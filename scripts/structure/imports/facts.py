@@ -8,11 +8,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
 
 from scripts.structure import placement_evidence
 
-from . import ModuleLookup, bindings, dependency_evidence, executed, normalize
+from . import ModuleSourceLookup, bindings, dependency_evidence, executed, mock_targets, normalize
 
 
 class FactKind(StrEnum):
@@ -47,10 +46,6 @@ class Evidence:
     unknown: tuple[Unknown, ...]
 
 
-class Lookup(ModuleLookup, Protocol):
-    repo_root: Path
-
-
 _DYNAMIC_CALLS = frozenset(
     {
         "importlib.import_module",
@@ -70,7 +65,7 @@ class _Collector(ast.NodeVisitor):
         self,
         tree: ast.AST,
         path: str,
-        index: Lookup,
+        index: ModuleSourceLookup,
         tops: Sequence[str],
         *,
         embedded: bool = False,
@@ -202,9 +197,10 @@ class _Collector(ast.NodeVisitor):
         )
         values = self.scope.strings(target) if target is not None else None
         if values is None:
-            value = self.scope.value(target) if target is not None else None
-            if origin != "unittest.mock.patch" and isinstance(
-                value, ast.Dict | ast.List | ast.Tuple | ast.Set
+            if (
+                target is not None
+                and origin != "unittest.mock.patch"
+                and mock_targets.is_object(target, self.scope, self.index)
             ):
                 return  # An actual object target does not invoke patch's string importer.
             self.gap(node, f"{origin} target is not bounded literal text")
@@ -392,7 +388,9 @@ class _Collector(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def collect(tree: ast.AST, rel_path: str, index: Lookup, *, tops: Sequence[str]) -> Evidence:
+def collect(
+    tree: ast.AST, rel_path: str, index: ModuleSourceLookup, *, tops: Sequence[str]
+) -> Evidence:
     """Unpruned direct facts for a checkout, with every recognized unsupported input retained.
 
     Literal dynamic imports, finite pytest string domains, Python -m/-c launches
@@ -415,7 +413,9 @@ def collect(tree: ast.AST, rel_path: str, index: Lookup, *, tops: Sequence[str])
     )
 
 
-def _embedded(source: executed.Source, path: str, index: Lookup, tops: Sequence[str]) -> Evidence:
+def _embedded(
+    source: executed.Source, path: str, index: ModuleSourceLookup, tops: Sequence[str]
+) -> Evidence:
     try:
         tree = ast.parse(source.text)
     except SyntaxError as error:
