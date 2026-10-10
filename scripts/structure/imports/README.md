@@ -152,8 +152,13 @@ proven runtime module name. It models one level of unchanged, checkout-local
 Python sources, with each parsed source reused only within that analysis. Recognized
 `write_text`, `write_bytes` and potentially writable `open` calls before execution
 prevent a source proof when their target matches a loaded source or is opaque.
-Targets use the existing resource grammar and physical path resolution. A
-read-only open also requires its existing unmodified-callee proof; its mode does
+Targets use the existing resource grammar and physical path resolution. A known
+source path passed to another operation, including through a plain alias,
+literal container or bound method, also prevents proof without an existing
+unmodified read-only or Path-builder contract. This rejects an opaque helper or
+unsupported mutation without interpreting its body or enumerating file-write
+APIs. A call result remains opaque; the arguments of its producing call do not
+prove its return value. A read-only open also requires its existing unmodified-callee proof; its mode does
 not certify a replaced function. A later local file-write call does not
 retroactively invalidate an earlier execution. Ancestor
 calls have no proven ordering relative to a nested invocation and remain

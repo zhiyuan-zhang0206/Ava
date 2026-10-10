@@ -9,7 +9,14 @@ from pathlib import Path
 
 from . import bindings
 
-__all__ = ["ExecutionProof", "input_domain", "prior_calls", "prove_execution"]
+__all__ = [
+    "ExecutionProof",
+    "call_arguments",
+    "input_domain",
+    "path_argument",
+    "prior_calls",
+    "prove_execution",
+]
 
 
 @dataclass(frozen=True)
@@ -240,3 +247,36 @@ def prior_calls(
             ):
                 yield call, current
         current = current.parent
+
+
+def path_argument(target: ast.expr, scope: bindings.Scope) -> ast.expr:
+    """Unwrap one unchanged Path constructor without interpreting its callee."""
+    value = scope.value(target)
+    if (
+        isinstance(value, ast.Call)
+        and len(value.args) == 1
+        and not value.keywords
+        and scope.unmodified_origin(value.func) == "pathlib.Path"
+    ):
+        return value.args[0]
+    return value
+
+
+def call_arguments(call: ast.Call, scope: bindings.Scope) -> Iterator[ast.expr]:
+    """Expressions passed to a call, including a bound method's receiver.
+
+    Plain aliases and literal containers participate. A call's result stays
+    opaque: its arguments are not a proof about what the callee returns.
+    """
+    pending = [call.func, *call.args, *(kw.value for kw in call.keywords)]
+    seen: set[int] = set()
+    while pending:
+        value = _object_value(pending.pop(), scope)
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
+        yield value
+        if not isinstance(value, ast.Call):
+            pending.extend(
+                child for child in ast.iter_child_nodes(value) if isinstance(child, ast.expr)
+            )

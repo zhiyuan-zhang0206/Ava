@@ -264,7 +264,7 @@ class _Collector(ast.NodeVisitor):
         if not inputs:
             self.gap(node, "File-loader name and path have no bounded unchanged checkout anchor")
             return
-        changed = self._source_change(node, inputs)
+        changed = self._source_change(node, proof.spec, inputs)
         if changed:
             self.gap(*changed, kind=FactKind.RESOURCE)
             return
@@ -283,10 +283,10 @@ class _Collector(ast.NodeVisitor):
         return inputs
 
     def _source_change(
-        self, execution: ast.Call, inputs: tuple[tuple[str, str], ...]
+        self, execution: ast.Call, spec: ast.Call, inputs: tuple[tuple[str, str], ...]
     ) -> tuple[ast.Call, str] | None:
         for call, scope in file_loader.prior_calls(execution, self.scope):
-            reason = self._source_write(call, scope, inputs)
+            reason = self._source_write(call, scope, inputs) if call is not spec else None
             if reason:
                 return call, reason
         return None
@@ -298,10 +298,10 @@ class _Collector(ast.NodeVisitor):
         try:
             target = self._write_target(node)
             if target is None:
-                return None
+                return self._source_escape(node, inputs)
             anchored = self._file_path_text(target)
             if anchored is None:
-                target = self._write_argument(target)
+                target = file_loader.path_argument(target, scope)
             values = scope.strings(anchored if anchored is not None else target)
             if not values or (anchored is None and any(not Path(v).is_absolute() for v in values)):
                 return "File-loader prior write has no proven checkout or external target"
@@ -315,16 +315,25 @@ class _Collector(ast.NodeVisitor):
             self.scope = previous
         return None
 
-    def _write_argument(self, target: ast.expr) -> ast.expr:
-        value = self.scope.value(target)
-        if (
-            isinstance(value, ast.Call)
-            and len(value.args) == 1
-            and not value.keywords
-            and self.scope.unmodified_origin(value.func) == "pathlib.Path"
-        ):
-            return value.args[0]
-        return value
+    def _source_escape(self, node: ast.Call, inputs: tuple[tuple[str, str], ...]) -> str | None:
+        target = self._read_target(node)
+        if target is not None or self._path_call(node):
+            operation = "open" if self._open_function(node.func) else getattr(node.func, "attr", "")
+            path = self._resource_path(target) if target is not None else ""
+            if self._unmodified_path_operation(
+                node, path or "", operation, function=self._open_function(node.func)
+            ):
+                return None
+        sources = {(self.index.repo_root / path).resolve() for _, path in inputs}
+        for argument in file_loader.call_arguments(node, self.scope):
+            candidate = file_loader.path_argument(argument, self.scope)
+            anchored = self._file_path_text(candidate)
+            values = self.scope.strings(anchored if anchored is not None else candidate)
+            if values and any(
+                (self.index.repo_root / value).resolve() in sources for value in values
+            ):
+                return "File-loader source path escaped to an operation without a read-only proof"
+        return None
 
     def _write_target(self, node: ast.Call) -> ast.expr | None:
         method = node.func
@@ -349,17 +358,16 @@ class _Collector(ast.NodeVisitor):
         return target
 
     def _file_path_text(self, node: ast.expr) -> ast.expr | None:
-        value = node
-        path = self._resource_path(value)
+        path = self._resource_path(node)
         if path is not None:
             return ast.Constant(path)
-        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Div):
-            prefix = self._resource_path(value.left)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            prefix = self._resource_path(node.left)
             if prefix is not None:
                 return ast.JoinedStr(
                     [
                         ast.Constant(prefix + "/" if prefix else ""),
-                        ast.FormattedValue(value.right, -1),
+                        ast.FormattedValue(node.right, -1),
                     ]
                 )
         return None
