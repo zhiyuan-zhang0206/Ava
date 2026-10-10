@@ -88,6 +88,13 @@ import strings, patch strings and non-executed source samples are separate
 collector evidence. It preserves alias facts and diagnoses rather than applying
 an automatic rewrite that could change which object a local name binds.
 
+`bindings.module_context()` lets a whole-module reader such as `facts.collect()`
+resolve the module's own `__name__`, subscripts of literal tables and loop variables
+over them. A table written by subscript, augmented assignment, a mutating method call
+or a `global`/`nonlocal` rebinding stays opaque. Iteration yields a dict's keys and
+indexing its values. Like the one-binding rule, this does not observe writes from other
+modules. Scopes built without a context keep the plain one-binding rules.
+
 `bindings.local_nodes()` preserves lexical depth-first order with an explicit
 iterator stack, so deep expressions do not repeatedly relay each node through
 recursive generators. Nested bodies and definition-time inputs retain the same

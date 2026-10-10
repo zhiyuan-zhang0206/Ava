@@ -76,12 +76,13 @@ def test_base_declaration_input_preserves_removed_binding_impact(
     assert result.tests == (_TEST,)
 
 
-def test_missing_declared_first_party_module_has_visible_incomplete_impact(tmp_path: Path) -> None:
+def test_missing_declared_first_party_module_runs_its_scope_visibly(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _write(root, "tests/support/__init__.py")
     (root / "tests/support/fixture.py").unlink()
     result = test_selector.select_tests([_TABLE], repo_root=root)
-    assert (result.decision, result.reason) == ("FULL", "incomplete-impact")
+    assert result.decision == "SELECTED", result.as_json()
+    assert result.tests == (_TEST,)
     assert result.diagnostics == (
         f"head:{_TABLE}:0: Declared first-party fixture module is missing: {_MODULE}",
     )
