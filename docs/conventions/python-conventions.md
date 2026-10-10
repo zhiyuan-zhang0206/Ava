@@ -125,9 +125,11 @@ Only ambient-state sites retain exact `path::target -> site count` maps in their
 baseline shards until the remaining debt is cleared. Their guards remain shrink-only,
 including when a rule version changes; see the ambient-state lint owner.
 
-A test in the top-level `tests/` has no baseline section to be frozen in: it must stay by design
-or be listed in `scripts/structure/tests_location_allowed.py` as `contract` or `integration`
-with a reason, and any other one is refused (`scripts/structure/tests_location.py`).
+A test in the top-level `tests/` has no baseline section to be frozen in. Complete
+subject evidence with a repository-root LCA needs no filename registration;
+unknown inputs prevent that proof. Existing by-design and historical
+`scripts/structure/tests_location_allowed.py` policies remain during migration.
+Other root tests are refused by `scripts/structure/tests_location.py`.
 
 What this means for common edits:
 
