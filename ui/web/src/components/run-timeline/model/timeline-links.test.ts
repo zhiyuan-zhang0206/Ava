@@ -291,7 +291,16 @@ describe("merging arrows that lie close together", () => {
     expect(sizes([arrow("p", 100, 300, rows[0]), arrow("q", 101, 301, rows[1])], 1000)).toEqual([1, 1]);
   });
 
-  it("buckets a link by its kind and the two rows with their agents", () => {
+  it("puts the links with different peers outside the view in one bucket, since they share the Other agents row", () => {
+    const [a, b] = resolveLinks(
+      [link({ sender: 1, receiver: 8 }), link({ sender: 1, receiver: 9 })],
+      new Set([1, 2]),
+      new Map([[1, agent([])], [2, agent([])]]),
+    );
+    expect(bucketOf(a)).toBe(bucketOf(b));
+  });
+
+  it("buckets a link by its kind and the two rows its ends stand in", () => {
     const [a, b, c] = resolveLinks(
       [link({}), link({ kind: "spawn" }), link({ receiver: 3 })],
       new Set([1, 2, 3]),

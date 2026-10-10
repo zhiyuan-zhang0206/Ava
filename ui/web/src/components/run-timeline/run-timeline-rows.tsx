@@ -446,7 +446,13 @@ export function RunTimelineRows({
   const readout = (() => {
     if (hoveredLinks.length === 0) return describe(hover);
     const first = hoveredLinks[0];
-    const common = { kind: linkLabels[first.link.kind], from: endLabel(first.link.sender), to: endLabel(first.link.receiver) };
+    // The ends of merged arrows can be different peers in the Other agents row: then the row is named, not one agent.
+    const same = (pick: (l: ResolvedLink) => number | null, label: string | null) => (hoveredLinks.every((l) => pick(l) === pick(first)) ? endLabel(pick(first)) : (label ?? ""));
+    const common = {
+      kind: linkLabels[first.link.kind],
+      from: same((l) => l.link.sender, t("otherAgents")),
+      to: same((l) => l.link.receiver, t("otherAgents")),
+    };
     if (hoveredLinks.length === 1) return t("readoutLink", { ...common, time: formatShort(first.link.ts) });
     const times = hoveredLinks.map((l) => Date.parse(l.link.ts));
     return t("readoutLinkGroup", {
