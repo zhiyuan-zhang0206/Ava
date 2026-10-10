@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
+import math
 import threading
 import time
+from collections.abc import Callable, Generator
 from types import TracebackType
 
 from pydantic import BaseModel, Field
@@ -44,30 +47,131 @@ def _read_policy() -> SamplingPolicy:
     )
 
 
-class _PolicyCache:
-    def __init__(self) -> None:
+class _Refresh:
+    """One retained refresh attempt; shutdown observes the actual worker."""
+
+    def __init__(self, refresh: Callable[[], None]) -> None:
+        self.refresh = refresh
+        self.stopping = threading.Event()
+        self.completed = threading.Event()
+        self.error: BaseException | None = None
+        self.traceback: TracebackType | None = None
+        self.thread = threading.Thread(target=self.run, name="sdk-call-policy", daemon=True)
+        self.thread.start()
+
+    def run(self) -> None:
+        try:
+            if not self.stopping.is_set():
+                self.refresh()
+        except BaseException as exc:
+            self.error = exc
+            self.traceback = exc.__traceback__
+            logger.bind(_no_emitter=True).opt(exception=exc).error(
+                "SDK sampling refresh worker failed: {error}", error=exc
+            )
+        finally:
+            self.completed.set()
+
+    def stop(self, timeout: float) -> bool:
+        self.stopping.set()
+        self.thread.join(timeout=timeout)
+        if self.thread.is_alive():
+            return False
+        if self.error is not None:
+            self.error.with_traceback(self.traceback)
+            raise self.error
+        return True
+
+
+class SamplingPolicyOwner:
+    """The SDK installation's lazy policy and finite refresh lifetime."""
+
+    def __init__(self, *, reader: Callable[[], SamplingPolicy] | None = None) -> None:
+        self.reader = reader
         self.value: SamplingPolicy | None = None
         self.next_refresh = 0.0
         self.lock = threading.Lock()
         self.refreshing = False
         self.error: tuple[Exception, TracebackType | None] | None = None
+        self.worker: _Refresh | None = None
+        self.stopped = False
 
     def read(self) -> SamplingPolicy:
         from base.config import settings
 
         with self.lock:
+            if self.stopped:
+                raise RuntimeError("the SDK sampling owner has stopped")
             if self.value is None:
                 self.value = SamplingPolicy(
                     sampling_enabled=settings.observability.sdk_call_sampling_enabled,
                     sample_every=settings.observability.sdk_call_sample_every,
                 )
-            if time.monotonic() >= self.next_refresh and not self.refreshing:
+            if self.worker is not None and self.worker.error is not None:
+                raise self.worker.error.with_traceback(self.worker.traceback)
+            alive = self.worker is not None and self.worker.thread.is_alive()
+            if time.monotonic() >= self.next_refresh and not self.refreshing and not alive:
                 self.refreshing = True
-                threading.Thread(target=self.refresh, name="sdk-call-policy", daemon=True).start()
+                try:
+                    self.worker = _Refresh(self.refresh)
+                except BaseException:
+                    self.refreshing = False
+                    raise
+            if self.worker is not None and self.worker.error is not None:
+                raise self.worker.error.with_traceback(self.worker.traceback)
             if self.error is not None:
                 error, traceback = self.error
                 raise error.with_traceback(traceback)
             return self.value
+
+    def stop(self, timeout: float = 2.0) -> bool:
+        """Fence new reads; return False while the retained attempt remains alive.
+
+        A later stop observes its original failure. A completed invalid refresh
+        raises the same exception that subsequent SDK entries would receive.
+        """
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("SDK sampling stop timeout must be finite and nonnegative")
+        with self.lock:
+            self.stopped = True
+            worker = self.worker
+        if worker is not None and not worker.stop(timeout):
+            return False
+        with self.lock:
+            if self.error is not None:
+                error, traceback = self.error
+                raise error.with_traceback(traceback)
+        return True
+
+    def close(self) -> bool:
+        """Report an unfinished finite stop; propagate completed original failures."""
+        joined = self.stop()
+        if not joined:
+            logger.bind(_no_emitter=True).warning(
+                "SDK sampling refresh unfinished at shutdown; worker retained",
+                event="sdk_sampling_refresh_unfinished",
+            )
+        return joined
+
+    @contextlib.contextmanager
+    def execution(self) -> Generator[None, None, None]:
+        """Collect refresh outcomes before the child forms its result envelope."""
+        primary: BaseException | None = None
+        primary_traceback: TracebackType | None = None
+        try:
+            yield
+        except BaseException as exc:
+            primary, primary_traceback = exc, exc.__traceback__
+            raise
+        finally:
+            try:
+                self.close()
+            except BaseException as secondary:
+                if primary is None:
+                    raise
+                if secondary is not primary:
+                    primary.add_note(f"SDK sampling shutdown also failed: {secondary!r}")
+                primary.with_traceback(primary_traceback)
 
     def refresh(self) -> None:
         transient_errors: tuple[type[Exception], ...] = ()
@@ -81,7 +185,7 @@ class _PolicyCache:
                 httpx.RemoteProtocolError,
             )
             status_error = httpx.HTTPStatusError
-            value = _read_policy()
+            value = _read_policy() if self.reader is None else self.reader()
             with self.lock:
                 self.value = value
                 self.error = None
@@ -107,9 +211,6 @@ class _PolicyCache:
                 self.refreshing = False
 
 
-_cache = _PolicyCache()
-
-
-def policy() -> SamplingPolicy:
-    """Return the current snapshot; at most one background refresh per five seconds."""
-    return _cache.read()
+def policy(owner: SamplingPolicyOwner) -> SamplingPolicy:
+    """Read the supplied installation's snapshot, with one attempt per five seconds."""
+    return owner.read()

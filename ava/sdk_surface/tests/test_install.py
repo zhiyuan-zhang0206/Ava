@@ -45,7 +45,11 @@ from base.packages.plugins.extensions import (
 def _surface(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Start from no installation and bare callables, and leave no installation behind."""
     assert install.installed() is None
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     yield
     install.uninstall()
 
