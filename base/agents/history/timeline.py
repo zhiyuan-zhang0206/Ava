@@ -46,7 +46,7 @@ from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
 # callers keep importing it from here.
 from base.clock import Clock
 from base.config import settings
-from base.db import InboundRow
+from base.db import ChatAnchor, InboundRow
 
 # Items after the same inbound anchor are offset by a microsecond increment to
 # preserve relative order without colliding with the next real-ts anchor
@@ -136,7 +136,7 @@ def needs_chat_anchors(messages: Sequence[BaseMessage]) -> bool:
 
 def build_timeline_items(
     messages: Sequence[BaseMessage],
-    chat_anchors: list[InboundRow],
+    chat_anchors: Sequence[ChatAnchor | InboundRow],
     *,
     start: int = 0,
     segment_prefix: str = "",
@@ -323,7 +323,7 @@ def _inbound_item(
     msg_idx: int,
     raw_content: str | list[str | dict[str, Any]],
     kwargs: AvaMessageKwargs,
-    chat_anchors: list[InboundRow],
+    chat_anchors: Sequence[ChatAnchor | InboundRow],
     anchor_positions: dict[int, int],
     next_anchor_idx: int,
     current_anchor: datetime,

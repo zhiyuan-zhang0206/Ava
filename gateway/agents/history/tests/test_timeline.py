@@ -383,7 +383,7 @@ class TestTimelineFailLoud:
         rendering other pages).
 
         Path: load_checkpoint_messages raises IO failures as CheckpointReadError,
-        get_timeline catches it → warning log + messages=[]. Prevents the fail-loud
+        load_current_messages catches it → warning log + messages=[]. Prevents the fail-loud
         refactor from going too far and turning read failures into 500 affecting UX
         (contrast with the /messages data endpoint 503: that doesn't tolerate, this one does).
         """
