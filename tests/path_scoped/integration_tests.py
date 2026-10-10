@@ -11,6 +11,7 @@ from ava.gateway_client.transport import use_client
 
 # ava.self.AGENT_ID is set by tests/fixtures/env_bootstrap.py (=1), no override here.
 from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 # The provider-key mock and the in-process spawn stand-in are defined once (the ava and
 # gateway tests take them too); imported here so they register for this module's paths.
@@ -52,7 +53,7 @@ class _TestClientTransport(httpx.BaseTransport):
 @pytest.fixture
 def gateway_client(db_conn: psycopg.Connection) -> Iterator[httpx.Client]:
     """Point the SDK's gateway client at the in-process gateway app (a TestClient transport)."""
-    with TestClient(app) as test_client:
+    with gateway_test_client(app) as test_client:
         transport = _TestClientTransport(test_client)
         with (
             httpx.Client(
