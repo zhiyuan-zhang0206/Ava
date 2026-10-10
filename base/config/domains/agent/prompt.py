@@ -497,6 +497,25 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
+    prompt_sequential_tool_calls_enabled: bool = Field(
+        default=False,
+        alias="AVA_SYSTEM_PROMPT_SEQUENTIAL_TOOL_CALLS",
+        description=(
+            "Add one sentence to the base prompt: several tool calls in one "
+            "response run one at a time in order, and an error in one does not "
+            "stop the later ones, so dependent steps belong in one call. Off by "
+            "default; enable it per agent to evaluate a model."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
     @field_validator(
         "sdk_disable",
         "sdk_expand_in_system_prompt",

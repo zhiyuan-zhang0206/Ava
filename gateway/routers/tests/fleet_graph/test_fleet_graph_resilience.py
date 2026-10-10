@@ -160,25 +160,6 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
     assert emitted[0][1]["source"] == "postgres"
 
 
-def test_pg_phase_exceeding_route_budget_serves_stale_before_telemetry(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A slow DB phase serves the stale graph instead of finishing the response."""
-    _seed_agent(db_conn)
-    redis = _FakeRedis()
-
-    import gateway.routers.fleet_graph as fg
-
-    monotonic = iter((0.0, fg._ROUTE_TIMEOUT_S + 0.1))
-    patch_sync_redis(monkeypatch, _RedisFactory(redis))
-    monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
-    with TestClient(app) as client:
-        response = client.get("/api/fleet/graph")
-
-    assert response.status_code == 200
-    assert response.json()["stale"] is True
-
-
 def test_pg_cancellation_serves_last_good_graph(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:

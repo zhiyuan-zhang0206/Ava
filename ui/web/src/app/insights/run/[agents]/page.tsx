@@ -1,6 +1,6 @@
 "use client";
 
-import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 
@@ -9,6 +9,9 @@ import { AgentViewToolbar } from "@/components/run-timeline/agent-view/agent-vie
 import { AgentPending } from "@/components/run-timeline/agent-view/agent-view-group";
 import type { AgentSelection } from "@/components/run-timeline/agent-view/agent-view-nav";
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
+import { LinkDetail } from "@/components/run-timeline/run-timeline-link-detail";
+import { LinkGroupDetail } from "@/components/run-timeline/run-timeline-link-group-detail";
+import { LINK_KINDS, MAX_ARROWS, resolveLinks, type LinkKind } from "@/components/run-timeline/model/timeline-links";
 import { RunTimelineRows, type AgentEntry } from "@/components/run-timeline/run-timeline-rows";
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import { PageHeader } from "@/components/shell/page-header";
@@ -16,6 +19,7 @@ import {
   categoryClass,
   classCategory,
   clampViewport,
+  MIN_VIEW_MS,
   contextPoint,
   levelsTopFirst,
   nodeAncestors,
@@ -65,8 +69,17 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   const [highlight, setHighlight] = useState<Highlight | null>(null);
   // null = the whole loaded extent.
   const [viewport, setViewport] = useState<Viewport | null>(null);
+  // The selected arrow between agents (a selected arrow and a selected block exclude each other) and the kinds drawn.
+  // The selected links: one for an arrow of one link, several for a merged arrow.
+  const [linkKeys, setLinkKeys] = useState<readonly string[]>([]);
+  const setLinkKey = (key: string | null) => setLinkKeys(key === null ? [] : [key]);
+  const [linkKinds, setLinkKinds] = useState<ReadonlySet<LinkKind>>(() => new Set(LINK_KINDS));
+  const [showUser, setShowUser] = useState(true);
+  const [showOther, setShowOther] = useState(true);
+  const [maxArrows, setMaxArrows] = useState<number>(MAX_ARROWS);
   const [levels, setLevels] = useState<number | null>(null);
-  const [contextSize, setContextSize] = useState(true);
+  // Off by default: the Context size row is one more row per agent.
+  const [contextSize, setContextSize] = useState(false);
   const [unitHeights, setUnitHeights] = useState<UnitHeights>("tokens");
   const options: RowOptions = useMemo(() => ({ levels, contextSize }), [levels, contextSize]);
 
@@ -99,6 +112,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   };
   const removeAgent = (id: number) => {
     if (ids.length <= 1) return;
+    setLinkKey(null);
     if (selection?.agent === id) setSelection(null);
     setAgents(ids.filter((other) => other !== id));
   };
@@ -107,7 +121,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   const reads = useQueries({
     queries: ids.map((id) => ({
       queryKey: ["run-timeline", id],
-      queryFn: () => api.getRunTimeline(id, {}),
+      queryFn: ({ signal }) => api.getRunTimeline(id, { signal }),
     })),
     combine: pickRead,
   });
@@ -125,6 +139,24 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
     () => entries.flatMap((entry) => (entry.status === "loaded" ? [{ id: entry.id, data: entry.data }] : [])),
     [entries],
   );
+
+  // The arrows are read for the extent the agents together span.
+  const linkWindow = useMemo(() => {
+    const spans = loaded.map(({ data }) => viewportOf(data.window));
+    return spans.length === 0
+      ? null
+      : { from: new Date(Math.min(...spans.map((w) => w.from))).toISOString(), to: new Date(Math.max(...spans.map((w) => w.to))).toISOString() };
+  }, [loaded]);
+  const linksRead = useQuery({
+    queryKey: ["run-timeline-links", [...ids].sort((a, b) => a - b).join(","), linkWindow?.from, linkWindow?.to],
+    queryFn: () => api.getRunTimelineLinks(ids, linkWindow as { from: string; to: string }),
+    enabled: linkWindow !== null,
+  });
+  const links = useMemo(
+    () => resolveLinks(linksRead.data?.links ?? [], new Set(ids), new Map(loaded.map(({ id, data }) => [id, data]))),
+    [linksRead.data, ids, loaded],
+  );
+  const selectedLinks = links.filter((l) => linkKeys.includes(l.key));
 
   if (paramsResolved && agentIds === null) {
     return (
@@ -168,6 +200,18 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
     },
   };
   const maxLevels = Math.max(0, ...loaded.map(({ data }) => levelsTopFirst(data.nodes).length));
+  // Selecting one link of a merged arrow zooms to it: a window 20 times the span the group covered, so
+  // the group falls apart, never wider than now.
+  const focusLink = (key: string) => {
+    const target = links.find((l) => l.key === key);
+    if (target === undefined || view === null) return;
+    const times = selectedLinks.map((l) => Date.parse(l.link.ts));
+    const width = Math.min(Math.max((Math.max(...times) - Math.min(...times)) * 20, MIN_VIEW_MS), view.to - view.from);
+    const at = Date.parse(target.link.ts);
+    if (base !== null) setViewport(clampViewport({ from: at - width / 2, to: at + width / 2 }, base));
+    setSelection(null);
+    setLinkKeys([key]);
+  };
   const select = (agent: number) => (id: string) => setSelection({ agent, selection: { kind: "node", id } });
 
   const main = (
@@ -182,6 +226,18 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
         onContextSize={setContextSize}
         unitHeights={unitHeights}
         onUnitHeights={setUnitHeights}
+        showUser={showUser}
+        onShowUser={(on) => {
+          setShowUser(on);
+          if (!on) setLinkKey(null);
+        }}
+        showOther={showOther}
+        onShowOther={(on) => {
+          setShowOther(on);
+          if (!on) setLinkKey(null);
+        }}
+        maxArrows={maxArrows}
+        onMaxArrows={setMaxArrows}
       />
       {base && view ? (
         <>
@@ -199,14 +255,47 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
             view={view}
             onView={setViewport}
             selection={selection}
-            onSelect={setSelection}
+            onSelect={(next) => {
+              setLinkKey(null);
+              setSelection(next);
+            }}
             highlight={highlight}
             onHighlight={setHighlight}
             options={options}
             unitHeights={unitHeights}
             onRemove={ids.length > 1 ? removeAgent : null}
             onRetry={retry}
+            links={links}
+            showUser={showUser}
+            onShowUser={(on) => {
+              setShowUser(on);
+              if (!on) setLinkKey(null);
+            }}
+            showOther={showOther}
+            onShowOther={(on) => {
+              setShowOther(on);
+              if (!on) setLinkKey(null);
+            }}
+            linkKinds={linkKinds}
+            onToggleLinkKind={(kind) =>
+              setLinkKinds((kinds) => {
+                const next = new Set(kinds);
+                if (!next.delete(kind)) next.add(kind);
+                return next;
+              })
+            }
+            linkKeys={linkKeys}
+            maxArrows={maxArrows}
+            onSelectLinks={(keys) => {
+              setSelection(null);
+              setLinkKeys(keys);
+            }}
           />
+          {linksRead.isError ? (
+            <p role="alert" className="text-xs text-destructive" data-testid="run-timeline-links-failed">
+              {t("linksFailed")}
+            </p>
+          ) : null}
         </>
       ) : (
         <div className="space-y-3">
@@ -228,7 +317,11 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
     </>
   );
 
-  const side = selectedNode ? (
+  const side = selectedLinks.length > 1 ? (
+    <LinkGroupDetail links={selectedLinks} onSelect={focusLink} />
+  ) : selectedLinks.length === 1 ? (
+    <LinkDetail key={selectedLinks[0].key} resolved={selectedLinks[0]} onAddAgent={addAgent} />
+  ) : selectedNode ? (
     <NodeDetail
       key={`n${focus}-${selectedNode.id}`}
       agentId={focus ?? 0}

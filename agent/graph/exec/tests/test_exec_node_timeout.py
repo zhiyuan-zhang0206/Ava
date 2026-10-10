@@ -23,6 +23,8 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
+from base.native_process.turn_identity import HostedTurnResources
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -37,9 +39,12 @@ _TOOL_CALL_AIMESSAGE = AIMessage(
 )
 
 
-def _make_runtime() -> Runtime[AvaContext]:
+def _make_runtime(
+    hosted_resources: HostedTurnResources,
+) -> Runtime[AvaContext]:
     """Minimal runtime with fake ops_pool + event_publisher."""
     ctx = AvaContext(
+        hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         llm=None,
         event_publisher=MagicMock(),
@@ -52,6 +57,7 @@ def _make_runtime() -> Runtime[AvaContext]:
 
 
 async def test_exec_node_timeout_fires_asyncio_wait_for(
+    hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When _run_in_subprocess hangs longer than exec_node_timeout_seconds,
@@ -77,7 +83,13 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
     # → TimeoutError caught → returns _ExecTimedOut via Command
     from langgraph.types import Command
 
-    result = await _exec_node_impl(state, _make_runtime(), _CONFIG)
+    result = await _exec_node_impl(
+        state,
+        _make_runtime(
+            hosted_resources=hosted_resources,
+        ),
+        _CONFIG,
+    )
 
     # The result is a Command (returned by _exec_node_impl's match dispatch).
     # _ExecTimedOut branch sets halted=False and returns a Command with
@@ -97,6 +109,7 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
 
 
 async def test_exec_node_timeout_does_not_fire_when_fast(
+    hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When _run_in_subprocess completes quickly, exec_node_timeout_seconds
@@ -121,7 +134,13 @@ async def test_exec_node_timeout_does_not_fire_when_fast(
 
     from langgraph.types import Command
 
-    result = await _exec_node_impl(state, _make_runtime(), _CONFIG)
+    result = await _exec_node_impl(
+        state,
+        _make_runtime(
+            hosted_resources=hosted_resources,
+        ),
+        _CONFIG,
+    )
 
     assert isinstance(result, Command)
     assert result.update is not None

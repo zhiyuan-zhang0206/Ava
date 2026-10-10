@@ -11,7 +11,7 @@ tags: []
 
 - `gateway/app.py` — FastAPI application definition, lifespan, middleware, route mounting
 - `gateway/__main__.py` — `.venv/bin/python -m gateway` → uvicorn
-- `gateway/schedules/runner.py` — `.venv/bin/python -m gateway.schedules.runner <id>`, the in-session schedule entrypoint the ScheduleManager launches; the module path is a cross-version launch contract, so it stays at the package root
+- `gateway/schedules/runner.py` — the schedule execution engine; the ScheduleManager launches `services/wake/schedule_manager/runner.py` to compose the SDK in an independent process
 - `scripts/entrypoints/gateway.py` — canonical launch script (per `gateway/app.py` docstring)
 
 Parent node: [[gateway.ava.okf.md|Gateway]].

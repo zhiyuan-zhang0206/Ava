@@ -28,6 +28,7 @@ import pytest
 
 import ava
 from ava.sdk_surface import wraps
+from base.agents.sdk import call_policy
 from base.packages.plugins import activation
 
 
@@ -364,7 +365,7 @@ def test_wrap_captures_the_base_callable_below_a_metering_recorder(
     from ava.sdk_surface import metering
 
     ns, fn = probe
-    ns.fn = metering._make_recorder(fn, "probe.fn")
+    ns.fn = metering._make_recorder(fn, "probe.fn", call_policy.SamplingPolicyOwner())
 
     undo = apply(lambda inner, *a, **kw: inner(*a, **kw))
 

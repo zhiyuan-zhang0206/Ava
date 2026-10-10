@@ -48,6 +48,7 @@ import { InspectorToggle } from "@/components/inspector/inspector-toggle";
 import { PendingStrip } from "@/components/conversation/pending-strip";
 import { UploadButton } from "@/components/conversation/upload-button";
 import { TimelineView } from "@/components/timeline";
+import { Button } from "@/components/ui/button";
 import { api, MessageDeliveryUnknownError } from "@/lib/transport/api";
 import { errMsg } from "@/lib/contracts/errors";
 import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
@@ -252,6 +253,7 @@ function HomeContent({
   handleFork,
 }: HomeContentProps) {
   const t = useTranslations("common");
+  const timelineText = useTranslations("timeline");
   const composerFocusToken = useStore((s) => s.composerFocusToken);
   // Timeline content-column width — user-adjustable fraction of the viewport
   // (display.timeline_width_ratio, default 0.4). The composer gets the same
@@ -313,7 +315,7 @@ function HomeContent({
   // switchThread (in the same set() that swaps in the new thread's items),
   // so there is no parent-side switch effect here.
 
-  const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading, retainedItemsMax } =
+  const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading, retainedItemsMax, error: timelineError, isFetching, retryTimeline } =
     useTimeline(activeId, showError);
   const { contextTokens, maxContextTokens, softCompactTokens, hardCompactTokens, contextPending } = useTokenUsage(
     activeId,
@@ -337,7 +339,7 @@ function HomeContent({
       if (activeId == null) return false;
       try {
         // One send is one message, whatever was typed. Text invoking several
-        // commands (`/plan … /recap`) is sent whole and expanded server-side
+        // commands (`/recap … /compact`) is sent whole and expanded server-side
         // inside that single inbound, so the agent reads the commands as one
         // composite instruction rather than as unrelated turns.
         if (imageUrls.length === 0) {
@@ -424,6 +426,15 @@ function HomeContent({
             #805: on narrow viewports contentColumnMaxWidth is undefined,
             so the column is full-width (mobile). */}
         <div data-testid="timeline-surface" className={cn("relative", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
+          {timelineError && (
+            <div role="alert" className="mx-4 mt-14 mb-2 rounded-md border border-destructive/30 p-3 text-sm">
+              <p>{timelineText(items.length > 0 ? "refreshFailed" : "loadFailed")}</p>
+              <p className="mt-1 break-words text-xs text-muted-foreground">{errMsg(timelineError)}</p>
+              <Button className="mt-2" variant="outline" size="sm" disabled={isFetching} onClick={retryTimeline}>
+                {timelineText("retryLoad")}
+              </Button>
+            </div>
+          )}
           <TimelineView
             items={items}
             compactBuffer={compactBuffer}

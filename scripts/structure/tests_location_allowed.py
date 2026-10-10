@@ -40,7 +40,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/components/agent/test_compact_contract.py": (
         "contract",
-        "the compaction triggers point at the ava.self.compact contract in commands/compact.md",
+        "the compaction triggers point at the ava.self.compact contract in ava_builtins/commands/compact.md",
     ),
     "tests/components/agent/test_corpse_reap.py": (
         "integration",

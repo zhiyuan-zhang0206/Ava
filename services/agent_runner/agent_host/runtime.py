@@ -7,29 +7,59 @@ import hashlib
 import json
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from psycopg_pool import AsyncConnectionPool
+from pydantic import BaseModel
 
 from agent.process_boot import boot_agent_scope
-from base.config import settings
-from base.host.env.agent_slices import AgentSlices
+from base.host.env.agent_slices import AgentBrain, AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import validate_model_config
 from base.lm.registry import resolve_available_model
 from base.log import logger
 
 __all__ = [
+    "HostCachePolicy",
+    "HostPolicy",
     "HostStats",
     "_AgentRuntime",
     "_StoredConfig",
     "_config_fingerprint",
     "admit_stored_model",
 ]
+
+
+@dataclass(frozen=True)
+class HostCachePolicy:
+    """The cache limits read at one eviction, never at host construction."""
+
+    idle_ttl_seconds: float
+    size: int
+
+
+@dataclass(frozen=True)
+class HostPolicy:
+    """Capacity is fixed at construction; cache and model readers remain live."""
+
+    max_concurrent_turns: int
+    cache: Callable[[], HostCachePolicy]
+    default_model: Callable[[], str]
+    llm_override: Callable[[], str]
+
+    def resolve_slices(
+        self,
+        pins: Mapping[str, Any],
+        plugin_pins: Mapping[str, Mapping[str, Any]],
+        plugin_configs: Mapping[str, BaseModel] | None,
+    ) -> AgentSlices:
+        """Resolve the model at the existing slice boundary, with pins taking precedence."""
+        brain = AgentBrain(pins["llm_model"] if "llm_model" in pins else self.default_model())
+        return AgentSlices.resolve(pins, plugin_pins, plugin_configs=plugin_configs, brain=brain)
 
 
 def _config_fingerprint(
@@ -121,6 +151,7 @@ def admit_stored_model(
     normalized: dict[int, str],
     catalog: ModelCatalog,
     llm_override: str,
+    default_model: Callable[[], str],
 ) -> bool:
     """Admit the stored model configuration a hosted wake is about to bind.
 
@@ -148,7 +179,7 @@ def admit_stored_model(
     Returns True when the wake may proceed, False when the configuration cannot
     build (the caller returns without a turn).
     """
-    model = pins.get("llm_model") or settings.lm.llm_model
+    model = pins.get("llm_model") or default_model()
     try:
         validate_model_config(model=model, catalog=catalog, llm_override=llm_override)
     except ValueError as exc:
@@ -265,7 +296,13 @@ async def cached_runtime(
     return runtime
 
 
-def evict_runtimes(runtimes: OrderedDict[int, _AgentRuntime], in_flight: set[int]) -> None:
+def evict_runtimes(
+    runtimes: OrderedDict[int, _AgentRuntime],
+    in_flight: set[int],
+    *,
+    policy: HostCachePolicy,
+    now: float,
+) -> None:
     """Evict idle runtimes by age and least-recent use; misses rebuild on wake.
 
     Active runtimes survive both bounds, including turns longer than the
@@ -273,11 +310,11 @@ def evict_runtimes(runtimes: OrderedDict[int, _AgentRuntime], in_flight: set[int
     Active-agent admission can exceed the cache budget; completion returns
     the warm cache to its configured size as active runtimes settle.
     """
-    cutoff = time.monotonic() - settings.daemon.host_agent_idle_ttl_seconds
+    cutoff = now - policy.idle_ttl_seconds
     aged = [a for a, r in runtimes.items() if r.last_used < cutoff and a not in in_flight]
     for agent_id in aged:
         del runtimes[agent_id]
-    cap = settings.daemon.host_agent_cache_size
+    cap = policy.size
     for agent_id in list(runtimes):
         if len(runtimes) <= cap:
             break

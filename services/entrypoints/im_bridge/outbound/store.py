@@ -488,7 +488,7 @@ class IMOutboxStore:
             return list(
                 conn.execute(
                     "SELECT channel,account_id,chat_id FROM im_bridge_outbound_intents "
-                    "WHERE status IN ('queued','sending') AND (channel,account_id) IN "
+                    "WHERE status='queued' AND (channel,account_id) IN "
                     "(SELECT key,value FROM jsonb_each_text(%s)) GROUP BY channel,account_id,chat_id "
                     "ORDER BY min(id) LIMIT 16",
                     (Jsonb(accounts),),
@@ -496,18 +496,12 @@ class IMOutboxStore:
             )
 
     def claim(self, stream: tuple[str, str, str]) -> tuple[int, UUID, OutboundIntent] | None:
-        """Recover and claim only while the caller holds this stream's transaction gate.
+        """Atomically start one queued intent; never steal an unresolved attempt.
 
-        The gate must outlive the external call and finish commit. There is no
-        time-based claim stealing: a live owner can retain its gate indefinitely.
+        Sending rows retain their original attempt's completion authority and
+        do not prevent later queued intents from being claimed.
         """
         with write_transaction(self._pool()) as conn:
-            conn.execute(
-                "UPDATE im_bridge_outbound_intents SET status='uncertain', completed_at=now(), "
-                "outcome_reason='sending_attempt_unresolved' "
-                "WHERE channel=%s AND account_id=%s AND chat_id=%s AND status='sending'",
-                stream,
-            )
             row = conn.execute(
                 "SELECT id,request FROM im_bridge_outbound_intents "
                 "WHERE channel=%s AND account_id=%s AND chat_id=%s AND status='queued' "
@@ -519,7 +513,7 @@ class IMOutboxStore:
             attempt = uuid4()
             conn.execute(
                 "UPDATE im_bridge_outbound_intents SET status='sending', attempt_id=%s, started_at=now(), "
-                "outcome_reason=NULL WHERE id=%s AND status='queued'",
+                "outcome_reason='send_result_unconfirmed' WHERE id=%s AND status='queued'",
                 (attempt, row[0]),
             )
             return int(row[0]), attempt, OutboundIntent.model_validate(row[1])

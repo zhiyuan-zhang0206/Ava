@@ -89,10 +89,13 @@ class Supervisor(StoppingMixin):
         self._lock = asyncio.Lock()
         self._started_at: float | None = None
         self._running = False
+        self._closed = False
         self._health: HealthSource | None = None
         self._metrics: MetricsSource | None = None
         self._runtime_identity: LoadedRuntimeIdentity | None = None
         self._home: Path | None = None
+        self._watches: dict[asyncio.Task[None], _Generation] = {}
+        self._watch_errors: list[BaseException] = []
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -100,6 +103,7 @@ class Supervisor(StoppingMixin):
         """Start selected units, preserving recorded operator intent and failures."""
         self._log_dir.mkdir(parents=True, exist_ok=True)
         async with self._lock:
+            self._require_admission()
             self._running = True
             self._started_at = monotonic()
             for runtime in self._units.values():
@@ -119,8 +123,30 @@ class Supervisor(StoppingMixin):
         are still stopped; the refusals are then raised together, before any
         watch is cancelled, so each refused unit's reap is still observed.
         """
+        refusals = await self._stop_units()
+        if not refusals:
+            for task in self._watches:
+                task.cancel()
+        if self._watches:
+            await asyncio.wait(set(self._watches), timeout=self._config.watch_join_timeout_s)
+        if self.unfinished_watches:
+            _log.warning(
+                "root shutdown retains %d unfinished child watches", len(self.unfinished_watches)
+            )
+        self._clear_completed_watches()
+        failures: list[BaseException] = list(refusals)
+        try:
+            self._raise_watch_error()
+        except BaseException as exc:
+            failures.append(exc)
+        if failures:
+            raise BaseExceptionGroup("root shutdown failed", failures)
+
+    async def _stop_units(self) -> list[Exception]:
+        """Close birth admission and attempt every child's declared stop window."""
         refusals: list[Exception] = []
         async with self._lock:
+            self._closed = True
             self._running = False
             for unit_id in self._registry.all_stop_order():
                 runtime = self._units[unit_id]
@@ -129,22 +155,37 @@ class Supervisor(StoppingMixin):
                     await self._stop_unit(runtime)
                 except Exception as exc:
                     refusals.append(exc)
-        if refusals:
-            raise ExceptionGroup(f"root shutdown could not stop {len(refusals)} unit(s)", refusals)
-        pending = [
-            task
-            for runtime in self._units.values()
-            for task in (runtime.watch_task,)
-            if task is not None
-        ]
-        for task in pending:
-            task.cancel()
-        for result in await asyncio.gather(*pending, return_exceptions=True):
-            # Cancellation is the expected end of a watch task; anything else it died of is news.
-            if isinstance(result, Exception):
-                _log.warning("a unit watch task failed before shutdown", exc_info=result)
+        return refusals
+
+    def _clear_completed_watches(self) -> None:
         for runtime in self._units.values():
-            runtime.watch_task = None
+            if runtime.watch_task is not None and runtime.watch_task.done():
+                runtime.watch_task = None
+
+    @property
+    def unfinished_watches(self) -> tuple[asyncio.Task[None], ...]:
+        """Actual live watcher identities, including refused children still being reaped."""
+        return tuple(task for task in self._watches if not task.done())
+
+    def _retain_watch(self, task: asyncio.Task[None], generation: _Generation) -> None:
+        """Transfer the actual Task synchronously before another generation can replace it."""
+        self._watches[task] = generation
+        task.add_done_callback(self._watch_completed)
+
+    def _watch_completed(self, task: asyncio.Task[None]) -> None:
+        """Retrieve every generation outcome, preserving unknown errors at their original owner."""
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                self._watch_errors.append(error)
+                _log.error("root generation watcher failed", exc_info=error)
+        self._watches.pop(task)
+
+    def _raise_watch_error(self) -> None:
+        if len(self._watch_errors) > 1:
+            raise BaseExceptionGroup("root generation watchers failed", self._watch_errors)
+        if self._watch_errors:
+            raise self._watch_errors[0]
 
     # ── control verbs ────────────────────────────────────────────────────────
 
@@ -154,6 +195,7 @@ class Supervisor(StoppingMixin):
             return await self._up_locked(unit_id)
 
     async def _up_locked(self, unit_id: str) -> dict[str, object]:
+        self._require_admission()
         results: list[dict[str, object]] = []
         for member in self._registry.subtree(unit_id):
             runtime = self._units[member]
@@ -196,6 +238,7 @@ class Supervisor(StoppingMixin):
         observe the new generation.
         """
         async with self._lock:
+            self._require_admission()
             members = self._registry.subtree(unit_id)
             for member in members:
                 runtime = self._units[member]
@@ -506,6 +549,7 @@ class Supervisor(StoppingMixin):
         `close_fds=True` so the instance lock cannot leak into the tree. The
         group is the unit's stop scope: see `_stop_posix_generation`.
         """
+        self._require_admission()
         manifest = runtime.manifest
         for item in manifest.inputs:
             item.require_unchanged()
@@ -539,7 +583,9 @@ class Supervisor(StoppingMixin):
         runtime.generation = generation
         runtime.state = UnitState.RUNNING
         runtime.last_error = None
-        runtime.watch_task = asyncio.create_task(self._watch(runtime, generation))
+        watch = asyncio.create_task(self._watch(runtime, generation))
+        self._retain_watch(watch, generation)
+        runtime.watch_task = watch
         _log.info(
             "unit %s started (pid %s): %s",
             manifest.id,
@@ -563,6 +609,10 @@ class Supervisor(StoppingMixin):
         """True when the unit has a live generation process."""
         generation = runtime.generation
         return generation is not None and generation.proc.returncode is None
+
+    def _require_admission(self) -> None:
+        if self._closed:
+            raise RuntimeError("root supervisor admission closed")
 
     @staticmethod
     def _pid(runtime: _UnitRuntime) -> int | None:

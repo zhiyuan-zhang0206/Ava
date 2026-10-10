@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from typing import Any
 from uuid import uuid4
 
@@ -259,41 +260,68 @@ async def test_worker_records_whole_send_outcome_without_secret(
     assert adapter.sent == ["original"]
 
 
-async def test_two_pools_gate_live_send_then_recover_crash_and_continue(
+async def test_blocked_send_releases_single_pool_lease_and_other_worker_claims_later(
     pool: ConnectionPool,
 ) -> None:
-    with ConnectionPool[Connection](settings.data_plane.db_url, min_size=1, max_size=2) as pool2:
-        store = IMOutboxStore(pool)
+    with ConnectionPool[Connection](settings.data_plane.db_url, min_size=1, max_size=1) as small:
+        store = IMOutboxStore(small)
         store.accept("telegram", "bot", "chat", 7, [candidate(), candidate(2, text="later")])
         live = RecordingAdapter()
         live.started, live.release = asyncio.Event(), asyncio.Event()
         worker = asyncio.create_task(IMOutboxWorker(store, {"telegram": live}).run_once())
-        await live.started.wait()
-        restarted = RecordingAdapter()
-        await IMOutboxWorker(IMOutboxStore(pool2), {"telegram": restarted}).run_once()
-        assert restarted.sent == [] and statuses(pool)[0][0] == "sending"
-        worker.cancel()
-        await asyncio.sleep(0.02)
-        assert not worker.done(), "cancellation must retain gate until the active send returns"
-        live.release.set()
-        with pytest.raises(asyncio.CancelledError):
-            await worker
-        assert statuses(pool)[0][0] == "sending"
-        await IMOutboxWorker(IMOutboxStore(pool2), {"telegram": restarted}).run_once()
-        assert [row[0] for row in statuses(pool)] == ["uncertain", "sent"]
+        try:
+            await asyncio.wait_for(live.started.wait(), timeout=5)
+            # A real max_size=1 lease is available while the provider is blocked.
+            with small.connection(timeout=0.5) as conn:
+                assert conn.execute("SELECT 1").fetchone() == (1,)
+            original_attempt = statuses(pool)[0][1]
+            restarted = RecordingAdapter()
+            await asyncio.wait_for(
+                IMOutboxWorker(IMOutboxStore(pool), {"telegram": restarted}).run_once(), timeout=5
+            )
+            assert restarted.sent == ["later"]
+            assert statuses(pool)[0] == ("sending", original_attempt, "send_result_unconfirmed")
+            worker.cancel()
+            await asyncio.sleep(0.02)
+            assert not worker.done(), "cancellation still collects the actual SDK send"
+        finally:
+            live.release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await worker
+        assert live.sent == ["original"]
+        await IMOutboxWorker(IMOutboxStore(pool), {"telegram": restarted}).run_once()
+        assert [row[0] for row in statuses(pool)] == ["sending", "sent"]
         assert restarted.sent == ["later"]
-        first_id = store.accept(
-            "telegram", "bot", "other", 7, [candidate(chat="other")]
-        ).intent_ids[0]
-        assert store.finish(first_id, uuid4(), OutboundStatus.SENT, None) is False
 
 
-def test_worker_rejects_single_connection_configuration() -> None:
-    with (
-        ConnectionPool[Connection](settings.data_plane.db_url, min_size=1, max_size=1) as small,
-        pytest.raises(ValueError, match="max_size >= 2"),
-    ):
-        IMOutboxWorker(IMOutboxStore(small), {}).validate_pool()
+def test_two_concurrent_claims_cannot_start_the_same_intent(pool: ConnectionPool) -> None:
+    store = IMOutboxStore(pool)
+    [intent_id] = store.accept("telegram", "bot", "chat", 7, [candidate()]).intent_ids
+
+    def claim(_index: int):
+        return store.claim(("telegram", "bot", "chat"))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        claims = list(executor.map(claim, range(2)))
+    claimed = [claim for claim in claims if claim is not None]
+    assert len(claimed) == 1 and claimed[0][0] == intent_id
+    assert statuses(pool)[0] == ("sending", claimed[0][1], "send_result_unconfirmed")
+    assert not store.finish(intent_id, uuid4(), OutboundStatus.SENT, None)
+    assert store.finish(intent_id, claimed[0][1], OutboundStatus.SENT, None)
+
+
+async def test_claim_without_send_is_unconfirmed_and_does_not_block_later(pool: ConnectionPool):
+    store = IMOutboxStore(pool)
+    store.accept("telegram", "bot", "chat", 7, [candidate(), candidate(2, text="later")])
+    claimed = store.claim(("telegram", "bot", "chat"))
+    assert claimed is not None
+    adapter = RecordingAdapter()
+    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    assert adapter.sent == ["later"]
+    assert [row[0] for row in statuses(pool)] == ["sending", "sent"]
+    # A still-live original owner may finish; no recovery rewrites its authority.
+    assert store.finish(claimed[0], claimed[1], OutboundStatus.SENT, None)
 
 
 @pytest.mark.parametrize("committed", [False, True])
@@ -316,9 +344,13 @@ async def test_success_before_outcome_commit_failure_never_repeats_external_send
     old_attempt = statuses(pool)[0][1]
     monkeypatch.setattr(store, "finish", finish)
     await IMOutboxWorker(store, {"telegram": adapter}).run_once()
-    assert statuses(pool)[0][0] == ("sent" if committed else "uncertain")
+    assert statuses(pool)[0][0] == ("sent" if committed else "sending")
     assert adapter.sent == ["original"]
-    assert not finish(original, old_attempt, OutboundStatus.SENT, None)
+    assert not finish(original, uuid4(), OutboundStatus.SENT, None)
+    assert statuses(pool)[0][1] == old_attempt
+    store.accept("telegram", "bot", "chat", 7, [candidate(2, text="later")])
+    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    assert adapter.sent == ["original", "later"]
 
 
 async def test_quiesce_between_streams_finishes_active_attempt_and_holds_new_claim(
@@ -345,3 +377,107 @@ async def test_quiesce_between_streams_finishes_active_attempt_and_holds_new_cla
     await worker.run_once()
     assert adapter.sent == ["first", "second"]
     assert [row[0] for row in statuses(pool)] == ["sent", "sent"]
+
+
+@pytest.mark.parametrize("finish_fails", [False, True])
+async def test_programming_error_is_visible_then_rethrown_without_resend(
+    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, finish_fails: bool
+) -> None:
+    store = IMOutboxStore(pool)
+    store.accept("telegram", "bot", "chat", 7, [candidate()])
+    adapter = RecordingAdapter()
+    original = TypeError("invalid adapter state SECRET")
+    adapter.error = original
+    finish_error = RuntimeError("outcome storage failed")
+    finish = store.finish
+    if finish_fails:
+
+        def failed_finish(*args: Any):
+            raise finish_error
+
+        monkeypatch.setattr(store, "finish", failed_finish)
+    with pytest.raises(TypeError) as caught:
+        await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    assert caught.value is original
+    assert caught.value.__cause__ is (finish_error if finish_fails else None)
+    assert statuses(pool)[0][0] == ("sending" if finish_fails else "uncertain")
+    assert "SECRET" not in str(statuses(pool))
+    monkeypatch.setattr(store, "finish", finish)
+    adapter.error = None
+    store.accept("telegram", "bot", "chat", 7, [candidate(2, text="later")])
+    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    assert adapter.sent == ["original", "later"]
+
+
+async def test_partial_prefix_is_never_replayed_as_a_whole_manifest(pool: ConnectionPool):
+    from services.entrypoints.im_bridge.types import SendOutcomeUncertainError
+
+    class PartialAdapter(RecordingAdapter):
+        async def send_prepared_outbound(
+            self, chat_id: str, prepared: PreparedOutboundSend
+        ) -> None:
+            self.sent.append(prepared.chunks[0].text)
+            raise SendOutcomeUncertainError("prefix delivered; suffix unknown")
+
+    store = IMOutboxStore(pool)
+    first = candidate()
+    assert first.intent is not None
+    # Preserve the real immutable, multi-part request through acceptance.
+    first = TimelineCandidate(
+        first.item,
+        first.intent.model_copy(
+            update={
+                "prepared": first.intent.prepared.model_copy(
+                    update={"chunks": (OutboundChunk(text="prefix"), OutboundChunk(text="suffix"))}
+                )
+            }
+        ),
+    )
+    store.accept("telegram", "bot", "chat", 7, [first])
+    partial = PartialAdapter()
+    await IMOutboxWorker(store, {"telegram": partial}).run_once()
+    await IMOutboxWorker(store, {"telegram": partial}).run_once()
+    assert partial.sent == ["prefix"]
+    assert statuses(pool)[0][0] == "uncertain"
+    store.accept("telegram", "bot", "chat", 7, [candidate(2, text="later")])
+    later = RecordingAdapter()
+    await IMOutboxWorker(store, {"telegram": later}).run_once()
+    assert later.sent == ["later"]
+    assert [row[0] for row in statuses(pool)] == ["uncertain", "sent"]
+
+
+async def test_cancelled_send_still_exposes_collected_programming_error(pool: ConnectionPool):
+    store = IMOutboxStore(pool)
+    store.accept("telegram", "bot", "chat", 7, [candidate()])
+    started, release = asyncio.Event(), Event()
+    original = TypeError("late SDK result invalid")
+    loop = asyncio.get_running_loop()
+
+    class SDKAdapter(RecordingAdapter):
+        async def send_prepared_outbound(
+            self, chat_id: str, prepared: PreparedOutboundSend
+        ) -> None:
+            def blocking_sdk() -> None:
+                loop.call_soon_threadsafe(started.set)
+                assert release.wait(timeout=5), "test must release the real SDK thread"
+                self.sent.append(prepared.chunks[0].text)
+                raise original
+
+            await asyncio.to_thread(blocking_sdk)
+
+    adapter = SDKAdapter()
+    task = asyncio.create_task(IMOutboxWorker(store, {"telegram": adapter}).run_once())
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        task.cancel()
+        await asyncio.sleep(0.02)
+        assert not task.done()
+    finally:
+        release.set()
+    with pytest.raises(TypeError) as caught:
+        await asyncio.wait_for(task, timeout=5)
+    assert caught.value is original
+    assert isinstance(original.__cause__, asyncio.CancelledError)
+    assert statuses(pool)[0][0] == "uncertain"
+    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    assert adapter.sent == ["original"]

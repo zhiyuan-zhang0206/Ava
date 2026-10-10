@@ -61,6 +61,8 @@ import type { NoticesFeed,
   RestartAgentResponse,
   ResurrectAgentResponse,
   RunTimelineContext,
+  RunTimelineLinkContent,
+  RunTimelineLinks,
   RunTimelineMessages,
   RunTimelineResponse,
   ShellCapture,
@@ -304,15 +306,37 @@ export const api = {
   // window means the agent's whole lifetime.
   getRunTimeline: (
     agentId: number,
-    options?: { from?: string; to?: string },
+    options?: { from?: string; to?: string; signal?: AbortSignal },
   ): Promise<RunTimelineResponse> => {
     const params = new URLSearchParams();
     if (options?.from != null) params.set("from", options.from);
     if (options?.to != null) params.set("to", options.to);
     const query = params.toString();
-    return f(`/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`).then(
-      ok<RunTimelineResponse>,
+    return jsonWithTimeout<RunTimelineResponse>(
+      `/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`,
+      {},
+      INSPECT_REQUEST_TIMEOUT_MS,
+      options?.signal,
+      "run timeline",
     );
+  },
+
+  // The agent-to-agent events (messages, spawns, forks, terminations, restarts,
+  // resurrections) in a window with an end among `agents`.
+  getRunTimelineLinks: (
+    agents: readonly number[],
+    window: { from: string; to: string },
+  ): Promise<RunTimelineLinks> => {
+    const params = new URLSearchParams({ agents: agents.join(","), from: window.from, to: window.to });
+    return f(`/api/insights/run-timeline/links?${params.toString()}`).then(ok<RunTimelineLinks>);
+  },
+
+  // The full text of the chat message or notice behind a selected arrow.
+  getRunTimelineLinkContent: (
+    ref: { inbound_id: number } | { notice_id: number },
+  ): Promise<RunTimelineLinkContent> => {
+    const params = new URLSearchParams(Object.entries(ref).map(([k, v]) => [k, String(v)]));
+    return f(`/api/insights/run-timeline/link-content?${params.toString()}`).then(ok<RunTimelineLinkContent>);
   },
 
   // The context breakdown of the LLM request at (or next after) message `at`:

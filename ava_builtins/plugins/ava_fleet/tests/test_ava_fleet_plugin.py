@@ -79,7 +79,10 @@ def _load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Install Fleet with a valid local sampling policy; uninstall after the test."""
     from base.agents.sdk import call_policy
 
-    monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     with installed_fleet_surface():
         yield
 

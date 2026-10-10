@@ -1,4 +1,4 @@
-"""Tests for gateway/schedules/runner.py — the session schedule entrypoint.
+"""Tests for gateway/schedules/runner.py — the schedule execution engine.
 
 Exercises the runner mechanics against the real test DB + a per-test $AVA_HOME:
 materialize the script, bind the schedule actor, run it, capture a crash. The
@@ -21,7 +21,8 @@ import pytest
 
 from base.config import settings
 from base.db import Database
-from gateway.schedules.runner import _script_filename, run
+from gateway.schedules.runner import _script_filename
+from gateway.schedules.tests.runner_inputs import run_schedule as run
 
 
 @pytest.fixture(autouse=True)
@@ -292,7 +293,7 @@ def test_run_loads_plugins_for_py_script(
 def test_run_hands_py_script_a_clean_argv(
     db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The gateway launches the runner as `python -m gateway.schedules.runner <id>`,
+    # The gateway launches the runner as `python -m services.wake.schedule_manager.runner <id>`,
     # so this process's sys.argv carries the schedule id. A .py script runs
     # in-process and must see the argv `python <script>` would give it — just its
     # own path — not the runner's (2026-09-22: the daily debt sweep's argparse
@@ -782,18 +783,3 @@ def test_stall_verdict_closes_run_row(
 
     assert exited == [1]
     assert _runs(db_conn, sid) == [(False, f"stalled ({sr._stall_timeout_s():.0f}s)")]
-
-
-def test_main_refuses_on_foreign_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """issue #194: the runner refuses to start from a worktree-anchored checkout."""
-    from gateway.schedules import runner
-
-    monkeypatch.setattr(sys, "argv", ["schedule_runner", "1"])
-    monkeypatch.setattr(runner, "prod_service_checkout_error", _refuse_foreign_checkout)
-    with pytest.raises(SystemExit) as excinfo:
-        runner.main()
-    assert excinfo.value.code == 3
-
-
-def _refuse_foreign_checkout(_repo: Path) -> str:
-    return "prod home but foreign checkout"

@@ -6,6 +6,7 @@ import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/li
 
 import { RunTimelineRows } from "./run-timeline-rows";
 import type { UnitHeights } from "./canvas/run-timeline-paint";
+import { LINK_KINDS } from "./model/timeline-links";
 import { ALL_ROWS } from "./model/timeline-nav";
 import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas/run-timeline-test-canvas";
 import type { Selection } from "./model/timeline-model";
@@ -52,6 +53,7 @@ const unit = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: numbe
   start: at(from),
   end: at(to),
   source: null,
+  inbound_id: null,
   preview: kind,
   parent: null,
   context_tokens: total === null ? null : 5,
@@ -63,7 +65,7 @@ const unit = (kind: RunTimelineUnit["kind"], i0: number, from: number, to: numbe
 });
 
 const ENTRIES = (data: Partial<RunTimelineResponse>) => [
-  { id: 42, status: "loaded" as const, data: { nodes: [], units: [], events: [], ...data } as RunTimelineResponse },
+  { id: 42, status: "loaded" as const, data: { nodes: [], units: [], ...data } as RunTimelineResponse },
 ];
 
 function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | null = null, heights: UnitHeights = "equal") {
@@ -82,6 +84,15 @@ function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | n
       unitHeights={heights}
       onRemove={null}
       onRetry={vi.fn()}
+      links={[]}
+      showUser
+      onShowUser={vi.fn()}
+      showOther
+      onShowOther={vi.fn()}
+      linkKinds={new Set(LINK_KINDS)}
+      onToggleLinkKind={vi.fn()}
+      linkKeys={[]}
+      onSelectLinks={vi.fn()}
     />,
   );
   return onSelect;

@@ -35,6 +35,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 async def _prepare_graph(
@@ -150,6 +151,7 @@ async def test_abort_survives_database_loss_before_halted_state_write(
         db_conn.commit()
     outages = await _inject_database_outages_into_state_writes(monkeypatch, graph)
     host = AgentHost(
+        policy=configured_policy(),
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,

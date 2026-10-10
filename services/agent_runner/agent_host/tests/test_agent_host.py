@@ -46,13 +46,15 @@ from base.events.live.tests.fakes import patch_async_redis
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.runtime import TurnOutcome
+from services.agent_runner.agent_host.runtime import HostPolicy, TurnOutcome
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 def _host(*, catalog: ModelCatalog, **kwargs: Any) -> AgentHost:
     """An `AgentHost` on this box with the handles the tests share."""
     return AgentHost(
+        policy=kwargs.pop("policy", configured_policy()),
         machine="this-box",
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
@@ -467,6 +469,7 @@ def wired(
         results: dict[int, list[dict[str, Any]]] | None = None,
         *,
         catalog: ModelCatalog | None = None,
+        policy: HostPolicy | None = None,
     ) -> tuple[AgentHost, _FakeGraph, _FakePool]:
         graph = _FakeGraph(results or {})
         pool = _FakePool(rows)
@@ -476,6 +479,7 @@ def wired(
             graph=graph,
             plugin_configs=host_plugin,
             catalog=model_catalog if catalog is None else catalog,
+            policy=policy if policy is not None else configured_policy(),
         )
         return host, graph, pool
 

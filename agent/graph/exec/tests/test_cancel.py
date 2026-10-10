@@ -50,6 +50,8 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
+from base.native_process.turn_identity import HostedTurnResources
+from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 # Most tests here drive exec_node/llm_node with mocked _run_in_subprocess / a
 # fake cancel_event, so they are deterministic and run in the parallel pool.
@@ -68,7 +70,9 @@ def _has_cancelled_event(pub: MagicMock, agent_id: int) -> bool:
     return False
 
 
-def _make_runtime(*, llm=None, ops_pool=None, event_publisher=None) -> Runtime[AvaContext]:
+def _make_runtime(
+    hosted_resources: HostedTurnResources, *, llm=None, ops_pool=None, event_publisher=None
+) -> Runtime[AvaContext]:
     """Test helper: assemble an AvaContext and wrap it in Runtime."""
     if llm is None:
         llm = MagicMock()
@@ -77,6 +81,7 @@ def _make_runtime(*, llm=None, ops_pool=None, event_publisher=None) -> Runtime[A
     if ops_pool is None:
         ops_pool = make_fake_ops_pool()
     ctx = AvaContext(
+        hosted_resources=hosted_resources,
         ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
@@ -117,6 +122,7 @@ def _committed_messages(update: dict) -> list:
 
 
 async def test_llm_node_cancel_event_race_discards_partial(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """cancel_event set during LLM stream → llm_node detects it via asyncio.wait
@@ -135,7 +141,7 @@ async def test_llm_node_cancel_event_race_discards_partial(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.1))
-    runtime = _make_runtime(llm=fake_llm, event_publisher=pub)
+    runtime = _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, event_publisher=pub)
     result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
     await trigger
 
@@ -150,6 +156,7 @@ async def test_llm_node_cancel_event_race_discards_partial(
 
 
 async def test_llm_node_cancel_event_race_discards_partial_tool_call(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """cancel arrives mid tool_call stream → partial AIMessage is entirely
@@ -191,7 +198,7 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.1))
-    runtime = _make_runtime(llm=fake_llm, event_publisher=pub)
+    runtime = _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, event_publisher=pub)
     result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
     await trigger
 
@@ -206,6 +213,7 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
 
 
 async def test_llm_node_cancel_event_race_no_partial_returns_halted(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """cancel_event set before LLM emits anything → llm_node returns Command(halted=True,
@@ -222,7 +230,7 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.05))
-    runtime = _make_runtime(llm=fake_llm, event_publisher=pub)
+    runtime = _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, event_publisher=pub)
     result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
     await trigger
     assert _has_cancelled_event(pub, agent_id=7)
@@ -235,6 +243,7 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
 
 
 async def test_llm_node_cancel_event_race_normal_completion(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
 ) -> None:
     """cancel_event not set, LLM stream completes normally → llm_node returns
@@ -256,7 +265,7 @@ async def test_llm_node_cancel_event_race_normal_completion(
     fake_llm.astream.return_value = _fast_stream()
     state = AgentState(messages=[HumanMessage(content="go")], halted=False)
 
-    runtime = _make_runtime(llm=fake_llm)
+    runtime = _make_runtime(hosted_resources=hosted_resources, llm=fake_llm)
     result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
 
     assert isinstance(result, Command)
@@ -273,6 +282,7 @@ async def test_llm_node_cancel_event_race_normal_completion(
     [("user", "user"), ("agent:9", "system")],
 )
 async def test_exec_node_preserves_durable_interrupt_attribution(
+    hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -306,7 +316,7 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", interrupted_child)  # pyright: ignore[reportUnknownArgumentType]
     result = await exec_node(
         AgentState(messages=[_ai_with_code("pass")], halted=False),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(hosted_resources=hosted_resources, ops_pool=aops_pool),
         {"configurable": {"thread_id": str(agent_id)}},
     )
     assert calls == 1
@@ -322,6 +332,7 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
 
 
 async def test_exec_node_cancel_event_returns_cancelled_command(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -338,7 +349,7 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     pub = MagicMock()
     state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
 
-    runtime = _make_runtime(event_publisher=pub)
+    runtime = _make_runtime(hosted_resources=hosted_resources, event_publisher=pub)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert isinstance(result, Command)
@@ -355,6 +366,7 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
 
 
 async def test_exec_node_cancel_event_race_normal_completion(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -370,7 +382,9 @@ async def test_exec_node_cancel_event_race_normal_completion(
 
     state = AgentState(messages=[_ai_with_code('print("hello")')], halted=False)
 
-    runtime = _make_runtime()
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources,
+    )
     result = await exec_node(state, runtime, _CONFIG)
 
     assert isinstance(result, Command)
@@ -394,6 +408,7 @@ async def test_exec_node_cancel_event_race_normal_completion(
 
 
 async def test_exec_node_timeout_path(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -409,7 +424,9 @@ async def test_exec_node_timeout_path(
 
     state = AgentState(messages=[_ai_with_code('print("long task")')], halted=False)
 
-    runtime = _make_runtime()
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources,
+    )
     result = await exec_node(state, runtime, _CONFIG)
 
     assert isinstance(result, Command)
@@ -425,6 +442,7 @@ async def test_exec_node_timeout_path(
 
 
 async def test_exec_node_timeout_empty_output(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -439,7 +457,9 @@ async def test_exec_node_timeout_empty_output(
 
     state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
 
-    runtime = _make_runtime()
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources,
+    )
     result = await exec_node(state, runtime, _CONFIG)
 
     msg = result.update["messages"][0]
@@ -534,6 +554,7 @@ async def test_chunk_publisher_uses_correct_item_id() -> None:
 
 
 async def test_exec_node_dispatch_system_halt(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -557,7 +578,7 @@ async def test_exec_node_dispatch_system_halt(
     emitter = MagicMock()
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code('ava.self.compact("s")')], halted=False)
-    runtime = _make_runtime(event_publisher=emitter)
+    runtime = _make_runtime(hosted_resources=hosted_resources, event_publisher=emitter)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is True
@@ -572,6 +593,7 @@ async def test_exec_node_dispatch_system_halt(
 
 
 async def test_exec_node_dispatch_agent_termination(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -585,7 +607,9 @@ async def test_exec_node_dispatch_agent_termination(
 
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.terminate()")], halted=False)
-    runtime = _make_runtime()
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources,
+    )
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is True
@@ -596,6 +620,7 @@ async def test_exec_node_dispatch_agent_termination(
 
 
 async def test_exec_node_dispatch_agent_restart(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -610,13 +635,16 @@ async def test_exec_node_dispatch_agent_restart(
 
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.restart()")], halted=False)
-    runtime = _make_runtime()
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources,
+    )
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is True
 
 
 async def test_exec_node_dispatch_ordinary_exception(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,
@@ -637,7 +665,9 @@ async def test_exec_node_dispatch_ordinary_exception(
 
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code('raise ValueError("boom")')], halted=False)
-    runtime = _make_runtime()
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources,
+    )
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is False
@@ -650,6 +680,7 @@ async def test_exec_node_dispatch_ordinary_exception(
 
 
 async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
+    hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -669,7 +700,9 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
 
     monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("...")], halted=False)
-    runtime = _make_runtime()
+    runtime = _make_runtime(
+        hosted_resources=hosted_resources,
+    )
 
     with pytest.raises(TypeError, match="Unrecognized LifecycleExit subclass"):
         await exec_node(state, runtime, _CONFIG)

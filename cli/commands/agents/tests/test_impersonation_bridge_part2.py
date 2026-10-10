@@ -131,8 +131,9 @@ class Listener:
         else:
             self.waited(len(self.waits))
 
-    async def close(self) -> None:
+    async def stop(self) -> tuple[str, ...]:
         self.closed = True
+        return ()
 
 
 class FakeClock:

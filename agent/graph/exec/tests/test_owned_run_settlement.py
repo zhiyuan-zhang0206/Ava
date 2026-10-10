@@ -6,6 +6,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import pytest
+
 from agent.graph.exec._owned_run import _OwnedRun
 
 
@@ -44,16 +46,19 @@ async def test_unsettled_attached_owner_is_retained_by_the_hosted_scope() -> Non
     run.settle_attached_owner.assert_awaited_once()
 
 
-async def test_owner_that_cannot_settle_is_logged_not_raised() -> None:
+async def test_owner_that_cannot_settle_raises_its_original_failure() -> None:
     run = _run(scope=SimpleNamespace(completions=set()))
+    failure = RuntimeError("owner still open")
 
     async def failing() -> Any:
-        raise RuntimeError("owner still open")
+        raise failure
 
     task = asyncio.ensure_future(failing())
     run.attached_completion = lambda: task  # type: ignore[assignment]
 
-    await run.finish_owner()
+    with pytest.raises(RuntimeError) as observed:
+        await run.finish_owner()
+    assert observed.value is failure
 
 
 async def test_settled_unhosted_or_unattached_owner_is_not_handed_off() -> None:

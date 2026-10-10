@@ -24,10 +24,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.components.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
@@ -81,7 +83,7 @@ def _exercise_shutdown(failure: str) -> None:
 
     events: list[str] = []
 
-    async def record(name: str) -> None:
+    async def record(name: str, **_kwargs: object) -> None:
         await asyncio.sleep(0)
         events.append(name)
 
@@ -130,7 +132,12 @@ def _exercise_shutdown(failure: str) -> None:
     async def close_health(*_args: object) -> None:
         await record("health_closed")
 
+    def close_sampling(owner: SamplingPolicyOwner) -> bool:
+        events.append("sampling_stopped")
+        return owner.stop()
+
     with (
+        patch.object(SamplingPolicyOwner, "close", close_sampling),
         patch.multiple(
             process_boot,
             init_process_scope=MagicMock(),
@@ -171,8 +178,10 @@ def _exercise_shutdown(failure: str) -> None:
 def _assert_heartbeat_order(events: list[str], failure: str) -> None:
     assert events.index("beat_started") < events.index("boot_settled")
     assert events.index("beat_stopped") < events.index("owner_released")
+    assert events.index("sampling_stopped") < events.index("pools_closed")
     if failure in {"exception", "dispatcher_returns"}:
         assert events.index("turns_drained") < events.index("beat_stopped")
+        assert events.index("turns_drained") < events.index("sampling_stopped")
     if failure == "heartbeat":
         assert events.index("beat_failed") < events.index("dispatcher_continued")
         assert events.index("dispatcher_continued") < events.index("turns_drained")
@@ -194,7 +203,8 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
             sys.executable,
             "-c",
             "from services.agent_runner.agent_host.tests.runtime.test_agent_host_shutdown import _exercise_shutdown; "
-            f"_exercise_shutdown({failure!r})",
+            "import sys; _exercise_shutdown(sys.argv[1])",
+            failure,
         ],
         capture_output=True,
         check=False,
@@ -211,6 +221,7 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
         "turns_drained",
         "owner_released",
         "health_closed",
+        "sampling_stopped",
         "pools_closed",
         "pidfile_removed",
         exception,
@@ -281,6 +292,7 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
 
     monkeypatch.setattr(host_mod, "_RELEASE_OWNER_TIMEOUT_S", 0.05)
     host = host_mod.AgentHost(
+        policy=configured_policy(),
         pool=cast(Any, _UnreachablePool()),
         checkpointer=cast(Any, object()),
         graph=cast(Any, object()),
@@ -314,6 +326,7 @@ def test_failed_heartbeat_during_boot_still_closes_pools_and_pidfile() -> None:
         "beat_failed",
         "beat_stopped",
         "boot_continued",
+        "sampling_stopped",
         "pools_closed",
         "pidfile_removed",
         "RuntimeError",

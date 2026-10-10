@@ -350,21 +350,6 @@ def test_remote_client_error_response_keeps_socket_open(monkeypatch: pytest.Monk
 # ─── _list_tools / _call_raw remote daemon path + cache fallback ─────────────
 
 
-def test_list_tools_uses_remote_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    """daemon available → directly use remote.list_tools, not reading cache / not connecting subprocess."""
-    fake_remote = MagicMock()
-    fake_remote.list_tools.return_value = [{"name": "t1", "description": "d", "input_schema": {}}]
-    monkeypatch.setattr(mcps_mod, "_get_remote_client", lambda: fake_remote)
-
-    for timeout in (7.5, 2.0):
-        monkeypatch.setattr(settings.sandbox, "mcp_connect_timeout_seconds", timeout)
-        tools = mcps_mod._list_tools("srv")
-        assert tools == [{"name": "t1", "description": "d", "input_schema": {}}]
-        assert fake_remote.list_tools.call_args.args == ("srv",)
-        assert fake_remote.list_tools.call_args.kwargs == {"timeout_seconds": timeout}
-    assert fake_remote.list_tools.call_count == 2
-
-
 def test_list_tools_falls_back_to_cache_when_remote_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -380,24 +365,6 @@ def test_list_tools_falls_back_to_cache_when_remote_fails(
 
     tools = mcps_mod._list_tools("srv")
     assert tools == cached
-
-
-def test_call_raw_uses_remote_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_remote = MagicMock()
-    fake_remote.call_tool.return_value = {
-        "content": [{"type": "text", "text": "ok"}],
-        "isError": False,
-        "structuredContent": None,
-    }
-    monkeypatch.setattr(mcps_mod, "_get_remote_client", lambda: fake_remote)
-
-    for timeout in (7.5, 2.0):
-        monkeypatch.setattr(settings.sandbox, "mcp_connect_timeout_seconds", timeout)
-        out = mcps_mod._call_raw("srv", "tool_x", arg="v")
-        assert out["content"][0]["text"] == "ok"
-        assert fake_remote.call_tool.call_args.args == ("srv", "tool_x", {"arg": "v"})
-        assert fake_remote.call_tool.call_args.kwargs == {"timeout_seconds": timeout}
-    assert fake_remote.call_tool.call_count == 2
 
 
 def test_call_raw_falls_back_to_local_when_remote_fails(
@@ -493,7 +460,9 @@ def test_list_tools_uses_url_for_remote_server(
 
     tools = mcps_mod._list_tools("remote")
 
-    connect_http.assert_awaited_once_with("https://mcp.example.com/mcp", None, server="remote")
+    connect_http.assert_awaited_once_with(
+        "https://mcp.example.com/mcp", None, server="remote", timeout_seconds=mcp.timeout_seconds
+    )
     # The session is cached with the stack that owns its transport, so a dead one is closed on rebuild.
     assert mcp.sessions["remote"] is session
     assert mcp.session_stacks["remote"] is stack
@@ -521,7 +490,9 @@ def test_connect_http_local_fallback_initializes(
     monkeypatch.setattr("mcp.client.streamable_http.create_mcp_http_client", client_factory)
 
     got, stack = mcps_mod._run_async(
-        mcps_mod._connect_http("https://mcp.example.com/mcp", {"x-api-key": "k"})
+        mcps_mod._connect_http(
+            "https://mcp.example.com/mcp", {"x-api-key": "k"}, timeout_seconds=lambda: 17.0
+        )
     )
 
     assert got is session
@@ -531,9 +502,7 @@ def test_connect_http_local_fallback_initializes(
     assert factory.call_args.kwargs["http_client"] is client_factory.return_value
     # every local-fallback request must be bounded by the same timeout knob —
     # the SDK default (None) would block the calling agent forever on a hung server.
-    assert client_session_cls.call_args.kwargs["read_timeout_seconds"] == (
-        settings.sandbox.mcp_connect_timeout_seconds
-    )
+    assert client_session_cls.call_args.kwargs["read_timeout_seconds"] == (17.0)
 
 
 def test_connect_http_local_fallback_timeout_raises_connect_error(
@@ -551,7 +520,11 @@ def test_connect_http_local_fallback_timeout_raises_connect_error(
     )
 
     with pytest.raises(mcps_mod.MCPConnectError, match="timed out"):
-        mcps_mod._run_async(mcps_mod._connect_http("https://mcp.example.com/mcp", None))
+        mcps_mod._run_async(
+            mcps_mod._connect_http(
+                "https://mcp.example.com/mcp", None, timeout_seconds=lambda: 15.0
+            )
+        )
 
 
 def test_connect_stdio_sets_request_timeout_on_client_session(

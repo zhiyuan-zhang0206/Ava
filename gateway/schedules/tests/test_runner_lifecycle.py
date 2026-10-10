@@ -14,6 +14,7 @@ import pytest
 from base.config import settings
 from base.db import Database
 from gateway.schedules import runner as sr
+from gateway.schedules.tests.runner_inputs import run_schedule as run
 
 
 def _log_text(records: list[dict[str, Any]]) -> str:
@@ -232,7 +233,13 @@ def test_script_failure_stays_primary_when_guard_close_fails(
 
     monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: None)
     with pytest.raises(type(primary)) as caught:
-        sr._run_python_script(Database.from_settings(), 1, None, tmp_path / "script.py")
+        sr._run_python_script(
+            Database.from_settings(),
+            1,
+            None,
+            tmp_path / "script.py",
+            load_plugins=ava.ensure_plugins_loaded,
+        )
     assert caught.value is primary
     assert sys.argv is argv
     assert sr.time.sleep is sleep
@@ -338,12 +345,12 @@ def test_successful_script_exit_cannot_complete_after_guard_close_failure(
     monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: None)
     try:
         if blocked:
-            assert sr.run(row[0]) == 1
+            assert run(row[0]) == 1
             assert guards[0].thread.is_alive()
             assert "stall guard did not stop" in _log_text(loguru_records)
         else:
             with pytest.raises(WorkerFailure) as caught:
-                sr.run(row[0])
+                run(row[0])
             assert caught.value is error
         assert db_conn.execute(
             "SELECT status FROM schedules WHERE id = %s", (row[0],)

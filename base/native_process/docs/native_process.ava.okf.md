@@ -20,6 +20,16 @@ the existing SDK process-context entry. A successor read cannot replace it.
 completions of one actual hosted turn Task. The host creates the scope before
 starting the Task and passes it through `AvaContext.hosted_resources` to exec
 and settlement. Exact request/domain identity is required to discharge an entry.
+`HostedServiceResources` is the explicit host lifespan that owns the real turn
+roots, interrupt watchers and late completion tasks across turns. A late unknown
+is reported immediately with its original scope, retained, and raised at service
+stop/join without cancelling another agent. The existing cancellation-diagnostic
+budget bounds join by an absolute deadline. Unfinished tasks keep their actual
+handles, clients and pools until the daemon's existing hard exit; expiry is not
+resource settlement. Successful join precedes client and database pool closure.
+Direct graph embedders with a database interrupt pool must create this service,
+obtain a turn scope, pass it as `AvaContext.hosted_resources`, and join the service
+before closing their clients. `pool=None` subscriptions need no watcher owner.
 Neither primitive exposes an ambient current getter or uses a ContextVar.
 Graph identity comes from `Runtime[AvaContext]` and SDK identity from the
 execution process entry. Native ownership and resource-settlement fences remain

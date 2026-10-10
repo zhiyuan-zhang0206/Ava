@@ -161,11 +161,11 @@ def test_command_chain_expands_inside_the_one_message() -> None:
     """Several commands in one inbound expand into that same message, in the
     order typed — the whole composite instruction reaches the model at once
     instead of arriving as unrelated turns."""
-    msg, _ = build_chat_inbound(_inbound("/recap the week /plan the migration"))
+    msg, _ = build_chat_inbound(_inbound("/recap the week /compact after the recap"))
     assert isinstance(msg.content, str)  # pyright: ignore[reportUnknownMemberType]
-    assert msg.content.index("Command /recap:") < msg.content.index("Command /plan:")
+    assert msg.content.index("Command /recap:") < msg.content.index("Command /compact:")
     assert "Additional message: the week" in msg.content
-    assert "Additional message: the migration" in msg.content
+    assert "Additional message: after the recap" in msg.content
 
 
 def test_lifecycle_command_chains_like_any_other() -> None:

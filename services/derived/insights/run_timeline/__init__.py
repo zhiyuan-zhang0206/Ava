@@ -7,6 +7,6 @@ Package door — no imports, no re-exports; `router` is mounted in
   - `context.py`    — the context breakdown of one LLM request (`/run-timeline/context`)
   - `messages.py`   — raw-message range reads (`/run-timeline/messages`)
   - `history.py`    — the cached stitched history with its units and usage sums
-  - `_lifecycle.py` — spawn / restart / terminate markers from the audit record
+  - `links.py`      — agent-to-agent events (`/api/insights/run-timeline/links`)
   - `schemas.py`    — the wire models
 """

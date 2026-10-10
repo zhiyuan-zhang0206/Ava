@@ -525,6 +525,7 @@ async def auto_compact_for_llm(
             agent_id,
             incarnation=runtime.context.original_incarnation,
             work=runtime.context.native_work,
+            resources=runtime.context.hosted_resources,
         ) as interrupted:
             summary = await interruptible_model(
                 _auto_compact_summary(

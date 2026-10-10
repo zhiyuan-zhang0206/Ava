@@ -32,11 +32,13 @@ from __future__ import annotations
 import atexit
 import contextlib
 import json
+import math
 import queue
 import socket
 import sys
 import threading
 import time
+import traceback
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -46,12 +48,15 @@ from typing import Any, Literal
 from base.events.contract import EVENTS
 from base.events.contract import category_for_kind as registry_category
 from base.paths import logs_dir
-from base.telemetry.emitter_sync import synchronize
+from base.telemetry.emitter_sync import DrainPhase, DrainResult, DrainStatus, SyncReceipt
 from base.telemetry.observability import cluster_label
 from base.telemetry.serialization import event_line, event_line_digest, event_payload
 
 __all__ = [
     "Category",
+    "DrainPhase",
+    "DrainResult",
+    "DrainStatus",
     "Event",
     "category_for_kind",
     "emit",
@@ -116,14 +121,6 @@ def event_row(event: Event) -> dict[str, Any]:
     body_str = event_line(event)
     ts_ns = int(event.ts.timestamp() * 1_000_000_000)
     return {**body, "id": event_id(body_str, ts_ns)}
-
-
-class _SyncMarker:
-    """Sentinel for _EventPipeline.sync(): the drain thread flushes its
-    held batch and signals completion when it dequeues one."""
-
-
-_SYNC = _SyncMarker()
 
 
 # Telemetry event names — derived from the event contract registry
@@ -395,7 +392,7 @@ class _EventPipeline:
         self._writer = writer
         self._batch_size = batch_size
         self._flush_interval_s = flush_interval_s
-        self._queue: queue.Queue[Event | _SyncMarker | None] = queue.Queue(maxsize=queue_maxsize)
+        self._queue: queue.Queue[Event | SyncReceipt] = queue.Queue(maxsize=queue_maxsize)
         self._drop_reported_at = 0.0
         self._drop_example: Event | None = None
         self.dropped = 0  # records shed because the queue was full since the last flush
@@ -403,16 +400,27 @@ class _EventPipeline:
         # reads and zeroes the counter — `+=` is not atomic under the GIL, so
         # the read-modify-write pair is serialized.
         self._dropped_lock = threading.Lock()
-        self._sync_done = threading.Event()  # set by the drain thread after a sync() flush
+        self._admission_lock = threading.Lock()
+        self._stop_requested = threading.Event()
+        self._finished = threading.Event()
+        self._error: BaseException | None = None
         self._thread = threading.Thread(target=self._drain, daemon=True, name="event-emitter")
         self._thread.start()
 
     def enqueue(self, event: Event) -> None:
-        """Producer path — never blocks: the event is shed (counted) when the queue is full."""
-        try:
-            self._queue.put_nowait(event)
-        except queue.Full:
+        """Producer path: shed full, closed or failed admission without waiting on writes."""
+        if not self._admit(event):
             self._record_drop(event)
+
+    def _admit(self, event: Event | SyncReceipt) -> bool:
+        with self._admission_lock:
+            if self._stop_requested.is_set() or self._finished.is_set():
+                return False
+            try:
+                self._queue.put_nowait(event)
+                return True
+            except queue.Full:
+                return False
 
     def _record_drop(self, event: Event) -> None:
         with self._dropped_lock:
@@ -427,52 +435,75 @@ class _EventPipeline:
 
             report_loss(event, 1, "emitter")
 
-    def flush(self) -> None:
-        """Synchronously drain queued records for tests and shutdown seams."""
-        events: list[Event] = []
-        while True:
-            try:
-                event = self._queue.get_nowait()
-            except queue.Empty:
-                break
-            if isinstance(event, _SyncMarker):
-                continue  # sync() barrier — the drain thread consumes it
-            if event is None:
-                break
-            events.append(event)
-        self._flush(events)
+    def flush(self) -> DrainResult:
+        """Acknowledge queued and held records through the sole drain writer."""
+        return self.sync()
 
-    def sync(self, timeout: float = 5.0, *, bounded: bool = False) -> None:
-        """Drain the queue AND wait for the drain thread's held batch to land.
+    def _check_error(self) -> None:
+        if self._error is not None:
+            raise self._error
 
-        flush() drains the queue on the calling thread, but a batch the
-        drain thread already dequeued can still be written up to one
-        flush_interval later — a TRUNCATE or a mirror read in between
-        loses that race (the test_events_api straggler flake class,
-        testing/ci-flakes-pr1686-20260807.md). sync() closes the window:
-        it flushes the queue, pokes the drain thread to write its held
-        batch immediately, and blocks until that write completed.
-        """
-        outcome = synchronize(
-            flush=self.flush,
-            event_queue=self._queue,
-            marker=_SYNC,
-            drain_thread=self._thread,
-            marker_done=self._sync_done,
-            timeout=timeout,
-            bounded=bounded,
-        )
-        if outcome is not None:
+    def _result(self, *, completed: bool, phase: DrainPhase) -> DrainResult:
+        self._check_error()
+        result = DrainResult(DrainStatus.COMPLETED if completed else DrainStatus.UNFINISHED, phase)
+        if not completed:
             report_no_pipeline(
-                f"[event-emitter] sync() timed out after {{t}}s during {outcome} — the mirror may land later",
-                t=timeout,
+                "[event-emitter] {operation} timed out; telemetry shutdown degraded: "
+                "unfinished ordinary records may be lost or land later",
+                operation="stop()" if phase is DrainPhase.STOP else "sync()",
             )
+        return result
 
-    def stop(self) -> None:
-        """Signal the drain thread to exit and join. Daemon thread won't block
-        process exit even if join times out."""
-        self._queue.put(None)  # sentinel
-        self._thread.join(timeout=5.0)
+    def sync(self, timeout: float = 5.0, *, bounded: bool = False) -> DrainResult:
+        """Wait on a distinct FIFO receipt within one end-to-end deadline.
+
+        All ordinary telemetry barriers are finite. ``bounded`` remains accepted
+        for existing close callers. A stuck writer is never rescued by another
+        writer; unfinished delivery is reported and returned to the caller.
+        A terminal worker failure is raised with its original exception.
+        """
+        del bounded  # retained call compatibility; every ordinary barrier is now finite
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("event drain timeout must be finite and non-negative")
+        if threading.current_thread() is self._thread:
+            raise RuntimeError("event drain cannot wait on its own barrier")
+        deadline = time.monotonic() + timeout
+        receipt = SyncReceipt()
+        admitted = False
+        while not admitted:
+            self._check_error()
+            if self._finished.is_set():
+                return self._result(completed=True, phase=DrainPhase.DRAIN)
+            admitted = self._admit(receipt)
+            remaining = deadline - time.monotonic()
+            if not admitted and remaining <= 0:
+                return self._result(completed=False, phase=DrainPhase.MARKER)
+            if not admitted:
+                self._finished.wait(min(0.01, remaining))
+        while not receipt.done.is_set():
+            self._check_error()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return self._result(completed=False, phase=DrainPhase.DRAIN)
+            receipt.done.wait(min(0.01, remaining))
+        return self._result(completed=True, phase=DrainPhase.DRAIN)
+
+    def stop(self, timeout: float = 5.0) -> DrainResult:
+        """Close admission, request the owned worker's exit, and join finitely.
+
+        The stop request never enters the bounded event queue. Even a full queue
+        and blocked writer leave the caller with an explicit unfinished result.
+        Repeated stop calls observe late completion or the original failure.
+        """
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("event drain timeout must be finite and non-negative")
+        deadline = time.monotonic() + timeout
+        with self._admission_lock:
+            self._stop_requested.set()
+        if threading.current_thread() is self._thread:
+            raise RuntimeError("event drain cannot join itself")
+        self._thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        return self._result(completed=not self._thread.is_alive(), phase=DrainPhase.STOP)
 
     def _flush(self, batch: list[Event]) -> None:
         """Write loss summaries directly; a saturated queue cannot shed its own alarm."""
@@ -490,31 +521,41 @@ class _EventPipeline:
         self._writer(batch)
 
     def _drain(self) -> None:
-        """Accumulate up to `_batch_size` events, or whatever arrived within
-        `_flush_interval_s`, and write them in one round-trip.
+        """Own all writes and retain terminal failures for barrier/stop callers."""
+        try:
+            self._run_drain()
+        except BaseException as exc:
+            self._error = exc
+            report_no_pipeline("[event-emitter] drain failed: {err}", err=repr(exc), exc=exc)
+            # Early emit-before-init callers may have no logging sink yet.
+            with contextlib.suppress(OSError, ValueError):
+                traceback.print_exception(exc, file=sys.stderr)
+        finally:
+            self._finished.set()
 
-        The deadline is what keeps a quiet process from holding a partial batch
-        indefinitely — a single record still lands within the interval."""
+    def _run_drain(self) -> None:
+        """Flush batches and receipts in FIFO order; stop drains closed admission."""
         batch: list[Event] = []
         deadline = time.monotonic() + self._flush_interval_s
         while True:
-            timeout = max(0.0, deadline - time.monotonic())
+            stopping = self._stop_requested.is_set()
+            timeout = 0.0 if stopping else min(0.05, max(0.0, deadline - time.monotonic()))
             try:
                 event = self._queue.get(timeout=timeout)
             except queue.Empty:
+                if stopping or time.monotonic() >= deadline:
+                    self._flush(batch)
+                    batch = []
+                    deadline = time.monotonic() + self._flush_interval_s
+                if stopping:
+                    return
+                continue
+            if isinstance(event, SyncReceipt):
                 self._flush(batch)
                 batch = []
+                event.done.set()
                 deadline = time.monotonic() + self._flush_interval_s
                 continue
-            if isinstance(event, _SyncMarker):  # sync() barrier: write held batch, signal
-                self._flush(batch)
-                batch = []
-                self._sync_done.set()
-                deadline = time.monotonic() + self._flush_interval_s
-                continue
-            if event is None:  # sentinel from stop()
-                self._flush(batch)
-                return
             batch.append(event)
             if len(batch) >= self._batch_size:
                 self._flush(batch)
@@ -699,47 +740,44 @@ def emit_prepared(event: Event, *, capture: Callable[[Event], Event] | None = No
             pipeline.enqueue(event)
 
 
-def flush() -> None:
-    """Drain the queue synchronously — tests assert rows right after emit, and
-    shutdown seams want the last records landed before exit."""
+def flush() -> DrainResult:
+    """Acknowledge queued and held ordinary records within the default deadline."""
     pipeline = _state["pipeline"]
     if pipeline is not None:
-        pipeline.flush()
+        return pipeline.flush()
+    return DrainResult(DrainStatus.COMPLETED, DrainPhase.DRAIN)
 
 
-def sync(timeout: float = 5.0, *, bounded: bool = False) -> None:
+def sync(timeout: float = 5.0, *, bounded: bool = False) -> DrainResult:
     """Drain and acknowledge the event pipeline; close uses the bounded form."""
     pipeline = _state["pipeline"]
     if pipeline is not None:
-        pipeline.sync(timeout, bounded=bounded)
+        return pipeline.sync(timeout, bounded=bounded)
+    return DrainResult(DrainStatus.COMPLETED, DrainPhase.DRAIN)
 
 
-def stop() -> None:
+def stop(timeout: float = 5.0) -> DrainResult:
     """Stop the drain thread (process teardown / tests)."""
     pipeline = _state["pipeline"]
     if pipeline is not None:
-        pipeline.stop()
+        return pipeline.stop(timeout)
+    return DrainResult(DrainStatus.COMPLETED, DrainPhase.STOP)
 
 
 def _drain_on_exit() -> None:
-    """Flush queued events + stop the drain thread at process exit.
+    """Close ordinary admission and finitely join its single writer at normal exit.
 
-    The drain thread is a daemon — without an exit hook, a process that exits
-    with events still queued (or mid-batch) silently loses them, which is
-    exactly the failure mode the `process_exit` event exists to report. Runs
-    via atexit on normal exits (main returns, SystemExit — including the agent
-    kernel's signal→SystemExit conversion in `agent/lifecycle.py` and the
-    exec-subprocess path, where `init_subprocess_logger` never opened the
-    pipeline and `_ensure_pipeline` built it lazily on first emit). SIGKILL /
-    SIGSTOP cannot be intercepted; there the JSONL mirror remains the recovery
-    source.
-    The ONE ordered exit seam for OTLP: providers are built with `shutdown_on_exit=False`;
-    no provider atexit shutdown can strand a tail record (task #4320)."""
+    The ordered exit seam closes downstream sinks only after the writer finishes.
+    Providers use ``shutdown_on_exit=False`` so their independent atexit handlers
+    cannot run first and strand a tail batch. An unfinished writer is reported;
+    process exit may shed its ordinary tail. ``hard_exit`` bypasses this hook.
+    """
     pipeline = _state["pipeline"]
     if pipeline is None:
         return
-    pipeline.flush()
-    pipeline.stop()
+    result = pipeline.stop()
+    if result.status is DrainStatus.UNFINISHED:
+        return  # the owned writer still uses these sinks; process exit sheds its tail
     with failure_isolated("close observed-metrics projection"):
         from base.telemetry.metrics.observed_metrics import close_projection
 

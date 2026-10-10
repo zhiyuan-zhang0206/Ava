@@ -104,6 +104,12 @@ The invocation worker lifetime, bounded drain, failure propagation and known
 Redis recovery contracts are documented in
 [[base/events/live/docs/live/invocation-publisher.ava.okf.md|Invocation Publisher Ownership]].
 
+## CLI inbound listener ownership
+
+Request deadlines, reconnectable resource close, terminal bounded stop and late
+failure propagation are owned by
+[[base/events/live/docs/live/redis-listener.ava.okf.md|Redis Inbound Listener Ownership]].
+
 ## Key Dependencies
 
 - [[agents-contract.ava.okf.md]] — the sibling agent ↔ gateway contract; lifecycle hints carry only `agent_id` and `role`, while authoritative state comes from roster/directory/detail reads.
