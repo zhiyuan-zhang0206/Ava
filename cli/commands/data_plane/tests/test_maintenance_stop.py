@@ -41,19 +41,12 @@ def forbidden(*_args: object, **_kwargs: object) -> NoReturn:
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract")
 
 
-_EXIT = "import time; print('ready', flush=True); time.sleep(60)"
-_IGNORE = (
-    "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
-    "print('ready', flush=True); time.sleep(60)"
-)
-
-
 def test_a_session_in_the_service_refuses_before_any_signal(
     home: Path, launch: Launcher, pty_service: PtyServiceProcess
 ) -> None:
     """A terminal refuses a stop that closes none; nothing is signalled."""
     del pty_service
-    proc = launch("ava-agent-host", _EXIT)
+    proc = launch("ava-agent-host")
     assert new_session("ava-agent-123-shell-1", home)
     with pytest.raises(RuntimeError, match="will not kill or replay"):
         stop.require_no_terminals()
@@ -74,7 +67,7 @@ def test_invalid_timeout_refuses(timeout: float, home: Path) -> None:
 def test_linux_ticks_win_over_changed_epoch_birth(
     launch: Launcher, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    proc = launch("unused", _IGNORE)
+    proc = launch("unused", term="ignore")
     tick: int | None = 123
 
     def read_tick(_pid: int) -> int | None:
@@ -269,7 +262,7 @@ def test_foreign_redis_directory_refuses_before_local_signals(
 
 
 def _dead_shell(launch: Launcher) -> stop.OwnedProcess:
-    proc = launch("dead-shell", _EXIT)
+    proc = launch("dead-shell")
     identity = stop.OwnedProcess.capture(psutil.Process(proc.pid))
     proc.kill()
     proc.wait(timeout=5)
@@ -283,7 +276,7 @@ def test_a_dead_service_with_only_a_known_job_does_not_block_terminal_closure(
     before = admission.snapshot()
     journal = home / "run/lifecycle-op.json"
     assert not journal.exists()
-    job = launch("surviving-job", _IGNORE)
+    job = launch("surviving-job", term="ignore")
     member = stop.OwnedProcess.capture(psutil.Process(job.pid))
     ledger.write(
         ledger_path(), [closure.Target("ava-agent-123-shell-1", _dead_shell(launch), (member,))]
