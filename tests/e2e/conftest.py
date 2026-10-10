@@ -91,7 +91,7 @@ def pytest_collection_modifyitems(
     # node_modules-less session may still be the one that would otherwise never
     # get a chance to clean it.
     with contextlib.suppress(Exception):  # a cleanup failure must not abort collection
-        sweep_stale_e2e_processes()
+        sweep_stale_e2e_processes(receipt_path=_LOG_DIR / f"cleanup-{_E2E_SUFFIX}.jsonl")
     if shutil.which("npm") and (_REPO_ROOT / "ui" / "web" / "node_modules" / "next").exists():
         return
     for item in items:
@@ -208,7 +208,7 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     # A reaper failure must not abort the session (same rule as collection) —
     # and at teardown a failure must not skip the env restore below.
     with contextlib.suppress(Exception):
-        sweep_stale_e2e_processes()
+        sweep_stale_e2e_processes(receipt_path=_LOG_DIR / f"cleanup-{_E2E_SUFFIX}.jsonl")
     _apply_e2e_seq_offset()
     # Every key assigned below, no exceptions — `tests/harness/test_home_isolation.py`'s
     # `test_the_e2e_fixture_restores_every_env_key_it_assigns` derives the assigned set
@@ -323,15 +323,13 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     try:
         yield
     finally:
-        # Reap whatever OUR session left behind (an agent that ignored its
-        # terminate, a gateway child that escaped `managed_proc`). Runs at
-        # package teardown, when the session fixtures (frontend, browser) are
-        # still holding their own processes — those are also e2e-owned and
-        # get reaped here too, which their own teardowns simply find already
-        # dead instead of killing again. A reaper failure must never skip the
-        # env restore (the leak this file's scope contract exists to prevent).
+        # Reap our package residue, including the still-active session frontend.
+        # Its managed teardown later finds it dead. A reaper failure must never
+        # skip environment restoration; record sender/target evidence separately.
         with contextlib.suppress(Exception):
-            sweep_stale_e2e_processes(include_own=True)
+            sweep_stale_e2e_processes(
+                include_own=True, receipt_path=_LOG_DIR / f"cleanup-{_E2E_SUFFIX}.jsonl"
+            )
         settings.data_plane.events_channel = prev_events
         for k, v in prev_env.items():
             if v is None:
@@ -435,6 +433,7 @@ def frontend_proc() -> Iterator[None]:
             env=env,
             label="frontend",
             log_path=str(_LOG_DIR / f"frontend-{_E2E_SUFFIX}.log"),
+            receipt_path=_LOG_DIR / f"cleanup-{_E2E_SUFFIX}.jsonl",
         ):
             wait_for_port("127.0.0.1", FRONTEND_PORT, timeout=30.0, label="frontend")
             yield
