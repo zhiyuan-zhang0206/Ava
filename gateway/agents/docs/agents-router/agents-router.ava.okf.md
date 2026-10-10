@@ -39,6 +39,12 @@ relationships and the effective cluster default using
 endpoint, birth stamp and spawn preflight.
 `/api/agents/{id}/exited` finalizes agent exit.
 
+Lifecycle handlers pass the actual request app's database and pool to
+`forward_to_home_machine`; home lookup borrows that pool and RPC uses that
+database. MCP termination passes its server-composed database and pool through
+`terminate_agent_with_open_tasks`, including the advisory task hint and shell
+TTL cleanup. Forward helpers do not import the assembled `gateway.app`.
+
 ## Spawn boundary
 
 [[gateway/agents/docs/agents-router/router-spawn.ava.okf.md]] owns preset resolution,

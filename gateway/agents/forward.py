@@ -15,9 +15,9 @@ intent, just relocated from the old app.py to here.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from loguru import logger
+from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from base.agents import (
@@ -78,7 +78,13 @@ def _raise_proxied_wire_error_from_payload(payload: dict[str, object]) -> None:
 
 
 async def forward_to_home_machine(
-    agent_id: int, path: str, json_body: dict, *, idempotency_key: str | None = None
+    agent_id: int,
+    path: str,
+    json_body: dict,
+    *,
+    db: Database,
+    pool: ConnectionPool,
+    idempotency_key: str | None = None,
 ) -> dict:
     """Lifecycle operations (resurrect / force-terminate / etc.) must run on
     the agent's home machine (`agents_meta.machine`) — they mutate physical
@@ -103,17 +109,10 @@ async def forward_to_home_machine(
         Other AvaAgentError subclasses: business errors raised by the
             target machine's op are passed through.
     """
-    # Lazy import: gateway.agents -> gateway.app -> gateway.agents cycle. Also lets
-    # tests monkeypatch the helper with the same signature as before the
-    # router split.
-    from gateway.app import app
-
-    target = await asyncio.to_thread(_home_machine_blocking, app, agent_id)
+    target = await asyncio.to_thread(_home_machine_blocking, pool, agent_id)
     if idempotency_key is not None:
-        return await enqueue_lifecycle(
-            app.state.db, target, path, json_body, idempotency_key=idempotency_key
-        )
-    return await enqueue_lifecycle(app.state.db, target, path, json_body)
+        return await enqueue_lifecycle(db, target, path, json_body, idempotency_key=idempotency_key)
+    return await enqueue_lifecycle(db, target, path, json_body)
 
 
 async def enqueue_lifecycle(
@@ -201,9 +200,9 @@ async def forward_spawn_to_remote(
         ) from exc
 
 
-def _home_machine_blocking(app: Any, agent_id: int) -> str:
+def _home_machine_blocking(pool: ConnectionPool, agent_id: int) -> str:
     """Sync home-machine lookup for lifecycle ops — via to_thread."""
-    with app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
     if row is None:
