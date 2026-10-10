@@ -92,6 +92,7 @@ export function RunTimelineRows({
   onRemove,
   onRetry,
   links,
+  interactions,
   linkKinds,
   onToggleLinkKind,
   linkKey,
@@ -116,6 +117,8 @@ export function RunTimelineRows({
   onRetry: (agent: number) => void;
   /** Every arrow between agents the view can resolve; the kinds that are off are not drawn. */
   links: readonly ResolvedLink[];
+  /** The Interactions switch: off draws no arrows, no legend for them and no Other agents group. */
+  interactions: boolean;
   linkKinds: ReadonlySet<LinkKind>;
   onToggleLinkKind: (kind: LinkKind) => void;
   /** The selected arrow. */
@@ -129,7 +132,7 @@ export function RunTimelineRows({
   // Whether the pointer is over a block or node: an item wins over an arrow drawn across it.
   const overItem = useRef(false);
   const hitRef = useRef<LinkHit>(() => null);
-  const shownLinks = useMemo(() => links.filter((l) => linkKinds.has(l.link.kind)), [links, linkKinds]);
+  const shownLinks = useMemo(() => (interactions ? links.filter((l) => linkKinds.has(l.link.kind)) : []), [interactions, links, linkKinds]);
   const externals = useMemo(() => externalLinks(shownLinks), [shownLinks]);
   const linkCounts = useMemo(() => {
     const counts = new Map<LinkKind, number>();
@@ -542,14 +545,16 @@ export function RunTimelineRows({
         return agent === undefined ? null : renderAgent(agent);
       })}
 
-      <OtherAgentsGroup
-        links={externals}
-        axis={axis}
-        viewU={viewU}
-        selectedKey={linkKey}
-        onHover={setHoverLink}
-        onSelect={onSelectLink}
-      />
+      {interactions ? (
+        <OtherAgentsGroup
+          links={externals}
+          axis={axis}
+          viewU={viewU}
+          selectedKey={linkKey}
+          onHover={setHoverLink}
+          onSelect={onSelectLink}
+        />
+      ) : null}
 
       <RunTimelineAxis view={view} base={base} onView={onView} axis={axis} />
 
@@ -559,6 +564,7 @@ export function RunTimelineRows({
         classLabel={classLabel}
         sources={sources}
         sourceLabel={sourceLabel}
+        interactions={interactions}
         linkKinds={linkKinds}
         linkLabels={linkLabels}
         linkCounts={linkCounts}

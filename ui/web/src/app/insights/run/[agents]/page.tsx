@@ -10,7 +10,7 @@ import { AgentPending } from "@/components/run-timeline/agent-view/agent-view-gr
 import type { AgentSelection } from "@/components/run-timeline/agent-view/agent-view-nav";
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { LinkDetail } from "@/components/run-timeline/run-timeline-link-detail";
-import { LINK_KINDS, resolveLinks, type LinkKind } from "@/components/run-timeline/model/timeline-links";
+import { LINK_KINDS, resolveLinks, type LinkKind, type ResolvedLink } from "@/components/run-timeline/model/timeline-links";
 import { RunTimelineRows, type AgentEntry } from "@/components/run-timeline/run-timeline-rows";
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import { PageHeader } from "@/components/shell/page-header";
@@ -46,6 +46,7 @@ function parseAgents(segment: string): number[] | null {
 }
 
 const NO_AGENTS: number[] = [];
+const NO_LINKS: ResolvedLink[] = [];
 
 /** What the page keeps of each agent's query; shared by structure, so an unchanged read keeps its identity. */
 const pickRead = (results: { data: RunTimelineResponse | undefined; isError: boolean }[]) =>
@@ -70,6 +71,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   // The selected arrow between agents (a selected arrow and a selected block exclude each other) and the kinds drawn.
   const [linkKey, setLinkKey] = useState<string | null>(null);
   const [linkKinds, setLinkKinds] = useState<ReadonlySet<LinkKind>>(() => new Set(LINK_KINDS));
+  const [interactions, setInteractions] = useState(true);
   const [levels, setLevels] = useState<number | null>(null);
   const [contextSize, setContextSize] = useState(true);
   const [unitHeights, setUnitHeights] = useState<UnitHeights>("tokens");
@@ -142,13 +144,13 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   const linksRead = useQuery({
     queryKey: ["run-timeline-links", [...ids].sort((a, b) => a - b).join(","), linkWindow?.from, linkWindow?.to],
     queryFn: () => api.getRunTimelineLinks(ids, linkWindow as { from: string; to: string }),
-    enabled: linkWindow !== null,
+    enabled: linkWindow !== null && interactions,
   });
   const links = useMemo(
     () => resolveLinks(linksRead.data?.links ?? [], new Set(ids), new Map(loaded.map(({ id, data }) => [id, data]))),
     [linksRead.data, ids, loaded],
   );
-  const selectedLink = linkKey === null ? undefined : links.find((l) => l.key === linkKey);
+  const selectedLink = !interactions || linkKey === null ? undefined : links.find((l) => l.key === linkKey);
 
   if (paramsResolved && agentIds === null) {
     return (
@@ -206,6 +208,11 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
         onContextSize={setContextSize}
         unitHeights={unitHeights}
         onUnitHeights={setUnitHeights}
+        interactions={interactions}
+        onInteractions={(on) => {
+          setInteractions(on);
+          if (!on) setLinkKey(null);
+        }}
       />
       {base && view ? (
         <>
@@ -233,7 +240,8 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
             unitHeights={unitHeights}
             onRemove={ids.length > 1 ? removeAgent : null}
             onRetry={retry}
-            links={links}
+            links={interactions ? links : NO_LINKS}
+            interactions={interactions}
             linkKinds={linkKinds}
             onToggleLinkKind={(kind) =>
               setLinkKinds((kinds) => {
@@ -248,7 +256,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
               setLinkKey(key);
             }}
           />
-          {linksRead.isError ? (
+          {interactions && linksRead.isError ? (
             <p role="alert" className="text-xs text-destructive" data-testid="run-timeline-links-failed">
               {t("linksFailed")}
             </p>

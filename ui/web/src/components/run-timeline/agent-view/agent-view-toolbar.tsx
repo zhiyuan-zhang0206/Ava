@@ -25,6 +25,8 @@ export function AgentViewToolbar({
   onContextSize,
   unitHeights,
   onUnitHeights,
+  interactions,
+  onInteractions,
 }: {
   agentIds: readonly number[];
   onAdd: (agent: number) => void;
@@ -37,6 +39,9 @@ export function AgentViewToolbar({
   onContextSize: (on: boolean) => void;
   unitHeights: UnitHeights;
   onUnitHeights: (heights: UnitHeights) => void;
+  /** Whether the arrows between agents (and the Other agents group) are shown. */
+  interactions: boolean;
+  onInteractions: (on: boolean) => void;
 }) {
   const t = useTranslations("runTimeline");
   const [draft, setDraft] = useState("");
@@ -117,6 +122,15 @@ export function AgentViewToolbar({
           data-testid="agent-view-context-size"
         />
         {t("contextSizeLabel")}
+      </label>
+      <label className={cn(FLEX, "items-center gap-1.5 pb-1 text-xs text-muted-foreground")}>
+        <input
+          type="checkbox"
+          checked={interactions}
+          onChange={(event) => onInteractions(event.target.checked)}
+          data-testid="agent-view-interactions"
+        />
+        {t("interactionsLabel")}
       </label>
     </div>
   );

@@ -332,6 +332,22 @@ describe("arrows between agents", () => {
     expect(fromOther.map((d) => d.color)).toEqual(["#ef4444"]);
   });
 
+  it("hides every arrow, the link legend and the Other agents group with the Interactions switch, and restores the kinds", async () => {
+    await ready();
+    fireEvent.click(screen.getByTestId("run-timeline-link-legend-spawn"));
+    fireEvent.click(screen.getByTestId("agent-view-interactions"));
+    await paintFrame();
+    expect(strokes()).toHaveLength(0);
+    expect(screen.queryByTestId("run-timeline-link-legend")).toBeNull();
+    expect(screen.queryByTestId("agent-view-other-agents")).toBeNull();
+    fireEvent.click(screen.getByTestId("agent-view-interactions"));
+    await screen.findByTestId("agent-view-other-agents");
+    await paintFrame();
+    expect(strokes().some((d) => d.color === BLUE)).toBe(true);
+    expect(strokes().some((d) => d.color === GREEN)).toBe(false);
+    expect(screen.getByTestId("run-timeline-link-legend-spawn").getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("switches a kind on and off from the legend, with how many there are", async () => {
     await ready();
     const spawn = screen.getByTestId("run-timeline-link-legend-spawn");

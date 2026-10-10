@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 
-import { arrowDirection, hitLink, LINK_COLORS, type Curve, type ResolvedLink } from "../model/timeline-links";
+import { curveOf, endTangent, hitLink, LINK_COLORS, type Curve, type ResolvedLink } from "../model/timeline-links";
 import type { AxisMap, Viewport } from "../model/timeline-model";
 
 const ROW_TESTID = { units: "run-timeline-row-units", lifecycle: "run-timeline-row-lifecycle", other: "run-timeline-row-other" } as const;
@@ -75,7 +75,7 @@ export function LinksCanvas({
       for (const l of links) {
         const a = place(l.from);
         const b = place(l.to);
-        if (a !== null && b !== null) curves.push({ key: l.key, x0: a.x, y0: a.y, x1: b.x, y1: b.y });
+        if (a !== null && b !== null) curves.push(curveOf(l.key, a.x, a.y, b.x, b.y));
       }
       const byKey = new Map(links.map((l) => [l.key, l]));
       // The hovered and the selected arrow go on top of the rest.
@@ -84,20 +84,22 @@ export function LinksCanvas({
         const l = byKey.get(c.key);
         if (l === undefined) continue;
         const lit = c.key === selectedKey ? 2 : c.key === hoverKey ? 1 : 0;
-        const dy = (c.y1 - c.y0) / 2;
         ctx.globalAlpha = lit > 0 ? 1 : selectedKey !== null ? 0.25 : 0.55;
         ctx.strokeStyle = LINK_COLORS[l.link.kind];
         ctx.fillStyle = ctx.strokeStyle;
         ctx.lineWidth = lit === 2 ? 2.5 : lit === 1 ? 2 : 1.25;
         ctx.beginPath();
         ctx.moveTo(c.x0, c.y0);
-        ctx.bezierCurveTo(c.x0, c.y0 + dy, c.x1, c.y1 - dy, c.x1, c.y1);
+        ctx.bezierCurveTo(c.c1x, c.c1y, c.c2x, c.c2y, c.x1, c.y1);
         ctx.stroke();
-        const dir = arrowDirection(c);
+        // The head points along the curve's tangent at its end.
+        const tan = endTangent(c);
+        const bx = c.x1 - tan.x * HEAD_PX;
+        const by = c.y1 - tan.y * HEAD_PX;
         ctx.beginPath();
         ctx.moveTo(c.x1, c.y1);
-        ctx.lineTo(c.x1 - HEAD_PX * 0.7, c.y1 - dir * HEAD_PX);
-        ctx.lineTo(c.x1 + HEAD_PX * 0.7, c.y1 - dir * HEAD_PX);
+        ctx.lineTo(bx - tan.y * HEAD_PX * 0.6, by + tan.x * HEAD_PX * 0.6);
+        ctx.lineTo(bx + tan.y * HEAD_PX * 0.6, by - tan.x * HEAD_PX * 0.6);
         ctx.closePath();
         ctx.fill();
       }

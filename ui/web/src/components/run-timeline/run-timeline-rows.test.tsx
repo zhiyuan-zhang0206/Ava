@@ -85,6 +85,7 @@ function renderRows(data: Partial<RunTimelineResponse>, selection: Selection | n
       onRemove={null}
       onRetry={vi.fn()}
       links={[]}
+      interactions
       linkKinds={new Set(LINK_KINDS)}
       onToggleLinkKind={vi.fn()}
       linkKey={null}

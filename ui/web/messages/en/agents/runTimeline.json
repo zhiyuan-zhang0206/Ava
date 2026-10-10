@@ -105,5 +105,6 @@
   "linkAddAgent": "Add agent #{id} to the view",
   "linkMessage": "Message",
   "linksFailed": "Could not load the arrows between agents.",
-  "linkUnmatched": "This message is not matched to a block of the receiver (its history carries no inbound id for it); the arrow ends at the time of the event."
+  "linkUnmatched": "This message is not matched to a block of the receiver (its history carries no inbound id for it); the arrow ends at the time of the event.",
+  "interactionsLabel": "Interactions"
 }

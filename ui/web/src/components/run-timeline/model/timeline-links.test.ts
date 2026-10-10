@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { RunTimelineLink, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
 import {
+  curveOf,
+  curvePoint,
   distanceToCurve,
+  endTangent,
   externalLinks,
   hitLink,
   nearestLink,
@@ -114,22 +117,61 @@ describe("nearestUnit", () => {
   });
 });
 
+describe("the curve", () => {
+  it("bends visibly even when both ends are at the same x, within bounds", () => {
+    const c = curveOf("k", 100, 0, 100, 200);
+    expect(Math.abs(c.c1x - c.x0)).toBeGreaterThanOrEqual(20);
+    expect(Math.abs(c.c1x - c.x0)).toBeLessThanOrEqual(140);
+    expect(c.c1x - c.x0).toBe(-(c.c2x - c.x1));
+    const short = curveOf("k", 100, 0, 100, 4);
+    expect(Math.abs(short.c1x - short.x0)).toBeGreaterThanOrEqual(20);
+  });
+
+  it("pulls further for longer vertical distances, up to a bound", () => {
+    const pull = (dy: number) => Math.abs(curveOf("k", 0, 0, 0, dy).c1x);
+    expect(pull(400)).toBeGreaterThan(pull(100));
+    expect(pull(10000)).toBeLessThanOrEqual(140);
+  });
+
+  it("varies the bend between links so simultaneous ones do not coincide", () => {
+    const pulls = new Set(["a", "b", "c", "d", "e", "f", "g"].map((k) => curveOf(k, 0, 0, 0, 200).c1x));
+    expect(pulls.size).toBeGreaterThan(1);
+  });
+
+  it("leaves toward the side the receiver is on", () => {
+    expect(curveOf("k", 0, 0, 300, 100).c1x).toBeGreaterThan(0);
+    expect(curveOf("k", 300, 0, 0, 100).c1x).toBeLessThan(300);
+  });
+
+  it("ends tangent to the curve, not along the line between the ends", () => {
+    const c = curveOf("k", 0, 0, 40, 400);
+    const tan = endTangent(c);
+    expect(Math.hypot(tan.x, tan.y)).toBeCloseTo(1, 5);
+    // The end control point is level with the end, so the head points sideways, not down the chord.
+    expect(tan.y).toBeCloseTo(0, 5);
+    expect(tan.x).toBeGreaterThan(0.9);
+  });
+});
+
 describe("hitting a curve", () => {
-  const down: Curve = { key: "a", x0: 100, y0: 0, x1: 100, y1: 200 };
-  const slanted: Curve = { key: "b", x0: 300, y0: 0, x1: 500, y1: 200 };
+  const down: Curve = curveOf("a", 100, 0, 100, 200);
+  const slanted: Curve = curveOf("b", 600, 0, 800, 200);
 
   it("measures the distance to the curve, zero on it", () => {
-    expect(distanceToCurve(down, 100, 80)).toBeCloseTo(0, 5);
-    expect(distanceToCurve(down, 107, 80)).toBeCloseTo(7, 1);
+    const mid = curvePoint(down, 0.3);
+    expect(distanceToCurve(down, mid.x, mid.y)).toBeLessThan(0.5);
+    expect(distanceToCurve(down, mid.x + 40, mid.y)).toBeGreaterThan(10);
   });
 
   it("hits the nearest curve within the tolerance and nothing beyond it", () => {
-    expect(hitLink([down], 102, 100, 4)).toBe("a");
-    expect(hitLink([down], 110, 100, 4)).toBeNull();
-    expect(hitLink([down, slanted], 100, 100, 4)).toBe("a");
+    const p = curvePoint(down, 0.5);
+    expect(hitLink([down], p.x + 2, p.y, 4)).toBe("a");
+    expect(hitLink([down], p.x + 30, p.y, 4)).toBeNull();
+    expect(hitLink([down, slanted], p.x, p.y, 4)).toBe("a");
   });
 
   it("prefers the one drawn later when two are equally near", () => {
-    expect(hitLink([down, { ...down, key: "c" }], 100, 100, 4)).toBe("c");
+    const p = curvePoint(down, 0.5);
+    expect(hitLink([down, { ...down, key: "c" }], p.x, p.y, 4)).toBe("c");
   });
 });
