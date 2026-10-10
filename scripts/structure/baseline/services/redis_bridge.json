@@ -1,6 +1,0 @@
-{
-  "ambient_state": {
-    "services/redis_bridge/relay.py::thread:_handle": 2,
-    "services/redis_bridge/relay.py::thread:serve_forever": 1
-  }
-}
