@@ -130,6 +130,9 @@ Recognized `Path` or `open` reads whose repository or external anchor cannot be
 proved also retain an unknown, rather than treating a relative working-directory
 path as repository-rooted. Source embedded in Python `-c` uses the same collector;
 it has no implicit relative-import package or source-file resource anchor.
+The lexical fact pass also identifies recognized launchers. Source with none
+skips the second execution-input pass; launcher-bearing source retains the full
+execution grammar and its unknown diagnostics.
 
 These facts do not replace import-linter's graph or enable new placement gates.
 CI reverse impact follows unpruned runtime dependencies; test ownership remains
