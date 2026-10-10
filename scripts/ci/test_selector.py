@@ -63,6 +63,10 @@ _TREE_SCAN_ONLY_PREFIXES = (
     "demos/",
     "tests/e2e/",  # CI runs the whole e2e package for every diff that is not docs-only
 )
+# Hidden tool directories that tests read by path rather than import. A change
+# there also selects every collectable test whose source text names the directory
+# (`_referencing_tests`), so the set of readers is derived, never listed by hand.
+_REFERENCED_ROOTS = (".github", ".agents", ".ava", ".trunk")
 # Top-level directories whose files belong to a package with an owning `tests/`.
 _PACKAGE_ROOTS = frozenset(
     {
@@ -333,19 +337,49 @@ def _conftest_tests(path: str, checkout: Checkout) -> set[str]:
     return {test for test in checkout.collectable if test.startswith(prefix)}
 
 
+def _reference_pattern(root: str) -> re.Pattern[str]:
+    """A string-literal reference to a top-level directory: ``.github/`` or ``".github"``.
+
+    The unquoted form must not follow a word character or a dot, so the module
+    name ``base.agents`` does not reference ``.agents``.
+    """
+    escaped = re.escape(root)
+    return re.compile(rf"(?<![\w.]){escaped}/|[\"']{escaped}[\"']")
+
+
+def _referencing_tests(root: str, checkout: Checkout) -> set[str]:
+    """Collectable tests whose source text names the top-level directory ``root``."""
+    pattern = _reference_pattern(root)
+    return {
+        test
+        for test in checkout.collectable
+        if pattern.search((checkout.repo_root / test).read_text(encoding="utf-8"))
+    }
+
+
+def _path_tests(
+    path: str, path_class: PathClass, checkout: Checkout, reverse_map: dict[str, set[str]]
+) -> set[str]:
+    """What one changed path contributes to the candidate subset."""
+    if path_class is PathClass.TEST:
+        return {path}
+    if path_class is PathClass.CONFTEST:
+        return _conftest_tests(path, checkout)
+    if path_class is PathClass.PACKAGE:
+        return reverse_map.get(path, set()) | package_tests(path, checkout)
+    root = path.split("/", maxsplit=1)[0]
+    if path_class is PathClass.TREE_SCAN_ONLY and root in _REFERENCED_ROOTS:
+        return _referencing_tests(root, checkout)
+    return set()
+
+
 def _owner_tests(
     changed: dict[str, PathClass], checkout: Checkout, reverse_map: dict[str, set[str]]
 ) -> set[str]:
     """The union of what each changed path contributes (rules by class)."""
     selected: set[str] = set()
     for path, path_class in changed.items():
-        if path_class is PathClass.TEST:
-            selected.add(path)
-        elif path_class is PathClass.CONFTEST:
-            selected.update(_conftest_tests(path, checkout))
-        elif path_class is PathClass.PACKAGE:
-            selected.update(reverse_map.get(path, set()))
-            selected.update(package_tests(path, checkout))
+        selected.update(_path_tests(path, path_class, checkout, reverse_map))
     return selected
 
 

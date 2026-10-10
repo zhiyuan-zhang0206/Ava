@@ -40,7 +40,8 @@ matching row decides.
 | 4 | Absent from the head tree | DELETED | ignored |
 | 5 | A collectable test file | TEST | itself |
 | 6 | A global path (below) | GLOBAL | full suite |
-| 7 | `.github/`, `.agents/`, `.ava/`, `.trunk/`, `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE`, `.test_durations`, `.test_durations.source.json` | TREE_SCAN_ONLY | tree-scan tests only |
+| 7a | `.github/`, `.agents/`, `.ava/`, `.trunk/` | TREE_SCAN_ONLY | tree-scan tests plus every collectable test whose source names that top-level directory (below) |
+| 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE`, `.test_durations`, `.test_durations.source.json` | TREE_SCAN_ONLY | tree-scan tests only |
 | 8 | A non-Python file under `ui/` | FRONTEND | none; the frontend job owns it |
 | 9 | Any other file under agent/, ava/, ava_builtins/, base/, cli/, gateway/, ops/, schedules/, scripts/, services/, tests/ or ui/ | PACKAGE | direct importers plus the owning package's tests |
 | 10 | Anything else | UNMAPPED | full suite |
@@ -50,6 +51,13 @@ Global paths apply to every test: `pyproject.toml`, `uv.lock`, `.python-version`
 (plus the `__init__.py` of every package on their import path), and everything
 under tests/fixtures/, db/, migrations/, deploy/ and commands/. This list and
 the plugin set are the single "global path" concept in the selector.
+
+Tests read `.github/`, `.agents/`, `.ava/` and `.trunk/` by path, so no import
+links them. A change there selects, besides the tree-scan tests, every
+collectable test whose source contains the directory as a string literal: the
+unquoted `.github/` (not preceded by a word character or a dot, so the module
+name `base.agents` does not match `.agents`) or the quoted `".github"` or
+`'.github'`. Test sources are scanned at selection time; no map file is stored.
 
 The owning package of a path is found by walking up from its directory: the
 nearest `tests` directory that holds at least one collectable test owns it, and
