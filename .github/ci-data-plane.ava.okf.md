@@ -39,8 +39,10 @@ sentinel ports: the suite must provision its own throwaway cluster, and a
 sentinel turns "a test quietly reached a real data plane" into a connection
 error instead of a silent pass.
 
-The `backend-selected` job sets `AVA_PG_THROWAWAY_BASE` to
-`${{ runner.temp }}/ava-selected-pg` and creates that directory before pytest.
+The `backend-selected` preparation step sets `AVA_PG_THROWAWAY_BASE` to
+`${{ runner.temp }}/ava-selected-pg`, creates that directory, and writes the
+value to `GITHUB_ENV` for pytest and the later capacity report. The `runner`
+context is resolved in step-level `env`, where GitHub Actions permits it.
 Its selected native suite uses the runner's temporary disk instead of the
 Linux default RAM-backed `/dev/shm`. Each throwaway Postgres instance still
 gets its own private directory and the normal fixture teardown removes it;
