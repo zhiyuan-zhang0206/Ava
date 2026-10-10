@@ -449,3 +449,45 @@ async def test_unknown_probe_or_wake_key_error_reaches_active_caller(
         assert listener._operations == {}
     finally:
         await listener.stop(timeout=1)
+
+
+@pytest.mark.parametrize("boundary", ["consume_timeout", "consume_transport", "wake_key_timeout"])
+async def test_old_phase_cleanup_preserves_replacement_subscription(
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+) -> None:
+    old, new = PubSub(), PubSub()
+    first, second = Redis(old), Redis(new)
+    if boundary == "wake_key_timeout":
+        first.getdel_release.clear()
+    client(monkeypatch, first, second)
+    monkeypatch.setattr(redis_listener, "_CONSUME_ABANDON_GRACE", 0.02)
+    listener = redis_listener.RedisInboundListener("redis://unused", 7016)
+    waiter = asyncio.create_task(listener.wait_one(0.3))
+    try:
+        started = first.getdel_entered if boundary == "wake_key_timeout" else old.reading
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await listener.close()
+        await listener.ensure_listening()
+        assert old.closed and first.closed
+        assert listener._pubsub is new and listener._redis is second
+        if boundary == "consume_transport":
+            old.error = OSError("the replaced socket failed")
+            old.release.set()
+        await finished(waiter)
+        waiter.result()
+        await asyncio.sleep(0)
+        assert listener._pubsub is new and listener._redis is second
+        assert not new.closed and not second.closed
+        if boundary == "consume_timeout":
+            assert old.task is not None and not old.task.done()
+            assert any(":consume:" in name for name in listener.unfinished_work)
+    finally:
+        first.getdel_release.set()
+        old.release.set()
+        new.release.set()
+        waiter.cancel()
+        await asyncio.gather(waiter, return_exceptions=True)
+        if old.task is not None:
+            await asyncio.gather(old.task, return_exceptions=True)
+        await listener.stop(timeout=1)

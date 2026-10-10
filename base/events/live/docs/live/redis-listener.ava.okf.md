@@ -46,6 +46,12 @@ one that crosses a resource close retries against the current subscription
 within the original request budget. A positive stop budget is finite; zero
 skips waiting.
 
+Each phase retains the pubsub/client pair and generation it actually used.
+GETDEL timeout, consume abandonment and transport-error cleanup discard only
+that still-current subscription. A resource close followed by eager reconnect
+cannot let the old phase detach or close the replacement; an old resistant
+consume remains known until it finishes.
+
 The return is the tuple of known unfinished operation identities. The same
 live information is available through `unfinished_work`; a nonempty result
 also emits a warning. Repeating stop can join remaining work and observe
