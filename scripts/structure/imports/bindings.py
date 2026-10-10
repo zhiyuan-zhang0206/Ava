@@ -34,6 +34,20 @@ _SCOPE_NODES = (
     ast.DictComp,
     ast.GeneratorExp,
 )
+_BINDING_NODES = (
+    ast.Name,
+    ast.Assign,
+    ast.AnnAssign,
+    ast.Import,
+    ast.ImportFrom,
+    ast.Attribute,
+    ast.For,
+    ast.AsyncFor,
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.ExceptHandler,
+)
 
 
 def scope_parts(
@@ -95,6 +109,18 @@ class ModuleContext:
         self.name = name
         self._tree = tree
         self._mutated: frozenset[str] | None = None
+        self._scopes: dict[tuple[ast.AST, str, Scope | None], Scope] = {}
+
+    def scope(self, tree: ast.AST, path: str, parent: Scope | None = None) -> Scope:
+        """Reuse a completed lexical scope within this source analysis only."""
+        key = (tree, path, parent)
+        if key not in self._scopes:
+            self._scopes[key] = Scope(tree, path, parent, context=self)
+        return self._scopes[key]
+
+    def clear_scopes(self) -> None:
+        """Release query-owned scopes, including their references to this context."""
+        self._scopes.clear()
 
     @property
     def mutated(self) -> frozenset[str]:
@@ -216,8 +242,12 @@ class Scope:
         self.functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
         self.stores: Counter[str] = Counter()
         self.domains: dict[str, tuple[str, ...]] = {}
+        self.calls: list[ast.Call] = []
         for node in local_nodes(tree):
-            self._bind(node, path)
+            if isinstance(node, ast.Call):
+                self.calls.append(node)
+            elif isinstance(node, _BINDING_NODES):
+                self._bind(node, path)
         if isinstance(tree, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
             args = tree.args
             for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:

@@ -103,6 +103,13 @@ iterator stack, so deep expressions do not repeatedly relay each node through
 recursive generators. Nested bodies and definition-time inputs retain the same
 scope boundaries.
 
+Within one analysis, `ModuleContext.scope()` reuses completed scopes by AST node,
+source path and lexical parent. The fact and execution-input visitors share these
+scopes; each scope retains its lexical Call order for transparent-helper checks.
+Binding collection skips nodes that cannot bind names without pruning the public
+lexical walker. `clear_scopes()` releases the query's scope references; neither
+scopes nor helper proofs cross analyses, source files or checkout generations.
+
 Import-linter contracts, private package doors and test-placement rules remain
 responsible for their existing boundaries.
 

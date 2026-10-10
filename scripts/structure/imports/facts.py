@@ -74,7 +74,8 @@ class _Collector(ast.NodeVisitor):
     ) -> None:
         self.path, self.index, self.tops = path, index, tops
         name = "__main__" if embedded else bindings.module_name(path)
-        self.scope = bindings.Scope(tree, path, context=bindings.module_context(tree, name))
+        self.context = bindings.module_context(tree, name)
+        self.scope = self.context.scope(tree, path)
         self.depth = len(Path(path).parts) if path else 0
         self.embedded = embedded
         self.resource_seen: set[int] = set()
@@ -120,7 +121,7 @@ class _Collector(ast.NodeVisitor):
         outer, inner = bindings.scope_parts(node)
         for expression in outer:
             self.visit(expression)
-        self.scope = bindings.Scope(node, self.path, parent.nested_parent())
+        self.scope = self.context.scope(node, self.path, parent.nested_parent())
         for statement in inner:
             self.visit(statement)
         self.scope = parent
@@ -445,7 +446,12 @@ def collect(
     """
     collector = _Collector(tree, rel_path, index, tops)
     collector.visit(tree)
-    inputs = executed.inputs(tree, rel_path) if collector.has_launches else executed.Inputs()
+    inputs = (
+        executed.inputs(tree, rel_path, context=collector.context)
+        if collector.has_launches
+        else executed.Inputs()
+    )
+    collector.context.clear_scopes()
     collector.unknown.extend(
         Unknown(g.path, g.line, "Python -c", g.reason, FactKind.EMBEDDED_IMPORT)
         for g in inputs.unresolved
@@ -479,6 +485,7 @@ def _embedded(
         )
     collector = _Collector(tree, path, index, tops, embedded=True)
     collector.visit(tree)
+    collector.context.clear_scopes()
     return Evidence(
         tuple(
             Fact(source.line, FactKind.EMBEDDED_IMPORT, fact.target, fact.names, fact.via)
