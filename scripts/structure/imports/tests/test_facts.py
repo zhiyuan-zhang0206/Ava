@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.structure import placement
-from scripts.structure.imports import facts
+from scripts.structure.imports import executed, facts
 from scripts.structure.tests.patch_repo import make_repo
 
 
@@ -317,3 +317,33 @@ def test_unsupported_path_operation_read_is_explicitly_unknown(tmp_path: Path) -
     )
     assert len(found.unknown) == 1
     assert found.unknown[0].kind == facts.FactKind.RESOURCE
+
+
+def test_no_launcher_avoids_repeating_execution_analysis(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse_execution_analysis(*_args: object) -> executed.Inputs:
+        pytest.fail("A source without a launcher needs no execution analysis")
+
+    monkeypatch.setattr(executed, "inputs", refuse_execution_analysis)
+    found = evidence(
+        make_repo(tmp_path), "import importlib\nimportlib.import_module('base.net.retry')\n"
+    )
+    assert [fact.target for fact in found.records] == ["base.net.retry"]
+    assert found.unknown == ()
+
+
+@pytest.mark.parametrize(
+    "source, unresolved",
+    [
+        ("subprocess.run([sys.executable, '-c', 'import base.net.retry'])", False),
+        ("def run():\n subprocess.run([sys.executable, '-c', code])", True),
+        ("[subprocess.run([sys.executable, '-c', 'import base.net.retry']) for _ in []]", False),
+    ],
+)
+def test_launchers_retain_execution_analysis_in_every_lexical_scope(
+    tmp_path: Path, source: str, unresolved: bool
+) -> None:
+    found = evidence(make_repo(tmp_path), "import sys, subprocess\n" + source)
+    assert bool(found.unknown) is unresolved
+    assert [fact.target for fact in found.records] == ([] if unresolved else ["base.net.retry"])

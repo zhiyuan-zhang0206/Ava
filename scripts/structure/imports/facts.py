@@ -80,6 +80,7 @@ class _Collector(ast.NodeVisitor):
         self.depth = len(Path(path).parts) if path else 0
         self.embedded = embedded
         self.resource_seen: set[int] = set()
+        self.has_launches = False
         self.records: list[Fact] = []
         self.unknown: list[Unknown] = []
 
@@ -157,6 +158,7 @@ class _Collector(ast.NodeVisitor):
         if origin in _PATCH_IMPORTS:
             self._patch_import(node, origin)
         if origin in executed._LAUNCHERS:
+            self.has_launches = True
             target, reason = executed.module_input(node, self.scope)
             if target is not None:
                 values = self.scope.strings(target)
@@ -399,7 +401,7 @@ def collect(tree: ast.AST, rel_path: str, index: Lookup, *, tops: Sequence[str])
     """
     collector = _Collector(tree, rel_path, index, tops)
     collector.visit(tree)
-    inputs = executed.inputs(tree, rel_path)
+    inputs = executed.inputs(tree, rel_path) if collector.has_launches else executed.Inputs()
     collector.unknown.extend(
         Unknown(g.path, g.line, "Python -c", g.reason, FactKind.EMBEDDED_IMPORT)
         for g in inputs.unresolved
