@@ -11,6 +11,7 @@ from base.agents import impersonation as leases
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.tests.impersonation._impersonation_helpers import _active, _agent
 from services.wake.heartbeat.daemon import (
@@ -28,9 +29,13 @@ def pool():
 
 
 def active_lease(
-    conn: psycopg.Connection, *, config_authority: ConfigAuthority, age: float = 400
+    conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    age: float = 400,
+    database_gate: ProcessDbGate,
 ) -> dict[str, Any]:
-    lease = _active(_agent(conn), authority=config_authority)
+    lease = _active(_agent(conn), authority=config_authority, database_gate=database_gate)
     conn.execute(
         "UPDATE agent_impersonations SET activated_at=now()-make_interval(secs=>%s) WHERE id=%s",
         (age, lease["id"]),
@@ -49,8 +54,10 @@ def test_active_clock_does_not_depend_on_native_turns(
     db_conn: psycopg.Connection,
     status: str,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ):
-    lease = active_lease(db_conn, config_authority=config_authority)
+    lease = active_lease(db_conn, config_authority=config_authority, database_gate=database_gate)
     db_conn.execute(
         "UPDATE agents_meta SET status=%s,last_active_at=now(),heartbeat_backoff_level=5 WHERE id=%s",
         (status, lease["agent_id"]),
@@ -60,9 +67,15 @@ def test_active_clock_does_not_depend_on_native_turns(
 
 
 def test_activation_starts_the_clock(
-    pool: ConnectionPool, db_conn: psycopg.Connection, config_authority: ConfigAuthority
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ):
-    lease = active_lease(db_conn, age=20, config_authority=config_authority)
+    lease = active_lease(
+        db_conn, age=20, config_authority=config_authority, database_gate=database_gate
+    )
     db_conn.execute(
         "UPDATE agents_meta SET last_active_at=now()-interval '1 hour' WHERE id=%s",
         (lease["agent_id"],),
@@ -77,8 +90,10 @@ def test_pause_then_normal_cadence(
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ):
-    lease = active_lease(db_conn, config_authority=config_authority)
+    lease = active_lease(db_conn, config_authority=config_authority, database_gate=database_gate)
     aid = lease["agent_id"]
     db_conn.execute(
         "UPDATE agents_meta SET heartbeat_paused_until=now()+interval '1 hour' WHERE id=%s", (aid,)
@@ -104,9 +119,13 @@ def test_pause_then_normal_cadence(
 
 
 def test_external_work_is_not_a_failed_native_turn(
-    pool: ConnectionPool, db_conn: psycopg.Connection, config_authority: ConfigAuthority
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ):
-    lease = active_lease(db_conn, config_authority=config_authority)
+    lease = active_lease(db_conn, config_authority=config_authority, database_gate=database_gate)
     aid = lease["agent_id"]
     pending, failures, noops = {aid: 400 / 60}, {aid: 2}, {aid: 2}
     _reconcile_checkin_outcomes(
@@ -124,9 +143,13 @@ def test_external_work_is_not_a_failed_native_turn(
 
 
 def test_expired_active_lease_does_not_receive_checkin(
-    pool: ConnectionPool, db_conn: psycopg.Connection, config_authority: ConfigAuthority
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ):
-    lease = active_lease(db_conn, config_authority=config_authority)
+    lease = active_lease(db_conn, config_authority=config_authority, database_gate=database_gate)
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=now()-interval '1 second' WHERE id=%s",
         (lease["id"],),
@@ -141,6 +164,8 @@ def test_sdk_attachment_can_pause_heartbeat(
     monkeypatch: pytest.MonkeyPatch,
     config_authority: ConfigAuthority,
     model_installation: Installation,
+    *,
+    database_gate: ProcessDbGate,
 ):
     import ava
     from agent.state import BaseAgentState
@@ -154,7 +179,7 @@ def test_sdk_attachment_can_pause_heartbeat(
         return call_policy.SamplingPolicy()
 
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-    lease = active_lease(db_conn, config_authority=config_authority)
+    lease = active_lease(db_conn, config_authority=config_authority, database_gate=database_gate)
     pin_agent(None)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
 
@@ -179,10 +204,12 @@ def test_heartbeat_history_survives_ack_including_activation_backlog(
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ):
     owner = _agent(db_conn)
     _send_heartbeat_checkin(pool, database, event_bus, owner.agent_id, 7)
-    lease = _active(owner, authority=config_authority)
+    lease = _active(owner, authority=config_authority, database_gate=database_gate)
     _send_heartbeat_checkin(pool, database, event_bus, owner.agent_id, 8)
     messages = leases.inbox(database, lease["id"], attested_caller(lease))
     ids = [m["id"] for m in messages]

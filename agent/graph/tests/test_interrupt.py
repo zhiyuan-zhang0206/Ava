@@ -640,7 +640,9 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     model, publisher = MagicMock(), MagicMock()
     model.bind_tools.return_value = model
     model.astream.return_value = ordinary_generation()
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     config: RunnableConfig = {"configurable": {"thread_id": str(tid)}}
     runtime = Runtime(
         context=AvaContext(

@@ -17,6 +17,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.daemon import (
     _select_idle_agents_needing_heartbeat,
@@ -42,12 +43,14 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         selected = _selected(pool)
         assert aid in selected
@@ -60,6 +63,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """An idle hosted agent has no turn lease and can still receive a check-in."""
         aid = _make_idle(
@@ -67,6 +71,7 @@ class TestSelectIdleAgents:
             status_changed_s_ago=_THRESHOLD_S + 60,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -83,6 +88,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Scenario 1: a recent wake (status_changed_at fresh) leaves the agent
         under the idle threshold, so it is not yet due."""
@@ -91,6 +97,7 @@ class TestSelectIdleAgents:
             status_changed_s_ago=120,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         assert aid not in _selected(pool)
 
@@ -101,6 +108,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Only idling agents get a check-in; a running one is active by definition."""
         aid = _make_idle(
@@ -109,6 +117,7 @@ class TestSelectIdleAgents:
             status="running",
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         assert aid not in _selected(pool)
 
@@ -119,6 +128,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """An agent about to wake on a real message does not also need a check-in."""
         aid = _make_idle(
@@ -126,6 +136,7 @@ class TestSelectIdleAgents:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -145,6 +156,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Task #4872: while a lease is preparing, neither executor can
         receive a check-in, so it could not
@@ -155,6 +167,7 @@ class TestSelectIdleAgents:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         _lease(db_conn, aid, status=status)
         assert aid not in _selected(pool)
@@ -166,6 +179,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """A lease with nothing left to apply is history: the native loop is
         the consumer again and the check-in cadence resumes."""
@@ -174,6 +188,7 @@ class TestSelectIdleAgents:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         _lease(db_conn, aid, status="expired")
         assert aid in _selected(pool)
@@ -185,6 +200,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Unapplied delta state counts as in-flight (the impersonation
         subsystem's own predicate): stay silent until the native catches up."""
@@ -193,6 +209,7 @@ class TestSelectIdleAgents:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         _lease(db_conn, aid, status="expired", delta_version=3, applied_version=2)
         assert aid not in _selected(pool)
@@ -204,6 +221,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """An automatic lease whose handoff was never applied still counts as
         in-flight; a check-in waits for the application."""
@@ -212,6 +230,7 @@ class TestSelectIdleAgents:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         _lease(db_conn, aid, status="expired", automatic=True)
         assert aid not in _selected(pool)
@@ -223,12 +242,14 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         _lease(db_conn, aid, status="expired", automatic=True, handoff_applied=True)
         assert aid in _selected(pool)
@@ -240,6 +261,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Scenario 2: while the pause window is in the future, the agent is
         skipped even though it has been idle far longer than the threshold."""
@@ -249,6 +271,7 @@ class TestSelectIdleAgents:
             paused_until_s_ahead=1800,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         assert aid not in _selected(pool)
 
@@ -259,6 +282,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """R-6: the pause window is a floor, not an absolute check-in time. A
         real turn during the window starts the normal idle clock, so after expiry
@@ -270,6 +294,7 @@ class TestSelectIdleAgents:
             paused_until_s_ahead=-1,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         assert aid not in _selected(pool)
 
@@ -280,6 +305,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The R-6 pause floor wins while it is open, then the real turn's
         idle clock wins after expiry; both edges are one unified due-time rule."""
@@ -290,6 +316,7 @@ class TestSelectIdleAgents:
             paused_until_s_ahead=60,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         expired_window = _make_idle(
             db_conn,
@@ -298,6 +325,7 @@ class TestSelectIdleAgents:
             paused_until_s_ahead=-1,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         selected = _selected(pool)
         assert open_window not in selected
@@ -310,6 +338,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Once a wake post-dates the expired pause window (status_changed_at >
         heartbeat_paused_until), the normal wake-resettable clock resumes: an
@@ -321,6 +350,7 @@ class TestSelectIdleAgents:
             paused_until_s_ahead=-300,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         assert aid not in _selected(pool)
 
@@ -331,6 +361,7 @@ class TestSelectIdleAgents:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """No intervening wake: the agent has been idle 600s and its pause
         window expired 60s ago. It is overdue under both regimes and selected."""
@@ -340,6 +371,7 @@ class TestSelectIdleAgents:
             paused_until_s_ahead=-60,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         assert aid in _selected(pool)
 
@@ -356,6 +388,7 @@ class TestIdleClockCountsRealActivityOnly:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """An agent idle 400s (past threshold) then hit by an ops restart:
         status_changed_at is fresh (5s ago, the re-idle after respawn) but
@@ -367,6 +400,7 @@ class TestIdleClockCountsRealActivityOnly:
             last_active_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         assert aid in _selected(pool)
 
@@ -377,6 +411,7 @@ class TestIdleClockCountsRealActivityOnly:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Contrast with the pre-fix behavior: keyed off status_changed_at the same
         agent (fresh status_changed_at) would read as only 5s idle and be excluded.
@@ -388,6 +423,7 @@ class TestIdleClockCountsRealActivityOnly:
             last_active_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         selected = _selected(pool)
         assert aid in selected
@@ -400,6 +436,7 @@ class TestIdleClockCountsRealActivityOnly:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The mirror case: an agent whose status_changed_at is old (600s) but that
         just completed a real turn 30s ago (last_active_at fresh) is NOT due — real
@@ -410,6 +447,7 @@ class TestIdleClockCountsRealActivityOnly:
             last_active_s_ago=30,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         assert aid not in _selected(pool)
 
@@ -439,6 +477,7 @@ class TestWakeupStormFlattening:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """With jitter, the unpaused due-time is `threshold + (id mod span)`. An
         agent idle just short of its own jittered due-time is excluded; the same
@@ -450,6 +489,7 @@ class TestWakeupStormFlattening:
             status_changed_s_ago=1,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         offset = aid % int(span)
 
@@ -468,6 +508,7 @@ class TestWakeupStormFlattening:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """jitter_span_s=0 (the default) collapses the offset to 0 — no
         divide-by-zero, identical to the un-jittered predicate."""
@@ -476,6 +517,7 @@ class TestWakeupStormFlattening:
             status_changed_s_ago=350,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         got = dict(_select_idle_agents_needing_heartbeat(pool, 300.0, jitter_span_s=0.0))
         assert aid in got
@@ -487,6 +529,7 @@ class TestWakeupStormFlattening:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """`limit` bounds the batch; ordering is oldest-idle first so the most
         overdue agents drain ahead of fresher ones."""
@@ -495,18 +538,21 @@ class TestWakeupStormFlattening:
             status_changed_s_ago=900,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         a_mid = _make_idle(
             db_conn,
             status_changed_s_ago=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         a_new = _make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
 
         order = [r[0] for r in _select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S)]

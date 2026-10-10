@@ -510,7 +510,7 @@ def test_the_reaper_pass_signals_a_stuck_source_until_it_seals(
     participant = _participant(owner, lease, "reaper-stuck", database_gate=database_gate)
     _expire(db_conn, lease, database_gate=database_gate)
 
-    with pool(max_size=2) as reaper_pool:
+    with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert maintenance.signal_incomplete_event_logs(reaper_pool) == 1
         assert maintenance.signal_incomplete_event_logs(reaper_pool) == 1  # state, not edge
         seal_local_participant(LocalCaptureGate(participant))

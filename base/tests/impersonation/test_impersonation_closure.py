@@ -10,6 +10,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.tests.impersonation._impersonation_helpers import _active, _agent, _request
@@ -24,6 +25,7 @@ def test_closure_restores_six_native_owners(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     from base.agents.impersonation.maintenance import reap_impersonations
     from base.db import pool
@@ -40,7 +42,7 @@ def test_closure_restores_six_native_owners(
             (host, owner.agent_id),
         )
         db_conn.commit()
-        lease = _active(owner, authority=config_authority)
+        lease = _active(owner, authority=config_authority, database_gate=database_gate)
         before = db_conn.execute(
             "SELECT runtime_kind,runtime_protocol_version,lease_expires_at FROM agents_meta "
             "WHERE id=%s",
@@ -64,7 +66,7 @@ def test_closure_restores_six_native_owners(
                 (lease["id"],),
             )
             db_conn.commit()
-            with pool(max_size=2) as reaper_pool:
+            with pool(max_size=2, gate=database_gate) as reaper_pool:
                 assert reap_impersonations(reaper_pool, database, event_bus) == 1
                 assert reap_impersonations(reaper_pool, database, event_bus) == 0
         assert db_conn.execute(
@@ -86,13 +88,17 @@ def test_closure_restores_six_native_owners(
 
 @pytest.mark.parametrize("guard", ["consistent", "unowned", "terminated", "machine", "requested"])
 def test_closure_preserves_guarded_rows(
-    db_conn: psycopg.Connection, guard: str, *, config_authority: ConfigAuthority
+    db_conn: psycopg.Connection,
+    guard: str,
+    *,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
     lease = (
-        _request(owner, authority=config_authority)
+        _request(owner, authority=config_authority, database_gate=database_gate)
         if guard == "requested"
-        else _active(owner, authority=config_authority)
+        else _active(owner, authority=config_authority, database_gate=database_gate)
     )
     foreign = (uuid4(), uuid4())
     if guard != "consistent":
@@ -149,9 +155,10 @@ def test_closure_restore_rolls_back_with_lease(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority)
+    lease = _request(owner, authority=config_authority, database_gate=database_gate)
     leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     if lease_status == "active":
         leases.activate(database, event_bus, lease["id"], owner)

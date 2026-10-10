@@ -11,6 +11,7 @@ from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -53,7 +54,9 @@ def make_fake_ops_pool() -> AsyncMock:
     return pool
 
 
-def placeholder_runtime(ops_pool: Any = None) -> Runtime[AvaContext]:
+def placeholder_runtime(
+    ops_pool: Any = None, *, database_gate: ProcessDbGate
+) -> Runtime[AvaContext]:
     """A Runtime whose context holds a mock `ops_pool` / `llm` / `event_publisher` and the
     live-default agent slices."""
     ctx = AvaContext(
@@ -63,7 +66,7 @@ def placeholder_runtime(ops_pool: Any = None) -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,

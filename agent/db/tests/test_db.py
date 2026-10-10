@@ -24,6 +24,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent import db as agent_db
 from base.config.service_read import ConfigAuthority
 from base.db import Database, agent_exists, create_agent, list_agents
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
@@ -176,10 +177,13 @@ class TestReconcileClaimedInbounds:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         from agent.db import reconcile_claimed_inbounds
 
-        tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+        tid = spawn_agent(
+            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        )
         # Manually create a 'claimed' row to mirror what the previous
         # process's claim_inbound_batch would have left behind
         with db_conn.cursor() as cur:
@@ -206,10 +210,13 @@ class TestReconcileClaimedInbounds:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         from agent.db import reconcile_claimed_inbounds
 
-        tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+        tid = spawn_agent(
+            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
@@ -236,12 +243,15 @@ class TestReconcileClaimedInbounds:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Two claimed rows; one in committed_set, one not — first → done,
         second → pending."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+        tid = spawn_agent(
+            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
@@ -276,11 +286,14 @@ class TestReconcileClaimedInbounds:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Common boot path: no prior process left claimed rows behind."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+        tid = spawn_agent(
+            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        )
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
             aops_pool, tid, committed_inbound_ids={42, 43}, incarnation=None
         )
@@ -293,13 +306,18 @@ class TestReconcileClaimedInbounds:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Claimed row for another agent must not be touched — each process
         only reconciles its own agent_id."""
         from agent.db import reconcile_claimed_inbounds
 
-        mine = spawn_agent(catalog=model_catalog, authority=config_authority)
-        other = spawn_agent(catalog=model_catalog, authority=config_authority)
+        mine = spawn_agent(
+            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        )
+        other = spawn_agent(
+            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
@@ -324,13 +342,16 @@ class TestReconcileClaimedInbounds:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """A claimed row older than the stale threshold is dead-lettered
         (done), not reset to pending — a resurrect of a long-terminated agent
         must not re-deliver ancient mail as fresh messages (Task #654)."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+        tid = spawn_agent(
+            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages "
@@ -357,12 +378,15 @@ class TestReconcileClaimedInbounds:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Young claims keep the crash-recovery contract: a message lost in
         transit (crash mid-handling) is re-delivered on the next boot."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+        tid = spawn_agent(
+            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages "
@@ -389,12 +413,15 @@ class TestReconcileClaimedInbounds:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Committed set wins regardless of age; among the uncommitted, only
         stale rows dead-letter — young ones still reset to pending."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+        tid = spawn_agent(
+            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages "
@@ -444,13 +471,16 @@ class TestReconcileClaimedInbounds:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Rows claimed before the claimed_at column existed (2026-08-02)
         carry NULL claimed_at; created_at is their only age evidence and is
         stale by now — dead-letter them instead of re-delivering."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+        tid = spawn_agent(
+            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages "

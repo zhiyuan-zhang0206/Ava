@@ -58,7 +58,9 @@ async def test_host_persists_provider_failure_before_releasing_turn(
         from base.config import settings
         from services.agent_runner.agent_host.host import AgentHost
 
-        agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+        agent_id = spawn_agent(
+            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        )
         row = db_conn.execute("SELECT machine FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
         assert row is not None
         incarnation = await admit_hosted_runtime(

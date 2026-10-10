@@ -208,7 +208,7 @@ def test_cancel_interrupts_a_running_exec_and_the_agent_stays_usable(
 
     # This stack disables HTTP auth; drive the canonical native admission owner
     # as a trusted test producer. HTTP credential admission has gateway tests.
-    with pool(max_size=2) as command_pool:
+    with pool(max_size=2, gate=database_gate) as command_pool:
         target = observe_native_work(command_pool, agent)
         assert target is not None
         accepted = accept_native_cancel(command_pool, str(uuid4()), agent, target)

@@ -24,6 +24,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.cluster import snapshots
 from gateway.cluster.snapshots import Snapshot
@@ -401,7 +402,7 @@ def test_put_non_dict_half_422() -> None:
 
 
 def test_inventory_uses_each_request_apps_database_and_pool(
-    database: Database, monkeypatch: pytest.MonkeyPatch
+    database: Database, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """Two serving apps route SQL and RPC through their own attached resources."""
     _seed_machine(REMOTE)
@@ -430,7 +431,7 @@ def test_inventory_uses_each_request_apps_database_and_pool(
         ).model_dump()
 
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatch)
-    other_database = Database.from_settings()
+    other_database = Database.from_settings(gate=database_gate)
     with database.pool(max_size=2) as first_pool, other_database.pool(max_size=2) as second_pool:
         for db, pool in [(database, first_pool), (other_database, second_pool)]:
             pool_requests = pool.get_stats().get("requests_num", 0)

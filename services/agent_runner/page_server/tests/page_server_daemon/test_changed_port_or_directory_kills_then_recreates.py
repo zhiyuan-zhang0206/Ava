@@ -17,6 +17,7 @@ from psycopg_pool import ConnectionPool
 import services.agent_runner.page_server.daemon as psd
 import services.agent_runner.page_server.degradation as page_degradation
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.page_server.tests.test_page_server_daemon import (
     _HOST,
@@ -44,8 +45,11 @@ def test_changed_port_or_directory_kills_then_recreates_the_page_session(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     old_dir = tmp_path / "old"
     old_dir.mkdir()
     new_dir = tmp_path / "new"
@@ -78,8 +82,11 @@ def test_daemon_restart_adopts_a_healthy_live_page_session(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     page_session = f"ava-agent-{agent_id}-shell-5-page-adopted"
     backend.sessions.add(page_session)
     _insert_page_row(
@@ -111,8 +118,11 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     key = (agent_id, "kept")
     page_session = f"ava-agent-{agent_id}-shell-6-page-kept"
     backend.sessions.add(page_session)
@@ -151,8 +161,11 @@ def test_failed_session_creation_uses_spawn_backoff(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_page_row(db_conn, agent_id, "backoff", 12012, tmp_path)
     backend.new_result = False
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
@@ -174,8 +187,11 @@ def test_missing_serve_dir_uses_the_existing_degradation_ladder(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     missing = tmp_path / "gone"
     _insert_page_row(db_conn, agent_id, "missing", 12013, missing)
     degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}

@@ -9,7 +9,13 @@ from unittest.mock import AsyncMock, MagicMock
 import psycopg
 import pytest
 from langchain_core.exceptions import ModelAPIError
-from langchain_core.messages import AIMessageChunk, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    AnyMessage,
+    HumanMessage,
+    SystemMessage,
+)
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import llm_node
@@ -17,8 +23,10 @@ from agent.graph.llm_errors import FatalProviderError, LlmLedger
 from agent.graph.tests.test_llm_helpers import _CONFIG as _LLM_CONFIG
 from agent.graph.tests.test_llm_helpers import _make_runtime as _llm_make_runtime
 from agent.hooks.compact import (
+    _EMERGENCY_COMPACT_MARKER,
     COMPACT_MAX_ATTEMPTS,
     CompactionFailedError,
+    compose_summary_message,
     emergency_compact_summary,
 )
 from base.agents.context import AvaContext
@@ -30,6 +38,10 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.turn_identity import HostedTurnResources
+from services.agent_runner.agent_host.tests.circuit_breaker.provider_failures import (
+    LONG_SUMMARY,
+    FakeProviderStatusError,
+)
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.test_circuit_breaker import (
     _ancestor_halt_notes,
@@ -147,7 +159,10 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
     the nearest live ancestor, and the frontend gets a blocked Error — while
     ONE rejection alone changes none of it."""
     ancestor_id, child_id = _spawn_child_under_idling_ancestor(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     publisher = _RecordingPublisher()
 
@@ -194,7 +209,12 @@ async def test_transient_rejection_does_not_count_or_trip(
 ) -> None:
     """Only the PERMANENT class counts: a configured-fatal/transient rejection
     aborts the turn but never arms the recovery breaker."""
-    child_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    child_id = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     exc = FatalProviderError(
         "rate limited", error_class="transient", provider="deepseek", status=429
     )
@@ -226,7 +246,12 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
     together (agent/graph/llm/node.py)."""
     from agent.graph.llm.node import _persist_last_active
 
-    child_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    child_id = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     db_conn.execute(
         "UPDATE agents_meta SET permanent_reject_streak = 2, "
         "last_permanent_reject_reason = 'billing', last_turn_fatal_at = now() "
@@ -255,3 +280,68 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
         (child_id,),
     ).fetchone()
     assert row == (0, None, None)
+
+
+async def test_emergency_compact_summary_uses_real_summary() -> None:
+    """The compaction call succeeds → its summary is used (the no-LLM fallback
+    only fires when the request cannot go out)."""
+    msgs: list[AnyMessage] = [SystemMessage(content="<sys>"), HumanMessage(content="hi")]
+    llm = MagicMock()
+    llm.bind_tools.return_value.ainvoke = AsyncMock(return_value=AIMessage(content=LONG_SUMMARY))
+    summary = await emergency_compact_summary(
+        msgs,
+        llm,
+        AgentSlices.resolve(default_reader=configured_policy().default_reader),
+        catalog=build_model_catalog(),
+    )
+    assert summary == LONG_SUMMARY
+
+
+async def test_emergency_compact_summary_falls_back_on_permanent_rejection() -> None:
+    """Every compaction attempt is permanently rejected → the marker fallback
+    is returned instead of raising — the wipe still happens, the agent is
+    rescued without any model call."""
+    msgs: list[AnyMessage] = [SystemMessage(content="<sys>"), HumanMessage(content="hi")]
+    llm = MagicMock()
+    llm.bind_tools.return_value.ainvoke = AsyncMock(
+        side_effect=FakeProviderStatusError(
+            400,
+            {"error": {"type": "invalid_request_error", "message": "maximum context length"}},
+        )
+    )
+
+    summary = await emergency_compact_summary(
+        msgs,
+        llm,
+        AgentSlices.resolve(default_reader=configured_policy().default_reader),
+        catalog=build_model_catalog(),
+    )
+    assert _EMERGENCY_COMPACT_MARKER in summary
+    assert llm.bind_tools.return_value.ainvoke.await_count == 1, (
+        "a permanent rejection must not be retried — the request cannot succeed"
+    )
+
+
+async def test_emergency_compact_summary_preserves_last_prior_summary() -> None:
+    """The fallback embeds the last preserved compaction summary, so the
+    model-less wipe keeps as much memory as possible."""
+    prior = "## Requests\nremember the prior compact. " * 40
+    msgs: list[AnyMessage] = [
+        SystemMessage(content="<sys>"),
+        HumanMessage(
+            content=compose_summary_message(prior),
+            additional_kwargs={"ava_msg_type": "compact_summary"},
+        ),
+        HumanMessage(content="work since the last compact"),
+    ]
+    llm = MagicMock()
+    llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=FakeProviderStatusError(400))
+
+    summary = await emergency_compact_summary(
+        msgs,
+        llm,
+        AgentSlices.resolve(default_reader=configured_policy().default_reader),
+        catalog=build_model_catalog(),
+    )
+    assert prior in summary
+    assert _EMERGENCY_COMPACT_MARKER in summary

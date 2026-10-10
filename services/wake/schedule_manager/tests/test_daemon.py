@@ -16,14 +16,15 @@ import base.db
 import gateway.app
 from base.daemon.loop_health import LivenessGroup
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
 from base.native_process.loaded_commit import LoadedCommit
 from services.wake.schedule_manager import daemon
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool]:
-    p = base.db.pool(max_size=2)
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+    p = base.db.pool(max_size=2, gate=database_gate)
     try:
         yield p
     finally:

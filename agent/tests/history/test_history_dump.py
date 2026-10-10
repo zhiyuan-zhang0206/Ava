@@ -496,7 +496,9 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     no note, no AIMessage — nothing that could sit between a tool_use and its
     tool_result on the wire."""
     _patch_dump_enabled(monkeypatch, tmp_path)
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "agent-written summary", "compact_summary")
     state = AgentState(
         messages=[
@@ -541,7 +543,9 @@ async def test_claim_compact_summary_no_note_when_disabled(
 ):
     """Config off → claim-path compact tail is exactly today's (summary only)."""
     _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "agent-written summary", "compact_summary")
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="old")],

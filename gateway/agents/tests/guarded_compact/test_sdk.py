@@ -16,6 +16,7 @@ from ava.gateway_client import transport
 from base.agents import GatewayUnavailable
 from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import make_host
@@ -28,6 +29,7 @@ async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
     monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     agent = agent_row(db_conn)
@@ -42,7 +44,13 @@ async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
     db_conn.commit()
     ordinary: list[object] = []
     host, _saver, _config = await make_host(
-        aops_pool, agent, 100, ordinary, monkeypatch, catalog=model_catalog
+        aops_pool,
+        agent,
+        100,
+        ordinary,
+        monkeypatch,
+        catalog=model_catalog,
+        database_gate=database_gate,
     )
     await host.run_turn(agent)
     assert len(ordinary) == 1

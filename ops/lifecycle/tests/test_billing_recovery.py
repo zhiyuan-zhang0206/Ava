@@ -39,10 +39,10 @@ from ops.rpc_schemas import BillingBalanceReport
 
 
 @pytest.fixture()
-def pool() -> Iterator[ConnectionPool]:
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
     import base.db
 
-    p = base.db.pool(max_size=4)
+    p = base.db.pool(max_size=4, gate=database_gate)
     yield p
     p.close()
 

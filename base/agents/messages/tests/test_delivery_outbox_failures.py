@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NoReturn
 
 import psycopg
 import pytest
@@ -13,6 +14,7 @@ from psycopg_pool import ConnectionPool, PoolClosed
 from base.agents.messages import delivery_outbox as outbox
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent
+from base.db.code_version_gate import ProcessDbGate
 
 from .test_delivery_outbox_sender import authority as authority
 
@@ -40,10 +42,10 @@ def journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 
 @pytest.fixture()
-def pool() -> Iterator[ConnectionPool]:
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
     from base import db
 
-    p = db.pool(max_size=2)
+    p = db.pool(max_size=2, gate=database_gate)
     yield p
     p.close()
 
@@ -147,10 +149,10 @@ def test_unknown_database_failure_preserves_journal(
     assert path is not None
     before = path.read_bytes()
 
-    def broken_delivery(*_args: object, authority: ConfigAuthority) -> int:
+    def fail_connect(*, timeout: float | None = None) -> NoReturn:
         raise error
 
-    monkeypatch.setattr(outbox, "_deliver", broken_delivery)
+    monkeypatch.setattr(pool, "connection", fail_connect)
     with pytest.raises(type(error)) as raised:
         outbox.flush(pool, publish_wake, authority=authority, now=_NOW + timedelta(seconds=43201))
     assert raised.value is error

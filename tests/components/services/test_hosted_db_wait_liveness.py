@@ -174,7 +174,10 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
     database_gate: ProcessDbGate,
 ) -> None:
     incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
 
@@ -257,9 +260,14 @@ async def test_gateway_exemption_requires_current_db_identity_and_finite_fresh_p
     proof_kind: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
     db_conn.execute(
@@ -312,9 +320,14 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
     clock = TurnProgress()
@@ -355,9 +368,14 @@ async def test_success_handoff_clears_on_actual_node_progress(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
     clock = TurnProgress()

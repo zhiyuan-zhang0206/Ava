@@ -12,6 +12,7 @@ import json
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import NoReturn
 from unittest.mock import Mock
 
 import psycopg
@@ -22,16 +23,17 @@ from base.agents.messages import delivery_outbox as outbox
 from base.agents.messages.chat_delivery import insert_chat_inbound_once
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent
+from base.db.code_version_gate import ProcessDbGate
 
 from .test_delivery_outbox_sender import _NOW, _patch_limits, _record
 from .test_delivery_outbox_sender import authority as authority
 
 
 @pytest.fixture()
-def pool() -> Iterator[ConnectionPool]:
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
     from base import db
 
-    p = db.pool(max_size=2)
+    p = db.pool(max_size=2, gate=database_gate)
     yield p
     p.close()
 
@@ -223,18 +225,11 @@ def test_flush_failed_attempt_backs_off(
     assert path is not None
     attempts: list[datetime] = []
 
-    def _boom(
-        _pool: object,
-        _wake: object,
-        entry: outbox.OutboxEntry,
-        _timeout: float,
-        *,
-        authority: ConfigAuthority,
-    ) -> int:
+    def fail_connect(*, timeout: float | None = None) -> NoReturn:
         attempts.append(_NOW)
         raise psycopg.OperationalError("data plane down")
 
-    monkeypatch.setattr(outbox, "_deliver", _boom)
+    monkeypatch.setattr(pool, "connection", fail_connect)
     first = outbox.flush(pool, publish_wake, authority=authority, now=_NOW + timedelta(seconds=31))
     assert first.deferred == 1 and len(attempts) == 1
     entry = outbox._read(path)
@@ -269,17 +264,10 @@ def test_flush_abandons_at_budget_after_the_failed_attempt(
     path = _record(authority, agent_id=agent_id, now=_NOW)
     assert path is not None
 
-    def _boom(
-        _pool: object,
-        _wake: object,
-        entry: outbox.OutboxEntry,
-        _timeout: float,
-        *,
-        authority: ConfigAuthority,
-    ) -> int:
+    def fail_connect(*, timeout: float | None = None) -> NoReturn:
         raise psycopg.OperationalError("data plane down")
 
-    monkeypatch.setattr(outbox, "_deliver", _boom)
+    monkeypatch.setattr(pool, "connection", fail_connect)
     report = outbox.flush(
         pool, publish_wake, authority=authority, now=_NOW + timedelta(seconds=43201)
     )
@@ -331,17 +319,10 @@ def test_flush_past_budget_not_due_defers_until_the_attempt(
     assert path is not None
     _patch_limits(monkeypatch, budget_seconds=100.0)
 
-    def _boom(
-        _pool: object,
-        _wake: object,
-        entry: outbox.OutboxEntry,
-        _timeout: float,
-        *,
-        authority: ConfigAuthority,
-    ) -> int:
+    def fail_connect(*, timeout: float | None = None) -> NoReturn:
         raise psycopg.OperationalError("data plane down")
 
-    monkeypatch.setattr(outbox, "_deliver", _boom)
+    monkeypatch.setattr(pool, "connection", fail_connect)
     # Attempt 1 at +31 (next due +91), attempt 2 at +95 (next due +395).
     assert (
         outbox.flush(

@@ -36,11 +36,11 @@ async def _reap(pool: ConnectionPool, *, database_gate: ProcessDbGate) -> list[t
 
 
 @pytest.fixture()
-def reaper_pool() -> Iterator[ConnectionPool]:
+def reaper_pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
     """The reaper's own small pool (the functions take a ConnectionPool)."""
     import base.db
 
-    pool = base.db.pool(max_size=2)
+    pool = base.db.pool(max_size=2, gate=database_gate)
     yield pool
     pool.close()
 

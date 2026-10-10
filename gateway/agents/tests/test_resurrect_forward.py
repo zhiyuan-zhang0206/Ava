@@ -231,7 +231,11 @@ async def test_lifecycle_forward_deadline_becomes_a_clear_gateway_error(
 
 
 def test_resurrect_routes_through_each_request_apps_resources(
-    database: Database, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    database: Database,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Home lookup and RPC use the serving app even beside an assembled app."""
     from fastapi import FastAPI
@@ -256,7 +260,7 @@ def test_resurrect_routes_through_each_request_apps_resources(
         return {"status": "spawned"}
 
     monkeypatch.setattr(forward_module, "enqueue_lifecycle", enqueue)
-    other_database = Database.from_settings()
+    other_database = Database.from_settings(gate=database_gate)
     with database.pool(max_size=2) as first_pool, other_database.pool(max_size=2) as second_pool:
         for db, pool in [(database, first_pool), (other_database, second_pool)]:
             serving_app = FastAPI()

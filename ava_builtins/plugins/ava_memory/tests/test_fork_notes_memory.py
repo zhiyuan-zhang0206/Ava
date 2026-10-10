@@ -86,7 +86,9 @@ async def test_fork_end_to_end_single_copy_each_note(
     cluster index; after the claim exactly one of each of the first three
     remains (the grafted, new-agent copies), and the cluster index survives
     exactly once — no second copy grafted."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
 
     def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:
@@ -109,7 +111,10 @@ async def test_fork_end_to_end_single_copy_each_note(
         process_clients(database=lambda: Database.from_settings(gate=database_gate))
     ) as clients:
         runtime = _make_runtime(
-            ops_pool=aops_pool, extensions=_registry(memory_plugin), agent_id=tid
+            ops_pool=aops_pool,
+            extensions=_registry(memory_plugin),
+            agent_id=tid,
+            database_gate=database_gate,
         )
         cmd = await claim_node(
             AgentState(messages=list(inherited)),
@@ -166,7 +171,9 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
     content, same order — so the provider's prefix cache stays valid. The
     source-identity notes drop, and the conversation tail follows the grafted
     sequence."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
     inherited: list[AnyMessage] = [
         SystemMessage(content="sys"),
@@ -180,7 +187,10 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
         process_clients(database=lambda: Database.from_settings(gate=database_gate))
     ) as clients:
         runtime = _make_runtime(
-            ops_pool=aops_pool, extensions=_registry(memory_plugin), agent_id=tid
+            ops_pool=aops_pool,
+            extensions=_registry(memory_plugin),
+            agent_id=tid,
+            database_gate=database_gate,
         )
         cmd = await claim_node(
             AgentState(messages=list(inherited)),

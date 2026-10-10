@@ -20,6 +20,7 @@ import ava
 from ava.sdk_surface.install import Installation
 from base.config import set_field, settings
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.model_catalog import AddModels
 from tests.fixtures.pin_agent import pin_agent
@@ -85,11 +86,16 @@ class TestTerminate:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """terminate self-inserts a kind='terminate' source='self' into its own agent.
         source='self' lets the claim dispatch produce the "by yourself" marker (distinguishing from external
         user / agent:N triggered "by {source}", precisely expressing "suicide" semantics)."""
-        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))  # self identity
+        pin_agent(
+            spawn_agent(
+                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            )
+        )  # self identity
         with pytest.raises(ava.self.AgentTermination):
             ava.self.terminate()
         assert _inbound_rows(db_conn, ava.self.AGENT_ID) == [("", "terminate", "self")]
@@ -104,11 +110,16 @@ class TestRestart:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         model_installation: Installation,
+        database_gate: ProcessDbGate,
     ) -> None:
         """restart self-inserts a kind='restart' source='self' into its own agent.
         The restarter daemon will handle the respawn (this test only verifies the SDK-side write is correct)."""
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))  # self identity
+        pin_agent(
+            spawn_agent(
+                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            )
+        )  # self identity
         with pytest.raises(ava.self.AgentRestart):
             ava.self.restart()
         assert _inbound_rows(db_conn, ava.self.AGENT_ID) == [("", "restart", "self")]
@@ -121,6 +132,7 @@ class TestRestart:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         model_installation: Installation,
+        database_gate: ProcessDbGate,
     ) -> None:
         """`ava.self.restart(config_overlay={...})` (PR-E) — payload JSONB holds config_overlay.
 
@@ -128,7 +140,11 @@ class TestRestart:
         into inbound_messages.payload.
         """
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            )
+        )
         with pytest.raises(ava.self.AgentRestart):
             ava.self.restart(config_overlay={"auto_compact_fraction": 0.7})
         with db_conn.cursor() as cur:
@@ -152,6 +168,7 @@ class TestRestart:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         model_installation: Installation,
+        database_gate: ProcessDbGate,
     ) -> None:
         """restart(config_overlay=) merges into agents_meta.config_overlay rather than
         replacing it: pre-existing keys survive, new keys are added.
@@ -161,7 +178,11 @@ class TestRestart:
         right diff text.
         """
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            )
+        )
         # Pre-seed an existing overlay key directly in the column.
         with db_conn.cursor() as cur:
             cur.execute(
@@ -202,10 +223,15 @@ class TestRestart:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         model_installation: Installation,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Non-per_agent field → InvalidConfigOverlay; does **not** deliver inbound, process does not exit."""
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            )
+        )
         with pytest.raises(ava.self.InvalidConfigOverlay, match=r"typo|per_agent"):  # type: ignore[attr-defined]
             ava.self.restart(config_overlay={"definitely_not_a_field": 1})
         # No inbound delivered (process will not exit)
@@ -226,10 +252,15 @@ class TestRestart:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         model_installation: Installation,
+        database_gate: ProcessDbGate,
     ) -> None:
         """A model typo is rejected before either persistent restart side effect."""
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            )
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT config_overlay FROM agents_meta WHERE id = %s",
@@ -267,6 +298,7 @@ class TestRestart:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         model_installation: Installation,
+        database_gate: ProcessDbGate,
     ) -> None:
         """A registered-but-withdrawn model passes the membership check but is
         settled to its registered fallback before persistence (task #4306): the
@@ -286,7 +318,11 @@ class TestRestart:
         )
         model_installation = replace(model_installation, catalog=model_catalog)
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            )
+        )
         with pytest.raises(ava.self.AgentRestart):
             ava.self.restart(config_overlay={"llm_model": model})
         with db_conn.cursor() as cur:
@@ -331,10 +367,15 @@ class TestPauseHeartbeat:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """pause_heartbeat updates the window, records the pause trail, and
         emits the heartbeat_paused event used by the inspector's Last Pause."""
-        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))  # self identity
+        pin_agent(
+            spawn_agent(
+                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            )
+        )  # self identity
         ava.self.pause_heartbeat(1800)
         from base import telemetry
 
@@ -391,9 +432,14 @@ class TestPauseHeartbeat:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Invalid duration must not write or emit a heartbeat pause event."""
-        pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            )
+        )
         from base import telemetry
 
         def _unexpected_emit(_category: str, event_name: str, **_kwargs: object) -> None:
@@ -422,12 +468,17 @@ class TestPauseHeartbeat:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The configured cluster limit accepts its inclusive upper boundary."""
         original_limit = settings.agent.heartbeat_pause_max_seconds
         set_field("heartbeat_pause_max_seconds", 3600.0)
         try:
-            pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
+            pin_agent(
+                spawn_agent(
+                    catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                )
+            )
             ava.self.pause_heartbeat(3600)
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -444,13 +495,21 @@ class TestPauseHeartbeat:
             set_field("heartbeat_pause_max_seconds", original_limit)
 
     def test_pause_heartbeat_per_agent_override_wins(
-        self, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+        self,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The effective per-agent overlay limit is read when the SDK is called."""
         original_limit = settings.agent.heartbeat_pause_max_seconds
         set_field("heartbeat_pause_max_seconds", 172800.0)
         try:
-            pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))
+            pin_agent(
+                spawn_agent(
+                    catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                )
+            )
             ava.self.pause_heartbeat(172800)
         finally:
             set_field("heartbeat_pause_max_seconds", original_limit)

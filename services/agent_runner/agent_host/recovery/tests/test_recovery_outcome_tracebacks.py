@@ -89,7 +89,12 @@ async def test_streak_write_failure_keeps_its_traceback(
 
     await _reject(
         aops_pool,
-        spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority),
+        spawn_agent(
+            spawner="user",
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+        ),
         database_gate=database_gate,
     )
 
@@ -124,7 +129,12 @@ async def test_halt_suppression_failure_keeps_its_traceback(
 
     await _reject(
         aops_pool,
-        spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority),
+        spawn_agent(
+            spawner="user",
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+        ),
         database_gate=database_gate,
     )
 
@@ -159,7 +169,12 @@ async def test_ancestor_report_failure_keeps_its_traceback(
 
     await _reject(
         aops_pool,
-        spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority),
+        spawn_agent(
+            spawner="user",
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+        ),
         database_gate=database_gate,
     )
 

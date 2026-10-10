@@ -13,6 +13,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.claim.test_inbound_ownership import _insert, agent_row
 from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
@@ -34,6 +35,8 @@ async def test_real_host_http_once_summary_cold_ack_and_next_chat(
     interval: int,
     fault: str,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     agent = agent_row(db_conn)
@@ -63,7 +66,13 @@ async def test_real_host_http_once_summary_cold_ack_and_next_chat(
     ordinary: list[object] = []
 
     host, saver, config = await make_host(
-        aops_pool, agent, interval, ordinary, monkeypatch, catalog=model_catalog
+        aops_pool,
+        agent,
+        interval,
+        ordinary,
+        monkeypatch,
+        catalog=model_catalog,
+        database_gate=database_gate,
     )
     await host.run_turn(agent)
     assert len(ordinary) == 1

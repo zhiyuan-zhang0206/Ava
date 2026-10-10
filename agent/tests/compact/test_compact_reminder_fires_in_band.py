@@ -233,7 +233,9 @@ async def test_compact_summary_preserves_agent_continuity(
     the agent continues its conversation rather than being terminated. The goto
     itself is the init_context detour that rebuilds the standing head; where the
     batch was actually headed rides in `context_reset.resume`."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_compact_summary(db_conn, tid, "summary after compact")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
@@ -264,7 +266,9 @@ async def test_compact_summary_replaces_whole_history_no_tail(
     """compact_summary → the whole history is cleared and the parked tail is the
     summary alone; not a single original message survives (the summary is the
     complete memory, no raw tail)."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     sys_msg = SystemMessage(content="<test sys prompt>")
     initial_msgs: list[AnyMessage] = [
         sys_msg,
@@ -294,7 +298,9 @@ async def test_compact_summary_emits_compact_done(
     """When claim processes compact_summary (agent-written summary), emit CompactDone
     at the same place where history is replaced — so UI refreshes, aligning with auto path (agent/hooks/compact.py).
     User-triggered compact_request goes through the same compact_payload block, emit is path-agnostic."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_compact_summary(db_conn, tid, "summary after compact")
     state = AgentState(
         messages=[
@@ -352,7 +358,9 @@ async def test_consecutive_compacts_both_processed(
 ):
     """Two consecutive compact_summary → first replaces with [sys, summary1]; second on that
     state replaces again with [sys, summary2]."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     sys_msg = SystemMessage(content="<test sys prompt>")
 
     # ---- first compact ----
@@ -394,7 +402,9 @@ async def test_compact_with_empty_state_injects_system_message_and_summary(
     to clear. Claim used to lay down a cold-start head here and then pop it back
     off — the head is `init_context`'s now, so there is nothing to undo and the
     two cases stopped differing."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_compact_summary(db_conn, tid, "compact before any chat")
 
     state = AgentState()  # empty messages
@@ -418,7 +428,9 @@ async def test_compact_with_super_long_summary_in_claim(
 ):
     """claim_node processes compact_summary with super-long summary (50K chars) —
     no truncation, no error thrown."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     long_summary = "LONG_" * 10_000  # 50K chars
 
     sys_msg = SystemMessage(content="<test sys prompt>")

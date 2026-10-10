@@ -11,6 +11,7 @@ from psycopg_pool import ConnectionPool
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db import pool as db_pool
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.rpc_schemas import OpStatus
@@ -18,8 +19,8 @@ from services.agent_runner.agent_ops import daemon
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool]:
-    resource = db_pool(max_size=2)
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+    resource = db_pool(max_size=2, gate=database_gate)
     try:
         yield resource
     finally:

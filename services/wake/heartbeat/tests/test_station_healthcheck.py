@@ -36,10 +36,10 @@ def _log_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clean_state() -> None:
+def _clean_state(*, database_gate: ProcessDbGate) -> None:
     """Reset the in-process probe state between tests (the module dict is
     process-global, same as the watchdog would hold it)."""
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with base.db.connect(gate=database_gate) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM machine_units WHERE machine_name LIKE 'station-test%'")
         conn.commit()
 
@@ -52,8 +52,10 @@ def _no_remote_observatory(monkeypatch: pytest.MonkeyPatch) -> None:
     publish_telemetry_token(ava_home(), "cluster-token")
 
 
-def _insert_station_unit(name: str = "station-test-a", url: str = "http://10.0.0.9:4318") -> None:
-    with base.db.connect() as conn, conn.cursor() as cur:
+def _insert_station_unit(
+    name: str = "station-test-a", url: str = "http://10.0.0.9:4318", *, database_gate: ProcessDbGate
+) -> None:
+    with base.db.connect(gate=database_gate) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_units "
             "(machine_name, home, serve_gateway, serve_agent_runner, "
@@ -82,13 +84,13 @@ def test_main_is_noop_without_remote_observatory(monkeypatch: pytest.MonkeyPatch
 
 
 def test_resolve_target_uses_advertised_machine_units_url(
-    monkeypatch: pytest.MonkeyPatch, database: Database
+    monkeypatch: pytest.MonkeyPatch, database: Database, *, database_gate: ProcessDbGate
 ) -> None:
     """The probe target is the station's ADVERTISED machine_units url — the
     reachability contract — not the configured base."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
     monkeypatch.setattr(settings.observability, "telemetry_otlp_port", 4319)
-    _insert_station_unit()
+    _insert_station_unit(database_gate=database_gate)
     target = hc.resolve_target(database=lambda: database)
     assert target is not None
     assert target.url == "http://10.0.0.9:4318"
@@ -110,16 +112,15 @@ def test_resolve_target_falls_back_to_configured_base_without_registration(
 
 
 def test_resolve_target_skips_hybrid_gateway_station_units(
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
+    monkeypatch: pytest.MonkeyPatch, database: Database, *, database_gate: ProcessDbGate
 ) -> None:
     """A hybrid gateway+station unit advertises its GATEWAY url (unit_dial_url
     lets the gateway capability win), not the OTLP ingress — probing it would
     hit the gateway API and alert forever (QA #1156 NIT-2). Only units whose
     capability set identifies an ingress advertisement qualify."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.46")
-    _insert_station_unit(url="http://10.0.0.46:4318")
-    with base.db.connect() as conn, conn.cursor() as cur:
+    _insert_station_unit(url="http://10.0.0.46:4318", database_gate=database_gate)
+    with base.db.connect(gate=database_gate) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machine_units SET serve_gateway = true WHERE machine_name = 'station-test-a'"
         )
@@ -198,12 +199,12 @@ def test_station_answers_without_a_published_token_warns_and_fails_open(
 
 
 def test_main_probes_advertised_station_and_does_not_raise(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """End-to-end: with a registered station, main() runs clean on a healthy
     probe and fails open on a failing one."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
-    _insert_station_unit()
+    _insert_station_unit(database_gate=database_gate)
     answers = [True, False]
 
     def probe(_url: str) -> bool:

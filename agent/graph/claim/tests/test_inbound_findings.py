@@ -104,7 +104,9 @@ async def test_flagged_chat_note_rides_right_behind_its_message(
 ) -> None:
     """The note names where the flagged inbound came from and what matched, and
     carries no message body; nothing is left in process state."""
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     insert_inbound_message(
         db_conn, agent_id, _HOSTILE_USER, source="user", bus=event_bus, database=database
     )
@@ -129,7 +131,9 @@ async def test_flagged_system_note_inbound_note_rides_behind_it(
     database_gate: ProcessDbGate,
 ) -> None:
     """A peer-authored system-note inbound (a task note) is scanned like chat."""
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     insert_inbound_message(
         db_conn,
         agent_id,
@@ -160,7 +164,9 @@ async def test_each_flagged_message_in_a_batch_gets_its_own_note(
 ) -> None:
     """One batch of three chats: a note behind each flagged message, none behind
     the clean one, in batch order."""
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     insert_inbound_message(
         db_conn, agent_id, _HOSTILE_USER, source="user", bus=event_bus, database=database
     )
@@ -199,7 +205,9 @@ async def test_unflagged_inbound_gets_no_note(
     database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(settings.agent, "security_scan_enabled", scan_enabled)
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     insert_inbound_message(db_conn, agent_id, text, source="user", bus=event_bus, database=database)
 
     delta = _delta(await _claim(aops_pool, agent_id, database_gate=database_gate))
@@ -221,7 +229,9 @@ async def test_compact_batch_defers_the_flagged_chat_together_with_its_note(
     """A chat sharing a batch with a compaction is deferred and re-delivered in
     the fresh context: its note goes with it, and is raised once when the chat is
     claimed and scanned again."""
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     insert_inbound_message(
         db_conn, agent_id, _HOSTILE_USER, source="user", bus=event_bus, database=database
     )

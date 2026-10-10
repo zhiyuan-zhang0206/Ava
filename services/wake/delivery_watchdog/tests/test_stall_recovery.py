@@ -51,7 +51,12 @@ def _crash_marked_agent_with_stalled_chats(
     returns the agent id and its OLDEST stalled inbound id."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     db.execute(
         "UPDATE agents_meta SET status = 'idling', last_turn_fatal_at = now() WHERE id = %s",
         (aid,),

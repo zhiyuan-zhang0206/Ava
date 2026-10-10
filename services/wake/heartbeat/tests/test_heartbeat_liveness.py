@@ -75,11 +75,17 @@ def _make_agent(
     claimed: bool = True,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> int:
     """Spawn an agent on `machine`. `lease_s_ahead` sets lease_expires_at
     relative to now() (None = NULL, negative = expired). `claimed=False`
     models a freshly created idling row whose ownership columns are all NULL."""
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = %s, machine = %s, "
@@ -156,9 +162,15 @@ class TestLivenessPass:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         register_machine(db_conn)
-        aid = _make_agent(db_conn, model_catalog=model_catalog, config_authority=config_authority)
+        aid = _make_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+        )
         _merge_liveness(pool)
         assert _state(db_conn, aid) == ("unknown", None)
 
@@ -170,9 +182,15 @@ class TestLivenessPass:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         register_machine(db_conn)
-        aid = _make_agent(db_conn, model_catalog=model_catalog, config_authority=config_authority)
+        aid = _make_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+        )
         _set_machine_probe(db_conn, MACHINE, online=True, failures=0)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -213,6 +231,7 @@ class TestLivenessPass:
             lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         seen: dict[str, object] = {}
 
@@ -253,6 +272,7 @@ class TestLivenessPass:
             lease_s_ahead=-10,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         import asyncio
 
@@ -285,6 +305,7 @@ class TestLivenessPass:
             lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         import asyncio
 
@@ -306,6 +327,7 @@ class TestLivenessPass:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """A host judged offline (>= 2 consecutive failed probes) takes every
         non-terminated row on it offline, lease notwithstanding."""
@@ -317,6 +339,7 @@ class TestLivenessPass:
             lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         aid2 = _make_agent(
             db_conn,
@@ -324,6 +347,7 @@ class TestLivenessPass:
             lease_s_ahead=None,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         # Probe success would reset the failure count — this test exercises
         # the merge judgement directly on a pre-set probe state.
@@ -339,6 +363,7 @@ class TestLivenessPass:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """One failed probe is a blip: consecutive_failures must reach
         _OFFLINE_AFTER_FAILURES before the machine reads offline."""
@@ -350,6 +375,7 @@ class TestLivenessPass:
             lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         _merge_liveness(pool)
         assert _state(db_conn, aid)[0] == "online"
@@ -372,6 +398,7 @@ class TestLivenessPass:
             lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         import asyncio
 
@@ -447,7 +474,11 @@ class TestLivenessPass:
         """A mounted frontend receives online/offline truth without a poll storm."""
         register_machine(db_conn)
         aid = _make_agent(
-            db_conn, status="idling", model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            status="idling",
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
         )
         announced: list[int] = []
 
@@ -542,6 +573,7 @@ class TestLivenessPass:
             claimed=False,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         import asyncio
 
@@ -574,6 +606,7 @@ class TestLivenessPass:
             lease_s_ahead=None,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -612,6 +645,7 @@ class TestLivenessPass:
             machine="ghost-host",
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         import asyncio
 
@@ -645,6 +679,7 @@ class TestLivenessPass:
             lease_s_ahead=600,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         import asyncio
 
@@ -687,10 +722,16 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A failed check-in stays skipped, then becomes a probe when its window ends."""
     idle_threshold = settings.daemon.heartbeat_idle_threshold_seconds
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'idling', "

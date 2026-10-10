@@ -19,6 +19,7 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.health import Liveness
 from base.db import create_agent, pool
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -156,6 +157,7 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The root builds the slice from settings.lm.labeler_model (its own knob), not
     settings.lm.llm_model (the main reasoning model). Pin the two to different
@@ -190,12 +192,12 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
 
     monkeypatch.setattr(daemon, "generate_label_async", _capture)
 
-    p = pool()
+    p = pool(gate=database_gate)
     try:
         with pytest.raises(asyncio.CancelledError):
             await daemon._dispatch_loop(
                 p,
-                labeler_db(),
+                labeler_db(database_gate=database_gate),
                 event_bus,
                 Liveness(daemon._LIVENESS_TIMEOUT_S),
                 config,
@@ -299,6 +301,7 @@ async def test_dispatch_loop_backs_off_on_llm_failure(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A trusted invocation failure excludes its row until its cooldown expires.
 
@@ -342,12 +345,12 @@ async def test_dispatch_loop_backs_off_on_llm_failure(
         return rows
 
     monkeypatch.setattr(daemon, "_select_unlabeled", select)
-    p = pool()
+    p = pool(gate=database_gate)
     try:
         with pytest.raises(asyncio.CancelledError):
             await daemon._dispatch_loop(
                 p,
-                labeler_db(),
+                labeler_db(database_gate=database_gate),
                 event_bus,
                 Liveness(daemon._LIVENESS_TIMEOUT_S),
                 daemon.labeler_config(),

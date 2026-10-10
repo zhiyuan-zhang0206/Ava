@@ -22,6 +22,7 @@ from base.agents.observation.relay_supervision import RelaySupervision
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
@@ -91,6 +92,7 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Issue #2052: an accepted (not yet active) lease whose accepting
     incarnation died restarts at 'requested' under the successor admission —
@@ -101,7 +103,9 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     from base.cluster.machine import machine_name
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     first = await admit_hosted_runtime(
         aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling", db=database
     )

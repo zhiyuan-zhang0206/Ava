@@ -58,7 +58,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
         )
     db_conn.commit()
 
-    pool = base.db.pool(max_size=2)
+    pool = base.db.pool(max_size=2, gate=database_gate)
     try:
         assert (
             asyncio.run(
@@ -96,7 +96,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
             (datetime(2026, 9, 14, 10, tzinfo=UTC), agent_id),
         )
     db_conn.commit()
-    pool = base.db.pool(max_size=2)
+    pool = base.db.pool(max_size=2, gate=database_gate)
     try:
         assert (
             asyncio.run(
@@ -152,7 +152,7 @@ def test_unknown_digest_failure_propagates_to_service(
         return await real_deliver(pool, db, bus, agent_id, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(completion_digest, "deliver_chat_inbound", fail_one)
-    pool = base.db.pool(max_size=2)
+    pool = base.db.pool(max_size=2, gate=database_gate)
     try:
         with pytest.raises(RuntimeError, match="poison digest"):
             asyncio.run(
@@ -197,7 +197,7 @@ def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbou
     async def fail_publish(*_args: object, **_kwargs: object) -> None:
         raise bug
 
-    with base.db.pool(max_size=2) as pool:
+    with base.db.pool(max_size=2, gate=database_gate) as pool:
         with monkeypatch.context() as patch:
             patch.setattr(lifecycle, "publish_inbound_arrived", fail_publish)
             with pytest.raises(ChatInboundCommittedError) as failed:

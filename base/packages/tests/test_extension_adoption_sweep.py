@@ -21,6 +21,7 @@ from pathlib import Path
 import psycopg
 
 from base import db, paths
+from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import adopt as adopt
 from base.packages.extensions import install_registry
 from base.packages.extensions import registry as reg
@@ -61,13 +62,17 @@ def _install_locally(
 
 
 def test_sweep_uploads_a_pre_registry_install(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The claim: content that only ever existed on one machine becomes cluster
     content, with that machine named as where it came from."""
     with as_machine(tmp_path / "home-a"):
         _install_locally("sweep-demo")
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
         assert result.adopted == ["sweep-demo"]
 
@@ -79,14 +84,18 @@ def test_sweep_uploads_a_pre_registry_install(
 
 
 def test_a_swept_name_crosses_to_a_machine_that_never_had_it(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Adoption is only worth anything if the adopted content then behaves like
     any other cluster row — otherwise the sweep has moved bytes into a table
     nobody reads."""
     with as_machine(tmp_path / "home-a"):
         src = _install_locally("crossing-demo")
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
         original = (src / "SKILL.md").read_text(encoding="utf-8")
 
@@ -101,16 +110,20 @@ def test_a_swept_name_crosses_to_a_machine_that_never_had_it(
 
 
 def test_the_sweep_is_idempotent(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """It runs on every converge, so a second pass has to write nothing — or
     every start re-uploads a blob and `updated_at` stops meaning anything."""
     _ = db_conn
     with as_machine(tmp_path / "home-a"):
         _install_locally("idem-sweep")
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             first = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             second = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
 
     assert first.adopted == ["idem-sweep"]
@@ -119,7 +132,11 @@ def test_the_sweep_is_idempotent(
 
 
 def test_two_machines_with_identical_content_merge_silently(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Same name, same bytes, two routes — that is one extension, not a
     disagreement, and it must not produce a warning an operator has to triage."""
@@ -127,7 +144,7 @@ def test_two_machines_with_identical_content_merge_silently(
     for home in ("home-a", "home-b"):
         with as_machine(tmp_path / home):
             _install_locally("twin-demo", body="Identical on both.")
-            with db.pool() as pool:
+            with db.pool(gate=database_gate) as pool:
                 result = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
 
     assert result.conflicts == []
@@ -135,7 +152,11 @@ def test_two_machines_with_identical_content_merge_silently(
 
 
 def test_a_disagreement_is_refused_with_both_machines_named(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The design's own S2 lock. Two machines, one name, different content:
     neither copy is touched, and the report says who else holds it — because
@@ -143,12 +164,12 @@ def test_a_disagreement_is_refused_with_both_machines_named(
     where the other one is."""
     with as_machine(tmp_path / "home-a"):
         _install_locally("clash-demo", body="A's version.")
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
 
     with as_machine(tmp_path / "home-b"):
         local = _install_locally("clash-demo", body="B's version.")
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
 
         assert result.adopted == []
@@ -165,7 +186,11 @@ def test_a_disagreement_is_refused_with_both_machines_named(
 
 
 def test_converge_managed_packages_are_not_adopted(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Repo- and plugin-origin packages are derived state whose content comes
     from the checkout. Uploading them would put checkout bytes in a blob, and a
@@ -174,7 +199,7 @@ def test_converge_managed_packages_are_not_adopted(
     with as_machine(tmp_path / "home-a"):
         _install_locally("repo-skill", origin="repo")
         _install_locally("plugin-skill", origin="plugin")
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
 
     assert result.adopted == []
@@ -182,14 +207,18 @@ def test_converge_managed_packages_are_not_adopted(
 
 
 def test_a_locally_disabled_skill_adopts_disabled(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The local flag is the only evidence of what the operator wanted. Adopting
     everything as enabled would silently switch on something somebody turned
     off, cluster-wide."""
     with as_machine(tmp_path / "home-a"):
         _install_locally("off-demo", enabled=False)
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
 
     row = reg.get(db_conn, "off-demo")
@@ -199,7 +228,11 @@ def test_a_locally_disabled_skill_adopts_disabled(
 
 
 def test_local_reviewed_trust_travels(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """User ruling 2026-08-21 (issue #218): trust is a cluster-level fact about
     CONTENT — "has a human reviewed these bytes" — not about the machine the
@@ -207,7 +240,7 @@ def test_local_reviewed_trust_travels(
     lands `reviewed`, carrying the review to every machine."""
     with as_machine(tmp_path / "home-a"):
         _install_locally("trusted-demo", trust="reviewed")
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
 
     row = reg.get(db_conn, "trusted-demo")
@@ -216,19 +249,23 @@ def test_local_reviewed_trust_travels(
 
 
 def test_reviewed_row_survives_a_later_unreviewed_machine(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Multi-machine convergence (issue #218): home-a adopts a reviewed package,
     then home-b — holding the IDENTICAL bytes unreviewed — sweeps. The review
     must survive: trust only ever rises for the same content."""
     with as_machine(tmp_path / "home-a"):
         _install_locally("shared-trust-demo", body="Same bytes.", trust="reviewed")
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
 
     with as_machine(tmp_path / "home-b"):
         _install_locally("shared-trust-demo", body="Same bytes.", trust="unreviewed")
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
         assert result.conflicts == []
         assert result.already_claimed == ["shared-trust-demo"]
@@ -239,7 +276,11 @@ def test_reviewed_row_survives_a_later_unreviewed_machine(
 
 
 def test_a_tracked_name_missing_from_disk_is_reported_not_invented(
-    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+    tmp_path: Path,
+    as_machine: _AsMachine,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A row in `installed.json` with no tree behind it is a pre-existing local
     inconsistency. The sweep says so rather than registering an empty name that
@@ -248,7 +289,7 @@ def test_a_tracked_name_missing_from_disk_is_reported_not_invented(
         install_registry.register(
             install_registry.InstalledPackage(name="ghost-demo", type="skill", origin="user")
         )
-        with db.pool() as pool:
+        with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
 
     assert result.missing_tree == ["ghost-demo"]

@@ -27,7 +27,6 @@ from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import boot, daemon
 from services.agent_runner.agent_ops.tests.test_daemon import (
     _REPO,
-    _db,
     _fake_spawn_factory,
     _stub_pool,
 )
@@ -378,7 +377,9 @@ def test_ops_binds_all_interfaces_only_when_authenticated() -> None:
     assert boot.ops_bind_host(None) == "127.0.0.1"
 
 
-def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_boot_announces_this_unit_up(
+    monkeypatch: pytest.MonkeyPatch, *, ops_database: Callable[[], Database]
+) -> None:
     """The daemon registers its OWN unit once it is serving — the same
     `register_self` write `ava start` makes, so the stop latch is cleared and
     `up_since_at` restamped by the process whose liveness the row stands for.
@@ -401,7 +402,7 @@ def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -
     pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     set_identity(name="wsl", role="agent-runner")
     try:
-        boot.register_boot(database=_db)
+        boot.register_boot(database=ops_database)
     finally:
         reset_identity()
 
@@ -409,7 +410,7 @@ def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_register_boot_failure_does_not_stop_the_daemon(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, ops_database: Callable[[], Database]
 ) -> None:
     """A failed registration refresh leaves dispatch entirely correct, so it is
     logged and swallowed. Exiting here would hand the watchdog a respawn loop and
@@ -421,8 +422,6 @@ def test_register_boot_failure_does_not_stop_the_daemon(
         _db: object,
         *,
         url: str | None = None,
-        database: Callable[[], Database],
-        image: LoadedCommit,
     ) -> None:
         raise RuntimeError("central postgres unreachable")
 
@@ -438,14 +437,16 @@ def test_register_boot_failure_does_not_stop_the_daemon(
 
     set_identity(name="wsl", role="agent-runner")
     try:
-        boot.register_boot(database=_db)  # must not raise
+        boot.register_boot(database=ops_database)  # must not raise
     finally:
         reset_identity()
 
     assert logged and "boot registration failed" in logged[0]
 
 
-def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_boot_unstops_a_host_that_came_back(
+    monkeypatch: pytest.MonkeyPatch, *, ops_database: Callable[[], Database]
+) -> None:
     """The bug this call fixes, end to end against the real tables.
 
     A host that announced `ava stop` carries a `stopped_at` latch that only a
@@ -470,15 +471,19 @@ def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyP
 
     set_identity(name="came-back", role="agent-runner")
     try:
-        machines.register_self(_db(), url="http://10.0.0.9:8600")
-        machines.mark_stopping(_db(), "came-back", "~/.ava")
-        assert machines.list_agent_runners(_db()) == []  # dropped from the fan-out
-        assert machines.list_stopped_agent_runners(_db()) == [("came-back", "http://10.0.0.9:8600")]
+        machines.register_self(ops_database(), url="http://10.0.0.9:8600")
+        machines.mark_stopping(ops_database(), "came-back", "~/.ava")
+        assert machines.list_agent_runners(ops_database()) == []  # dropped from the fan-out
+        assert machines.list_stopped_agent_runners(ops_database()) == [
+            ("came-back", "http://10.0.0.9:8600")
+        ]
 
-        boot.register_boot(database=_db)  # the daemon comes up on its own
+        boot.register_boot(database=ops_database)  # the daemon comes up on its own
 
-        assert machines.list_agent_runners(_db()) == [("came-back", "http://10.0.0.9:8600")]
-        assert machines.list_stopped_agent_runners(_db()) == []
+        assert machines.list_agent_runners(ops_database()) == [
+            ("came-back", "http://10.0.0.9:8600")
+        ]
+        assert machines.list_stopped_agent_runners(ops_database()) == []
     finally:
         reset_identity()
 

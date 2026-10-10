@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.maintenance import admission, pause_owner
@@ -711,12 +712,18 @@ def _seed_agent_on_machine(
     status: str = "idling",
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> int:
     """One live agent row homed on `machine` (test spawn helper + machine
     stamp; the row-creation path moved gateway-side, Task #1236 follow-up)."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET machine = %s, status = %s WHERE id = %s",

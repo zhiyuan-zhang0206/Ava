@@ -26,8 +26,8 @@ from services.upkeep.ttl_reaper import cadence, daemon, remote, shells, sweep
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool]:
-    p = base.db.pool(max_size=4)
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+    p = base.db.pool(max_size=4, gate=database_gate)
     try:
         yield p
     finally:
@@ -164,11 +164,13 @@ def test_a_phase_is_claimed_once_per_interval(
     assert cadence.claim_due(pool, cadence.TORN_POINTER_SCAN, 3600.0) is False
 
 
-def test_a_claim_survives_a_restart(db_conn: psycopg.Connection, pool: ConnectionPool) -> None:
+def test_a_claim_survives_a_restart(
+    db_conn: psycopg.Connection, pool: ConnectionPool, *, database_gate: ProcessDbGate
+) -> None:
     """The clock is a row, not process state: a fresh pool (a restarted service)
     reads the stamp the previous one wrote."""
     assert cadence.claim_due(pool, cadence.FIRE_LOG_PRUNE, 86400.0) is True
-    restarted = base.db.pool(max_size=2)
+    restarted = base.db.pool(max_size=2, gate=database_gate)
     try:
         assert cadence.claim_due(restarted, cadence.FIRE_LOG_PRUNE, 86400.0) is False
     finally:

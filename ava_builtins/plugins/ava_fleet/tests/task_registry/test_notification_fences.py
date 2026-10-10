@@ -49,7 +49,7 @@ def test_reassigned_task_refuses_delayed_home_wake(
     task = task_registry.create(
         "fenced", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
     )
-    note_pool = db_pool()
+    note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
     selected = select_terminated_owners_with_pending(note_pool, 86400)
     assert len(selected) == 1
@@ -74,8 +74,7 @@ def test_reassigned_task_refuses_delayed_home_wake(
 
 
 def test_assignment_deadline_has_inspectable_failure(
-    db_conn: psycopg.Connection,
-    root_task_id: int,
+    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor = _seed_agent(db_conn)
     pin_agent(actor)
@@ -88,7 +87,7 @@ def test_assignment_deadline_has_inspectable_failure(
         (owner,),
     )
     db_conn.commit()
-    note_pool = db_pool()
+    note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
     assert select_terminated_owners_with_pending(note_pool, 86400) == []
     assert dead_letter_stale_pending_terminated(note_pool, 86400) == 1
@@ -103,8 +102,7 @@ def test_assignment_deadline_has_inspectable_failure(
 
 
 def test_reminder_policy_never_resurrects_terminated_owner(
-    db_conn: psycopg.Connection,
-    root_task_id: int,
+    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor = _seed_agent(db_conn)
     pin_agent(actor)
@@ -127,6 +125,6 @@ def test_reminder_policy_never_resurrects_terminated_owner(
         ),
     )
     db_conn.commit()
-    note_pool = db_pool()
+    note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
     assert select_terminated_owners_with_pending(note_pool, 86400) == []

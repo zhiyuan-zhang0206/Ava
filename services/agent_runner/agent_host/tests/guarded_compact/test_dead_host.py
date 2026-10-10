@@ -18,6 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.claim.test_inbound_ownership import _insert, agent_row
 from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
@@ -73,6 +74,8 @@ async def test_actual_sigkill_certified_successor_and_cancellation_order(
     add_bindings: AddBindings,
     stage: str,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     agent = prepare_agent(db_conn)
     secret = "guarded-compact-test-secret"  # noqa: S105 -- isolated credential
@@ -95,7 +98,14 @@ async def test_actual_sigkill_certified_successor_and_cancellation_order(
         )
         ordinary: list[object] = []
         host, saver, config = await make_host(
-            aops_pool, agent, 100, ordinary, monkeypatch, seed_history=False, catalog=model_catalog
+            aops_pool,
+            agent,
+            100,
+            ordinary,
+            monkeypatch,
+            seed_history=False,
+            catalog=model_catalog,
+            database_gate=database_gate,
         )
         await host.run_turn(agent)
         status = client.get(

@@ -37,11 +37,20 @@ def _progress() -> LoopProgress:
 
 
 def _agent(
-    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> int:
     from tests.fixtures.units import spawn_agent
 
-    return spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    return spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
 
 
 def _patch_loops(
@@ -135,8 +144,14 @@ def test_claim_hands_an_agent_out_once_per_cooldown(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    aid = _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority)
+    aid = _agent(
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+    )
 
     assert attempts.claim_attempts(pool, attempts.HARVEST, [aid], 60.0) == ([aid], 0)
     assert attempts.claim_attempts(pool, attempts.HARVEST, [aid], 60.0) == ([], 0)
@@ -158,11 +173,27 @@ def test_claim_limit_defers_the_ready_agents_it_leaves(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     first, second, third = (
-        _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority),
-        _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority),
-        _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority),
+        _agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+        ),
+        _agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+        ),
+        _agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+        ),
     )
     assert attempts.claim_attempts(pool, attempts.RESURRECT, [first], 60.0) == ([first], 0)
 
@@ -184,8 +215,14 @@ def test_finish_restarts_the_cooldown_clock(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    aid = _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority)
+    aid = _agent(
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+    )
     attempts.claim_attempts(pool, attempts.HOSTED_TURN, [aid], 600.0)
     db_conn.execute(
         "UPDATE delivery_watchdog_attempts SET last_attempt_at = now() - interval '1 hour' "

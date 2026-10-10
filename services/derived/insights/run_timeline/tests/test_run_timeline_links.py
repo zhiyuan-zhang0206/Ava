@@ -81,8 +81,12 @@ def message(
 
 
 @pytest.fixture
-def receiver(model_catalog: ModelCatalog, config_authority: ConfigAuthority) -> int:
-    return spawn_agent(catalog=model_catalog, authority=config_authority)
+def receiver(
+    model_catalog: ModelCatalog, config_authority: ConfigAuthority, *, database_gate: ProcessDbGate
+) -> int:
+    return spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
 
 
 def read(

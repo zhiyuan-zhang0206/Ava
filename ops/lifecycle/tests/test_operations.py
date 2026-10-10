@@ -232,11 +232,14 @@ async def test_restart_agent_op_terminated_short_circuits(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     from ops.tests.pool_support import make_test_pool
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
     db_conn.commit()
     wake = AsyncMock()

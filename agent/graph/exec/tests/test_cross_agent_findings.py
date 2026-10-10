@@ -190,13 +190,17 @@ async def test_interleaved_turns_deliver_each_finding_to_its_own_agent(
         "a": _Turn(
             hosted_resources,
             aops_pool,
-            spawn_agent(catalog=model_catalog, authority=config_authority),
+            spawn_agent(
+                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            ),
             database_gate=database_gate,
         ),
         "b": _Turn(
             await hosted_resources.require_service().turn(),
             aops_pool,
-            spawn_agent(catalog=model_catalog, authority=config_authority),
+            spawn_agent(
+                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            ),
             database_gate=database_gate,
         ),
     }

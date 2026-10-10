@@ -46,14 +46,23 @@ def pool():
 
 
 def _make_idling_agent(
-    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> int:
     """spawn_agent creates the agents_meta row (create_agent does not — that
     is the spawn path's job); the dispatch filter reads owner status, so tests
     spawn then park the agent 'idling'."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (aid,))
     db.commit()
@@ -123,7 +132,10 @@ class TestSelectPendingForDispatch:
         """All kinds count (a lost wake strands terminate/restart too), any
         kind of stale pending of an idling owner is dispatched."""
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
         )
         old_chat = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5, database_gate=database_gate
@@ -166,7 +178,10 @@ class TestSelectPendingForDispatch:
         'idling' (running = mid-turn queue, terminated = its own controller)
         are left alone."""
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
         )
         _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S - 0.3, database_gate=database_gate
@@ -204,7 +219,10 @@ class TestSelectPendingForDispatch:
         database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -279,7 +297,10 @@ class TestSelectPendingForDispatch:
         database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -321,7 +342,10 @@ class TestSelectPendingForDispatch:
         the host verdict; services/wake/heartbeat/liveness.py) — stays inside the
         one-failure grace window, so the wake is dispatched."""
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -349,7 +373,10 @@ class TestSelectPendingForDispatch:
         """A NULL host verdict with no failed probe yet (cf=0) sits outside
         the grace window: an absent verdict freezes."""
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
         )
         _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -367,7 +394,10 @@ class TestSelectPendingForDispatch:
         database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
         )
         _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -387,7 +417,10 @@ class TestSelectPendingForDispatch:
         from base.cluster.machine import machine_name
 
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
         )
         _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -417,7 +450,10 @@ class TestSelectPendingForDispatch:
         from base.paths import logs_dir
 
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
