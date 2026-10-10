@@ -79,6 +79,11 @@ import strings, patch strings and non-executed source samples are separate
 collector evidence. It preserves alias facts and diagnoses rather than applying
 an automatic rewrite that could change which object a local name binds.
 
+`bindings.local_nodes()` preserves lexical depth-first order with an explicit
+iterator stack, so deep expressions do not repeatedly relay each node through
+recursive generators. Nested bodies and definition-time inputs retain the same
+scope boundaries.
+
 Import-linter contracts, private package doors and test-placement rules remain
 responsible for their existing boundaries.
 

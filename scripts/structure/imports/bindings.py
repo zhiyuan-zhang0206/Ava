@@ -62,14 +62,20 @@ def local_nodes(tree: ast.AST) -> Iterator[ast.AST]:
     children = ast.iter_child_nodes(tree)
     if isinstance(tree, _SCOPE_NODES):
         children = iter(scope_parts(tree)[1])
-    for child in children:
+    pending = [(children, False)]
+    while pending:
+        children, scope_root = pending[-1]
+        child = next(children, None)
+        if child is None:
+            pending.pop()
+            continue
         yield child
         if isinstance(child, _SCOPE_NODES):
-            for expression in scope_parts(child)[0]:
-                yield expression
-                yield from local_nodes(expression)
-        else:
-            yield from local_nodes(child)
+            outer, inner = scope_parts(child)
+            # Definition-time expressions are separate roots, including lambda decorators.
+            pending.append((iter(inner if scope_root else outer), not scope_root))
+        elif child._fields:
+            pending.append((ast.iter_child_nodes(child), False))
 
 
 class Scope:
