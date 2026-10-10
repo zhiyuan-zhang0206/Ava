@@ -249,34 +249,81 @@ def _restore_park_detection() -> None:
     time.sleep = _ORIGINAL_SLEEP
 
 
-def _stall_action(database: Database, schedule_id: int, message: str, run_id: int | None) -> None:
-    """Reap descendants, bound failure recording, then hard-exit for manager recovery."""
+class _StallRecorder:
+    """Own the two failure writes until their shared hard-exit deadline."""
 
-    def record_failure() -> None:
+    def __init__(
+        self, database: Database, schedule_id: int, message: str, run_id: int | None
+    ) -> None:
+        self.database = database
+        self.schedule_id = schedule_id
+        self.message = message
+        self.run_id = run_id
+        self.stop = threading.Event()
+        self.error: BaseException | None = None
+        self.deadline = (
+            time.monotonic() + settings.gateway.schedule_stall_exit_record_deadline_seconds
+        )
+        self.thread = threading.Thread(
+            target=self._record, name=f"schedule-{schedule_id}-stall-recorder", daemon=True
+        )
+        self.thread.start()
+
+    def _record(self) -> None:
         try:
-            _record_error(database, schedule_id, message)
+            self._write_failure()
+        except BaseException as exc:
+            self.error = exc
+            logger.opt(exception=exc).error("Schedule {} stall recorder failed", self.schedule_id)
+
+    def _write_failure(self) -> None:
+        if self.stop.is_set():
+            return
+        try:
+            _record_error(self.database, self.schedule_id, self.message)
         except Exception:
             logger.opt(exception=True).warning(
                 "Schedule {} stall message could not be recorded in last_error; exiting without it",
-                schedule_id,
+                self.schedule_id,
             )
-        _record_run_end(database, run_id, ok=False, note=f"stalled ({_stall_timeout_s():.0f}s)")
+        # Do not admit another write after the owner exhausted its exit budget.
+        # An in-flight synchronous DB call is collected by process death.
+        if not self.stop.is_set():
+            _record_run_end(
+                self.database, self.run_id, ok=False, note=f"stalled ({_stall_timeout_s():.0f}s)"
+            )
 
+    def close(self) -> bool:
+        self.thread.join(timeout=max(0.0, self.deadline - time.monotonic()))
+        self.stop.set()
+        alive = self.thread.is_alive()
+        if alive:
+            logger.error(
+                "Schedule {} stall recording unfinished at hard-exit deadline", self.schedule_id
+            )
+        if self.error is not None:
+            raise self.error
+        return not alive
+
+
+def _stall_action(database: Database, schedule_id: int, message: str, run_id: int | None) -> None:
+    """Reap descendants, bound failure recording, then hard-exit for manager recovery."""
     try:
-        # Snapshot descendants while ancestry still proves ownership. Retain
-        # their identities through TERM/KILL; never signal the shared PTY group.
-        # setsid alone stays covered; already-reparented daemons are exempt.
-        base.host.proc.kill_process_tree(os.getpid(), include_root=False)
-    except Exception:
-        logger.exception("Schedule {} child cleanup failed", schedule_id)
-    try:
+        try:
+            # Snapshot descendants while ancestry still proves ownership. Retain
+            # identities through TERM/KILL; never signal the shared PTY group.
+            # setsid stays covered; already-reparented daemons are exempt.
+            base.host.proc.kill_process_tree(os.getpid(), include_root=False)
+        except Exception:
+            logger.exception("Schedule {} child cleanup failed", schedule_id)
         logger.error("Schedule {} {}", schedule_id, message)
-        # One deadline covers both writes, even if a DB call never returns.
-        # An abandoned write can leave the run row NULL; manager reconcile
-        # closes that row as interrupted once the runner has exited.
-        recorder = threading.Thread(target=record_failure, daemon=True)
-        recorder.start()
-        recorder.join(settings.gateway.schedule_stall_exit_record_deadline_seconds)
+        # One owner and deadline cover both writes, even if a DB call never
+        # returns. Manager reconcile closes any abandoned NULL row.
+        recorder = _StallRecorder(database, schedule_id, message, run_id)
+        recorder.close()
+    except BaseException as exc:
+        logger.opt(exception=exc).error("Schedule {} stall action failed", schedule_id)
+        raise
     finally:
         os._exit(1)  # hard exit — the schedule manager owns the restart
 
@@ -297,82 +344,111 @@ def _is_parked_frame(frame: FrameType) -> bool:
     ) == (_SUBPROCESS_FILENAME, "_communicate")
 
 
-def _start_stall_guard(database: Database, schedule_id: int, run_id: int | None) -> threading.Event:
-    """Watch the main thread for a stall and hard-exit when one is found.
+class _StallGuard:
+    """Own frame observation and serialize script completion with stall admission.
 
-    Returns a stop event; the caller sets it once the script returns so the
-    guard cannot kill the process between a clean return and the completed
-    marker write.
-
-    Every ``_stall_check_interval_s()`` the guard captures the main thread's
-    deepest frame. A frame that has not changed for ``_stall_timeout_s()`` is a
-    stall (a single call — HTTP, DB, import — that never returned): the guard
-    records ``last_error`` and ``os._exit(1)`` so the ScheduleManager's crash
-    path (backoff + breaker) relaunches the schedule instead of leaving a
-    zombie that never fires. The deepest frame being a park frame
-    (``time.sleep`` / ``Event.wait`` / ...) is the legitimate idle of a
-    resident schedule and is ignored. A deepest ``_wait`` frame in subprocess
-    (the blocking waitpid), or ``select`` in selectors immediately called by
-    subprocess's ``_communicate``, also marks a legitimate child wait, bounded
-    by the caller's ``timeout=``. Spawn, argument conversion, and the initial
-    ``stdin.flush`` remain guarded because that timeout does not cover them.
-    A wait WITHOUT ``timeout=`` is an accepted boundary:
-    frame identity cannot signal a missing timeout, and adding a ceiling
-    would impose a new behavioral limit requiring a separate ruling.
-
-    On 2026-09-25 a long daily scan's child wait outlasted this guard's budget,
-    causing a false stall verdict and an orphaned scan. Its deepest frame was
-    ``selectors.select``, so checking its immediate caller preserves stall
-    detection for HTTP/DB waits and argument callbacks using select too.
+    Sleep-family parks and actual subprocess waits retain their unlimited park
+    contract. A child wait without timeout remains an accepted boundary. Spawn,
+    argument conversion, stdin flush and selectors outside subprocess stay
+    guarded. Frame-read failures skip one observation and remain recoverable.
     """
-    main_thread_id = threading.get_ident()
-    stop = threading.Event()
 
-    def _guard() -> None:
+    def __init__(self, database: Database, schedule_id: int, run_id: int | None) -> None:
+        self.database = database
+        self.schedule_id = schedule_id
+        self.run_id = run_id
+        self.main_thread_id = threading.get_ident()
+        self.stop = threading.Event()
+        self.admission = threading.Lock()
+        self.action_started = False
+        self.error: BaseException | None = None
+        self.thread = threading.Thread(
+            target=self._guard, name=f"schedule-{schedule_id}-stall-guard", daemon=True
+        )
+        self.thread.start()
+
+    def _guard(self) -> None:
+        try:
+            self._observe()
+        except BaseException as exc:
+            self.error = exc
+            logger.opt(exception=exc).error("Schedule {} stall guard failed", self.schedule_id)
+
+    def _sample(self) -> tuple[str, int, str] | None:
+        frame = sys._current_frames().get(self.main_thread_id)
+        if frame is None or _is_parked_frame(frame):
+            return None
+        return frame.f_code.co_filename, frame.f_lineno, frame.f_code.co_name
+
+    def _claim_stall(self) -> bool:
+        with self.admission:
+            if self.stop.is_set():
+                return False
+            self.action_started = True
+            return True
+
+    def _observe(self) -> None:
         last_sig: tuple[str, int, str] | None = None
         stalled_since: float | None = None
         frame_read_failed = False
-        # quiesce-exempt: a watchdog thread inside one schedule runner process; it reads frames, not the database
-        while not stop.is_set():
-            time.sleep(_stall_check_interval_s())
+        while not self.stop.wait(_stall_check_interval_s()):
             try:
-                frame = sys._current_frames().get(main_thread_id)
-                if frame is None:
-                    continue
-                if _is_parked_frame(frame):
-                    last_sig = None
-                    stalled_since = None
-                    continue
-                sig = (frame.f_code.co_filename, frame.f_lineno, frame.f_code.co_name)
+                sig = self._sample()
             except Exception:
-                # The guard must never crash the runner; a failed frame read is
-                # just one skipped check, reported on the first failure only.
                 if not frame_read_failed:
                     frame_read_failed = True
                     logger.opt(exception=True).warning(
                         "Schedule {} stall guard frame read failed; "
                         "stall detection is skipped while it keeps failing",
-                        schedule_id,
+                        self.schedule_id,
                     )
                 continue
             if frame_read_failed:
                 frame_read_failed = False
-                logger.info("Schedule {} stall guard frame read recovered", schedule_id)
+                logger.info("Schedule {} stall guard frame read recovered", self.schedule_id)
+            if sig is None:
+                last_sig = None
+                stalled_since = None
+                continue
             now = time.monotonic()
-            if sig == last_sig and stalled_since is not None:
-                if now - stalled_since >= _stall_timeout_s():
-                    message = (
-                        f"schedule runner stalled {now - stalled_since:.0f}s in "
-                        f"{sig[2]} ({sig[0]}:{sig[1]}) — hard-exiting; check the "
-                        "gateway / DB / network the script calls into"
-                    )
-                    _stall_action(database, schedule_id, message, run_id)
-            elif sig != last_sig:
+            if sig != last_sig:
                 last_sig = sig
                 stalled_since = now
+                continue
+            if stalled_since is not None and now - stalled_since >= _stall_timeout_s():
+                message = (
+                    f"schedule runner stalled {now - stalled_since:.0f}s in "
+                    f"{sig[2]} ({sig[0]}:{sig[1]}) — hard-exiting; check the "
+                    "gateway / DB / network the script calls into"
+                )
+                if self._claim_stall():
+                    _stall_action(self.database, self.schedule_id, message, self.run_id)
+                return
 
-    threading.Thread(target=_guard, name=f"schedule-{schedule_id}-stall-guard", daemon=True).start()
-    return stop
+    def close(self, timeout: float = 1.0) -> None:
+        # Closing admission and claiming a real stall share one decision point.
+        # Never hold this lock through cleanup or a synchronous database write.
+        with self.admission:
+            self.stop.set()
+            action_started = self.action_started
+        # Ordinary stop wakes immediately. An admitted action retains the
+        # existing 3s TERM + 5s reap and shared record budget before hard exit.
+        budget = (
+            9.0 + settings.gateway.schedule_stall_exit_record_deadline_seconds
+            if action_started
+            else timeout
+        )
+        self.thread.join(timeout=budget)
+        alive = self.thread.is_alive()
+        if self.error is not None:
+            raise self.error
+        if alive:
+            raise RuntimeError(f"Schedule {self.schedule_id} stall guard did not stop")
+
+
+def _start_stall_guard(database: Database, schedule_id: int, run_id: int | None) -> _StallGuard:
+    """Start the owned watchdog before plugin import; caller closes it before bookkeeping."""
+    return _StallGuard(database, schedule_id, run_id)
 
 
 def _record_script_exit(
@@ -415,6 +491,59 @@ def _bind_schedule_actor(schedule_id: int) -> None:
     )
 
 
+def _run_python_script(
+    database: Database, schedule_id: int, run_id: int | None, script_path: Path
+) -> None:
+    """Run with isolated argv and collect the watchdog before any terminal write."""
+    import runpy
+
+    import ava
+
+    # Load plugin namespaces (ava.tasks etc.) into this process before the
+    # in-process script runs. This runner never builds the agent graph, so
+    # nothing else loads plugins here; without this, a schedule script that
+    # touches ava.tasks would hit the factory `import ava` and AttributeError.
+    # Only the .py-in-process branch needs it — the other branch runs a
+    # non-.py shell command (bash etc.) that does not import ava.
+    # Stall guard: a hung call inside the script (or in plugin
+    # loading below) must not leave the runner alive-but-silent
+    # (2026-08-03 self-evolution miss). Started before plugin loading
+    # so an import hang is covered too. Stopped before _mark_completed
+    # so a clean return cannot be overtaken by a spurious kill.
+    _patch_park_detection()
+    guard = _start_stall_guard(database, schedule_id, run_id)
+    # The gateway launches this runner as `python -m gateway.schedules.runner
+    # <id>`, so sys.argv carries the schedule id. The script must not
+    # inherit that runner-only argv: hand it the argv `python <script>`
+    # would produce — just its own path — and restore the runner's argv
+    # afterwards (2026-09-22: the daily debt sweep's argparse rejected the
+    # leaked id and exited 2 on every launch, tripping the crash breaker
+    # before its first fire).
+    runner_argv = sys.argv
+    sys.argv = [str(script_path)]
+    try:
+        ava.ensure_plugins_loaded()
+        runpy.run_path(str(script_path), run_name="__main__")
+    finally:
+        sys.argv = runner_argv
+        primary = sys.exc_info()[1]
+        try:
+            guard.close()
+        except BaseException:
+            if primary is None:
+                raise
+            # Preserve the script's primary failure; the guard keeps
+            # its original error and already reported it immediately.
+            logger.opt(exception=True).error("Schedule {} guard close failed", schedule_id)
+        finally:
+            _restore_park_detection()
+            if guard.action_started:
+                # A real stall won admission before script completion.
+                # Never mark it completed, even if cleanup exhausted
+                # the bounded join or a test replaced the hard exit.
+                os._exit(1)
+
+
 def _run(database: Database, schedule_id: int, revision: int | None = None) -> int:
     loaded = _load(database, schedule_id, revision)
     if loaded is None:
@@ -441,42 +570,7 @@ def _run(database: Database, schedule_id: int, revision: int | None = None) -> i
 
     try:
         if script_name.endswith(".py"):
-            import runpy
-
-            import ava
-
-            # Load plugin namespaces (ava.tasks etc.) into this process before the
-            # in-process script runs. This runner never builds the agent graph, so
-            # nothing else loads plugins here; without this, a schedule script that
-            # touches ava.tasks would hit the factory `import ava` and AttributeError.
-            # Only the .py-in-process branch needs it — the other branch runs a
-            # non-.py shell command (bash etc.) that does not import ava.
-            # Stall guard: a hung call inside the script (or in plugin
-            # loading below) must not leave the runner alive-but-silent
-            # (2026-08-03 self-evolution miss). Started before plugin loading
-            # so an import hang is covered too. Stopped before _mark_completed
-            # so a clean return cannot be overtaken by a spurious kill.
-            _patch_park_detection()
-            stop_guard = _start_stall_guard(database, schedule_id, run_id)
-            # The gateway launches this runner as `python -m gateway.schedules.runner
-            # <id>`, so sys.argv carries the schedule id. The script must not
-            # inherit that runner-only argv: hand it the argv `python <script>`
-            # would produce — just its own path — and restore the runner's argv
-            # afterwards (2026-09-22: the daily debt sweep's argparse rejected the
-            # leaked id and exited 2 on every launch, tripping the crash breaker
-            # before its first fire).
-            runner_argv = sys.argv
-            sys.argv = [str(script_path)]
-            try:
-                ava.ensure_plugins_loaded()
-                runpy.run_path(str(script_path), run_name="__main__")
-            finally:
-                sys.argv = runner_argv
-                stop_guard.set()
-                # The park wrapper is process-wide; the guard's judgment window
-                # is over, so restore the stdlib sleep — it must not leak into
-                # the rest of this process.
-                _restore_park_detection()
+            _run_python_script(database, schedule_id, run_id, script_path)
             _finish_completed(
                 database, schedule_id, run_id
             )  # clean return => finished, not crashed
