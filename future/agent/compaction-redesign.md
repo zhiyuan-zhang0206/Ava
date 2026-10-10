@@ -11,7 +11,7 @@ onto an entry point in `agent/hooks/compact.py` / `ava/self.py`.
 | Mode | Trigger / entry point | Who writes the summary | Declinable |
 |---|---|---|---|
 | **forced compact** | LLM node over the ceiling -> `generate_summary` | the model, in a separate compaction LLM call | no — the hard backstop |
-| **command compact** | a `/compact` command (prompt template `commands/compact.md`), typed or reminder-triggered -> housekeeping turns -> `ava.self.compact(summary)` | the agent, in its own turn | yes |
+| **command compact** | a `/compact` command (prompt template `ava_builtins/commands/compact.md`), typed or reminder-triggered -> housekeeping turns -> `ava.self.compact(summary)` | the agent, in its own turn | yes |
 | **spontaneous compact** | the agent decides on its own to call `ava.self.compact(summary)` (guided only by that SDK docstring) | the agent | yes — its own choice |
 
 Compaction always rebuilds the context as `[system prompt, summary]` — a full
@@ -112,7 +112,7 @@ write it — lives only in the `ava.self.compact` docstring. The three triggers 
 a copy:
 
 - **spontaneous** — the agent reads the docstring in its own SDK and writes the summary.
-- **command** (`commands/compact.md`) and the **reminder** nudge — short openers that wind the
+- **command** (`ava_builtins/commands/compact.md`) and the **reminder** nudge — short openers that wind the
   agent down and tell it to compact "as the docstring specifies"; the agent reads the contract
   when it acts.
 - **forced** (`COMPACTION_INSTRUCTION`) — the opener appends the SDK docstring's contract to
@@ -163,12 +163,12 @@ for a path the upstream cap already closes.
   the command/spontaneous `compact_summary` injection in the same pass).
 - **PR2 — command compact (#1116)**: qualitative reminder as the compact hook's `before_llm`
   (new `soft_compact_tokens` threshold < ceiling, agent-side — no `InboundKind`, no nudge /
-  heartbeat rail; once per window, defers to the agent-reply note) + `commands/compact.md`
+  heartbeat rail; once per window, defers to the agent-reply note) + `ava_builtins/commands/compact.md`
   housekeeping template + `CompactDone` emit on the agent claim path. The trigger-pair ordering
   fix the original plan listed is moot — #1099's no-tail REMOVE_ALL wipes the `[system halt]`
   pair with the rest. Depends on PR1's template structure.
 - **PR3 — single-source the contract (#1099)**: the section template, copied across
-  `COMPACTION_INSTRUCTION`, the reminder note, and `commands/compact.md`, collapses into the
+  `COMPACTION_INSTRUCTION`, the reminder note, and `ava_builtins/commands/compact.md`, collapses into the
   `ava.self.compact` docstring; the three triggers become short openers that defer to it (see
   "One contract, one place" above). Pure consolidation — no behavior change to the modes. The CWD
   follow-up noted there is explicitly out of scope.
