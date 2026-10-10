@@ -98,6 +98,7 @@ from base.log.sinks import (
     add_sink,
 )
 from base.native_process import loaded_commit
+from base.telemetry.delivery.pipeline import EventPipeline
 
 # `base.cluster.machine` / `base.paths` are imported inside the init functions that
 # use them, never at module top: both pull the pydantic Settings chain (+~30 MB
@@ -245,7 +246,9 @@ _LOG_LEVELS: dict[str, str] = {
 }
 
 
-def _postgres_sink(message: loguru.Message, *, producer: Callable[[], Any] | None = None) -> None:
+def _postgres_sink(
+    message: loguru.Message, *, producer: Callable[[], EventPipeline] | None = None
+) -> None:
     """Route one loguru record into the unified event pipeline.
 
     This is the loguru-side adapter: field derivation lives in
@@ -318,7 +321,7 @@ def add_postgres_sink(
     process: str = "unknown",
     *,
     agent_id: int | None = None,
-    producer: Callable[[], Any],
+    producer: Callable[[], EventPipeline],
     machine_reader: Callable[[], str],
 ) -> int:
     """Eagerly open the unified event pipeline + register the loguru adapter.
@@ -440,7 +443,7 @@ def _add_stderr_sink_before_settings() -> None:
 def init_gateway_process(
     name: str = "gateway",
     *,
-    producer: Callable[[], Any],
+    producer: Callable[[], EventPipeline],
     machine_reader: Callable[[], str],
     image: loaded_commit.LoadedCommit,
 ) -> None:
@@ -493,7 +496,7 @@ def init_gateway_process(
 
 
 def init_cli_process(
-    *, name: str, producer: Callable[[], Any], machine_reader: Callable[[], str]
+    *, name: str, producer: Callable[[], EventPipeline], machine_reader: Callable[[], str]
 ) -> None:
     """Called once by the CLI verbs that bring a unit up. Identical sink set to ``init_gateway_process``,
     minus its ``service_started`` row: stderr (human) + file (``<name>.log``)
