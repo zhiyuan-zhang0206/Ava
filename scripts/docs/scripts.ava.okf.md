@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Scripts"
-description: "`scripts/` is Ava's ops and engineering toolset — installation / provisioning, linting, CI / release, code generation, OKF graph building, cluster startup, etc., one-shot or hook-driven scripts. Not runtime code, but development and deployment infrastructure around the repo."
+description: "Engineering tools for setup, audits, linting, CI, code generation and deployment."
 tags:
   - tool
   - ops
@@ -20,7 +20,13 @@ tags:
 Split by kind: code/AST/Python-convention guards in [[scripts/lint/docs/lint.ava.okf.md]]; document/OKF/skill/migration-format guards in [[scripts/content_lint/docs/content_lint.ava.okf.md]].
 
 ### `audit/` — read-only drift audits
-`branch_protection.py` (live GitHub branch protection vs. `.trunk/trunk.yaml`), `where_used.py` + `where_used_scan.py` (before a change: every importer, test, string target, doc and baseline entry of a symbol, module or path, grouped; `--json` for scripts), `module_moves.py` (after a move: no reference to the old path may remain).
+`branch_protection.py` compares live GitHub protection with `.trunk/trunk.yaml`.
+Before changes, `where_used.py` groups importers, tests, strings, docs and baseline
+entries of symbols/modules/paths (`--json`); `where_used_scan.py` owns matching.
+After moves, `module_moves.py` rejects remaining old references and missing names.
+Both CLI owners expose `main(argv, *, repo_root=None)` with shared diagnostics and
+exit codes, defaulting to their checkout. Move imports use the caller's Python
+environment; validation algorithms stay local.
 
 ### `codegen/` — derived-artifact generation and OKF tooling
 `build_okf_data.py` (bundle → `graph_data.json`), `serve_okf_viz.py` (local viewer, `okf-d3-template.html` — also read by `gateway/inspect/okf_graph.py`'s `/api/okf/graph`) — OKF tooling. `build_app_update_manifest.py` (Tauri archives → `latest.json`), `dump_event_fixtures.py`, `dump_frontend_constants.py`, `dump_openapi.py`, `gen_config_lite_table.py`, `gen_event_registry.py`, `gen_pyright_test_environments.py` (test hosts from pytest `testpaths`; the `executionEnvironments` entries of `pyproject.toml` that hold each package's `tests/` directory to the tests type-checking standard, written between its GENERATED markers) — one generator per artifact, each with a matching `check-*-fresh.sh` or pre-commit drift gate.
@@ -52,4 +58,4 @@ Host side, stdlib only: `boundary.py` (what both recipes share: the start profil
 ## Notes
 
 - `hooks/prepush-base.sh` owns the contribution range for branch lint, pyright, input gating, artifact freshness and `provision/prepush_frontend.py`; missing base fails. Frontend selection includes known filesystem consumers and reports global/deletion closure as CI-only.
-- pre-commit runs lints / codegen; pre-push runs pyright / tsc / eslint / vitest. Full pytest / migration smoke stay in CI; local tests are targeted.
+- Hooks run lints, codegen, types and frontend checks. Full pytest and migration smoke stay in CI; local tests are targeted.
