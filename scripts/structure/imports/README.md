@@ -79,3 +79,9 @@ an automatic rewrite that could change which object a local name binds.
 
 Import-linter contracts, private package doors and test-placement rules remain
 responsible for their existing boundaries.
+
+`placement_evidence.subject_lca()` consumes the unpruned shared facts for root-test
+admission, then removes replacement-only and test-support subjects without the
+legacy all-patch fallback. It requires zero unknown inputs, including resource
+gaps, and at least one resolved Python subject. Its exact-directory LCA does
+not read empirical production edges or choose a unit by import direction.

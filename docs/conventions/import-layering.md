@@ -99,9 +99,11 @@ the other pre-commit hooks over all files in the `backend structure` job, and ag
 on the merged tree (`merged-tree-structure`, informational). A violation prints the
 import chain.
 
-The contracts also feed test placement: `scripts/structure/placement.py` reads
-`[tool.importlinter]` to decide which package may legally hold a test, so editing a
-contract can move the answer of the placement checks.
+The contracts also feed the legacy private-patch home calculation in
+`scripts/structure/placement.py`. Root-test admission instead uses the complete
+subject-directory LCA in `scripts/structure/placement_evidence.py`; import direction
+does not choose the owner of those subjects. Existing registered paths retain
+their policy, and package-local placement is not yet enforced.
 
 ### Shared dependency evidence
 
