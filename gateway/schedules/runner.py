@@ -451,6 +451,11 @@ def _start_stall_guard(database: Database, schedule_id: int, run_id: int | None)
     return _StallGuard(database, schedule_id, run_id)
 
 
+def _script_exit_code(exc: SystemExit) -> int:
+    """Normalize a deliberate script exit with the interpreter's bool/message semantics."""
+    return int(exc.code) if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+
+
 def _record_script_exit(
     database: Database, schedule_id: int, run_id: int | None, exc: SystemExit
 ) -> int:
@@ -460,7 +465,7 @@ def _record_script_exit(
     interpreter treats them as exit codes: True -> 1, False -> 0); a non-int
     code is a message the interpreter would print to stderr, so it rides the
     note instead of being swallowed (QA N1)."""
-    code = int(exc.code) if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+    code = _script_exit_code(exc)
     if code == 0:
         _finish_completed(database, schedule_id, run_id)
     else:
@@ -530,9 +535,12 @@ def _run_python_script(
         try:
             guard.close()
         except BaseException:
-            if primary is None:
+            if primary is None or (
+                isinstance(primary, SystemExit) and _script_exit_code(primary) == 0
+            ):
                 raise
-            # Preserve the script's primary failure; the guard keeps
+            # Successful SystemExit is completion, so cleanup failure wins.
+            # Preserve a failed script's primary failure; the guard keeps
             # its original error and already reported it immediately.
             logger.opt(exception=True).error("Schedule {} guard close failed", schedule_id)
         finally:

@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import pytest
 
 from base.config import settings
@@ -194,12 +195,17 @@ def test_recorder_does_not_start_second_write_after_close(monkeypatch: pytest.Mo
     assert second_writes == []
 
 
+@pytest.mark.parametrize(
+    "primary", [ValueError("script failed"), SystemExit(3), SystemExit(True), SystemExit("failed")]
+)
 def test_script_failure_stays_primary_when_guard_close_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loguru_records: list[dict[str, Any]],
+    primary: BaseException,
 ) -> None:
     _fast_guard(monkeypatch)
     failed = threading.Event()
-    primary = ValueError("script failed")
     secondary = WorkerFailure("guard failed")
     guards: list[sr._StallGuard] = []
     original_start = sr._start_stall_guard
@@ -225,7 +231,7 @@ def test_script_failure_stays_primary_when_guard_close_fails(
     import ava
 
     monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: None)
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(type(primary)) as caught:
         sr._run_python_script(Database.from_settings(), 1, None, tmp_path / "script.py")
     assert caught.value is primary
     assert sys.argv is argv
@@ -284,3 +290,75 @@ def test_stall_action_keeps_hard_exit_when_cleanup_fails(
     assert caught.value is error
     assert exits == [1]
     assert "stall action failed" in _log_text(loguru_records)
+
+
+@pytest.mark.parametrize("exit_code", [0, None, False])
+@pytest.mark.parametrize("blocked", [False, True], ids=["unknown-error", "blocked-close"])
+def test_successful_script_exit_cannot_complete_after_guard_close_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    exit_code: int | None,
+    blocked: bool,
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    _fast_guard(monkeypatch)
+    failed = threading.Event()
+    release = threading.Event()
+    error = WorkerFailure("original unknown guard failure")
+    guards: list[sr._StallGuard] = []
+    original_start = sr._start_stall_guard
+
+    def sample(_guard: sr._StallGuard) -> None:
+        failed.set()
+        if blocked:
+            assert release.wait(3)
+        raise error
+
+    def start(db: Database, sid: int, rid: int | None) -> sr._StallGuard:
+        guard = original_start(db, sid, rid)
+        guards.append(guard)
+        return guard
+
+    def script(*_args: object, **_kwargs: object) -> None:
+        assert failed.wait(2)
+        raise SystemExit(exit_code)
+
+    row = db_conn.execute(
+        "INSERT INTO schedules (name, script, command, enabled, status) "
+        "VALUES ('exit-cleanup', 'pass', 'python script.py', true, 'stopped') RETURNING id"
+    ).fetchone()
+    db_conn.commit()
+    assert row is not None
+    monkeypatch.setattr(sr._StallGuard, "_sample", sample)
+    monkeypatch.setattr(sr, "_start_stall_guard", start)
+    monkeypatch.setattr(runpy, "run_path", script)
+    import ava
+
+    monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: None)
+    try:
+        if blocked:
+            assert sr.run(row[0]) == 1
+            assert guards[0].thread.is_alive()
+            assert "stall guard did not stop" in _log_text(loguru_records)
+        else:
+            with pytest.raises(WorkerFailure) as caught:
+                sr.run(row[0])
+            assert caught.value is error
+        assert db_conn.execute(
+            "SELECT status FROM schedules WHERE id = %s", (row[0],)
+        ).fetchone() == ("stopped",)
+        outcome = db_conn.execute(
+            "SELECT ok FROM schedule_runs WHERE schedule_id = %s", (row[0],)
+        ).fetchone()
+        assert outcome == ((False,) if blocked else (None,))
+    finally:
+        release.set()
+        for guard in guards:
+            guard.thread.join(timeout=2)
+    assert "stall guard failed" in _log_text(loguru_records)
+    with pytest.raises(WorkerFailure) as caught:
+        guards[0].close()
+    assert caught.value is error
+    assert guards[0].error is error
+    assert not guards[0].thread.is_alive()
