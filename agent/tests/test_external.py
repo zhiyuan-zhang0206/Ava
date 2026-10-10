@@ -369,8 +369,9 @@ def test_close_delivers_telemetry_when_plugin_flush_fails(
 
     monkeypatch.setattr(attachment, "flush", fail_flush)
 
-    def sync_delivery(*, bounded: bool) -> None:
+    def sync_delivery(*, bounded: bool) -> telemetry.DrainResult:
         delivered.append((bounded, _borrowed_agent_id()))
+        return telemetry.DrainResult(telemetry.DrainStatus.COMPLETED, telemetry.DrainPhase.DRAIN)
 
     monkeypatch.setattr(telemetry, "sync", sync_delivery)
 
@@ -594,3 +595,26 @@ def test_attachment_context_keeps_body_error_primary_when_close_fails(
     assert raised.value is primary
     assert any("flush failed" in note for note in primary.__notes__)
     assert _borrowed_agent_id() is None
+
+
+def test_close_reports_unfinished_ordinary_telemetry(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.log import logger
+
+    def unfinished(*, bounded: bool) -> telemetry.DrainResult:
+        assert bounded
+        return telemetry.DrainResult(telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.DRAIN)
+
+    monkeypatch.setattr(telemetry, "sync", unfinished)
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(message.record["message"]), level="WARNING")
+    try:
+        attachment = external.attach("lease")
+        attachment.close()
+        assert _borrowed_agent_id() is None
+    finally:
+        logger.remove(sink)
+    assert any("ordinary telemetry delivery is unfinished" in message for message in warnings)
+    assert all("stay in the JSONL mirror" not in message for message in warnings)
