@@ -395,3 +395,123 @@ class DiscardReceipt:
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)
+
+
+REQUEST_SOURCE = (
+    SOURCE.replace(
+        "self._stopped = False", "self._stopped = False\n        self._stop = asyncio.Event()"
+    )
+    .replace("task = asyncio.create_task(work())", "task = asyncio.create_task(self._work(work))")
+    .replace("self._cancel()", "self._stop.set()")
+    + "\n    async def _work(self, work):\n        await self._stop.wait()\n        await work()\n"
+)
+
+
+def test_owner_request_stop_does_not_cancel_native_tasks(tmp_path: Path) -> None:
+    assert _sites(REQUEST_SOURCE, tmp_path) == {}
+    future = (
+        REQUEST_SOURCE.replace("asyncio.Event()", "asyncio.get_running_loop().create_future()")
+        .replace("self._stop.set()", "self._stop.set_result(None)")
+        .replace("await self._stop.wait()", "await asyncio.wait({self._stop})")
+    )
+    assert _sites(future, tmp_path) == {}
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("self._stop.set()", "other.set()"),
+        ("await self._stop.wait()", "await other.wait()"),
+        ("await self._stop.wait()", "self._stop.wait()"),
+        ("self._stop = asyncio.Event()", "self._stop = other"),
+        ("self._register(task)", "pass"),
+        ("self._operations[task] = True", "self._current = task"),
+        (
+            "await asyncio.wait(pending, timeout=timeout)",
+            "await asyncio.wait(other, timeout=timeout)",
+        ),
+        (
+            "await asyncio.wait(pending, timeout=timeout)",
+            "await asyncio.wait(pending, timeout=None)",
+        ),
+        ("return self.unfinished", "return ()"),
+        ("self._stop.set()", "self._stop = asyncio.Event()\n        self._stop.set()"),
+        ("self._stop.set()", "unused = self._request"),
+    ],
+)
+def test_request_stop_missing_or_decorative_edges_fail(
+    tmp_path: Path, before: str, after: str
+) -> None:
+    assert _sites(REQUEST_SOURCE.replace(before, after), tmp_path)
+
+
+NATIVE_SOURCE = (
+    REQUEST_SOURCE.replace("import asyncio", "import asyncio\nimport subprocess")
+    .replace("self._stop = asyncio.Event()", "self.proc = None")
+    .replace("self._stop.set()", "self._request()")
+    .replace(
+        "await self._stop.wait()\n        await work()",
+        "proc = self.proc\n        await asyncio.to_thread(proc.wait, 1)",
+    )
+    + """
+    def launch(self):
+        proc = subprocess.Popen(['worker'], stdin=subprocess.PIPE)
+        self.proc = proc
+
+    def _request(self):
+        proc = self.proc
+        proc.stdin.close()
+"""
+)
+
+
+def test_actual_popen_eof_and_same_bounded_wait_support_native_stop(tmp_path: Path) -> None:
+    assert _sites(NATIVE_SOURCE, tmp_path) == {}
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("subprocess.Popen(['worker'], stdin=subprocess.PIPE)", "pretend_process()"),
+        ("self.proc = proc", "self.proc = other"),
+        ("proc.stdin.close()", "other.stdin.close()"),
+        ("proc.stdin.close()", "proc.stdout.close()"),
+        ("asyncio.to_thread(proc.wait, 1)", "asyncio.to_thread(other.wait, 1)"),
+        ("asyncio.to_thread(proc.wait, 1)", "asyncio.to_thread(proc.wait, None)"),
+        ("asyncio.to_thread(proc.wait, 1)", "asyncio.to_thread(proc.wait, float('inf'))"),
+        ("proc = self.proc", "proc = other"),
+        ("self._request()", "unused = self._request"),
+        ("self.proc = proc", "self.proc = proc\n        self.proc = other"),
+        ("await asyncio.to_thread(proc.wait, 1)", "asyncio.to_thread(proc.wait, 1)"),
+    ],
+)
+def test_native_stop_cannot_use_fake_lost_or_unjoined_handles(
+    tmp_path: Path, before: str, after: str
+) -> None:
+    assert _sites(NATIVE_SOURCE.replace(before, after), tmp_path)
+
+
+@pytest.mark.parametrize("source", [REQUEST_SOURCE, NATIVE_SOURCE])
+def test_decorative_factory_cannot_lend_its_worker_stop_edge(tmp_path: Path, source: str) -> None:
+    source = source.replace("asyncio.create_task(self._work(work))", "asyncio.create_task(work())")
+    source += """
+    def decorate(self, work):
+        task = pretend_factory(self._work(work))
+        self._register(task)
+"""
+    assert _sites(source, tmp_path)
+
+
+@pytest.mark.parametrize("source", [REQUEST_SOURCE, NATIVE_SOURCE])
+def test_request_native_owner_names_and_module_aliases_are_semantically_irrelevant(
+    tmp_path: Path, source: str
+) -> None:
+    source = source.replace("import asyncio", "import asyncio as scheduling").replace(
+        "asyncio.", "scheduling."
+    )
+    source = source.replace("import subprocess", "import subprocess as native").replace(
+        "subprocess.", "native."
+    )
+    for old, new in (("Service", "Lifecycle"), ("_stop", "signal"), ("_request", "request_close")):
+        source = source.replace(old, new)
+    assert _sites(source, tmp_path) == {}

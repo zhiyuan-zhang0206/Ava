@@ -108,6 +108,8 @@ async def test_actual_owner_completion_unknown_reaches_original_service() -> Non
 
     completion = asyncio.create_task(failed_receipt())
     owned = object.__new__(_OwnedRun)
+    owned.registration = None
+    owned.attached = True
     owned.attached_completion = lambda: completion
     service = scope.require_service()
     service.complete_later(scope, owned.finish_owner(), name="actual-owner-result")
