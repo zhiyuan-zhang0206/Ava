@@ -189,7 +189,6 @@ async def _notice_loop(core: Any) -> None:
 
 async def _timeline_outbound_loop(core: Any, alerts: AlertOutboundBridge) -> None:
     """One service-owned dispatcher and periodic committed-tail wakeup."""
-    core.outbound_worker.validate_pool()
     while True:
         if not admission.quiesced():
             try:
@@ -326,7 +325,6 @@ async def run() -> None:
                 loops.create_task(_notice_loop(core))
                 await asyncio.gather(*(a.start(loops) for a in adapters))
                 if adapters:
-                    core.outbound_worker.validate_pool()
                     loops.create_task(_timeline_outbound_loop(core, alerts))
                 await asyncio.Event().wait()
             finally:
