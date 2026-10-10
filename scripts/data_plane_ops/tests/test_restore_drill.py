@@ -16,6 +16,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
+from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
 from base.config import settings
 from base.db import Database
 from base.paths import ava_home
@@ -75,6 +76,15 @@ def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
     `zzy`-owned ad-hoc table, as the sweep backup convention leaves behind."""
     from psycopg import sql as pgsql
 
+    # This is the session database: capability groups must retain their formal
+    # NOLOGIN contract when later tests use authenticated runner logins.
+    with psycopg.connect(db_conn.info.dsn, autocommit=True) as admin:
+        ensure_groups(
+            admin,
+            owner=db_conn.info.user,
+            database=db_conn.info.dbname,
+            groups=Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP),
+        )
     with db_conn.cursor() as cur:
         for role in restore_drill._RESTORE_ROLES:
             cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
@@ -105,6 +115,12 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     zzy with grants, plus a zzy-owned ad-hoc table) so the dump exercises the
     same restore path that failed in production on 2026-08-27 and 2026-09-21."""
     _grant_prod_roles(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT rolname, rolcanlogin FROM pg_roles WHERE rolname = ANY(%s) ORDER BY rolname",
+            ([GATEWAY_GROUP, RUNNER_GROUP],),
+        )
+        assert cur.fetchall() == [(GATEWAY_GROUP, False), (RUNNER_GROUP, False)]
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
         row = cur.fetchone()
