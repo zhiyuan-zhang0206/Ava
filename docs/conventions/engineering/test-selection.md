@@ -15,6 +15,8 @@ stdlib-only and consumes the shared runtime dependency facts in
 `scripts.structure.imports.facts`. It follows imports transitively through application
 modules, test helpers and imported tests, and adds the actual pytest fixture bindings:
 root/local conftests, literal `pytest_plugins`, and the shared `path_scopes.toml` reader.
+Each path-scoped binding retains its TOML source as an input, including removed base
+declarations; a missing first-party fixture module reports incomplete impact at that source.
 Relative imports, finite dynamic imports, literal Python subprocess modules/code and
 recognized repository-rooted resource paths use that same evidence owner and module resolver. Placement
 subject policies do not prune this runtime impact graph. The selector never imports
@@ -27,6 +29,12 @@ reachable dependency graph produces `incomplete-impact`, with source locations a
 reasons in the JSON `diagnostics` field and stderr. Explicit edges do not certify that
 an unrelated opaque input is resolved. Syntax errors, malformed declarations and
 unexpected analysis errors fail the selector job and the required backend check.
+
+Documentation is also an input when the shared resource graph proves a possible reader.
+The workflow's classify job and the selector query the same head/base evidence before
+skipping a documentation-only diff. Inputs with known readers request backend CI;
+unrelated unknowns alone do not turn an unread documentation change into a runtime edge.
+Classification analysis errors fail the required backend check as well.
 
 The existing e2e-env-guard job is outside this selection path. It continues to
 run its complete tests/e2e/ package plus tests/harness/test_home_isolation.py in one
@@ -44,7 +52,7 @@ matching row decides.
 
 | Order | Path | Class | Contribution |
 | --- | --- | --- | --- |
-| 1 | A documentation path (see below) | DOCUMENTATION | none |
+| 1 | A documentation path (see below) | DOCUMENTATION | runtime readers from either tree |
 | 2 | Root `conftest.py` | GLOBAL | full suite |
 | 3 | Any other `conftest.py` (also when deleted) | CONFTEST | every collectable test below its directory plus runtime consumers |
 | 4 | Absent from the head tree | DELETED | base-tree impact; FULL with a diagnostic when base facts are unavailable |
@@ -93,7 +101,7 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 | Order | Changed-path or event condition | Result |
 | --- | --- | --- |
 | 1 | Not a pull_request, or head ref begins trunk-merge/ or trunk-temp/ | FULL (queue-or-non-pr) |
-| 2 | Every path is a documentation path | SKIP |
+| 2 | Every path is documentation and has no known runtime reader in either tree | SKIP |
 | 3 | A path is GLOBAL | FULL (`global-path:<first path>`; the payload lists every global path) |
 | 4 | A path is UNMAPPED | FULL (unmapped; the payload lists the paths) |
 | 5 | Reachable dynamic input or missing deleted-path base facts | FULL (incomplete-impact; diagnostic locations and reasons) |

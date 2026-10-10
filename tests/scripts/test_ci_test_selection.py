@@ -64,12 +64,16 @@ def _backend_verdict(
 
 
 def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
-    results = dict.fromkeys(["test-select", *dependencies], "success")
-    non_backend = dict.fromkeys(results, "skipped")
+    results = dict.fromkeys(["classify", "test-select", *dependencies], "success")
+    non_backend = dict.fromkeys(results, "skipped") | {"classify": "success"}
     for outcome in ("success", "failure", "cancelled", "skipped"):
         actual = _backend_verdict(script, "false", non_backend | {"backend-structure": outcome})
         assert actual.returncode == (0 if outcome == "success" else 1), actual.stdout
         assert "backend-static:" not in actual.stdout
+        actual = _backend_verdict(
+            script, "false", non_backend | {"classify": outcome, "backend-structure": "success"}
+        )
+        assert actual.returncode == (0 if outcome == "success" else 1), actual.stdout
     for mode, decision, changes, expected in (
         ("enforce", "FULL", {}, 0),
         ("shadow", "SELECTED", {"backend-shard": "failure"}, 1),
@@ -253,8 +257,8 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
         "helper-signing-smoke",
     ]
     assert aggregator["if"] == (
-        "${{ !cancelled() && needs.classify.result == 'success' && "
-        "(needs.classify.outputs.backend == 'true' || "
+        "${{ !cancelled() && (needs.classify.result != 'success' || "
+        "needs.classify.outputs.backend == 'true' || "
         "needs.backend-structure.result != 'success') }}"
     )
     verify = _step(aggregator, "Verify backend job results")["run"]
@@ -350,6 +354,8 @@ def _git(repo: Path, *args: str) -> str:
 def _changed_repo(repo: Path, paths: tuple[str, ...]) -> str:
     repo.mkdir()
     _git(repo, "init", "-q")
+    (repo / "pyproject.toml").write_text('[tool.pytest.ini_options]\ntestpaths = ["tests"]\n')
+    _git(repo, "add", ".")
     _git(repo, "commit", "-q", "--allow-empty", "-m", "base")
     base = _git(repo, "rev-parse", "HEAD")
     for path in paths:
@@ -388,21 +394,64 @@ def test_native_classify_step_preserves_document_and_queue_routing(tmp_path: Pat
         repo = tmp_path / f"repo-{index}"
         base = _changed_repo(repo, paths)
         output = tmp_path / f"outputs-{index}"
-        environment = os.environ | {
-            "EVENT": event,
-            "HEAD_REF": head_ref,
-            "BASE_SHA": base,
-            "GITHUB_OUTPUT": str(output),
-            "PYTHONPATH": str(_REPO_ROOT),
-            "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
-        }
-        subprocess.run(  # noqa: S603 -- execute the checked-in workflow over test-owned inputs
-            ["bash", "-eu", "-c", step["run"]],
-            cwd=repo,
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        _run_classify(
+            step["run"], repo, base, output, event=event, head_ref=head_ref
+        ).check_returncode()
         values = dict(line.split("=", 1) for line in output.read_text().splitlines())
         assert (values["frontend"], values["backend"]) == expected, (event, head_ref, paths)
+
+
+def _run_classify(
+    script: str, repo: Path, base: str, output: Path, *, event: str, head_ref: str
+) -> subprocess.CompletedProcess[str]:
+    environment = os.environ | {
+        "EVENT": event,
+        "HEAD_REF": head_ref,
+        "BASE_SHA": base,
+        "GITHUB_OUTPUT": str(output),
+        "PYTHONPATH": str(_REPO_ROOT),
+        "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+    }
+    return subprocess.run(  # noqa: S603 -- checked-in workflow over test-owned inputs
+        ["bash", "-eu", "-c", script],
+        cwd=repo,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_native_classify_routes_document_resources_and_propagates_analysis_errors(
+    tmp_path: Path,
+) -> None:
+    step = _step(_workflow_jobs()["classify"], "Classify changed paths")
+    for index, source in enumerate(
+        (
+            'from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n(ROOT / "docs/runtime.md").read_text()\n',
+            "def syntax error\n",
+        )
+    ):
+        repo = tmp_path / f"repo-{index}"
+        _changed_repo(repo, ("docs/runtime.md",))
+        (repo / "tests").mkdir()
+        (repo / "tests/test_document.py").write_text(source)
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-qm", "base reader")
+        base = _git(repo, "rev-parse", "HEAD")
+        (repo / "docs/runtime.md").write_text("updated runtime input\n")
+        _git(repo, "commit", "-qam", "document input")
+        assert _git(repo, "diff", "--name-only", base, "HEAD") == "docs/runtime.md"
+        output = tmp_path / f"outputs-{index}"
+        result = _run_classify(
+            step["run"], repo, base, output, event="pull_request", head_ref="codex/docs"
+        )
+        if index == 0:
+            result.check_returncode()
+            assert dict(line.split("=", 1) for line in output.read_text().splitlines()) == {
+                "frontend": "false",
+                "backend": "true",
+            }
+        else:
+            assert result.returncode != 0
+            assert "SyntaxError" in result.stderr

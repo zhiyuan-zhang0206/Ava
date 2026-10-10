@@ -118,7 +118,7 @@ _TREE_SCAN_TESTS = frozenset(
 class PathClass(StrEnum):
     """How one changed path contributes to the selection."""
 
-    DOCUMENTATION = "documentation"  # no backend test; a docs-only diff is SKIP
+    DOCUMENTATION = "documentation"  # runtime readers can require backend tests
     TEST = "test"  # a collectable test file and its runtime test consumers
     CONFTEST = "conftest"  # every collectable test below its directory
     PACKAGE = "package"  # runtime consumers plus the owning package's tests
@@ -344,9 +344,7 @@ def _path_tests(
     path: str, path_class: PathClass, checkout: Checkout, reverse_map: dict[str, set[str]]
 ) -> set[str]:
     """What one changed path contributes to the candidate subset."""
-    runtime: set[str] = set()
-    for parent in (Path(path), *Path(path).parents):
-        runtime.update(reverse_map.get(parent.as_posix(), set()))
+    runtime = _runtime_tests(path, reverse_map)
     if path_class is PathClass.TEST:
         return {path} | runtime
     if path_class is PathClass.CONFTEST:
@@ -357,6 +355,40 @@ def _path_tests(
     if path_class is PathClass.TREE_SCAN_ONLY and root in _REFERENCED_ROOTS:
         return _referencing_tests(root, checkout) | runtime
     return runtime
+
+
+def _runtime_tests(path: str, reverse_map: dict[str, set[str]]) -> set[str]:
+    return {
+        test
+        for parent in (Path(path), *Path(path).parents)
+        for test in reverse_map.get(parent.as_posix(), ())
+    }
+
+
+def documentation_runtime_tests(
+    changed_files: list[str], *, repo_root: Path, base_ref: str | None = None
+) -> frozenset[str]:
+    """Known readers of documentation inputs in either tree, without executing tests.
+
+    Unknown inputs alone cannot establish a documentation dependency. Once a known
+    reader requests backend CI, the selector still reports its incomplete evidence.
+    """
+    if not any(is_doc_path(path) for path in changed_files):
+        return frozenset()
+    checkout = load_checkout(repo_root)
+    paths = [path for path in changed_files if _is_documentation_path(path, checkout.hosts)]
+    if not paths:
+        return frozenset()
+    impact = build_impact(repo_root, checkout.collectable)
+    selected = {test for path in paths for test in _runtime_tests(path, impact.tests_by_input)}
+    if base_ref is not None:
+        with base_checkout(repo_root, base_ref) as base_root:
+            base = load_checkout(base_root)
+            old = build_impact(base_root, base.collectable & checkout.collectable)
+            selected.update(
+                test for path in paths for test in _runtime_tests(path, old.tests_by_input)
+            )
+    return frozenset(selected)
 
 
 def _owner_tests(
@@ -386,7 +418,9 @@ def select_tests(
 
     if event != "pull_request" or head_ref.startswith(_QUEUE_PREFIXES):
         return _result("FULL", "queue-or-non-pr", full_estimate=full_estimate)
-    if all(_is_documentation_path(path, checkout.hosts) for path in changed):
+    if all(
+        _is_documentation_path(path, checkout.hosts) for path in changed
+    ) and not documentation_runtime_tests(list(changed), repo_root=repo_root, base_ref=base_ref):
         return _result("SKIP", "docs-only", full_estimate=full_estimate)
 
     classes = {path: classify_path(path, checkout) for path in changed}
