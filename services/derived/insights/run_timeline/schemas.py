@@ -87,7 +87,9 @@ class RunTimelineUnit(BaseModel):
     execution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the
     inclusive message-index span of the block's unit. Blocks without a time are not served.
     `parent` is the level-1 node whose span holds the block's first message, None for a block no
-    node covers (a compaction segment's head, the not yet summarized tail).
+    node covers (a compaction segment's head, the not yet summarized tail). `inbound_id` is the
+    `inbound_messages` row an inbound block was made from (the checkpoint's `ava_inbound_id`), None
+    for any other block and for an inbound message that predates the stamp.
 
     `context_tokens` is what the block occupies in the context (None while no request has read
     it), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether
@@ -111,6 +113,7 @@ class RunTimelineUnit(BaseModel):
     start: datetime
     end: datetime
     source: str | None
+    inbound_id: int | None
     preview: str
     parent: str | None
     context_tokens: int | None
@@ -122,13 +125,44 @@ class RunTimelineUnit(BaseModel):
 
 
 class RunTimelineEvent(BaseModel):
-    """A lifecycle marker from the audit record (spawn, restart, terminate)."""
+    """A lifecycle marker from the audit record (spawn, fork, restart, terminate...); `source` is who caused it."""
 
     model_config = ConfigDict(frozen=True)
 
     ts: datetime
     kind: str
     label: str | None
+    source: str
+
+
+LinkKind = Literal["send_message", "spawn", "fork", "terminate", "restart", "resurrect"]
+
+
+class RunTimelineLink(BaseModel):
+    """One event between two agents. `sender` did it to `receiver`.
+
+    `inbound_id` names the receiver's inbound message (send_message only); `fork_from` is the agent
+    a fork was copied from (fork only; the sender is the agent that executed the fork); `preview` is
+    the start of the message.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: LinkKind
+    ts: datetime
+    sender: int
+    receiver: int
+    inbound_id: int | None
+    fork_from: int | None
+    preview: str | None
+
+
+class RunTimelineLinks(BaseModel):
+    """GET /api/insights/run-timeline/links response: the agent-to-agent events with an end in the asked agents, oldest first."""
+
+    model_config = ConfigDict(frozen=True)
+
+    links: list[RunTimelineLink]
 
 
 class RunTimelineResponse(BaseModel):

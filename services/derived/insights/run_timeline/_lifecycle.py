@@ -1,4 +1,4 @@
-"""Lifecycle markers from the audit record: the spawn / restart / terminate events in a window."""
+"""Lifecycle markers from the audit record: the spawn / fork / restart / terminate events in a window."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from services.derived.insights.run_timeline.schemas import RunTimelineEvent
 
 # One audit event per user-visible lifecycle step. `resurrect` and
 # `restart_completed` are the two ways an agent comes back.
-_LIFECYCLE_EVENTS = ["spawn", "resurrect", "restart_completed", "terminate"]
+_LIFECYCLE_EVENTS = ["spawn", "fork", "resurrect", "restart", "restart_completed", "terminate"]
 # A transport page, not a display limit: the reader pages until the window is exhausted.
 _PAGE_SIZE = 500
 
@@ -46,6 +46,7 @@ def read(db: Database, agent_id: int, start: datetime, end: datetime) -> list[Ru
                 ts=cast(datetime, row["ts"]),
                 kind=str(row["event_name"]),
                 label=label if isinstance(label, str) else None,
+                source=str(row["source"]),
             )
         )
     return events

@@ -33,6 +33,7 @@ const unit = (i0: number, from: number, to: number, tokens: number | null = null
   start: at(from),
   end: at(to),
   source: null,
+  inbound_id: null,
   preview: "",
   parent: null,
   context_tokens: tokens,

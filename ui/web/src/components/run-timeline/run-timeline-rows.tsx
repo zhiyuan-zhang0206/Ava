@@ -41,6 +41,18 @@ import {
 } from "./model/timeline-nav";
 import { navigateAcross, type AgentSelection, type ViewAgent } from "./agent-view/agent-view-nav";
 import { AgentGroupHeader, AgentPending } from "./agent-view/agent-view-group";
+import { useLinkKindLabels } from "./agent-view/agent-view-link-labels";
+import { OtherAgentsGroup } from "./agent-view/agent-view-other";
+import { LinksCanvas, type LinkHit } from "./canvas/run-timeline-links-canvas";
+import {
+  externalLinks,
+  nearestLink,
+  nearestUnit,
+  selectionMs,
+  stepLink,
+  type LinkKind,
+  type ResolvedLink,
+} from "./model/timeline-links";
 import { barTop, frameOf, layoutsFor, type RowLayout } from "./model/timeline-canvas-model";
 import { RunTimelineAxis } from "./canvas/run-timeline-axis";
 import { TrackCanvas } from "./canvas/run-timeline-canvas";
@@ -79,6 +91,11 @@ export function RunTimelineRows({
   unitHeights,
   onRemove,
   onRetry,
+  links,
+  linkKinds,
+  onToggleLinkKind,
+  linkKey,
+  onSelectLink,
 }: {
   /** The agents, top to bottom; at least one is loaded. */
   entries: readonly AgentEntry[];
@@ -97,9 +114,30 @@ export function RunTimelineRows({
   /** Removes an agent from the view; null while it is the only one. */
   onRemove: ((agent: number) => void) | null;
   onRetry: (agent: number) => void;
+  /** Every arrow between agents the view can resolve; the kinds that are off are not drawn. */
+  links: readonly ResolvedLink[];
+  linkKinds: ReadonlySet<LinkKind>;
+  onToggleLinkKind: (kind: LinkKind) => void;
+  /** The selected arrow. */
+  linkKey: string | null;
+  onSelectLink: (key: string) => void;
 }) {
   const t = useTranslations("runTimeline");
+  const linkLabels = useLinkKindLabels();
   const [hover, setHover] = useState<AgentSelection | null>(null);
+  const [hoverLink, setHoverLink] = useState<string | null>(null);
+  // Whether the pointer is over a block or node: an item wins over an arrow drawn across it.
+  const overItem = useRef(false);
+  const hitRef = useRef<LinkHit>(() => null);
+  const shownLinks = useMemo(() => links.filter((l) => linkKinds.has(l.link.kind)), [links, linkKinds]);
+  const externals = useMemo(() => externalLinks(shownLinks), [shownLinks]);
+  const linkCounts = useMemo(() => {
+    const counts = new Map<LinkKind, number>();
+    for (const l of links) counts.set(l.link.kind, (counts.get(l.link.kind) ?? 0) + 1);
+    return counts;
+  }, [links]);
+  // An agent an event happened to shows its Lifecycle row even when no marker is in its window.
+  const lifecycleAgents = useMemo(() => new Set(shownLinks.filter((l) => l.to.row === "lifecycle").map((l) => l.to.agent)), [shownLinks]);
   // The row the selection was made in: a block and its bar in the Context size row select the same thing.
   const [navRow, setNavRow] = useState<string | null>(null);
   const choose = (agent: number, row: string, target: AgentSelection["selection"]) => {
@@ -179,9 +217,9 @@ export function RunTimelineRows({
     observer.observe(track);
     return () => observer.disconnect();
   }, []);
-  const nav = useRef({ agents, view, base, axis, selection, navRow, onSelect, onView });
+  const nav = useRef({ agents, view, base, axis, selection, navRow, onSelect, onView, externals, linkKey, onSelectLink });
   useEffect(() => {
-    nav.current = { agents, view, base, axis, selection, navRow, onSelect, onView };
+    nav.current = { agents, view, base, axis, selection, navRow, onSelect, onView, externals, linkKey, onSelectLink };
   });
   // Arrow keys move the selection (see `navigateAcross`) and pan the view to it; editable and resizing controls keep their own arrows.
   useEffect(() => {
@@ -192,6 +230,31 @@ export function RunTimelineRows({
       const el = event.target instanceof Element ? event.target : null;
       if (el?.closest("input, textarea, select, [contenteditable], [role=textbox], [role=separator], [role=slider], [role=combobox]")) return;
       const s = nav.current;
+      const reveal = (ms: number) => {
+        const shown = revealView(s.axis, s.view, s.base, ms, ms);
+        if (shown !== s.view) s.onView(shown);
+      };
+      // On the Other agents row the arrows walk its events; up leaves it for the last agent's Messages row.
+      if (s.linkKey !== null && s.externals.some((l) => l.key === s.linkKey)) {
+        event.preventDefault();
+        if (key === "left" || key === "right") {
+          const to = stepLink(s.externals, s.linkKey, key);
+          const found = s.externals.find((l) => l.key === to);
+          if (to !== null && found !== undefined) {
+            s.onSelectLink(to);
+            reveal(found.from.ms);
+          }
+        } else if (key === "up") {
+          const last = s.agents.at(-1);
+          const here = s.externals.find((l) => l.key === s.linkKey);
+          const target = last === undefined || here === undefined ? null : nearestUnit(last.data, here.from.ms);
+          if (last !== undefined && target !== null) {
+            setNavRow(UNITS_ROW);
+            s.onSelect({ agent: last.id, selection: target });
+          }
+        }
+        return;
+      }
       const next = navigateAcross(
         key,
         s.selection === null ? null : { ...s.selection, row: s.navRow },
@@ -203,7 +266,18 @@ export function RunTimelineRows({
       // The clicked block keeps keyboard focus (its focus ring and hover echo) while the selection moves on.
       if (el !== null && chartRef.current?.contains(el) && el instanceof HTMLElement) el.blur();
       setHover(null);
-      if (next === null) return;
+      if (next === null) {
+        // Down from the last agent's last row enters the Other agents row, at the event nearest in time.
+        const last = s.agents.at(-1);
+        const here = key === "down" && s.selection !== null && last?.id === s.selection.agent ? selectionMs(last.data, s.selection.selection) : null;
+        const to = here === null ? null : nearestLink(s.externals, here);
+        const found = s.externals.find((l) => l.key === to);
+        if (to !== null && found !== undefined) {
+          s.onSelectLink(to);
+          reveal(found.from.ms);
+        }
+        return;
+      }
       setNavRow(next.row);
       s.onSelect({ agent: next.agent, selection: next.item.selection });
       const shown = revealView(s.axis, s.view, s.base, next.item.start, next.item.end);
@@ -238,6 +312,23 @@ export function RunTimelineRows({
     return () => chart.removeEventListener("wheel", onWheel);
   }, []);
 
+  // A click on an arrow (where no block is under the pointer) selects it; native, like the wheel, because the chart itself is no control.
+  const onLink = useRef(onSelectLink);
+  useEffect(() => {
+    onLink.current = onSelectLink;
+  });
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const onClick = (event: MouseEvent) => {
+      if (overItem.current || (event.target instanceof Element && event.target.closest("[data-testid=run-timeline-other-event]"))) return;
+      const key = hitRef.current(event.clientX, event.clientY);
+      if (key !== null) onLink.current(key);
+    };
+    chart.addEventListener("click", onClick);
+    return () => chart.removeEventListener("click", onClick);
+  }, []);
+
   const trackRect = () => chartRef.current?.querySelector("[data-track]")?.getBoundingClientRect();
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const track = trackRect();
@@ -246,6 +337,12 @@ export function RunTimelineRows({
   };
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const state = drag.current;
+    // An arrow is under the pointer only where no item is (and not over a marker of the Other agents row, which hovers itself).
+    if (state === null && !(event.target instanceof Element && event.target.closest("[data-testid=run-timeline-other-event]"))) {
+      const key = overItem.current ? null : hitRef.current(event.clientX, event.clientY);
+      setHoverLink(key);
+      event.currentTarget.style.cursor = key === null ? "" : "pointer";
+    }
     const track = trackRect();
     if (!state || !track || track.width <= 0) return;
     const dx = event.clientX - state.x;
@@ -290,7 +387,16 @@ export function RunTimelineRows({
     const line = readoutText(target.selection, { data: owner.data, t, unitLabel, sourceLabel });
     return line !== null && agents.length > 1 ? t("readoutAgent", { id: target.agent, line }) : line;
   };
-  const readout = describe(hover);
+  const hovered = hoverLink === null ? undefined : links.find((l) => l.key === hoverLink);
+  const readout =
+    hovered === undefined
+      ? describe(hover)
+      : t("readoutLink", {
+          kind: linkLabels[hovered.link.kind],
+          from: hovered.link.sender,
+          to: hovered.link.receiver,
+          time: formatShort(hovered.link.ts),
+        });
   // The layout of every row (where each item is drawn) is cached per view: hovering and selecting only repaint.
   const paintStateOf = (agent: ViewAgent): PaintState => {
     const mine = hover?.agent === agent.id ? hover.selection : null;
@@ -318,6 +424,7 @@ export function RunTimelineRows({
         testId={`run-timeline-canvas-${row}`}
         onHit={(key) => {
           const item = key === null ? undefined : layout.items.get(key);
+          overItem.current = item !== undefined;
           setHover(item === undefined ? null : { agent: agent.id, selection: item.selection });
         }}
         onChoose={(key) => {
@@ -343,15 +450,15 @@ export function RunTimelineRows({
         className="space-y-1.5"
       >
         <AgentGroupHeader agentId={agent.id} onRemove={onRemove} />
-        {data.events.length > 0 ? (
+        {data.events.length > 0 || lifecycleAgents.has(agent.id) ? (
           <RowShell label={t("lifecycleRow")} height="h-5" testId="run-timeline-row-lifecycle">
-            {data.events.map((event) => {
+            {data.events.map((event, index) => {
               const box = axisBox(axis, event.ts, event.ts, viewU);
               if (box === null) return null;
               const when = formatShort(event.ts);
               return (
                 <span
-                  key={`${event.kind}-${event.ts}`}
+                  key={`${event.kind}-${event.ts}-${event.source}-${index}`}
                   role="img"
                   aria-label={t("eventAria", { kind: event.kind, time: when })}
                   title={`${event.kind} · ${when}${event.label ? ` · ${event.label}` : ""}`}
@@ -404,6 +511,7 @@ export function RunTimelineRows({
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
+      onPointerLeave={() => setHoverLink(null)}
       onClickCapture={(event) => {
         if (suppressClick.current) {
           event.stopPropagation();
@@ -412,6 +520,7 @@ export function RunTimelineRows({
       }}
       className="relative select-none space-y-3 rounded-[10px] border border-border bg-card p-3"
     >
+      <LinksCanvas links={shownLinks} selectedKey={linkKey} hoverKey={hoverLink} axis={axis} view={view} hitRef={hitRef} />
       <p role="status" aria-live="polite" data-testid="run-timeline-selection-live" className="sr-only">
         {spoken ?? ""}
       </p>
@@ -433,6 +542,15 @@ export function RunTimelineRows({
         return agent === undefined ? null : renderAgent(agent);
       })}
 
+      <OtherAgentsGroup
+        links={externals}
+        axis={axis}
+        viewU={viewU}
+        selectedKey={linkKey}
+        onHover={setHoverLink}
+        onSelect={onSelectLink}
+      />
+
       <RunTimelineAxis view={view} base={base} onView={onView} axis={axis} />
 
       <RunTimelineLegend
@@ -441,6 +559,10 @@ export function RunTimelineRows({
         classLabel={classLabel}
         sources={sources}
         sourceLabel={sourceLabel}
+        linkKinds={linkKinds}
+        linkLabels={linkLabels}
+        linkCounts={linkCounts}
+        onToggleLinkKind={onToggleLinkKind}
       />
 
       {empty ? <p className="pt-1 text-xs text-muted-foreground">{t("empty")}</p> : null}

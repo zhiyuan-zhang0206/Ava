@@ -3061,6 +3061,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/insights/run-timeline/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Timeline Links
+         * @description The agent-to-agent events in a window with an end among the comma-separated `agents`.
+         */
+        get: operations["get_run_timeline_links_api_insights_run_timeline_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/event-resolutions": {
         parameters: {
             query?: never;
@@ -7901,7 +7921,7 @@ export interface components {
         };
         /**
          * RunTimelineEvent
-         * @description A lifecycle marker from the audit record (spawn, restart, terminate).
+         * @description A lifecycle marker from the audit record (spawn, fork, restart, terminate...); `source` is who caused it.
          */
         RunTimelineEvent: {
             /**
@@ -7913,6 +7933,8 @@ export interface components {
             kind: string;
             /** Label */
             label: string | null;
+            /** Source */
+            source: string;
         };
         /**
          * RunTimelineGeneration
@@ -7929,6 +7951,44 @@ export interface components {
             output: number;
             /** Seconds */
             seconds: number;
+        };
+        /**
+         * RunTimelineLink
+         * @description One event between two agents. `sender` did it to `receiver`.
+         *
+         *     `inbound_id` names the receiver's inbound message (send_message only); `fork_from` is the agent
+         *     a fork was copied from (fork only; the sender is the agent that executed the fork); `preview` is
+         *     the start of the message.
+         */
+        RunTimelineLink: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "send_message" | "spawn" | "fork" | "terminate" | "restart" | "resurrect";
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Sender */
+            sender: number;
+            /** Receiver */
+            receiver: number;
+            /** Inbound Id */
+            inbound_id: number | null;
+            /** Fork From */
+            fork_from: number | null;
+            /** Preview */
+            preview: string | null;
+        };
+        /**
+         * RunTimelineLinks
+         * @description GET /api/insights/run-timeline/links response: the agent-to-agent events with an end in the asked agents, oldest first.
+         */
+        RunTimelineLinks: {
+            /** Links */
+            links: components["schemas"]["RunTimelineLink"][];
         };
         /**
          * RunTimelineMessage
@@ -8054,7 +8114,9 @@ export interface components {
          *     execution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the
          *     inclusive message-index span of the block's unit. Blocks without a time are not served.
          *     `parent` is the level-1 node whose span holds the block's first message, None for a block no
-         *     node covers (a compaction segment's head, the not yet summarized tail).
+         *     node covers (a compaction segment's head, the not yet summarized tail). `inbound_id` is the
+         *     `inbound_messages` row an inbound block was made from (the checkpoint's `ava_inbound_id`), None
+         *     for any other block and for an inbound message that predates the stamp.
          *
          *     `context_tokens` is what the block occupies in the context (None while no request has read
          *     it), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether
@@ -8091,6 +8153,8 @@ export interface components {
             end: string;
             /** Source */
             source: string | null;
+            /** Inbound Id */
+            inbound_id: number | null;
             /** Preview */
             preview: string;
             /** Parent */
@@ -13255,6 +13319,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunTimelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_timeline_links_api_insights_run_timeline_links_get: {
+        parameters: {
+            query: {
+                agents: string;
+                from: string;
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunTimelineLinks"];
                 };
             };
             /** @description Validation Error */

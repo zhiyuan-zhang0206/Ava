@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ContextBreakdownResponse,
   RunTimelineContext,
+  RunTimelineLinks,
   RunTimelineMessages,
   RunTimelineResponse,
   UserSettingListResponse,
@@ -14,6 +15,7 @@ const {
   getRunTimeline,
   getRunTimelineMessages,
   getRunTimelineContext,
+  getRunTimelineLinks,
   getAgentRoster,
   getSettings,
   getContextBreakdown,
@@ -35,13 +37,14 @@ const {
     getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
     getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
     getRunTimelineContext: vi.fn<(agentId: number, at: number) => Promise<RunTimelineContext>>(),
+    getRunTimelineLinks: vi.fn<(agents: readonly number[], window: { from: string; to: string }) => Promise<RunTimelineLinks>>(),
     getAgentRoster: vi.fn(),
   }));
 
 vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getAgentRoster, getSettings, getContextBreakdown },
+  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTimelineLinks, getAgentRoster, getSettings, getContextBreakdown },
 }));
 
 import {
@@ -118,6 +121,7 @@ const lifetimeResponse: RunTimelineResponse = {
       start: "2026-10-04T12:00:00.123456Z",
       end: "2026-10-04T12:00:00.123456Z",
       source: "user",
+      inbound_id: null,
       preview: "please fix the bug",
       parent: "1",
       context_tokens: 100,
@@ -134,6 +138,7 @@ const lifetimeResponse: RunTimelineResponse = {
       start: "2026-10-04T12:05:00.000000Z",
       end: "2026-10-04T12:06:00.000000Z",
       source: null,
+      inbound_id: null,
       preview: "look at the failing test",
       parent: "1",
       context_tokens: 300,
@@ -151,6 +156,7 @@ const lifetimeResponse: RunTimelineResponse = {
       start: "2026-10-04T12:05:00.000000Z",
       end: "2026-10-04T12:05:00.000000Z",
       source: null,
+      inbound_id: null,
       preview: "on it",
       parent: "1",
       context_tokens: 50,
@@ -167,6 +173,7 @@ const lifetimeResponse: RunTimelineResponse = {
       start: "2026-10-04T14:00:00.000000Z",
       end: "2026-10-04T14:00:00.000000Z",
       source: null,
+      inbound_id: null,
       preview: "second session",
       parent: "2",
       context_tokens: 20,
@@ -177,7 +184,7 @@ const lifetimeResponse: RunTimelineResponse = {
       request: { calls: 1, input: 400, cache_read: 0, output: 20, cache_write: 0, cost_usd: 0, cost_calls: 0 },
     },
   ],
-  events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null }],
+  events: [{ ts: "2026-10-04T12:00:00.000000Z", kind: "spawn", label: null, source: "user" }],
 };
 
 const messagesResponse: RunTimelineMessages = {
@@ -251,6 +258,8 @@ beforeEach(() => {
   mockCanvas();
   useMediaQuery.mockReturnValue(false);
   getRunTimeline.mockReset();
+  getRunTimelineLinks.mockReset();
+  getRunTimelineLinks.mockResolvedValue({ links: [] });
   getRunTimeline.mockResolvedValue(lifetimeResponse);
   getRunTimelineMessages.mockReset();
   getRunTimelineMessages.mockResolvedValue(messagesResponse);
@@ -306,6 +315,7 @@ describe("the default window", () => {
       "run-timeline-row-level-1",
       "run-timeline-row-units",
       "run-timeline-row-context",
+      "run-timeline-row-other",
     ]);
     // The rows are canvases: one per row, no element per node or block.
     expect(screen.queryAllByTestId("run-timeline-node")).toHaveLength(0);
@@ -560,6 +570,7 @@ describe("failure and loading", () => {
           start: "2026-10-04T12:04:00.000000Z",
           end: "2026-10-04T12:05:00.000000Z",
           source: null,
+          inbound_id: null,
           preview: "need a plan",
           parent: "1",
           context_tokens: null,
@@ -576,6 +587,7 @@ describe("failure and loading", () => {
           start: "2026-10-04T12:05:00.000000Z",
           end: "2026-10-04T12:05:00.000000Z",
           source: null,
+          inbound_id: null,
           preview: "ls",
           parent: "1",
           context_tokens: null,

@@ -61,6 +61,7 @@ import type { NoticesFeed,
   RestartAgentResponse,
   ResurrectAgentResponse,
   RunTimelineContext,
+  RunTimelineLinks,
   RunTimelineMessages,
   RunTimelineResponse,
   ShellCapture,
@@ -313,6 +314,16 @@ export const api = {
     return f(`/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`).then(
       ok<RunTimelineResponse>,
     );
+  },
+
+  // The agent-to-agent events (messages, spawns, forks, terminations, restarts,
+  // resurrections) in a window with an end among `agents`.
+  getRunTimelineLinks: (
+    agents: readonly number[],
+    window: { from: string; to: string },
+  ): Promise<RunTimelineLinks> => {
+    const params = new URLSearchParams({ agents: agents.join(","), from: window.from, to: window.to });
+    return f(`/api/insights/run-timeline/links?${params.toString()}`).then(ok<RunTimelineLinks>);
   },
 
   // The context breakdown of the LLM request at (or next after) message `at`:

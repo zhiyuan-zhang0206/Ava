@@ -7,7 +7,7 @@ window, and below them layer 0, the message units (`base.agents.history.hierarch
 No window means the agent's whole lifetime — from the earliest message or node to
 the latest; drilling a node is asking for its span as the window.
 
-Audit events (spawn, restart, terminate) are laid over the window as lifecycle
+Audit events (spawn, fork, restart, terminate) are laid over the window as lifecycle
 markers. They are not a data source: the window never looks at them, and a
 failed read of them leaves the markers out.
 """
@@ -22,11 +22,14 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from base.agents.history.hierarchy.serve import ServedNode, serve_nodes
 from base.agents.history.hierarchy.store import load_generation_costs, load_nodes
+from base.agents.history.hierarchy.units import DisplayBlock
+from base.agents.messages.kwargs import message_addl_kwargs
 from base.db import Database
 from base.log import logger
 from services.derived.insights.run_timeline import _lifecycle
 from services.derived.insights.run_timeline.context import router as context_router
 from services.derived.insights.run_timeline.history import HistoryView, HistoryViewCache
+from services.derived.insights.run_timeline.links import router as links_router
 from services.derived.insights.run_timeline.messages import router as messages_router
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineEvent,
@@ -46,6 +49,7 @@ from services.derived.insights.run_timeline.tokens import (
 router = APIRouter()
 router.include_router(messages_router)
 router.include_router(context_router)
+router.include_router(links_router)
 
 # What the window is when the agent has neither a message nor a node.
 _EMPTY_WINDOW = timedelta(hours=24)
@@ -66,6 +70,14 @@ def _covering_leaf(leaves: list[ServedNode], firsts: list[int], index: int) -> s
     """The id of the level-1 node (`leaves` in message order, `firsts` their first messages) whose span holds `index`."""
     at = bisect_right(firsts, index) - 1
     return leaves[at].id if at >= 0 and index <= leaves[at].span_end else None
+
+
+def _inbound_id(view: HistoryView, unit: DisplayBlock) -> int | None:
+    """The inbound row an inbound block was made from; the checkpoint stamps it on the message."""
+    if unit.kind != "inbound":
+        return None
+    stamped = message_addl_kwargs(view.history.messages[unit.i0]).get("ava_inbound_id")
+    return stamped if isinstance(stamped, int) else None
 
 
 def _units(
@@ -89,6 +101,7 @@ def _units(
                 start=unit.start,
                 end=unit.end,
                 source=unit.source,
+                inbound_id=_inbound_id(view, unit),
                 preview=unit.preview,
                 parent=_covering_leaf(leaves, firsts, unit.i0),
                 context_tokens=tokens.context_tokens,

@@ -19,6 +19,7 @@ const unit = (
   start: "2026-10-04T12:00:00Z",
   end: "2026-10-04T12:01:00Z",
   source: null,
+  inbound_id: null,
   preview: "out",
   parent: null,
   ...tokens,
