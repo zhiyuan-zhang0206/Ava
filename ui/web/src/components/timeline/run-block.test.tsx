@@ -1,8 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
+import type * as CardModule from "./card";
 import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import type { TurnSummary } from "./model/runs";
+
+// Count TurnBlock renders through the SDK-call chip it renders on every pass.
+const callBadgeRenders = vi.hoisted(() => ({ count: 0 }));
+vi.mock("./card", async (importOriginal) => {
+  const actual = await importOriginal<typeof CardModule>();
+  return {
+    ...actual,
+    CallBadge: (props: Parameters<typeof actual.CallBadge>[0]) => {
+      callBadgeRenders.count += 1;
+      return actual.CallBadge(props);
+    },
+  };
+});
 
 const sampleSummary: TurnSummary = {
   total: 3,
@@ -467,6 +481,56 @@ describe("TurnBlock component", () => {
     expect(toggle.className).not.toContain("after:top-full");
     expect(toggle.className).not.toContain("-mb-px");
     expect(toggle.className).toContain("motion-reduce:transition-none");
+  });
+
+  it("skips re-rendering when a regroup rebuilds equal member ids and summary", () => {
+    const onToggle = vi.fn();
+    const block = (memberIds: string[], summary: typeof sampleSummary) => (
+      <TurnBlock id="turn-1" memberIds={memberIds} summary={summary} expanded={false} onToggle={onToggle} />
+    );
+    callBadgeRenders.count = 0;
+    const { rerender } = render(block(["1.0", "1.1"], sampleSummary));
+    expect(callBadgeRenders.count).toBe(1);
+
+    // A streamed chunk elsewhere regroups the timeline: fresh arrays and a
+    // fresh summary object with the same values.
+    rerender(block(["1.0", "1.1"], { ...sampleSummary, sdkCalls: [{ method: "files.read", count: 2 }] }));
+    expect(callBadgeRenders.count).toBe(1);
+
+    rerender(block(["1.0", "1.1"], { ...sampleSummary, workedMs: 13000 }));
+    expect(callBadgeRenders.count).toBe(2);
+    expect(screen.getByTestId("turn-toggle").textContent).toContain("Worked for 13s");
+  });
+
+  it("ticks the live clock only while its turn is active", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(100_000);
+      const live = { ...sampleSummary, lastLiveKind: "code" as const, lastLiveStartedAt: 98_000 };
+      const { rerender } = render(
+        <TurnBlock id="turn-1" memberIds={["1.0"]} summary={live} expanded={false} turnActive onToggle={vi.fn()} />,
+      );
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 14s");
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 15s");
+      expect(vi.getTimerCount()).toBe(1);
+
+      rerender(
+        <TurnBlock id="turn-1" memberIds={["1.0"]} summary={live} expanded={false} turnActive={false} onToggle={vi.fn()} />,
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("calls onToggle with its id and current state", () => {
+    const onToggle = vi.fn();
+    render(
+      <TurnBlock id="turn-7" memberIds={["7.0"]} summary={sampleSummary} expanded={false} onToggle={onToggle} />,
+    );
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(onToggle).toHaveBeenCalledWith("turn-7", false);
   });
 
   it("calls onToggle when clicked in stuck state", () => {

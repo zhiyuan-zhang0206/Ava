@@ -219,12 +219,27 @@ export function useTimelineWindow({
     setHeights(new Map());
   }, [identity]);
 
+  // Live mirrors for the subscriptions below. The scroll listener and both
+  // ResizeObservers are installed once per tracking session and read the
+  // latest groups / heights / enabled here; keying them on those values
+  // re-subscribed (and re-observed every row) on each streamed commit.
+  const groupsRef = useRef(groups);
+  const heightsRef = useRef(heights);
+  const enabledRef = useRef(enabled);
+  useLayoutEffect(() => {
+    groupsRef.current = groups;
+    heightsRef.current = heights;
+    enabledRef.current = enabled;
+  });
+
   const measureView = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const rect = viewport.getBoundingClientRect();
     const content = contentRef.current;
-    if (content && enabled) keepFocusInTimeline(content, rect);
+    if (content && enabledRef.current) keepFocusInTimeline(content, rect);
+    const groups = groupsRef.current;
+    const heights = heightsRef.current;
     const first = content?.querySelector<HTMLElement>("[data-virtual-group]");
     const firstIndex = first ? groups.findIndex((group) => group.key === first.dataset.virtualGroup) : -1;
     let origin = viewRef.current.origin;
@@ -244,10 +259,13 @@ export function useTimelineWindow({
       viewRef.current = next;
       setView(next);
     }
-  }, [contentRef, enabled, groups, heights, rememberVisible, viewportRef]);
+  }, [contentRef, rememberVisible, viewportRef]);
 
-  // A compact handoff moves scrollTop in an earlier layout effect. Sampling
-  // here puts that position into the same pre-paint render that clears its pin.
+  // A compact handoff, send pin or restore moves scrollTop in an earlier
+  // layout effect. Sampling every commit puts that position into the same
+  // pre-paint render that clears its pin. The read is cheap on a streamed
+  // commit: TimelineView's stuck-header sync has already flushed layout, and
+  // measureView only renders again when the view actually moved.
   useLayoutEffect(() => {
     if (tracking) measureView();
   });
@@ -337,14 +355,18 @@ export function useTimelineWindow({
     rememberVisible();
   });
 
+  // One ResizeObserver per tracking session records each mounted group's and
+  // expanded row's height. Each commit only observes newly mounted nodes and
+  // releases unmounted ones; re-creating the observer per commit re-observed
+  // every row, and each observe() queues a fresh notification.
+  const rowObserverRef = useRef<{ observer: ResizeObserver; nodes: Set<HTMLElement> } | null>(null);
   useLayoutEffect(() => {
     if (!tracking) return;
     const content = contentRef.current;
     if (!content) return;
-    const nodes = content.querySelectorAll<HTMLElement>("[data-virtual-group], [data-virtual-row]");
     const observer = new ResizeObserver((entries) => {
       let changed = false;
-      const nextHeights = new Map(heights);
+      const nextHeights = new Map(heightsRef.current);
       for (const entry of entries) {
         const node = entry.target as HTMLElement;
         const key = node.dataset.virtualGroup ?? node.dataset.virtualRow;
@@ -356,21 +378,47 @@ export function useTimelineWindow({
       }
       if (!changed) return;
       const rect = viewportRef.current?.getBoundingClientRect();
-      if (rect && enabled) keepFocusInTimeline(content, rect);
+      if (rect && enabledRef.current) keepFocusInTimeline(content, rect);
       // ResizeObserver runs after layout. Keep the reader observed before the
       // height change; recapturing here would select the newly grown row.
       preserveRef.current = readingRef.current;
+      const groups = groupsRef.current;
       if (nextHeights.size > Math.max(HEIGHT_CACHE_SWEEP_FLOOR, groups.length * 2)) {
         const live = new Set(groups.flatMap((group) => [group.key, ...(group.expandedRows ?? [])]));
         for (const key of nextHeights.keys()) {
           if (!live.has(key)) nextHeights.delete(key);
         }
       }
+      // Two notifications can land before React commits; the second must
+      // build on the first rather than on the last committed map.
+      heightsRef.current = nextHeights;
       setHeights(nextHeights);
     });
-    nodes.forEach((node) => observer.observe(node));
-    return () => observer.disconnect();
-  }, [contentRef, enabled, groups, heights, range.start, range.end, readingRef, tracking, viewportRef]);
+    rowObserverRef.current = { observer, nodes: new Set() };
+    return () => {
+      observer.disconnect();
+      rowObserverRef.current = null;
+    };
+  }, [contentRef, tracking, viewportRef]);
+
+  useLayoutEffect(() => {
+    const rows = rowObserverRef.current;
+    const content = contentRef.current;
+    if (!rows || !content) return;
+    const mounted = new Set(content.querySelectorAll<HTMLElement>("[data-virtual-group], [data-virtual-row]"));
+    for (const node of rows.nodes) {
+      if (!mounted.has(node)) {
+        rows.observer.unobserve(node);
+        rows.nodes.delete(node);
+      }
+    }
+    for (const node of mounted) {
+      if (!rows.nodes.has(node)) {
+        rows.observer.observe(node);
+        rows.nodes.add(node);
+      }
+    }
+  });
 
   return { range, rowRange, measureView };
 }
