@@ -18,7 +18,7 @@ from base.telemetry.metrics.plugin_metrics import (
 
 def _spec(name: str = "core_test", **overrides) -> MetricSpec:
     query = overrides.pop("query", None) or (  # pyright: ignore[reportUnknownMemberType]
-        "SELECT count(*) AS n FROM events WHERE event_name = 'turn_end' AND category = 'telemetry'"
+        "SELECT count(*) AS n FROM agents_meta WHERE event_name = 'turn_end' AND category = 'telemetry'"
     )
     return MetricSpec(
         name=name,
@@ -47,7 +47,9 @@ def test_collect_core_metrics_rejects_duplicates(monkeypatch: pytest.MonkeyPatch
 def test_validate_core_metric_validates_sql_like_plugins() -> None:
     # unknown function -> rejected at admission time (same validator as plugins)
     with pytest.raises(InvalidMetricQuery, match="not on the whitelist"):
-        catalog.validate_core_metric(_spec(name="core_bad", query="SELECT version() FROM events"))
+        catalog.validate_core_metric(
+            _spec(name="core_bad", query="SELECT version() FROM agents_meta")
+        )
     # multi-target specs are validated per target
     with pytest.raises(InvalidMetricQuery, match="not on the whitelist"):
         catalog.validate_core_metric(
@@ -66,7 +68,7 @@ def test_validate_core_metric_agent_placeholder_rule() -> None:
         catalog.validate_core_metric(
             _spec(
                 name="core_agent",
-                query="SELECT count(*) FROM events WHERE {{agent_id}}",
+                query="SELECT count(*) FROM agents_meta WHERE {{agent_id}}",
                 output=["inspector"],
             )
         )

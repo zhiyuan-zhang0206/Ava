@@ -9,7 +9,7 @@ also holding the LISTEN socket on the CDP port being dialled.
 Both halves are load-bearing and the tests pin each one separately:
 
 - without the profile half, another unit's browser relayed onto this host's
-  loopback reads as ours (the WSL2/Windows shape);
+  loopback reads as ours;
 - without the listening half, our Chrome merely *existing* would vouch for a port
   it never won — which is exactly what happens when the relay binds first and
   Chrome comes up with a dead DevTools endpoint.

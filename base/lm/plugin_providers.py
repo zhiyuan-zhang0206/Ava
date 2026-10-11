@@ -19,8 +19,9 @@ def _load_one(builder: CatalogBuilder, name: str, provider_py: Path, *, is_built
     """Import one plugin's `provider.py`, take its declaration and install it into `builder`.
 
     The module registers nothing: it exports `contribute()` returning a `PluginContributions` whose
-    `providers` are `ProviderContribution`s. The declaration passes the manifest gate (the
-    `providers` key of the plugin's `ava-plugin.json`) before anything is
+    `providers` are `ProviderContribution`s and whose `decision_providers` are
+    `DecisionProviderContribution`s. The declaration passes the manifest gate (the
+    `providers` and `decisionProviders` keys of the plugin's `ava-plugin.json`) before anything is
     installed.
     """
     from base.packages.plugins.data_registry import declaration_of
@@ -41,9 +42,11 @@ def _load_one(builder: CatalogBuilder, name: str, provider_py: Path, *, is_built
     try:
         spec.loader.exec_module(module)
         contributions = declaration_of(module)
-        check_manifest(name, provider_py.parent, contributions, ("providers",))
+        check_manifest(name, provider_py.parent, contributions, ("providers", "decisionProviders"))
         for contribution in contributions.providers:
             builder.install(name, contribution)
+        for decision in contributions.decision_providers:
+            builder.install_decision(name, decision)
     except BaseException:
         sys.modules.pop(spec.name, None)
         raise

@@ -140,7 +140,7 @@ async def test_a_wake_cancelled_before_its_row_read_latches_only_live_continuati
     assert current.maintenance.failures == latched
 
 
-@pytest.mark.parametrize("phase", ["stopping", "stopped", "starting", "ready"])
+@pytest.mark.parametrize("phase", ["stopping", "stopped"])
 @pytest.mark.parametrize("agent", [2, 5], ids=["drained", "parked"])
 async def test_a_settled_members_held_wake_claims_nothing(
     wired: _Build, monkeypatch: pytest.MonkeyPatch, phase: str, agent: int

@@ -27,7 +27,7 @@ from datetime import UTC, datetime
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
+from schedules.catchup import cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
@@ -74,7 +74,6 @@ def fire_memory_maintenance(_slot: datetime, message: str) -> None:
 
 def main(*, inputs: ScheduleInputs) -> None:
     db = inputs.database()
-    catch_up(db, TRIGGERS, timezone=cluster_timezone(), fire=fire_memory_maintenance)
     while True:
         # Find the next fire among all triggers
         now = datetime.now(UTC)

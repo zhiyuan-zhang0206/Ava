@@ -220,7 +220,7 @@ class TestLivenessPass:
         """The pass's probe budget is `settings.gateway.status_probe_timeout_seconds`
         — the SAME setting the roster's probe reads, so the two probes stay
         aligned by construction — not a hardcoded 3s literal (task #1200: a
-        3.0s budget flipped a slow-but-healthy WSL runner offline). A probe
+        3.0s budget flipped a slow-but-healthy runner offline). A probe
         that outgrows the budget must be a failure (counted toward offline),
         never a success."""
 

@@ -291,10 +291,11 @@ class TraceCheckpointMessagesResponse(BaseModel):
 
     Spans are metadata-only (trace v2): this endpoint is how content comes
     back. `pruned` distinguishes the two absence shapes:
-    - pruned=true, checkpoint_id=None — the trace's checkpoint was dropped by
-      compact/checkpoint trim (retention is the latest K checkpoints), so the
-      content is gone; the span metadata in the mirror still exists. The
-      frontend renders this as "trimmed" rather than an error.
+    - pruned=true, checkpoint_id=None — no checkpoint carries this trace id
+      (the link predates the feature, or the turn committed no checkpoint), so
+      there is no content to return; the span metadata in the mirror still
+      exists. Checkpoints are never deleted. Callers render this as absent
+      content rather than an error.
     - pruned=false — the checkpoint exists; messages is its `messages` channel
       (the full conversation at that point, system prompt included).
 

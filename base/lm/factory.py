@@ -213,6 +213,7 @@ def validate_model_config(
     effective_model = resolve_available_model(effective_model, models=catalog.models)
 
     # 1. Model must be registered.
+    _reject_decision_model(effective_model, catalog=catalog)
     all_models: list[str] = [m for models in catalog.supported_models.values() for m in models]
     if effective_model not in all_models:
         raise ValueError(
@@ -229,6 +230,15 @@ def validate_model_config(
 
     _ensure_provider_key(effective_model, catalog=catalog)
     return effective_model
+
+
+def _reject_decision_model(model: str, *, catalog: ModelCatalog) -> None:
+    """A decision model answers typed questions; it is not a chat model on any path."""
+    if model in catalog.decision_models:
+        raise ValueError(
+            f"{model!r} is a decision model, not a chat model — it cannot be used as an agent "
+            "or chat model; call base.lm.catalog.decide.call.decide() instead"
+        )
 
 
 def _validate_model_effort(
@@ -452,6 +462,7 @@ def build_chat_model_bound(
     # that never load agent-side plugin.py.
 
     requested_model = model
+    _reject_decision_model(model, catalog=catalog)
     model = resolve_available_model(model, models=catalog.models)
     if model != requested_model:
         if single_attempt:

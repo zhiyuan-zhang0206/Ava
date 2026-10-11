@@ -7,14 +7,19 @@ the schedule-stall alert (`base.deploy.timing`) is ordered above it. Two clocks
 that disagree about "stopped making progress" are two chances to declare a host
 dead while it is working, or alive while it is not.
 
-## Why 900 s
+## Why 360 s
 
-The value is far above the measured POSIX agent-runner leg (2-15 s across 44
-samples on two hosts, 2026-07-01..29) because the Windows leg is two orders of
-magnitude slower: production rollouts of 2026-08-06..12 converged `win` inside
-0-11 minutes, and five rounds spent the whole bound. It is roughly 1.5x the
-longest leg observed, not a first-principles ceiling; the orderings it must keep
-against its neighbours are declared and checked in `base.deploy.timing`.
+The only runtime consumer is the ops daemon's wedge bound, so the value bounds
+how long one `/ops` request may legitimately run. Measured on the production
+`api_idempotency` ledger (the only record of ops request wall time: `completed_at -
+created_at`, 2026-09-11..10-11): 109 completed `lifecycle` requests with p50 1.3 s,
+p99 39.2 s, max 94.1 s, and 52 `spawn-launch-v2` requests with max 2.5 s. The longest
+deadline any caller puts on an ops request is 130 s (the upload delivery worker), so
+an op running past that has already been abandoned by its caller.
+
+360 s is 3.8x the measured maximum and 2.8x the longest caller deadline. It must stay
+above ten times `GATEWAY_PREFLIGHT_BUDGET_S` and below the schedule-stall alert; both
+orderings are declared and checked in `base.deploy.timing`.
 
 The module also holds the agent-lease family, the `ava start` readiness
 clocks and a remote unit's capability bundle lifetime; each constant's comment
@@ -25,7 +30,7 @@ from __future__ import annotations
 
 # The one definition of "this host has stopped making progress" (module
 # docstring names its consumers).
-NO_PROGRESS_TIMEOUT_S = 900.0
+NO_PROGRESS_TIMEOUT_S = 360.0
 
 # How often the agent host renews its hosted agents' leases: the one ownership
 # beat of `services/agent_runner/agent_host/daemon.py` (`_beat_forever`), which sleeps exactly

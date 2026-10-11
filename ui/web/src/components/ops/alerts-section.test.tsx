@@ -61,7 +61,7 @@ describe("AlertsSection", () => {
             ...ROW,
             id: 8,
             alertname: "machine offline",
-            annotations: { summary: "wsl back online" },
+            annotations: { summary: "runner-a back online" },
             status: "resolved",
             source: "machine-probe",
           },

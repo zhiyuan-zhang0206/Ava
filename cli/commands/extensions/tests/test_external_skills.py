@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import os
-import stat
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -45,23 +43,6 @@ def _bridge_module():
 
 def _filesystem_module():
     return importlib.import_module("cli.commands.extensions.external_skill_host.filesystem")
-
-
-def _ntfs_lstat(
-    inspect: Callable[[Path], os.stat_result],
-) -> Callable[[Path], os.stat_result]:
-    def inspect_with_synthetic_mode(path: Path) -> os.stat_result:
-        current = inspect(path)
-        values = list(current)
-        if stat.S_ISREG(current.st_mode):
-            values[stat.ST_MODE] = stat.S_IFREG | 0o666
-        elif stat.S_ISDIR(current.st_mode):
-            values[stat.ST_MODE] = stat.S_IFDIR | 0o777
-        else:
-            raise AssertionError(f"unexpected filesystem entry: {path}")
-        return os.stat_result(values)
-
-    return inspect_with_synthetic_mode
 
 
 def _write_source(repo: Path, *, body: str = "operator v1\n") -> Path:
@@ -289,48 +270,6 @@ def test_unmodified_managed_copy_updates_and_removes_only_stale_target_content(
     assert not (target / "references" / "recovery.md").exists()
     assert (target / "references" / "workspace.md").read_text() == "workspace lookup\n"
     assert unrelated.read_text() == "user owned\n"
-    assert _temp_entries(client_home / "skills") == []
-
-
-def test_ntfs_synthetic_modes_do_not_break_converge(
-    home: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
-) -> None:
-    repo = tmp_path / "repo"
-    source = _write_source(repo)
-    client_home = home / ".codex"
-    client_home.mkdir()
-    filesystem = _filesystem_module()
-    monkeypatch.setattr(filesystem, "is_posix", lambda: False)
-    monkeypatch.setattr(filesystem, "lstat", _ntfs_lstat(filesystem.lstat))
-    monkeypatch.setattr(filesystem, "source_lstat", _ntfs_lstat(filesystem.source_lstat))
-
-    _run(
-        repo,
-        home,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_config_machine=command_config_machine,
-    )
-
-    target = _target(client_home)
-    assert (target / "SKILL.md").read_text() == "operator v1\n"
-
-    (source / "SKILL.md").write_text("operator v2\n")
-    _run(
-        repo,
-        home,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_config_machine=command_config_machine,
-    )
-
-    assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert _temp_entries(client_home / "skills") == []
 
 

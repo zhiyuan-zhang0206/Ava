@@ -24,7 +24,7 @@ in [`docs/conventions/philosophy.md`](conventions/philosophy.md).)
 ## 🚀 Quickstart
 
 From zero to your first agent in about 15 minutes — full install guide with
-screenshots, Windows notes, and FAQ: **[QUICKSTART.md](../QUICKSTART.md)**.
+screenshots, and FAQ: **[QUICKSTART.md](../QUICKSTART.md)**.
 
 ---
 
@@ -121,9 +121,8 @@ logs and traces correlate; alerts reach chat end to end.
 Multi-machine is the default, not a premium configuration. A cluster is one
 gateway machine (owns the data plane) plus any number of agent-runner machines
 (only execute agents); **any machines that are network-reachable to each other
-form a cluster**. Authentication is always on and fail-closed. macOS, Linux,
-and Windows are all supported — Windows joins natively as an agent-runner, no
-WSL, no Docker. A single box is just the N=1 case: no flag, no opt-in.
+form a cluster**. Authentication is always on and fail-closed. macOS and Linux
+are supported. A single box is just the N=1 case: no flag, no opt-in.
 
 → [How multi-machine deployment works](decisions/runtime/updates/release/2026-06-11-multihost-deployment.md)
 

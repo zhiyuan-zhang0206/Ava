@@ -2,7 +2,7 @@
 
 One round trip backs the whole Insights Ops section: time-bucketed series
 for the three MVP metric groups (SSE/event-log backlog, LLM latency + TPS,
-process restart counts) plus whole-window totals and breakdowns. Series are
+service start counts) plus whole-window totals and breakdowns. Series are
 computed from `telemetry_events` (`gateway/cluster/ops_series`): counts and sums
 are exact, LLM p50/p95/max latency are exact over the rows of each bucket.
 Window is capped at 7d.
@@ -24,12 +24,6 @@ from gateway.cluster.schemas import OpsMonitorReport
 router = APIRouter()
 
 
-def _lookup_agent_labels(conn: psycopg.Connection, agent_ids: list[int]) -> dict[int, str | None]:
-    """Read the small agents-label projection."""
-    rows = conn.execute("SELECT id, label FROM agents WHERE id = ANY(%s)", (agent_ids,)).fetchall()
-    return dict(rows)
-
-
 @router.get("/api/ops/monitor")
 def get_ops_monitor(
     request: Request,
@@ -42,9 +36,7 @@ def get_ops_monitor(
     try:
         with request.app.state.db_pool.connection() as conn:
             conn.execute("SET LOCAL statement_timeout = '8s'")
-            data = fetch_ops_series(
-                conn, window, label_lookup=lambda agent_ids: _lookup_agent_labels(conn, agent_ids)
-            )
+            data = fetch_ops_series(conn, window)
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="ops monitor read timed out; retry") from exc
     return OpsMonitorReport(**data)

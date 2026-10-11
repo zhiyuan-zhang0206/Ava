@@ -159,12 +159,6 @@ def load_extensions(
     from ava.sdk_surface.plugin_loader import safe_load_plugin_module
 
     previous = sdk_install.uninstall() if not surface else None
-    sender = (
-        previous.delivery_sender
-        if previous is not None and previous.authority is authority
-        else None
-    )
-
     sampling = None
     if previous is not None:
         sampling = previous.sampling
@@ -201,7 +195,6 @@ def load_extensions(
             report,
             catalog=catalog,
             authority=authority,
-            delivery_sender=sender,
             producer=producer,
             sampling=sampling,
             clock_factory=clock_factory,

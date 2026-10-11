@@ -11,12 +11,10 @@ import ava
 from base import telemetry
 from base.cluster.machine import MachineIdentity
 from base.db import Database
-from base.native_process.os_platform import is_windows
 from base.paths import ava_home
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 pytestmark = [
-    pytest.mark.skipif(is_windows(), reason="PTY supervisor is POSIX-only"),
     pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
 

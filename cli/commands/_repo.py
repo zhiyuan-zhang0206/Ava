@@ -1,13 +1,9 @@
-"""Path / role helpers + preflight checks used by every cmd_*.
+"""Path / role helpers and preflight checks used by CLI commands.
 
-The cli-facing façade for the service roster: `ServiceSpec`, `build_services()`,
-and the capability filters (`_services_for_roles`, `_services_for_roles_annotated`)
-are re-exported from the ops desired-state module family so existing call sites
-keep their `from cli.commands._repo import ...` imports. This module owns:
-- `session_name()` composer re-export: `ava-<service>`
-- `_roles_or_none()` capability read
-- repo root + memory-pool / frontend / schema / gateway / register
-  preflight checks reused by `start`, `status`, `update`, `cluster`, etc.
+This module owns the capability read, repo root, and memory-pool / frontend /
+schema / gateway / register preflight checks. Service declarations and roster
+selection are defined in ops.roster.service_spec, ops.roster, and ops.spec;
+callers import those definitions directly.
 """
 
 from __future__ import annotations
@@ -20,32 +16,13 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-# Re-exported (redundant alias marks intentional re-export) so existing call
-# sites `from cli.commands._repo import session_name` keep working after the
-# composer moved to base.cluster.
-from base.cluster import session_name as session_name
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
-from base.host.system.backend import get_backend
 from base.sessions.env_forwarding import frontend_toolchain_env
 from cli.commands._setup import SetupValues
-
-# The service roster + capability filtering live in the `ops` module family — the
-# single desired-state source (`base < ops < {gateway, cli}`). Bound here under their
-# historical names (module-level assignments, so both ruff and pyright see them as
-# intentional exports) so existing `from cli.commands._repo import ...` call sites
-# (start / status / stop / update / converge / __init__) keep working; `_repo` stays
-# the cli-facing façade, while the `ops` module family owns the definitions.
 from cli.database.runtime import CommandRuntime
-from ops import spec as _spec
-from ops.roster import build_services as build_services
-from ops.roster.service_spec import ServiceSpec as ServiceSpec
-from ops.roster.service_spec import profile_marker as profile_marker
-
-_services_for_roles = _spec.services_for_capabilities
-_services_for_roles_annotated = _spec.services_for_capabilities_annotated
 
 
 def _roles_or_none(*, machine: MachineIdentity) -> MachineRoles | None:
@@ -139,13 +116,10 @@ def _ensure_frontend_deps(repo: Path) -> None:
     else:
         reason = "missing" if not node_modules.is_dir() else "package-lock.json changed"
         print(f"  · frontend deps {reason}, running npm ci (~30-60s)")
-    # On Windows `npm` is `npm.cmd`, which CreateProcess won't resolve from a bare
-    # "npm" argv — run it through the shell so the .cmd shim is found.
     subprocess.run(
         ["npm", "ci"],
         cwd=str(fe),
         check=True,
-        shell=get_backend().npm_shell_flag(),
         env=frontend_toolchain_env(),
     )
     stamp.write_text(want)

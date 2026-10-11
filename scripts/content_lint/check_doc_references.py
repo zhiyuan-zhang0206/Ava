@@ -7,7 +7,7 @@ Run: `.venv/bin/python scripts/content_lint/check_doc_references.py` (exit 1 on 
 
 Two escapes, hours apart, from the same class:
 
-- `docs/conventions/operations/windows-setup.md` told readers to run
+- A setup guide told readers to run
   `install.sh --skip-native-infra`. That flag has never existed.
 - `ava_builtins/skills/ava-self-development/SKILL.md` — a skill agents load and
   *execute* — told them `ava start --cluster preview`, eight days after

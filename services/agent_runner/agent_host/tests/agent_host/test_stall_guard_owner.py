@@ -65,8 +65,9 @@ async def test_external_cancel_retains_the_same_unknown_invocation_error() -> No
     guard = asyncio.create_task(run_invocation_with_stall_guard(graph, 7, ctx, {}, {}))
     await entered.wait()
     guard.cancel()
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(ValueError) as propagated:
         await guard
+    assert propagated.value is error
     await asyncio.sleep(0)
     assert actual is not None
     with pytest.raises(ValueError) as original:

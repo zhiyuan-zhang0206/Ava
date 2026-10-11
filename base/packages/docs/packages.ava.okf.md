@@ -22,15 +22,8 @@ initial missing-image read. Invalid images, disappearing files and unexpected
 read/write errors still fail binding; the default writer never overwrites an
 existing authority.
 
-Configuration upgrades reconcile the declared schema in memory before importing
-legacy environment aliases. Stored current fields validate before any alias can
-replace them; conflicting explicit image and legacy values reject the whole
-candidate without changing either file. A field absent from the old image may
-adopt its typed legacy value instead of a new default. Retired fields follow the
-schema merge's existing removal rule. The completed candidate commits once
-through the same image CAS writer, then only the adopted aliases leave `.env`
-under its expected-value check. Alias-removal failure keeps a same-value retry
-possible; the image and `.env` are not one transaction.
+Configuration upgrades reconcile the declared schema in memory before the image is
+rewritten; retired fields follow the schema merge's existing removal rule.
 
 ## Documented components
 

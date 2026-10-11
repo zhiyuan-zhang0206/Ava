@@ -49,9 +49,9 @@ def _same_dir(candidate: Path, target: Path) -> bool:
 def _folds_case(target: Path) -> bool:
     """Whether the filesystem resolves a case-flipped spelling of `target`.
 
-    macOS APFS and WSL DrvFs fold case; ext4 does not. Probed by flipping one
-    letter at a time until a spelling resolves to `target` itself (a path can
-    cross a case-sensitive mount boundary, e.g. /mnt/c on WSL). A target that
+    macOS APFS folds case; ext4 does not. Probed by flipping one letter at a
+    time until a spelling resolves to `target` itself (a path can cross a
+    case-sensitive mount boundary). A target that
     does not exist reports False — the string fallback then stays exact.
     """
     text = str(target)

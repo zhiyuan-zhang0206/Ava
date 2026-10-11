@@ -84,7 +84,7 @@ def _base_retry_delay_s(context: AvaContext | None = None) -> float:
 
 # ── Transient-failure retry policy ──
 # The gateway response policy lives in base.agents.messages.delivery.retry.
-# Transport retry and SDK/CLI outbox interception share its known statuses
+# SDK and CLI bounded retry share its known statuses
 # (429/502/503/504) and respect committed/retryable wire controls.
 
 # Bounded exponential backoff: attempt i sleeps the base delay multiplied by

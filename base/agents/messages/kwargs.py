@@ -58,7 +58,7 @@ class ExecStatus(StrEnum):
     running (syntax error). TIMED_OUT / CANCELLED: stopped at the sandbox limit / by an
     interrupt. HALTED: it ended the run by lifecycle request (compact, restart,
     terminate, impersonation). NOT_RUN: the call never executed (unknown tool, skipped
-    behind an earlier halt, synthetic interrupted result)."""
+    behind an earlier halt). UNKNOWN: the call was interrupted and its result is unconfirmed."""
 
     COMPLETED = "completed"
     FAILED = "failed"
@@ -66,6 +66,7 @@ class ExecStatus(StrEnum):
     CANCELLED = "cancelled"
     HALTED = "halted"
     NOT_RUN = "not_run"
+    UNKNOWN = "unknown"
 
 
 class NoteTag(StrEnum):

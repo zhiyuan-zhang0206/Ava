@@ -129,7 +129,6 @@ def test_stall_guard_fires_on_select_outside_subprocess(
             assert "select" in fired[0]
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="preexec_fn requires POSIX")
 def test_stall_guard_fires_during_subprocess_spawn(
     monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
@@ -188,7 +187,6 @@ def test_stall_guard_fires_during_subprocess_argument_conversion(
                 wake.join()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX subprocess flush and pipe semantics")
 def test_stall_guard_fires_during_subprocess_stdin_flush(
     monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
@@ -207,7 +205,6 @@ def test_stall_guard_fires_during_subprocess_stdin_flush(
         fd = child.stdin.fileno()
         os.set_blocking(fd, False)
         try:
-            # Stop when the actual pipe capacity is full, on macOS and Linux.
             with suppress(BlockingIOError):
                 while True:
                     os.write(fd, b"x" * 65536)

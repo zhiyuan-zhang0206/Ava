@@ -45,8 +45,6 @@ def log_usage_from_message(
     usage_kind: str = "agent",
     source: str | None = None,
     for_agent_id: int | None = None,
-    cache_mechanism: str | None = None,
-    cache_scope: str | None = None,
     stamp_message: bool = False,
     catalog: ModelCatalog,
 ) -> tuple[int, float] | None:
@@ -91,8 +89,6 @@ def log_usage_from_message(
         usage_kind=usage_kind,
         source=source,
         for_agent_id=for_agent_id,
-        cache_mechanism=cache_mechanism,
-        cache_scope=cache_scope,
         emit_billing="input_tokens" in usage_metadata and "output_tokens" in usage_metadata,
         requested_model=model,
         record_out=record,
@@ -114,9 +110,8 @@ def log_usage_fields(
     tok_reasoning: int = 0,
     latency_ms: float | None = None,
     usage_kind: str,
+    source: str | None = None,
     for_agent_id: int | None = None,
-    cache_mechanism: str | None = None,
-    cache_scope: str | None = None,
     catalog: ModelCatalog,
 ) -> tuple[int, float]:
     """Log raw provider token counts when no LangChain message exists."""
@@ -130,9 +125,8 @@ def log_usage_fields(
         reasoning=tok_reasoning,
         latency_ms=latency_ms,
         usage_kind=usage_kind,
+        source=source,
         for_agent_id=for_agent_id,
-        cache_mechanism=cache_mechanism,
-        cache_scope=cache_scope,
         catalog=catalog,
     )
 
@@ -167,8 +161,6 @@ def _log_usage(
     priced_at: datetime | None = None,
     source: str | None = None,
     for_agent_id: int | None = None,
-    cache_mechanism: str | None = None,
-    cache_scope: str | None = None,
     emit_billing: bool = True,
     requested_model: str | None = None,
     cache_write_5m: int = 0,
@@ -246,11 +238,6 @@ def _log_usage(
         decode_ms=decode_ms,
         usage_kind=usage_kind,
         **({"source": source, "transport_source": "system"} if source is not None else {}),
-        **(
-            {"cache_mechanism": cache_mechanism, "cache_scope": cache_scope}
-            if cache_mechanism is not None
-            else {}
-        ),
         **record,
     )
     return in_total + out_total, priced.cost_usd if priced is not None else 0.0

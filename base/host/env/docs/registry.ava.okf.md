@@ -16,7 +16,7 @@ registry without constructing Settings. Before Settings exists, boot-time
 projections read the generated static index in `config_lite_table.py`.
 
 Non-Settings passthrough keys include display/home/account variables, network
-proxy settings, temporary directories and Windows system keys. PATH and
+proxy settings, temporary directories. PATH and
 VIRTUAL_ENV are registered inventory keys rebuilt at the delivery site rather
 than copied blindly. Enabled provider-plugin bindings declare removable provider
 keys; those declarations load at the delivery boundaries that consume them.

@@ -20,7 +20,7 @@ import psutil
 import pytest
 
 from base.native_process import pid_starttime_ticks
-from base.native_process.os_platform import is_linux, is_windows
+from base.native_process.os_platform import is_linux
 from base.sessions import posixproc
 from base.sessions.record import SessionRecord
 from base.sessions.tests.process_evidence import (
@@ -30,8 +30,6 @@ from base.sessions.tests.process_evidence import (
     no_zombie_children,
 )
 from tests.components.base.poll_until import poll_until
-
-pytestmark = pytest.mark.skipif(is_windows(), reason="posixproc is the POSIX supervisor")
 
 # A long-lived child that outlives the test body; each test kills it explicitly.
 _SLEEP = ["/bin/sleep", "300"]
@@ -288,7 +286,7 @@ def test_has_session_false_when_process_gone(unit_home) -> None:
 
 def test_list_sessions_reaps_dead_record(unit_home) -> None:
     """A record whose process is gone is unlinked as list_sessions walks it, so the
-    listing reflects reality (mirrors winproc)."""
+    listing reflects reality."""
     name = "ava-test-agent-6"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
@@ -460,7 +458,7 @@ def test_list_sessions_keeps_recycled_pid_record_while_group_occupied(
 
 def test_new_session_idempotent_when_live(unit_home) -> None:
     """A second new_session for a still-live name is a no-op (returns True without
-    relaunching) — matching winproc + the has-session guard at the call site."""
+    relaunching) — matching the has-session guard at the call site."""
     name = "ava-test-agent-7"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     try:
@@ -482,7 +480,7 @@ def test_kill_session_survivor_reports_and_keeps_record(
 ) -> None:
     """A kill that fails to take the process down returns (False, mode) and
     KEEPS the record — the no-DB reap's only view of the survivor (audit
-    2026-08-08 P1; mirrors winproc's #1015 fix). The old code reported
+    2026-08-08 P1). The old code reported
     success unconditionally and unlinked the record, so a live-but-unbacked
     session became a service nothing starts."""
     name = "ava-test-agent-survivor"

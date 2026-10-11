@@ -65,7 +65,7 @@ Per-panel provenance:
 from __future__ import annotations
 
 from base.events.contract import DELIVERY_STALLED_KEYS, GATEWAY_LATENCY_KEYS, LLM_USAGE_KEYS
-from base.telemetry.metrics.logql import CATEGORY_WITH_LEGACY_LOG, event_count
+from base.telemetry.metrics.logql import CATEGORY_OR_LOG, event_count
 from base.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep
 
 # ── LogQL fragments (Task #1280) ──────────────────────────────────────────────
@@ -164,7 +164,7 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="short",
             panel="stat",
-            query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level="warning"', "$__range"),
+            query=event_count(f'{CATEGORY_OR_LOG} | level="warning"', "$__range"),
             query_type="logql",
             target_names=["warning"],
             field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
@@ -185,7 +185,7 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="short",
             panel="stat",
-            query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level=~"error|critical"', "$__range"),
+            query=event_count(f'{CATEGORY_OR_LOG} | level=~"error|critical"', "$__range"),
             query_type="logql",
             target_names=["error"],
             options={"noValue": "0"},
@@ -638,10 +638,8 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="short",
             panel="timeseries",
-            query=event_count(
-                f'{CATEGORY_WITH_LEGACY_LOG} | level=~"warning|error|critical"', "5m"
-            ),
-            targets=[event_count(CATEGORY_WITH_LEGACY_LOG, "5m")],
+            query=event_count(f'{CATEGORY_OR_LOG} | level=~"warning|error|critical"', "5m"),
+            targets=[event_count(CATEGORY_OR_LOG, "5m")],
             query_type="logql",
             target_names=["warn+error", "total"],
             custom={"axisLabel": "events/min"},

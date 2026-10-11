@@ -73,3 +73,5 @@ belongs only to the caller that names it — the same invariant the session serv
 - Correctness no longer depends on session records surviving the teardown: the
   second rule (self + ancestry) protects the process running the stop even after
   its own record has been unlinked.
+
+Superseded in part by: [decisions/2026-10-11-remove-windows-and-wsl-support.md](../../hosts/2026-10-11-remove-windows-and-wsl-support.md) — Windows and WSL support is removed.

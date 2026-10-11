@@ -100,6 +100,7 @@ _PROVIDER_KEY_ENV_VARS = frozenset(
         "GLM_API_KEY",  # ava_builtins/plugins/lm_zhipu
         "MIMO_API_KEY",  # ava_builtins/plugins/lm_xiaomi
         "MOONSHOT_API_KEY",  # ava_builtins/plugins/lm_moonshot
+        "TYPESAFE_API_KEY",  # ava_builtins/plugins/lm_typesafe
     }
 )
 

@@ -66,7 +66,7 @@ def read(db: Database, machine: str, *, conn: Any | None = None) -> HostDeploySt
     """This host's (or `machine`'s) deploy-state row; None when no row exists yet.
 
     A missing row reads as idle — every consumer's default — so a host that has
-    never been paused (or whose row the migration did not seed) behaves exactly
+    never been paused behaves exactly
     like an unpaused one. When `conn` is supplied, the caller owns its lifecycle;
     otherwise this read opens and closes one connection as before.
     """

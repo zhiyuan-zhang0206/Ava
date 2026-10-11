@@ -42,7 +42,7 @@ capability.
 |---|---|---|---|---|
 | Loki | native, `ava-root` service | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 84h retention |
 | Prometheus | native, `ava-root` service | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
-| Tempo | remote per cluster config | native backend on the station host; compose copy is the rollback asset | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
+| Tempo | remote per cluster config | host-managed on the station; this repository carries no Tempo configuration | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
 | Grafana | native, `ava-root` service | 13.2.3 | 3003 | anonymous read-only UI |
 
 The pinned release assets and SHA256 values live in
@@ -54,8 +54,7 @@ support Darwin arm64 and Linux amd64; unsupported platforms warn and skip.
 
 Native templates in `native/config/` are rendered on every converge into
 `$AVA_HOME/lgtm/native/config/`, including Grafana's INI, runtime environment,
-and launch script. Loki's limits and query defenses are copied from the rollback
-configuration and must remain aligned. Native backend listen hosts are config
+and launch script. Native backend listen hosts are config
 knobs (`AVA_LGTM_LISTEN_HOST`, `AVA_LGTM_GRAFANA_LISTEN_HOST`): Loki and
 Prometheus default to loopback, Grafana defaults to all interfaces, and native
 Grafana dials Loki, Prometheus, and Postgres on the host loopback.
@@ -110,12 +109,7 @@ One Grafana UI over Loki, Prometheus, and Tempo gives operators native LogQL,
 metrics, and trace exploration while keeping the rest of the product's OTel
 pipeline unchanged. Loki, Prometheus, and Grafana use verified native release
 assets on the LGTM host, and Tempo is selected by per-cluster configuration.
-Grafana and Tempo compose copies are used only during a manual rollback. The
-compose provisioning files are valid as checked in — datasource and webhook
-URLs use Grafana's native `$__env{}` expansion against the static defaults in
-`config/grafana/runtime.env` (loopback, identical to the native default), so a
-compose rollback never needs rendered templates. The
-native collector sidecar is still the one
+The native collector sidecar is still the one
 local OTLP entry on port 4318 for this marked home; its filelog receivers also
 own session-log shipping. OTLP records carry the home-derived `cluster`
 dimension, and the collector rejects non-null values belonging to another home
@@ -123,12 +117,11 @@ before they reach Loki, Prometheus, or Tempo.
 
 ## Resource and retention posture
 
-Loki and Prometheus use explicit Go memory limits rather than container memory
-caps. Loki retains normal streams for 84 hours, preserves the configured
+Loki and Prometheus use explicit Go memory limits. Loki retains normal streams for 84 hours, preserves the configured
 archive-stream exception, and keeps bounded query splitting, fan-out, and
 embedded result caches. Prometheus retains data for 15 days or 8GB, whichever
-limit is reached first. Tempo declares its 168-hour block retention. The two
-container services retain explicit CPU and memory capsules. Each native backend's
+limit is reached first. Tempo's block retention is set in its host-managed
+configuration (168 hours). Each native backend's
 stdout and stderr go to `$AVA_HOME/run/ava-root/logs/<name>/output.log` (`<name>`
 is `loki`, `prometheus`, or `grafana`); Grafana's own log files are written to
 `$AVA_HOME/lgtm/native/logs/`.
@@ -158,9 +151,8 @@ and `prometheus_tsdb_too_old_samples_total` rose by 2,321. The worst observed
 lateness was ~2h15m. The window is raised from 30m to 6h, ~2.7x that observed
 delay. A larger window holds out-of-order samples in the TSDB head longer and
 costs memory, so a delay beyond 6h should be investigated before increasing
-it again. This is an operations setting in both
-`deploy/lgtm/native/config/prometheus.yml` and
-`deploy/lgtm/config/prometheus.yml`, not a framework constant.
+it again. This is an operations setting in
+`deploy/lgtm/native/config/prometheus.yml`, not a framework constant.
 
 The `ava-ops-prom-too-old-samples` rule fires on any increase in the counter
 over 10m. That counter covers both the whole-batch HTTP 400 path and a silent
@@ -189,8 +181,7 @@ curl -fsS http://127.0.0.1:9090/api/v1/status/config |
   grep -F 'out_of_order_time_window: 6h'
 ```
 
-The checked-in container rollback config carries the same setting. After the
-next collector recovery event, verify all of the following:
+After the next collector recovery event, verify all of the following:
 
 1. The recovering collector's `otlphttp/prometheus` exporter has no new
    `Dropping data` log entry.
@@ -280,9 +271,9 @@ Copy `.env.example` to `.env` only when an override is needed.
 |---|---|---|
 | `GRAFANA_ROOT_URL` | `http://localhost:3003` | Grafana redirect URL |
 | `GRAFANA_PROVISIONING_PATH` | checkout provisioning directory | Rendered by converge for native Grafana; do not set it in `.env` |
-| `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` | `http://127.0.0.1:3100` / `http://127.0.0.1:9090` | Datasource URLs, expanded by Grafana from `$__env{}` references in the provisioning files. Native converge renders the two-state values (observatory base when `AVA_OBSERVABILITY_URL` is set); compose keeps the static loopback defaults |
-| `AVA_PG_URL` | Derived from the direct DB URL (legacy default `127.0.0.1:5433`) | Native converge renders the cluster data plane's scheme-less host:port, resolving a local registered PgBouncer port to PostgreSQL; it never follows the observatory host. A remote pooler with no local registry mapping retains the configured endpoint with the existing direct-URL warning. Manual compose keeps its static default. |
-| `AVA_ALERTS_WEBHOOK_URL` | Loopback plus `AVA_GATEWAY_PORT` and `/api/alerts` (default port 8000) | Native converge keeps local Grafana traffic on loopback. With `AVA_OBSERVABILITY_URL` set, it uses `AVA_GATEWAY_URL`, preserving scheme, port and proxy path; a legacy empty URL uses the gateway's reachable host and configured bind port. Manual compose keeps its static default. |
+| `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` | `http://127.0.0.1:3100` / `http://127.0.0.1:9090` | Datasource URLs, expanded by Grafana from `$__env{}` references in the provisioning files. Native converge renders the two-state values (observatory base when `AVA_OBSERVABILITY_URL` is set) |
+| `AVA_PG_URL` | Derived from the direct DB URL (legacy default `127.0.0.1:5433`) | Native converge renders the cluster data plane's scheme-less host:port, resolving a local registered PgBouncer port to PostgreSQL; it never follows the observatory host. A remote pooler with no local registry mapping retains the configured endpoint with the existing direct-URL warning. |
+| `AVA_ALERTS_WEBHOOK_URL` | Loopback plus `AVA_GATEWAY_PORT` and `/api/alerts` (default port 8000) | Native converge keeps local Grafana traffic on loopback. With `AVA_OBSERVABILITY_URL` set, it uses `AVA_GATEWAY_URL`, preserving scheme, port and proxy path; a legacy empty URL uses the gateway's reachable host and configured bind port. |
 | `AVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export |
 | `AVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus; when Tempo is remote, this host-scoped setting must name its remote query endpoint (writable through the config API), and converge warns when it conflicts with the intake topology |
 | `AVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for the native Loki (HTTP+gRPC) and Prometheus (web) listeners; `0.0.0.0` or a tailnet IP is the external-migration form — the matching `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` must follow (converge warns otherwise) |
@@ -308,9 +299,7 @@ When the observatory moves to a remote station (stage C of the observatory
 migration, `AVA_OBSERVABILITY_URL` set), the *rendered* Grafana is what
 migrates: point `GRAFANA_ROOT_URL` at the station's browser-reachable URL
 (e.g. the gateway proxy base or the station's tailnet address, keeping
-`serve_from_sub_path` semantics) so redirects survive the move. The
-docker-compose rollback path reads the same variable (`.env`),
-so a shared value stays consistent across both lifecycles. The alert webhook
+`serve_from_sub_path` semantics) so redirects survive the move. The alert webhook
 and datasource URLs are separate settings (`AVA_ALERTS_WEBHOOK_URL` /
 `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL`) — they follow the
 observatory independently, per the two-state rules above.
@@ -328,13 +317,11 @@ on this surface. Status of each, as of WP3:
 | Agent export endpoint default `http://127.0.0.1:4318` | `base/config/domains/observability/settings.py` | Default derived from the same constant; the full URL stays a separate override (`AVA_TELEMETRY_OTLP_ENDPOINT`) |
 | Loki/Prometheus/Grafana readiness | `base/telemetry/lgtm_local.py` | Local native listen settings; external query URLs do not select process ownership. |
 | Grafana `root_url` `http://localhost:3003` | `deploy/lgtm/native/config/run.sh` | Deliberately NOT parameterized into a converge render: it is the browser-facing redirect base, resolved at runtime from `GRAFANA_ROOT_URL` (migration section above). Rendered run.sh is asserted byte-identical in `cli/commands/observability/tests/test_converge_lgtm.py` |
-| Tempo container-internal OTLP receiver `0.0.0.0:4318` | `deploy/lgtm/config/tempo.yaml` (docker-compose rollback path) | Cannot be parameterized: it is the container-internal contract the compose file maps host `14318` → container `4318`; the host-visible OTLP entry on the LGTM host is `14318` (`AVA_TELEMETRY_TEMPO_ENDPOINT`), and `4318` on the host belongs to the sidecar |
 | Test pins `http://127.0.0.1:3200` / `http://127.0.0.1:14318` / `localhost` / `AVA_TELEMETRY_OTLP_PORT=4318` | `tests/fixtures/env_bootstrap.py` | Reviewed WP3: every pin exists to neutralize the operator's ambient `.env` on a dev box (login-shell leak class) and is asserted against both env and settings so a weakened pin fails loudly. `GRAFANA_ROOT_URL` is deliberately not pinned — it never reaches renders (script-level default), only runtime Grafana |
 
 Everything host-visible on the OTLP/LGTM surface now derives from settings;
-the two intentional literals left are the Grafana redirect base (runtime env
-by design) and the compose container-internal receiver port (mapping
-contract).
+the one intentional literal left is the Grafana redirect base (runtime env
+by design).
 
 ## Verify
 

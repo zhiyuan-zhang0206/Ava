@@ -24,17 +24,12 @@ uniqueness across plugins) and fills ``plugin`` from the registry entry; nothing
 process-wide.
 
 SQL safety (enforced when the data registry admits a plugin, task #180 PR C): a metric query must
-be a static single SELECT over ``events`` (the retired archive) or
-``agents_meta`` (live), built from a whitelist of keywords, aggregate
+be a static single SELECT over ``agents_meta`` (live), built from a whitelist of keywords, aggregate
 functions, operators and literals — no DML/DDL, no information/``pg_*``
 functions, no comments, no multi-statement, no Grafana macros, no
-``{event_name}`` / ``{category}`` / ``{{agent_id}}`` placeholders (the live
-event stream is read through LogQL, task #1280).
-
-**SQL metrics retired (task #1823)**: the frozen ``events`` table was
-dropped, so SQL templates (whose FROM clauses are restricted to that table)
-fail at runtime; no in-repo registration uses them — external plugins must
-migrate to ``query_type="logql"`` / ``"promql"``. LogQL templates
+``{event_name}`` / ``{category}`` / ``{{agent_id}}`` placeholders. The event
+stream is not in Postgres: SQL templates read live state tables only, and event
+metrics use ``query_type="logql"`` / ``"promql"``. LogQL templates
 (``query_type="logql"``) follow the lighter contract in
 ``base/telemetry/metrics/logql.py``. PromQL templates (``query_type="promql"``)
 are static Prometheus expressions.
@@ -50,7 +45,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from base.telemetry.metrics.plugin_metrics_sql import (
     _DOUBLE_QUOTED_OK,
     _QUOTED_RE,
-    _SQL_COLUMNS,
     _SQL_DENIED_KEYWORDS,
     _SQL_FUNCTIONS,
     _SQL_KEYWORDS,
@@ -161,8 +155,8 @@ class MetricSpec(BaseModel):
     unit: str = "short"
     panel: PanelType = "timeseries"
     query: str = Field(min_length=1)
-    # Query dialect: "sql" (postgres datasource over the legacy `events`
-    # table), "logql" (Loki event stream, #1280), or static "promql"
+    # Query dialect: "sql" (postgres datasource over live state tables such
+    # as `agents_meta`), "logql" (Loki event stream, #1280), or static "promql"
     # (Prometheus gauges/counters; Grafana-only).
     query_type: Literal["sql", "logql", "promql"] = "sql"
     # Additional query targets (refIds B/C/...) for multi-series panels —
@@ -312,8 +306,8 @@ def _single_statement_body(sql: str) -> str:
     if "{" in body or "}" in body:
         raise InvalidMetricQuery(
             "template placeholders are not allowed in metric queries — "
-            "{event_name}/{category}/{{agent_id}} were retired with the "
-            f"events-table cutover (task #180): {sql!r}"
+            "{event_name}/{category}/{{agent_id}} are not supported in SQL "
+            f"templates: {sql!r}"
         )
     return body
 
@@ -386,13 +380,13 @@ def _check_word(
             f"keyword {value!r} is not allowed in metric query templates "
             f"(denied set: {sorted(_SQL_DENIED_KEYWORDS)}): {sql!r}"
         )
-    if upper in _SQL_KEYWORDS or upper in _SQL_FUNCTIONS or value in _SQL_COLUMNS:
+    if upper in _SQL_KEYWORDS or upper in _SQL_FUNCTIONS:
         return
     # A bare word that is not whitelisted is only allowed as a column
     # reference / alias WITHOUT a call — a following `(` means a function
     # invocation, and only the whitelisted functions may be called
     # (version(), pg_sleep(), now(), ... are rejected here). Column/alias
-    # names resolve against the locked `events` table at query time, so a
+    # names resolve against the `agents_meta` table at query time, so a
     # misspelled one fails the query itself, never executes anything.
     if i + 1 < len(tokens) and tokens[i + 1] == ("op", "(") and i not in from_alias_positions:
         raise InvalidMetricQuery(
@@ -408,12 +402,11 @@ def validate_metric_sql(sql: str) -> None:
     read through LogQL (task #1280), so Grafana time macros and the
     ``{event_name}`` / ``{category}`` / ``{{{{agent_id}}}}`` placeholders are
     rejected outright. What remains is the static-read guardrail: a single
-    SELECT over ``events`` (the retired archive — deliberate archive reads
-    only) or ``agents_meta`` (live), whitelisted functions / columns /
+    SELECT over ``agents_meta`` (live), whitelisted functions /
     operators, no comments / multi-statement / DML / information functions.
 
     Rejects: multi-statement input (``;`` outside the trailing position),
-    comments (``--`` / ``/* */``), any FROM target other than ``events`` /
+    comments (``--`` / ``/* */``), any FROM target other than
     ``agents_meta``, Grafana macros, template placeholders, unknown
     identifiers / functions / operators, and any character the tokenizer
     does not recognize (e.g. dollar-quoted strings).
@@ -425,7 +418,7 @@ def validate_metric_sql(sql: str) -> None:
     tokens = _tokenize_metric_sql(sql, body)
     _require_select(tokens, sql)
 
-    # 4. Every FROM clause must reference only the `events` table (or a
+    # 4. Every FROM clause must reference only the `agents_meta` table (or a
     #    subquery, whose inner FROM clauses are checked recursively). Comma-
     #    separated table lists are walked item by item; a bare word right
     #    after a table/subquery is treated as its alias (harmless — the

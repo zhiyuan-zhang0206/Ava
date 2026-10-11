@@ -12,7 +12,6 @@ from threading import Barrier
 
 import pytest
 
-from base.agents.messages import delivery_outbox
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
 from base.deploy.maintenance import pause_owner
 from base.deploy.release import editable_install
@@ -88,8 +87,7 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     else:
         assert raw == b'{"a":"value","z":1}'
     assert sorted(tmp_path.iterdir()) == [path]
-    if os.name != "nt":
-        assert path.stat().st_mode & 0o777 == 0o600
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "locks"])
@@ -145,46 +143,6 @@ def test_cli_writer_commits_utf8_without_directory_sync(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="journals skip parent fsync on Windows")
-def test_journal_directory_sync_failure_raises_after_visible_commit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "record.json"
-    original_fsync = os.fsync
-
-    def fail_directory_sync(fd: int) -> None:
-        if stat.S_ISDIR(os.fstat(fd).st_mode):
-            raise OSError("directory sync failure")
-        original_fsync(fd)
-
-    monkeypatch.setattr(os, "fsync", fail_directory_sync)
-    entry = delivery_outbox.OutboxEntry(
-        schema_version=1,
-        agent_id=1,
-        source="test",
-        content="message",
-        client_message_id="key",
-        created_at="2026-09-24T00:00:00+00:00",
-        last_attempt_at="2026-09-24T00:00:00+00:00",
-        attempts=1,
-        origin_agent_id=None,
-        origin_pid=None,
-        flush_attempts=0,
-        last_flush_at=None,
-        state=delivery_outbox.DeliveryOutboxState.PENDING,
-        abandon_reason=None,
-        abandon_detail=None,
-        abandoned_at=None,
-    )
-
-    expected = entry.as_dict()
-
-    with pytest.raises(OSError, match="directory sync failure"):
-        delivery_outbox._write_atomic(path, entry)
-    assert path.read_bytes() == json.dumps(expected, separators=(",", ":"), sort_keys=True).encode()
-    assert sorted(tmp_path.iterdir()) == [path]
-
-
 def test_concurrent_marker_writers_publish_complete_snapshots(tmp_path: Path) -> None:
     path = tmp_path / "state.json"
 
@@ -198,7 +156,6 @@ def test_concurrent_marker_writers_publish_complete_snapshots(tmp_path: Path) ->
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows does not support directory fsync")
 def test_bytes_helper_syncs_file_then_parent_and_sets_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -214,8 +171,7 @@ def test_bytes_helper_syncs_file_then_parent_and_sets_mode(
     atomic_io.write_bytes_atomic(path, b"\x00payload", mode=0o600, sync_parent=True)
     assert path.read_bytes() == b"\x00payload"
     assert synced == ["file", "parent"]
-    if os.name != "nt":
-        assert path.stat().st_mode & 0o777 == 0o600
+    assert path.stat().st_mode & 0o777 == 0o600
     assert sorted(tmp_path.iterdir()) == [path]
 
 
@@ -234,7 +190,6 @@ def test_bytes_helper_can_skip_sync_without_skipping_atomic_replace(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="fchmod mode contract is POSIX-only")
 def test_text_helper_applies_requested_public_mode(tmp_path: Path) -> None:
     path = tmp_path / "pointer.pth"
     atomic_io.write_text_atomic(path, "target", mode=0o644, sync_file=False)
@@ -295,7 +250,6 @@ def test_visible_text_writers_clean_temp_after_failed_replace(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="fchmod mode contract is POSIX-only")
 @pytest.mark.parametrize(
     "writer", [editable_install._atomic_write_text, grafana_render._atomic_write]
 )
@@ -317,7 +271,6 @@ def test_visible_text_writers_set_public_mode_without_sync(
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are not Windows ACLs")
 def test_atomic_pointer_replacement_restores_read_only_mode(tmp_path: Path) -> None:
     path = tmp_path / "pointer.pth"
     path.write_text("old")

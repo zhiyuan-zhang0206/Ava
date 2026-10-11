@@ -2,7 +2,7 @@
 
 Covers what the data registry enforces when it admits a plugin's declared metrics: name
 uniqueness and query safety per dialect — the static-SQL whitelist (single SELECT over
-`events` / `agents_meta`, function / operator whitelist, no macros /
+`agents_meta`, function / operator whitelist, no macros /
 placeholders — task #180 PR C) and the LogQL contract
 (``base/telemetry/metrics/logql.py``).
 """
@@ -31,34 +31,34 @@ from base.telemetry.metrics.plugin_metrics import (
 def _good_sqls() -> list[str]:
     return [
         # plain static count (the core_live_agents shape)
-        "SELECT count(*) AS calls FROM events WHERE event_name='llm_usage' "
+        "SELECT count(*) AS calls FROM agents_meta WHERE event_name='llm_usage' "
         "AND category IN ('telemetry','log')",
         # FILTER + JSONB access + NULLIF division (static)
         "SELECT 100.0 * count(*) FILTER (WHERE attributes->>'status' = 'done') "
-        '/ NULLIF(count(*), 0) AS "done %" FROM events '
+        '/ NULLIF(count(*), 0) AS "done %" FROM agents_meta '
         "WHERE event_name = 'task_update' AND category = 'audit' AND attributes ? 'status'",
-        # subquery with its own FROM events (static)
+        # subquery with its own FROM agents_meta (static)
         'SELECT agent_id, max(ratio) AS "max agent" FROM ('
         "SELECT agent_id, SUM((attributes->>'cache_read')::bigint)::numeric "
         "/ NULLIF(SUM((attributes->>'in_total')::bigint), 0) AS ratio "
-        "FROM events WHERE event_name = 'llm_usage' AND category = 'telemetry' "
+        "FROM agents_meta WHERE event_name = 'llm_usage' AND category = 'telemetry' "
         "AND agent_id IS NOT NULL GROUP BY 1) per_agent "
         "GROUP BY 1 ORDER BY 1",
         # trailing semicolon tolerated
-        "SELECT count(*) FROM events WHERE event_name = 'llm_usage';",
+        "SELECT count(*) FROM agents_meta WHERE event_name = 'llm_usage';",
         # comparisons / arithmetic / IS NULL / LIMIT / OFFSET / bare columns
-        "SELECT count(*) FROM events WHERE agent_id IS NULL LIMIT 10 OFFSET 5",
+        "SELECT count(*) FROM agents_meta WHERE agent_id IS NULL LIMIT 10 OFFSET 5",
         # CASE expression + comparisons
-        "SELECT count(*) FILTER (WHERE CASE WHEN event_name = 'a' THEN 1 ELSE 0 END = 1) FROM events",
+        "SELECT count(*) FILTER (WHERE CASE WHEN event_name = 'a' THEN 1 ELSE 0 END = 1) FROM agents_meta",
         # ordered-set aggregate (W18): percentile_cont + WITHIN GROUP
         "SELECT percentile_cont(0.5) WITHIN GROUP "
-        "(ORDER BY (attributes->>'duration_seconds')::float8) AS p50 FROM events",
+        "(ORDER BY (attributes->>'duration_seconds')::float8) AS p50 FROM agents_meta",
         # the live agents_meta table (core_live_agents)
         "SELECT count(*) AS \"live agents\" FROM agents_meta WHERE status IN ('running','idling')",
         # keyword case-insensitivity (Tracker #766): the first keyword and the
         # table reference are accepted in any case, like every other keyword
         # check in the module
-        "select count(*) from events where event_name = 'llm_usage' "
+        "select count(*) from agents_meta where event_name = 'llm_usage' "
         "and category in ('telemetry', 'log')",
     ]
 
@@ -72,42 +72,49 @@ def _bad_sqls() -> list[tuple[str, str]]:
     """(sql, expected fragment) — every query must be rejected and the
     message must say why."""
     return [
-        ("INSERT INTO events (event_name) VALUES ('x')", "single SELECT"),
-        ("UPDATE events SET event_name='x'", "single SELECT"),
-        ("DELETE FROM events", "single SELECT"),
+        ("INSERT INTO agents_meta (event_name) VALUES ('x')", "single SELECT"),
+        ("UPDATE agents_meta SET event_name='x'", "single SELECT"),
+        ("DELETE FROM agents_meta", "single SELECT"),
         ("SELECT 1; SELECT 2", "multi-statement"),
-        ("SELECT count(*) FROM events; DROP TABLE events", "multi-statement"),
-        ("SELECT count(*) FROM agent_events", "only the `events` table"),
-        ("SELECT count(*) FROM events, agent_events", "only the `events` table"),
-        ("SELECT count(*) FROM (SELECT 1 FROM agent_events) x", "only the `events`"),
-        ("SELECT count(*) FROM information_schema.tables", "only the `events`"),
+        ("SELECT count(*) FROM agents_meta; DROP TABLE agents_meta", "multi-statement"),
+        ("SELECT count(*) FROM events", "only the `agents_meta` table"),
+        ("SELECT count(*) FROM agent_events", "only the `agents_meta` table"),
+        ("SELECT count(*) FROM agents_meta, agent_events", "only the `agents_meta` table"),
+        ("SELECT count(*) FROM (SELECT 1 FROM agent_events) x", "only the `agents_meta`"),
+        ("SELECT count(*) FROM information_schema.tables", "only the `agents_meta`"),
         ("SELECT version()", "not on the whitelist"),
         ("SELECT pg_sleep(1)", "not on the whitelist"),
-        ("SELECT count(*) FROM events WHERE ts > now()", "not on the whitelist"),
-        ("SELECT max(percentile_disc(0.5)) FROM events", "not on the whitelist"),
-        ("SELECT string_agg(event_name, ',') FROM events", "not on the whitelist"),
-        ("SELECT count(*) FROM events -- comment", "comments are not allowed"),
-        ("SELECT count(*) FROM events /* c */", "comments are not allowed"),
+        ("SELECT count(*) FROM agents_meta WHERE ts > now()", "not on the whitelist"),
+        ("SELECT max(percentile_disc(0.5)) FROM agents_meta", "not on the whitelist"),
+        ("SELECT string_agg(event_name, ',') FROM agents_meta", "not on the whitelist"),
+        ("SELECT count(*) FROM agents_meta -- comment", "comments are not allowed"),
+        ("SELECT count(*) FROM agents_meta /* c */", "comments are not allowed"),
         ("SELECT current_user", "not allowed"),
         ("SELECT current_date", "not allowed"),
-        ("SELECT count(*) FROM events WHERE event_name = 'x' UNION SELECT 1", "not allowed"),
-        ("WITH x AS (SELECT 1 FROM events) SELECT count(*) FROM x", "single SELECT"),
-        ("SELECT count(*) FROM events HAVING count(*) > 1", "not allowed"),
-        ("SELECT count(*) FROM events e WHERE event_name = 'x'", "alias"),
+        ("SELECT count(*) FROM agents_meta WHERE event_name = 'x' UNION SELECT 1", "not allowed"),
+        ("WITH x AS (SELECT 1 FROM agents_meta) SELECT count(*) FROM x", "single SELECT"),
+        ("SELECT count(*) FROM agents_meta HAVING count(*) > 1", "not allowed"),
+        ("SELECT count(*) FROM agents_meta e WHERE event_name = 'x'", "alias"),
         ("SELECT $$dollar$$", "unrecognized"),
-        ("EXPLAIN SELECT count(*) FROM events", "single SELECT"),
-        ("SELECT count(*) FROM events WHERE event_name = 'x' OR 1=1 -- x", "comments"),
+        ("EXPLAIN SELECT count(*) FROM agents_meta", "single SELECT"),
+        ("SELECT count(*) FROM agents_meta WHERE event_name = 'x' OR 1=1 -- x", "comments"),
         # the template era is over (task #180 PR C): macros and placeholders
         # are rejected — the live event stream is read through LogQL
-        ("SELECT count(*) FROM events WHERE $__timeFilter(ts)", "Grafana time macros"),
+        ("SELECT count(*) FROM agents_meta WHERE $__timeFilter(ts)", "Grafana time macros"),
         (
-            "SELECT $__timeGroup(ts, $__interval) AS time, count(*) FROM events GROUP BY 1",
+            "SELECT $__timeGroup(ts, $__interval) AS time, count(*) FROM agents_meta GROUP BY 1",
             "Grafana time macros",
         ),
-        ("SELECT count(*) FROM events WHERE event_name = {event_name}", "template placeholders"),
-        ("SELECT count(*) FROM events WHERE category = {category}", "template placeholders"),
-        ("SELECT count(*) FROM events WHERE {{agent_id}}", "template placeholders"),
-        ("SELECT count(*) FROM events WHERE event_name = {event_named}", "template placeholders"),
+        (
+            "SELECT count(*) FROM agents_meta WHERE event_name = {event_name}",
+            "template placeholders",
+        ),
+        ("SELECT count(*) FROM agents_meta WHERE category = {category}", "template placeholders"),
+        ("SELECT count(*) FROM agents_meta WHERE {{agent_id}}", "template placeholders"),
+        (
+            "SELECT count(*) FROM agents_meta WHERE event_name = {event_named}",
+            "template placeholders",
+        ),
     ]
 
 
@@ -129,7 +136,7 @@ def test_validate_accepts_core_migration_sql() -> None:
         "SELECT g.time AS time, coalesce(d.n, 0) AS n "
         "FROM generate_series(1, 10) AS g(time) "
         "LEFT JOIN ("
-        "SELECT extract(epoch FROM ts)::bigint AS time, count(*) AS n FROM events "
+        "SELECT extract(epoch FROM ts)::bigint AS time, count(*) AS n FROM agents_meta "
         "WHERE event_name = 'delivery_stalled' GROUP BY 1"
         ") d ON d.time = g.time "
         "ORDER BY 1"
@@ -139,7 +146,7 @@ def test_validate_accepts_core_migration_sql() -> None:
     )
     # comma-separated tables still work
     validate_metric_sql(
-        "SELECT count(*) FROM events, agents_meta WHERE events.agent_id = agents_meta.id"
+        "SELECT count(*) FROM agents_meta, agents_meta WHERE agents_meta.agent_id = agents_meta.id"
     )
 
 
@@ -147,29 +154,29 @@ def test_validate_accepts_core_migration_sql() -> None:
     ("sql", "fragment"),
     [
         (
-            "SELECT count(*) FROM generate_series(1, 10) LEFT JOIN events "
-            "ON events.id = generate_series.generate_series",
+            "SELECT count(*) FROM generate_series(1, 10) LEFT JOIN agents_meta "
+            "ON agents_meta.id = generate_series.generate_series",
             "LEFT JOIN must reference a subquery",
         ),
         (
-            "SELECT count(*) FROM events LEFT JOIN agents_meta ON events.id = agents_meta.id",
+            "SELECT count(*) FROM agents_meta LEFT JOIN agents_meta ON agents_meta.id = agents_meta.id",
             "LEFT JOIN must reference a subquery",
         ),
         # a subquery smuggled into generate_series args is still validated
         (
             "SELECT count(*) FROM generate_series((SELECT 1 FROM pg_class))",
-            "only the `events`",
+            "only the `agents_meta`",
         ),
         # scalar subquery inside a SELECT-list function call is legal SQL
         # and must still be checked (2026-08-10 audit: coalesce args were
-        # skipped wholesale, smuggling pg_class past the events-only gate)
+        # skipped wholesale, smuggling pg_class past the agents_meta-only gate)
         (
-            "SELECT coalesce((SELECT count(*) FROM pg_class), 0) FROM events",
-            "only the `events`",
+            "SELECT coalesce((SELECT count(*) FROM pg_class), 0) FROM agents_meta",
+            "only the `agents_meta`",
         ),
         (
-            "SELECT NULLIF((SELECT max(oid) FROM pg_class), 0) FROM events",
-            "only the `events`",
+            "SELECT NULLIF((SELECT max(oid) FROM pg_class), 0) FROM agents_meta",
+            "only the `agents_meta`",
         ),
     ],
 )
@@ -178,19 +185,19 @@ def test_validate_rejects_bad_joins(sql: str, fragment: str) -> None:
         validate_metric_sql(sql)
 
 
-def test_validate_accepts_scalar_subquery_over_events() -> None:
+def test_validate_accepts_scalar_subquery_over_agents_meta() -> None:
     """A scalar subquery inside a whitelisted function call is legal SQL
-    when it reads from `events` — the FROM gate recurses into call args
+    when it reads from `agents_meta` — the FROM gate recurses into call args
     but must not reject the legitimate case (2026-08-10 audit fix)."""
     validate_metric_sql(
-        "SELECT coalesce((SELECT count(*) FROM events), 0) FROM events "
+        "SELECT coalesce((SELECT count(*) FROM agents_meta), 0) FROM agents_meta "
         "WHERE event_name = 'llm_usage'"
     )
-    validate_metric_sql("SELECT extract(epoch FROM ts) AS t FROM events")
+    validate_metric_sql("SELECT extract(epoch FROM ts) AS t FROM agents_meta")
 
 
 def test_validate_rejects_unknown_from_function() -> None:
-    with pytest.raises(InvalidMetricQuery, match="only the `events`"):
+    with pytest.raises(InvalidMetricQuery, match="only the `agents_meta`"):
         validate_metric_sql("SELECT count(*) FROM unnest(ARRAY(1,2))")
 
 
@@ -203,18 +210,18 @@ def test_render_targets_renders_query_and_targets() -> None:
         title="Multi",
         event_name="turn_end",
         category="telemetry",
-        query="SELECT count(*) FROM events WHERE event_name = 'turn_end'",
+        query="SELECT count(*) FROM agents_meta WHERE event_name = 'turn_end'",
         targets=[
-            "SELECT count(*) FROM events WHERE category = 'telemetry'",
-            "SELECT count(*) FROM events WHERE agent_id = 7",
+            "SELECT count(*) FROM agents_meta WHERE category = 'telemetry'",
+            "SELECT count(*) FROM agents_meta WHERE agent_id = 7",
         ],
     )
     # static SQL renders verbatim (the template era is over, task #180 PR C)
     rendered = render_targets(spec)
     assert rendered == [
-        "SELECT count(*) FROM events WHERE event_name = 'turn_end'",
-        "SELECT count(*) FROM events WHERE category = 'telemetry'",
-        "SELECT count(*) FROM events WHERE agent_id = 7",
+        "SELECT count(*) FROM agents_meta WHERE event_name = 'turn_end'",
+        "SELECT count(*) FROM agents_meta WHERE category = 'telemetry'",
+        "SELECT count(*) FROM agents_meta WHERE agent_id = 7",
     ]
 
 
@@ -226,7 +233,7 @@ def test_validate_spec_sql_checks_all_targets() -> None:
                 title="Bad",
                 event_name="x",
                 category="log",
-                query="SELECT count(*) FROM events",
+                query="SELECT count(*) FROM agents_meta",
                 targets=["SELECT pg_sleep(1)"],
             )
         )
@@ -241,7 +248,7 @@ def _spec(**overrides: Any) -> MetricSpec:
         "title": "Test Metric",
         "event_name": "turn_end",
         "category": "telemetry",
-        "query": "SELECT count(*) FROM events WHERE event_name = 'turn_end' "
+        "query": "SELECT count(*) FROM agents_meta WHERE event_name = 'turn_end' "
         "AND category = 'telemetry'",
     }
     base.update(overrides)
@@ -323,7 +330,7 @@ def test_admission_rejects_template_placeholders() -> None:
     # admission — the live event stream is read through LogQL, and the
     # {{agent_id}} ↔ grafana surface rule died with the placeholders.
     spec = _spec(
-        query="SELECT count(*) FROM events WHERE event_name = {event_name} "
+        query="SELECT count(*) FROM agents_meta WHERE event_name = {event_name} "
         "AND category = {category} AND {{agent_id}}"
     )
     with pytest.raises(InvalidMetricQuery, match="template placeholders"):

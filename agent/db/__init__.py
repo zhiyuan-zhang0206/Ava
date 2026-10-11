@@ -414,123 +414,44 @@ async def reconcile_claimed_inbounds(
     *,
     incarnation: RuntimeIncarnation | None,
 ) -> tuple[int, int, int]:
-    """Finalize every `'claimed'` row for `agent_id` based on whether its
-    HumanMessage reached settled state, including one later removed from it.
+    """Consume claimed chat after interruption; never automatically redeliver.
 
-    The inbound reconcile — one helper shared by every settlement point that
-    can leave claimed-but-uncommitted rows behind. The caller supplies the
-    `committed_inbound_ids` set — read back from `state.messages`, or
-    side-loaded from the claim window's write rows (`base/agents/history/inbound_sideload.py`),
-    which also proves a message committed and later removed. Each `'claimed'`
-    row is then either:
-
-      - **flipped to `'done'`** if its id is in `committed_inbound_ids` —
-        the previous process's claim → langgraph commit chain completed
-        successfully before exit;
-      - **dead-lettered to `'done'`** if it is older than the stale-claimed
-        threshold (`settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds`,
-        age from `claimed_at`) — a claim that old is either already answered or hopelessly
-        stale, and re-delivering it would surface an ancient message as
-        fresh (Task #654: terminated agents pile up claimed rows forever;
-        a resurrect with a pruned checkpoint would otherwise reset them all
-        to 'pending' and flood the fresh context). The same cutoff the
-        delivery watchdog's sweep applies to terminated owners, applied
-        here at boot so the resurrect race is closed at the source;
-      - **reset to `'pending'`** otherwise — the message was lost in
-        transit (process crash mid-handling OR a silent saver-commit
-        failure like agent 57). The same inbound will be re-claimed and
-        re-delivered to the new process on its first claim cycle.
-
-    Returns `(committed_count, reset_count, dead_lettered_count)` for
-    logging. All writes happen in a single transaction; pool conns are
-    `autocommit=True` so callers don't need an explicit commit.
-
-    The caller must hold the agent's admitted runtime identity (an
-    incarnation whose lease is still fresh) and present a settled checkpoint:
-    the buffered super-step writes must already be flushed, or a message that
-    did commit can read as missing and its row be reset to `'pending'`.
-    Legitimate callers — a cold process's first admission, database recovery,
-    and the hosted turn's own abort settlement — each run single-flight per
-    agent, so no claim cycle for this agent_id is in flight; calling the
-    reconcile while claim nodes are active would race them.
+    Returns (confirmed, redelivered, interrupted). The queue's done status means
+    consumed, not successful execution. Unconfirmed rows have unknown results;
+    new messages are separate inputs and pending rows remain available.
+    The caller must hold the admitted identity and serialize against claims.
     """
-    stale_cutoff_s = settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
-    if not committed_inbound_ids:
-        # No commits to confirm — every claimed row is an orphan, treat as
-        # one reset path. (Common shape: brand-new process, no prior
-        # in-flight work; the SELECT below will likely return 0 rows.)
-        async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-            await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
-            await cur.execute(
-                "UPDATE inbound_messages SET status = 'done' "
-                "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s "
-                "  AND claimed_at "
-                "      < now() - make_interval(secs => %s)",
-                (agent_id, stale_cutoff_s),
-            )
-            dead_lettered = cur.rowcount
-            await cur.execute(
-                "UPDATE inbound_messages SET status = 'pending' "
-                "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s",
-                (agent_id,),
-            )
-            return (0, cur.rowcount, dead_lettered)
-
-    # Wrap both updates in an explicit transaction so a crash between them
-    # can't leave the table half-finalized (some claimed rows already
-    # `done`, the rest still `claimed` waiting on a later boot). Pool conn
-    # is autocommit=True; `conn.transaction()` opens an explicit BEGIN.
-    async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-        await conn.execute("SET TRANSACTION READ WRITE")
+    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
         await cur.execute(
-            "UPDATE inbound_messages SET status = 'done' "
-            "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s AND id = ANY(%s)",
+            "UPDATE inbound_messages SET status='done' WHERE status='claimed' "
+            "AND kind='chat' AND agent_id=%s AND id=ANY(%s)",
             (agent_id, sorted(committed_inbound_ids)),
         )
         committed = cur.rowcount
         await cur.execute(
-            "UPDATE inbound_messages SET status = 'done' "
-            "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s "
-            "  AND claimed_at "
-            "      < now() - make_interval(secs => %s)",
-            (agent_id, stale_cutoff_s),
-        )
-        dead_lettered = cur.rowcount
-        await cur.execute(
-            "UPDATE inbound_messages SET status = 'pending' "
-            "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s",
+            "UPDATE inbound_messages SET status='done' WHERE status='claimed' "
+            "AND kind='chat' AND agent_id=%s",
             (agent_id,),
         )
-        reset = cur.rowcount
-    return (committed, reset, dead_lettered)
+        interrupted = cur.rowcount
+    if interrupted:
+        logger.warning(
+            "consumed {count} interrupted inbound(s) with unknown results; no redelivery",
+            agent_id=agent_id,
+            count=interrupted,
+        )
+    return committed, 0, interrupted
 
 
 async def finalize_claimed_inbounds(
     pool: AsyncConnectionPool | None, agent_id: int, *, incarnation: RuntimeIncarnation | None
 ) -> int:
-    """Mark every 'claimed' row for `agent_id` as 'done' — the compaction
-    terminal-consumption point.
+    """Consume claimed chats at the compaction boundary under the owner lock.
 
-    Companion to `reconcile_claimed_inbounds` for the compact path. A
-    compaction REMOVE_ALLs the whole checkpoint history, so any claimed row
-    whose HumanMessage lived there loses the `ava_inbound_id` that startup
-    reconcile matches on; the next restart would see those rows as orphans,
-    reset them to 'pending', and re-deliver already-answered messages — which
-    surface to the user as a run of consecutive user messages with the
-    (compacted) replies missing (Task #823).
-
-    Compaction is the terminal consumption point for every claimed row: their
-    content is folded into the summary (or was folded by an earlier
-    compaction), so all of them finalize here. Only the co-batched chats —
-    deferred to 'pending' by `_defer_chats_to_pending` before this runs —
-    survive for re-delivery into the fresh context.
-
-    Returns the number of rows finalized. Pool conns are `autocommit=True`;
-    the UPDATE commits as soon as it executes. Safe on the compact path only:
-    the agent is process-bound 1:1 and mid-turn, so no other writer is
-    concurrently claiming for this agent_id. ``pool is None`` (container /
-    eval mode, which has no inbound queue) is a no-op.
+    Co-batched chats deferred before any execution remain pending for the fresh
+    context. Other claims stay consumed even when compaction removes their history.
+    A missing pool in container/eval mode is a no-op.
     """
     if pool is None:
         return 0

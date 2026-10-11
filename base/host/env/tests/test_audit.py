@@ -284,7 +284,7 @@ def test_noop_upsert_leaves_no_record_and_a_real_change_still_records(
 ) -> None:
     """A repeated byte-identical upsert must not manufacture an audit record.
 
-    This is the WSL converge noise of task #3637: converge presents the same app
+    This is the converge noise of task #3637: converge presents the same app
     port on every `ava start`, and a boot-retry storm re-runs that start per
     attempt. The change chain stays whole — a real change records its old→new
     diff, and the integrity guard sees a consistent file after both paths.

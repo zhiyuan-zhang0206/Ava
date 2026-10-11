@@ -31,7 +31,6 @@ Operator inputs are described in [[cli/database/docs/database.ava.okf.md]].
 | `ava status` | status (including the maintenance hold, pg/redis and the end-to-end private-network Redis bridge view); `ava status --json` prints only the hold as one JSON object, settings-lite |
 | `ava converge` | replays idempotent host wiring (symlink/PATH/dirs/plugin images and the macOS Redis bridge), usually via `ava start`; it never touches the memory pool |
 | `ava firewall status` / `ava firewall sync` | macOS Application Firewall allowlist manifest: `status` renders each manifest purpose, glob, resolved path, and Allow/Block/Missing state; `sync` applies it (repair + prune stale rules). Unprivileged mutation was empirically verified on the macmini running macOS 15.3.1, then falls back to non-interactive `sudo -n` and finally reports the exact manual commands on platforms that still require elevation |
-| `ava boot` | manual uncapped retry of `ava start` while boot dependencies become available |
 
 ### `ava cluster` Subcommands
 

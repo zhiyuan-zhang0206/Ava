@@ -21,9 +21,6 @@ import pytest
 
 from base.cluster.dataplane import pg_throwaway_base, pg_tools
 from base.config import settings
-from base.native_process.os_platform import is_windows
-
-pytestmark = pytest.mark.skipif(is_windows(), reason="throwaway clusters are POSIX-only")
 
 
 @pytest.fixture
@@ -57,7 +54,7 @@ def artifact_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     derived from the repo root, so patch the deriving function — writing into
     <repo>/tmp/ from a test would leave artifacts behind."""
     target = tmp_path / "artifacts"
-    monkeypatch.setattr(pg_tools, "_fixture_log_artifact_dir", lambda: target)
+    monkeypatch.setattr(pg_tools, "fixture_log_artifact_dir", lambda: target)
     return target
 
 
@@ -122,4 +119,4 @@ def test_artifact_dir_defaults_under_repo_tmp() -> None:
     deploy/ci/public-ci.yml). Follows the e2e-logs convention."""
     from base.paths import repo_root
 
-    assert pg_tools._fixture_log_artifact_dir() == repo_root() / "tmp" / "pg-fixture-logs"
+    assert pg_tools.fixture_log_artifact_dir() == repo_root() / "tmp" / "pg-fixture-logs"

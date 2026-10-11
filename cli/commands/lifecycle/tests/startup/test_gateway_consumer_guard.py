@@ -260,12 +260,7 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
 # entry is an explicit, reviewable exemption keyed by (module, field); the
 # companion test below pins every entry to fallback code that actually
 # exists, so the registry can never outlive the code it excuses.
-_FALLBACK_CONSUMED_READS: dict[tuple[str, str], str] = {
-    ("ops/lifecycle/billing_recovery.py", "deepseek_api_key"): (
-        "the provider-balance probe runs in-process on the gateway (the POST "
-        "route executes it); falls back to the unit .env file (task #3956)"
-    ),
-}
+_FALLBACK_CONSUMED_READS: dict[tuple[str, str], str] = {}
 
 
 _GATEWAY_CLOSURE_PACKAGES = (

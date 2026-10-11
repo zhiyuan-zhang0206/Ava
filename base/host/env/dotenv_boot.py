@@ -125,8 +125,8 @@ def apply_process_timezone(name: str | None) -> None:
     The configuration owner validates raw input and decides whether it holds an
     authoritative value. None leaves the host clock untouched. An invalid name
     that bypassed that boundary also leaves it untouched, matching the existing
-    startup operation. A valid value is exported for children; POSIX also
-    refreshes the local clock, while Windows has no ``time.tzset``.
+    startup operation. A valid value is exported for children and refreshes the local clock
+    with ``time.tzset``.
 
     This operation never reads Settings, a field default or ``AVA_TIMEZONE``.
     Read-only environment attachments must not call it.
@@ -138,9 +138,7 @@ def apply_process_timezone(name: str | None) -> None:
     except (ZoneInfoNotFoundError, ValueError):
         return
     os.environ["TZ"] = name
-    tzset = getattr(time, "tzset", None)
-    if tzset is not None:
-        tzset()
+    time.tzset()
 
 
 def resolve_ava_home() -> Path:

@@ -283,7 +283,7 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     }
 
 
-# ── relaxed trigger guard: system-reaped crash rows (task #3617) ─────────────
+# ── stale trigger guard: system-reaped crash rows ───────────────────────────
 
 
 def _backdate_before_status(db: psycopg.Connection, aid: int, iid: int) -> None:
@@ -306,7 +306,7 @@ def _reaped_crash_park(
     machine_identity: MachineIdentity,
 ) -> tuple[int, int]:
     """terminated + reaper source + retained crash marker + a leftover chat
-    that predates the termination (the relaxed-trigger shape)."""
+    that predates the termination (a legacy recovery-trigger shape)."""
     from base.db import insert_inbound_message
 
     aid = _park(
@@ -350,7 +350,7 @@ def _guarded_resurrect(
     )
 
 
-def test_reaped_crash_row_resumes_leftover_work(
+def test_reaped_crash_row_refuses_leftover_work(
     db_conn: psycopg.Connection,
     wakes: list[tuple[int, str]],
     database: Database,
@@ -361,8 +361,9 @@ def test_reaped_crash_row_resumes_leftover_work(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A reaper death is not an operator decision, so a chat that predates it
-    still qualifies as the pending-work trigger (task #3617, design section 6)."""
+    """A reaper termination cannot grant old work a fresh activation attempt."""
+    from ops.agents.resurrection_retry import ResurrectTriggerStaleError
+
     aid, trigger = _reaped_crash_park(
         db_conn,
         config_authority=config_authority,
@@ -371,7 +372,7 @@ def test_reaped_crash_row_resumes_leftover_work(
         machine_identity=machine_identity,
     )
 
-    assert (
+    with pytest.raises(ResurrectTriggerStaleError):
         wake.resurrect_agent(
             database,
             event_bus,
@@ -381,10 +382,8 @@ def test_reaped_crash_row_resumes_leftover_work(
             trigger_inbound_kind=InboundKind.CHAT,
             local_machine=machine_identity.name(),
         )
-        == aid
-    )
-    assert _row(db_conn, aid) == ("idling", None)
-    assert wakes == [(aid, "0")]
+    assert _row(db_conn, aid) == ("terminated", None)
+    assert wakes == []
 
 
 def test_operator_death_still_refuses_leftover_work(

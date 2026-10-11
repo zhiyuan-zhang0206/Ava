@@ -1,6 +1,5 @@
 """Actual host quiescence produces compact observations; a status row cannot."""
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID, uuid4
@@ -13,11 +12,9 @@ from psycopg_pool import AsyncConnectionPool
 from agent.state import CompactState
 from base.agents.compaction.history import ADMISSION_SQL, PENDING_HISTORY_SQL
 from base.agents.compaction.models import CompactTarget
-from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.agents.incarnation.native_work import NativeWorkRecord, load_work, managed_resources
-from base.agents.incarnation.native_work_models import NativeWorkPhase, NativeWorkTarget
+from base.agents.incarnation.native_work_models import NativeWorkPhase
 from base.agents.incarnation.resources import IncarnationResources, decode_resources
-from base.agents.observation.db_wait import DatabaseWaits
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
@@ -25,8 +22,6 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log import logger
 from base.native_process.turn_identity import HostedTurnResources
-from services.agent_runner.agent_host.db_recovery import recover_database
-from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.invocation.compact.lifecycle import settle_original_restart
 from services.agent_runner.agent_host.wake_screening import read_stored_config
@@ -95,7 +90,6 @@ async def produce_source(
 async def finish_compact_pump(
     pool: AsyncConnectionPool,
     saver: AsyncPostgresSaver,
-    graph: CompactGraph,
     agent_id: int,
     owner: UUID,
     resources: HostedTurnResources,
@@ -105,10 +99,7 @@ async def finish_compact_pump(
     default_reader: Callable[[str, str], Any],
 ) -> None:
     """Actual closed pump is the only producer; failures preserve pending intent."""
-    from services.agent_runner.agent_host.invocation.compact.recovery import settle_quiescent
-
     try:
-        await settle_quiescent(pool, saver, graph, agent_id, owner, resources)
         await produce_source(
             pool,
             saver,
@@ -214,27 +205,21 @@ async def finish_force_and_compact(
     force: Awaitable[bool],
     pool: AsyncConnectionPool,
     saver: AsyncPostgresSaver,
-    graph: CompactGraph,
     agent_id: int,
     owner: UUID,
     resources: HostedTurnResources,
     bus: EventBus,
     drop_agent: Callable[[int], None],
-    database_waits: DatabaseWaits,
-    peek_lock: asyncio.Lock,
     *,
-    work: NativeWorkTarget | None,
     catalog: ModelCatalog,
     llm_override: str,
     default_reader: Callable[[str, str], Any],
-    reconcile_inputs: ReconcileReadInputs,
 ) -> None:
     """Both proof tails share the original shielded owned settlement task."""
     await force
     await finish_compact_pump(
         pool,
         saver,
-        graph,
         agent_id,
         owner,
         resources,
@@ -248,15 +233,5 @@ async def finish_force_and_compact(
         agent_id,
         owner,
         drop_agent,
-        lambda token: recover_database(
-            pool=pool,
-            checkpointer=saver,
-            graph=graph,
-            incarnation=token,
-            database_waits=database_waits,
-            peek_lock=peek_lock,
-            work=work,
-            reconcile_inputs=reconcile_inputs,
-        ),
         resources=resources,
     )

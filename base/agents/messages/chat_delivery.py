@@ -1,11 +1,9 @@
 """Transactional identity for chat inbounds.
 
-An HTTP response cache cannot close the interval between committing an inbound
-and storing the response: a gateway death in that interval leaves the client
-uncertain whether retrying will duplicate the message.  ``client_message_id``
-therefore lives on the inbound row itself.  The unique claim, immutable-identity
-check, and INSERT share one Postgres transaction; a retry returns the original
-inbound id even when no HTTP response was ever stored.
+``client_message_id`` lives on the inbound row itself.  The unique claim,
+immutable-identity check, and INSERT share one Postgres transaction, so a
+gateway death between the commit and the response leaves no ambiguity: a retry
+returns the original inbound id and never duplicates the message.
 """
 
 from __future__ import annotations
