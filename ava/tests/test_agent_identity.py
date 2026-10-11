@@ -178,19 +178,6 @@ def test_lifecycle_self_actions_refuse_from_launched_script(
         fn("summary") if action == "compact" else fn()
 
 
-def test_update_removed_points_to_cli(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ava.self.update() was removed (2026-08): it now raises unconditionally with
-    the CLI replacement, never touching DB / gateway."""
-    monkeypatch.setattr(
-        ava.DB,
-        "cursor",
-        _boom_cursor := lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("reached DB")),  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    with pytest.raises(RuntimeError, match=r"ava\.self\.update\(\) has been removed"):
-        ava.self.update()
-
-
 def test_context_outside_a_bound_process_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Like `ava.state` outside an exec turn: no bound context, no attribute."""
     pin_no_identity()

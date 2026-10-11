@@ -87,8 +87,7 @@ class SpawnAgentRequest(BaseModel):
     ADDING skills to `skills_to_inject_into_system_prompt` /
     `skills_to_expand_at_start` (supersets); anything else is rejected with
     `fork_config_change_not_allowed`. A fork WITHOUT config inherits the
-    source's resolved overlay + preset verbatim (the pre-2026-09-10 behavior
-    dropped the source's overlay).
+    source's resolved overlay + preset verbatim.
 
     `spawner` default "user" — frontend spawn button does not need to
     pass it; external callers (claude-code / SDK paths `agent:N` etc.)

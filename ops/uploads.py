@@ -38,11 +38,7 @@ from ops.rpc_schemas import UploadReceivePayload, UploadReceiveResult
 _log = logging.getLogger(__name__)
 
 
-def _publish(target: Path, agent_id: int, contents: bytes, pool: ConnectionPool | None) -> None:
-    if pool is None:
-        # Direct helper compatibility; the native dispatch always binds its pool.
-        write_private_bytes(target, contents)
-        return
+def _publish(target: Path, agent_id: int, contents: bytes, pool: ConnectionPool) -> None:
     with write_transaction(pool) as conn:
         storage.lock_agent(conn, agent_id)
         exists = target.is_file()
@@ -60,12 +56,11 @@ def _publish(target: Path, agent_id: int, contents: bytes, pool: ConnectionPool 
 
 
 def upload_receive_op(
-    payload: UploadReceivePayload, *, pool: ConnectionPool | None = None
+    payload: UploadReceivePayload, *, pool: ConnectionPool
 ) -> UploadReceiveResult:
     """Fetch one upload from the gateway and write it into this host's local
-    uploads dir; return the local absolute path. Native dispatch supplies its
-    pool for physical quota admission after HTTP; direct payload-only calls
-    retain their historical filesystem-only behavior.
+    uploads dir; return the local absolute path. The pool provides physical
+    quota admission after the HTTP fetch.
 
     Raises:
         OSError: the gateway is unreachable, the file is gone, or the write

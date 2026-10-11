@@ -60,22 +60,16 @@ __all__ = [
     "ClusterOpFailed",
     "ClusterOpTargetAbsent",
     "ClusterOpUnreachable",
-    "OpKind",
     "dispatch_to_machine",
     "dispatch_to_url",
 ]
 
 _log = logging.getLogger(__name__)
 
-# OpKind (the op vocabulary) now lives in ops.rpc_schemas beside the wire models;
-# re-exported here (imported above, listed in __all__) so existing importers of
-# `ops.cluster.rpc.OpKind` keep working.
-
 # ── Retry policy ─────────────────────────────────────────────────────────────
-# A dispatch is one synchronous round-trip over the cluster's private network,
-# and it used to be single-shot: one transport hiccup (the 2026-08-06 fleet
-# transient) dropped a cross-machine op outright. Load-bearing ops now retry on
-# transient infrastructure failures with bounded exponential backoff + jitter.
+# A dispatch is one synchronous round-trip over the cluster's private network.
+# Load-bearing ops retry on transient infrastructure failures with bounded
+# exponential backoff + jitter.
 # Two bounds keep the retry cheap:
 #   * `retries` caps the extra attempts (default AVA_CLUSTER_RPC_MAX_RETRIES,
 #     3 -> 4 attempts total; worst-case wall for a blackholed host ~4x
@@ -240,9 +234,8 @@ async def _dispatch_once(
         ) as client:
             resp = await client.post(
                 url,
-                # exclude_none: an idempotent op's envelope is byte-identical to
-                # the pre-#961 wire (no idempotency_key field at all), so old
-                # ops servers see exactly what they always saw for those kinds.
+                # exclude_none: an idempotent op's envelope carries no
+                # idempotency_key field at all.
                 json=OpEnvelope(
                     kind=kind, payload=payload, idempotency_key=idempotency_key
                 ).model_dump(exclude_none=True),

@@ -155,12 +155,6 @@ def test_start_marks_serving_for_live_and_cold_admission(
     assert start_serving.is_serving()
 
 
-@pytest.mark.parametrize("argument", ["release_receipt", "updater_telemetry"])
-def test_start_rejects_removed_updater_arguments(argument: str) -> None:
-    with pytest.raises(TypeError, match="unexpected keyword argument"):
-        _start_commands.cmd_start(**{argument: True}, retained_children=[])  # pyright: ignore[reportArgumentType] — rejected API input
-
-
 def test_changed_live_generation_refuses_before_selection_or_converge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

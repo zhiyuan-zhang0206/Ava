@@ -659,7 +659,7 @@ async def recover_crash_marked_if_stalled(
 
 _LIFECYCLE_PATH = re.compile(
     r"^/api/agents/(?P<id>\d+)/"
-    r"(?P<action>terminate|resurrect|resurrect-explicit-v2|"
+    r"(?P<action>terminate|resurrect-explicit-v2|"
     r"resurrect-if-pending-work-v2|resurrect-billing-v1|recover-crash-marked-v2|restart|restart-work-v1)$"
 )
 
@@ -691,10 +691,6 @@ async def lifecycle_op(
     `resurrect-explicit-v2`, guarded `resurrect-if-pending-work-v2`,
     billing-guarded `resurrect-billing-v1` (task #3919), and
     `recover-crash-marked-v2` (the stalled-corpse harvest) paths.
-    Legacy `resurrect` is recognized only to reject it. This is the
-    version-skew fail-closed boundary: an old runner rejects the v2 paths and a
-    new runner rejects every old gateway resurrection instead of guessing its
-    intent from the request body.
     Anything else raises ValueError — the ops server converts that to a failed
     op result.
     """
@@ -719,8 +715,6 @@ async def lifecycle_op(
         return await terminate_agent_op(
             db, bus, agent_id, TerminateAgentRequest.model_validate(body), db_pool
         )
-    if action == "resurrect":
-        raise ValueError("legacy /resurrect is refused; use a versioned internal path")
     if action == "resurrect-explicit-v2":
         return await resurrect_agent_op(
             db, bus, agent_id, ResurrectAgentRequest.model_validate(body)

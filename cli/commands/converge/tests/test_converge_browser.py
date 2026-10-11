@@ -1,4 +1,4 @@
-"""Converge browser step: sheds the legacy plugin file; preflight when enabled."""
+"""Converge browser step: preflight when enabled."""
 
 from pathlib import Path
 
@@ -14,36 +14,13 @@ def _ctx(home: Path) -> cv.ConvergeCtx:
     )
 
 
-def _plugin_path(home: Path) -> Path:
-    return home / "plugins" / "ava_chrome" / ".mcp.json"
-
-
-def test_always_sheds_legacy_plugin_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The legacy converge-written file is removed (chrome is now built-in)."""
-    monkeypatch.setattr(cv.settings.services, "browser_enabled", False)
-    legacy = _plugin_path(tmp_path)
-    legacy.parent.mkdir(parents=True)
-    legacy.write_text("{}")
-    cv._ensure_browser(_ctx(tmp_path))
-    assert not legacy.exists()
-
-
-def test_disabled_noop_when_already_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(cv.settings.services, "browser_enabled", False)
-    cv._ensure_browser(_ctx(tmp_path))  # no raise, nothing to remove
-    assert not _plugin_path(tmp_path).exists()
-
-
-def test_enabled_runs_preflight_writes_nothing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_enabled_runs_preflight(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(cv.settings.services, "browser_enabled", True)
     import services.desktop.browser.profile as bp
 
     monkeypatch.setattr(cv, "browser_incapability", lambda: None)
     monkeypatch.setattr(bp, "ensure_browser_profile", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     cv._ensure_browser(_ctx(tmp_path))
-    assert not _plugin_path(tmp_path).exists()
 
 
 def test_capable_offers_profile_seed_with_tty_flag(
@@ -93,8 +70,6 @@ def test_enabled_but_incapable_warns_not_raises(
     stderr = capsys.readouterr().err
     assert "not applicable" in stderr
     assert "Install Node.js" not in stderr
-    # Legacy plugin file is still shed.
-    assert not _plugin_path(tmp_path).exists()
 
 
 def test_enabled_with_missing_npx_prints_the_repair_box(
@@ -110,7 +85,7 @@ def test_enabled_with_missing_npx_prints_the_repair_box(
 
 
 def test_step_registered_agent_runner_only() -> None:
-    step = next(s for s in cv.CONVERGE_STEPS if s.name == "browser capability + plugin")
+    step = next(s for s in cv.CONVERGE_STEPS if s.name == "browser capability")
     assert step.roles == frozenset({"agent-runner"})
     assert step.requires_unit_config is True
 

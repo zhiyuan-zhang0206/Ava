@@ -28,7 +28,7 @@ Architectural rule: this module does **not** build the turn-loop prompts
 (spawn/draft endpoints like schedules/guide/packages DO inline a fixed
 system prompt for the agent they spawn — that is the deliberate exception),
 does not run the LLM, does not construct the LangGraph; it only imports
-pure-function helpers from `agent.messages` (legacy cancel marker detection,
+pure-function helpers from `agent.messages` (cancel marker detection,
 etc.).
 UI and kernel are coupled through Postgres (pending / agents tables) +
 Redis (`ava:events` channel); they do not share Python process state or
@@ -114,7 +114,7 @@ from gateway.http.auth import router as auth_router
 from gateway.http.auth.cors import cors_allowed_origins
 from gateway.http.auth.request_principal import SessionKeys
 from gateway.http.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
-from gateway.http.middleware import idempotency, latency, pause_policy, runtime_metrics
+from gateway.http.middleware import latency, pause_policy, runtime_metrics
 from gateway.http.middleware.error_envelope import error_response, request_trace_middleware
 from gateway.http.middleware.error_handlers import (
     ava_agent_error_handler,
@@ -253,9 +253,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.session_touch = SessionTouchThrottle()
     app.state.page_host_cache = pages_router.PageHostCache()
     app.state.telemetry_rate_limiter = frontend_telemetry_router.SessionRateLimiter()
-    app.state.idempotency = idempotency.IdempotencyService(
-        idempotency.IdempotencyStore(app.state.db_pool)
-    )
     # The control plane must never queue behind the saturated data-plane pool.
     # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
     # recovery reads need their own short, small reservation.
@@ -277,10 +274,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
     except Exception:
         _log.warning("OS health-probe cron registration failed", exc_info=True)
-
-    # Config migrations (the retired override layers -> .env) run in the converge
-    # phase before the gateway process starts, so by the time this Settings is
-    # built the .env is already complete; nothing to do at lifespan startup.
 
     # Periodic telemetry emitters (latency / auth-401 / runtime): each
     # drains its accumulator or DB sample once per 60s and emits ONE bounded
@@ -374,18 +367,6 @@ async def _cluster_is_paused(_request: Request) -> bool:
     from base.deploy.maintenance.admission import business_paused
 
     return await asyncio.to_thread(business_paused)
-
-
-# AtLeastOnceWithKey dedup (doorplate ①): generic keyed routes store/replay a
-# response here. Transactional keyed routes (chat message delivery) bypass this
-# layer and own the key in the same commit as their durable business row.
-# Registered BEFORE the pause middleware below: Starlette's middleware stack
-# runs in REVERSE registration order, so with this order a paused cluster
-# answers 503 before dedup engages (audit P2-1 — the previous order let
-# pause-window requests claim a placeholder and then 503, an INSERT+DELETE
-# per request that also bricked the key if the process died inside the
-# window).
-app.middleware("http")(idempotency.idempotency_middleware)
 
 
 @app.middleware("http")
@@ -577,9 +558,9 @@ async def _cluster_auth_middleware(
 
 # Per-endpoint latency metering (Task #1091). Registered near-last so it is
 # near-OUTERMOST — Starlette builds the stack in reverse registration order —
-# and the measurement covers the full pipeline: pause gate, idempotency
-# dedup, and auth. `await call_next` returns at response headers, so SSE /
-# long-poll connections count time-to-first-byte, not lifetime.
+# and the measurement covers the full pipeline: pause gate and auth.
+# `await call_next` returns at response headers, so SSE / long-poll
+# connections count time-to-first-byte, not lifetime.
 app.middleware("http")(latency.latency_middleware)
 
 
@@ -609,12 +590,6 @@ app.add_exception_handler(AvaAgentError, ava_agent_error_handler)  # type: ignor
 app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
 app.add_exception_handler(Exception, unhandled_exception_handler)
-
-
-# `_publish_inbound_arrived` was inlined into the spawn/lifecycle handlers;
-# the same implementation now lives in gateway/ops_*.py as the public
-# helper `publish_inbound_arrived`, reused by both FastAPI handlers and the
-# ava-ops in-process dispatch.
 
 
 # --- Router registration (feature packages + gateway/routers/<domain>.py) ---

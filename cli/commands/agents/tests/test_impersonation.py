@@ -32,7 +32,9 @@ def _args(*args: str) -> Namespace:
     return build_parser().parse_args(["impersonate", *args])
 
 
-def test_timeline_and_context_are_one_command(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_timeline_command_dispatches_to_the_timeline_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[tuple[int, int, str | None]] = []
 
     def timeline(agent_id: int, limit: int, before: str | None) -> int:
@@ -40,12 +42,11 @@ def test_timeline_and_context_are_one_command(monkeypatch: pytest.MonkeyPatch) -
         return 0
 
     monkeypatch.setattr("cli.commands.agents.timeline.cmd_agents_timeline", timeline)
-    for name in ("timeline", "context"):
-        args = build_parser().parse_args(
-            ["agents", name, "405", "--limit", "100", "--before", "12.0"]
-        )
-        assert args.func(args) == 0
-    assert calls == [(405, 100, "12.0"), (405, 100, "12.0")]
+    args = build_parser().parse_args(
+        ["agents", "timeline", "405", "--limit", "100", "--before", "12.0"]
+    )
+    assert args.func(args) == 0
+    assert calls == [(405, 100, "12.0")]
 
 
 def test_request_uses_external_identity_without_delivering_a_credential(
@@ -106,11 +107,11 @@ def test_request_without_steer_endpoint_does_not_acquire_a_lease(
 ) -> None:
     from unittest.mock import Mock
 
-    from base.agents.impersonation import host_transport as codex_app_server
+    from base.agents.impersonation import host_transport
 
     request = Mock(return_value={})
     monkeypatch.setattr(sessions, "request", request)
-    monkeypatch.setattr(codex_app_server, "default_control_endpoint", lambda: None)
+    monkeypatch.setattr(host_transport, "default_control_endpoint", lambda: None)
     args = _args(
         "request",
         "--name",

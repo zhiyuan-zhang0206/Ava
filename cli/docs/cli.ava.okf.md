@@ -78,7 +78,7 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 
 ## Design Principles
 
-- **Path-only cluster identity**: identity **is** the home path — no name. Registry home-keyed (legacy name-keyed records read compatibly); verbs address via `--path`. A checkout's `ava` acts on its home's cluster (`cli/commands/_repo.py`).
+- **Path-only cluster identity**: identity **is** the home path — no name. Registry home-keyed; verbs address via `--path`. A checkout's `ava` acts on its home's cluster (`cli/commands/_repo.py`).
 - **Two lifecycle entries**: `ava init` owns identity, `ava start` owns startup and restart; package acquisition does not create cluster identity or launch services.
 - **Ops-layer only**: not exposed to agents (they use the `ava.*` SDK).
 - **Settings-independent**: `ava init` and `ava start`'s admission are specially routed in `main()` before settings-gated imports — no `base.config` (stdlib + `base.host.env.dotenv_boot`). `ava config` uses only registry metadata and direct local files until a full Settings consumer needs the singleton, so a broken `.env` remains repairable. `ava pty` is settings-lite and data-plane-independent.

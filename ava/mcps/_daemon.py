@@ -681,10 +681,9 @@ def _unlink_own_socket(socket_path: str, self_ino: int) -> None:
 async def run_daemon(socket_path: str, *, timeout_seconds: Callable[[], float]) -> None:
     """Start the shared MCP daemon, listening on one Unix socket.
 
-    A single per-machine process (ops roster session "mcp-daemon") replaces
-    the previous one-daemon-per-agent design: 15 agents used to pay 15 daemon
-    processes (~12MB each). Sessions are isolated per client connection, so the
-    shared process is not a shared state.
+    A single per-machine process (ops roster session "mcp-daemon") serves every
+    agent. Sessions are isolated per client connection, so the shared process is
+    not a shared state.
     """
     # Reap this unit's stale daemons + drop a stale socket file, then bind.
     # The live-socket guard already ran in main(); anything still at

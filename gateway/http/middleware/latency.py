@@ -53,11 +53,9 @@ MAX_SAMPLES_PER_ROUTE = 10_000
 # alert tier while remaining visible on the all-route dashboard.
 #
 # The "slow" tier covers reads that pay a Loki/embedding round-trip per
-# request. /api/agents/{agent_id}/neighbors moved here at the LGTM cutover
-# sweep: the retired SQL function became a per-request Loki edge-stream read
-# (task #1958) — the same data shape as /api/fleet/graph, which was already
-# slow-classified. Holding it to the fast tier's 3s bar is unattainable for
-# any Loki-backed read.
+# request. /api/agents/{agent_id}/neighbors is a per-request Loki edge-stream
+# read — the same data shape as /api/fleet/graph. Holding it to the fast
+# tier's 3s bar is unattainable for any Loki-backed read.
 R17_R18_EXCLUSION_ROUTE_PATTERNS: dict[str, tuple[str, ...]] = {
     "llm": (
         r"/api/agents/.*/messages",

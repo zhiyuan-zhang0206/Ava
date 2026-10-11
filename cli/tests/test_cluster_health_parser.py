@@ -19,39 +19,6 @@ from cli.commands.cluster.tests.test_cluster_health import (
 )
 
 
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        ["health-probe", "--auto-rollback"],
-        ["health-probe", "--threshold", "3"],
-        ["health-probe-register", "--threshold", "3"],
-    ],
-)
-def test_parser_rejects_removed_release_policy_flags(arguments: list[str]) -> None:
-    from cli.parsers import parse_args
-
-    with pytest.raises(SystemExit) as refused:
-        parse_args(["cluster", *arguments])
-    assert refused.value.code == 2
-
-
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        ["health-probe", "--agent-min", "2"],
-        ["health-probe", "--crash-loop-max-restarts", "4"],
-        ["health-probe", "--crash-loop-window-minutes", "20"],
-        ["health-probe-register", "--interval", "300"],
-    ],
-)
-def test_parser_rejects_removed_health_probe_flags(arguments: list[str]) -> None:
-    from cli.parsers import parse_args
-
-    with pytest.raises(SystemExit) as refused:
-        parse_args(["cluster", *arguments])
-    assert refused.value.code == 2
-
-
 def test_health_probe_dispatch_preserves_observation_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

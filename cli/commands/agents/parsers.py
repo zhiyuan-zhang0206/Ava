@@ -156,9 +156,7 @@ def _h_notices_clear(args: argparse.Namespace) -> int:
 
 
 def _add_timeline_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = sub.add_parser(
-        "timeline", aliases=["context"], help="read standing context and recent conversation"
-    )
+    parser = sub.add_parser("timeline", help="read standing context and recent conversation")
     parser.add_argument("agent_id", type=int)
     parser.add_argument(
         "--limit", type=int, default=None, help="recent items, 1..1000 (default: configured window)"

@@ -12,7 +12,7 @@ Terminalization: closed_at NULL = open, non-NULL = closed (terminal). A
 UNIQUE partial index `WHERE closed_at IS NULL` ensures only one open row
 per (agent, name); historical closed rows do not block re-registration.
 
-register_page is an idempotent upsert — re-registering the same name
+register_page_in_transaction is an idempotent upsert — re-registering the same name
 updates host + port (agent restarted the server on a different port /
 name reuse), without colliding on the UNIQUE index. close is a CAS
 UPDATE; 0 rows returns None so the caller can distinguish not-found vs
@@ -87,7 +87,7 @@ _LIVE_PORT_INDEX = "agent_pages_unique_live_port"
 class PagePortConflictError(Exception):
     """(host, port) is already held by another live page row.
 
-    Raised by ``assert_port_free`` (the pre-check) and by ``register_page``
+    Raised by ``assert_port_free`` (the pre-check) and by ``register_page_in_transaction``
     when the live-port unique index rejects a registration that raced the
     pre-check. The message names the occupying page when it is visible; the
     gateway router maps this to HTTP 409.
@@ -146,24 +146,6 @@ def lock_page_agent(db: psycopg.Connection, agent_id: int) -> None:
     db.execute(
         "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"agent-pages:{agent_id}",)
     )
-
-
-def register_page(
-    db: psycopg.Connection,
-    agent_id: int,
-    name: str,
-    port: int,
-    host: str,
-    title: str | None,
-    serve_dir: str | None = None,
-    ttl_seconds: int | None = None,
-) -> PageRow:
-    """Register/update a page and commit, preserving the legacy call boundary."""
-    record = register_page_in_transaction(
-        db, agent_id, name, port, host, title, serve_dir, ttl_seconds
-    )
-    db.commit()
-    return record
 
 
 def register_page_in_transaction(
@@ -291,13 +273,6 @@ def list_all_open_pages(db: psycopg.Connection) -> list[PageRow]:
         )
         rows = cur.fetchall()
     return [_row_to_record(r) for r in rows]
-
-
-def close_all_agent_pages(db: psycopg.Connection, agent_id: int) -> list[str]:
-    """Close this agent's open pages and commit at the legacy call boundary."""
-    names = close_all_agent_pages_in_transaction(db, agent_id)
-    db.commit()
-    return names
 
 
 def close_all_agent_pages_in_transaction(
