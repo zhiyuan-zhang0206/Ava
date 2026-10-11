@@ -194,10 +194,9 @@ def test_help_on_skill_namespace_lists_children(
     _write_skill(d, "writing-plans", "name: writing-plans\ndescription: wp", body="# W\n")
     ava.help(ava.skills.superpowers)
     out = capsys.readouterr().out
-    # Heading is the display spelling (dash segments, `:` separators) at the
-    # loadable FQN's depth — the segment count, not the separators, sets level.
-    assert "#### ava.skills.superpowers:brainstorming\n\nbs" in out
-    assert "#### ava.skills.superpowers:writing-plans\n\nwp" in out
+    # Heading is the loadable path, at a depth set by its segment count.
+    assert "#### ava.skills.superpowers.brainstorming\n\nbs" in out
+    assert "#### ava.skills.superpowers.writing_plans\n\nwp" in out
 
 
 def test_module_getattr_handles_dash_in_name(fake_skills_dir: Path) -> None:
@@ -504,7 +503,7 @@ def test_root_skill_help_renders_body_then_children(
     assert "### ava.skills.sources" in out
     assert "pick an adapter" in out  # root SKILL.md body via BODY
     # child adapter listed as a heading at its FQN depth + description below
-    assert "#### ava.skills.sources:bilibili\n\nbili" in out
+    assert "#### ava.skills.sources.bilibili\n\nbili" in out
     assert "sources" in out  # path line is in the rendering
     # same no-docstring rule as a leaf skill's BODY/PATH
     assert '"""get content"""' not in out

@@ -18,7 +18,7 @@ catalog, grouped by what each skill does, is
 ## How Skills Work
 Skills are loaded on-demand by agents via `ava.help(ava.skills.<name>)`.
 Each skill is a Markdown file with frontmatter describing when to use it.
-Skills can be nested — displayed as `ava.skills.ava-memory:consolidation` (loadable as `ava.skills.ava_memory.consolidation`).
+Skills can be nested; every agent-visible spelling (index lines, `ava.help` headings, preloaded-skill sections) is the loadable path, e.g. `ava.skills.ava_memory.consolidation`.
 
 
 ## See Also
@@ -50,8 +50,8 @@ anywhere else, and one published elsewhere drops in unmodified.
 identifier character, so the CodeAct namespace reaches
 `inspect-a-trace/` as `ava.skills.inspect_a_trace`. `target()`
 renders that projection; `.` separates namespace segments there, while the
-display `identifier()` joins the same segments with `:`
-(`ava.skills.web-ai:deep-research`).
+display `identifier()` (composer commands, CLI) joins the same segments with `:`
+(`web-ai:deep-research`). Agent-visible text uses the `target()` spelling only.
 
 `base/packages/skills/names.py` is the single fold between them — `match_key` inbound
 (dash→underscore, and `:`→`.` so an ecosystem-style `ava-memory:consolidation` resolves),

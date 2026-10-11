@@ -358,29 +358,18 @@ def _format_skill_child(name: str, child: Any) -> str:
     """Skill child: a Markdown heading at the child's own FQN depth (the same
     depth rule every other heading follows), description as the body below.
 
-    The heading spells the path in display form (`ava.skills.web-ai:deep-research`);
-    heading depth is computed from the loadable FQN so the segment count (not
-    the display separators) decides the level.
+    The heading spells the loadable path (`ava.skills.web_ai.deep_research`), so
+    it pastes straight into `ava.help(...)`; its segment count decides the level.
 
     The description is ``_description`` (frontmatter) when available, else the
     first line of ``__doc__`` (namespace nodes carry theirs there)."""
     fqn = getattr(child, "__name__", None) or name
-    heading = f"{'#' * _heading_depth(fqn)} {_display_skill_fqn(fqn)}"
+    heading = f"{'#' * _heading_depth(fqn)} {fqn}"
     desc = getattr(child, "_description", None)
     if not desc:
         doc = inspect.getdoc(child)
         desc = doc.split("\n")[0] if doc else ""
     return f"{heading}\n\n{desc}" if desc else heading
-
-
-def _display_skill_fqn(fqn: str) -> str:
-    """Render a skill FQN in display spelling: `-`/`:` for `_`/`.` past the
-    `ava.skills.` prefix (e.g. `ava.skills.web_ai.deep_research` ->
-    `ava.skills.web-ai:deep-research`). Non-skill FQNs pass through unchanged."""
-    prefix = "ava.skills."
-    if not fqn.startswith(prefix):
-        return fqn
-    return prefix + fqn[len(prefix) :].replace("_", "-").replace(".", ":")
 
 
 def _format_pep224_const(name: str, const: "_Constant") -> str:
