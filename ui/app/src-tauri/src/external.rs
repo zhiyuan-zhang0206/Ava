@@ -84,7 +84,7 @@ fn open_in_cluster_chrome(url: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Windows and mobile have no cluster Chrome to hand a tab to.
+/// Mobile has no cluster Chrome to hand a tab to.
 #[cfg(not(all(unix, not(target_os = "android"), not(target_os = "ios"))))]
 fn open_in_cluster_chrome(_url: &str) -> bool {
     false

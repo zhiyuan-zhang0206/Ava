@@ -329,7 +329,7 @@ fn unreachable_page(failure: EntryFailure) -> String {
 
 /// Navigate to one of the bundled screens, whose origin differs per platform.
 fn navigate_to_page(window: &WebviewWindow, page: &str) {
-    let base = if cfg!(windows) || cfg!(target_os = "android") {
+    let base = if cfg!(target_os = "android") {
         "http://tauri.localhost/"
     } else {
         "tauri://localhost/"
