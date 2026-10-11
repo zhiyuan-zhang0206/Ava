@@ -25,8 +25,8 @@ LLM call can heal the breaker.
 
 ## Consequences
 
-- Startup and before-LLM recovery converge invalid histories without manual
-  checkpoint deletion.
+- Before-LLM recovery converges invalid histories without manual checkpoint
+  deletion (see the boot-pass update below).
 - A single chat arriving with an open-breaker heartbeat is answered instead of
   silently committed and buried.
 - The deliberately narrow orphan detector does not repair tool-use/result
@@ -52,3 +52,12 @@ when no real result exists), and only synthesizes when no kept result exists.
 Physical adjacency remains the placement rule for newly synthesized results;
 an existing non-adjacent result is valid and is not moved. This avoids both the
 duplicate-result provider rejection and its permanent repair-loop recurrence.
+
+## Update: no boot-time pass
+
+The runtime-construction repair that ran before the first graph invocation was
+removed; the before_llm hook is the only repair pass. It already covers every
+history shape the boot pass handled, including the pending-write shape the boot
+pass could not see. The one behavior difference: a claim-stage compact_request
+that summarizes a still-dangling history now fails that compaction and aborts
+the turn, and the next turn's hook repairs the history.

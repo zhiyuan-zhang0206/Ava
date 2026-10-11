@@ -34,7 +34,6 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
         return object(), None
 
     monkeypatch.setattr(host_module, "consume_claimed_inbounds", AsyncMock())
-    monkeypatch.setattr(host_module, "repair_dangling_tool_use_at_startup", AsyncMock())
     monkeypatch.setattr(runtime_module, "boot_agent_scope", _boot)
     host = AgentHost(
         policy=configured_policy(),
@@ -64,3 +63,43 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
             overrides
             == AgentSlices.resolve(default_reader=configured_policy().default_reader).overrides
         )
+
+
+async def test_runtime_build_does_not_repair_a_dangling_history(
+    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+) -> None:
+    """Cold runtime construction never reads or rewrites the agent's checkpoint history.
+
+    A dangling tool_use is repaired by the before_llm hook (`agent/hooks/repair.py`)
+    on the first LLM call, not at startup.
+    """
+    touched: list[str] = []
+
+    class _RecordingGraph:
+        async def aget_state(self, *_args: object, **_kwargs: object) -> object:
+            touched.append("aget_state")
+            raise AssertionError("startup must not read graph state")
+
+        async def aupdate_state(self, *_args: object, **_kwargs: object) -> None:
+            touched.append("aupdate_state")
+            raise AssertionError("startup must not rewrite graph state")
+
+    async def _boot(*_args: object, **_kwargs: object) -> tuple[object, None]:
+        return object(), None
+
+    monkeypatch.setattr(host_module, "reconcile_claimed_inbounds_at_startup", AsyncMock())
+    monkeypatch.setattr(runtime_module, "boot_agent_scope", _boot)
+    host = AgentHost(
+        policy=configured_policy(),
+        pool=Mock(),
+        checkpointer=Mock(),
+        graph=_RecordingGraph(),  # type: ignore[arg-type]
+        bus=Mock(),
+        db=Mock(),
+        catalog=model_catalog,
+    )
+    slices = AgentSlices.resolve({}, default_reader=configured_policy().default_reader)
+
+    await host._build_runtime(1, "fingerprint", slices, incarnation=None)
+
+    assert touched == []

@@ -1,4 +1,4 @@
-"""Dangling tool pairing crash recovery: detection/rebuild helper + both repair passes.
+"""Dangling tool pairing crash recovery: detection/rebuild helper and the before_llm hook.
 
 A hard cancel (SIGTERM / restart / stop -> asyncio.CancelledError) can leave an
 AIMessage(tool_use) without its ToolMessage, or a ToolMessage without a
@@ -6,12 +6,11 @@ preceding AIMessage(tool_use). Resuming either API-invalid history causes
 Anthropic-compat providers to reject every turn with 400 (agent 167 2026-06-06;
 agents 236/238 2026-07-13; agent 5333 2026-08-31).
 
-Covers `agent/hooks/repair.py` (shared helper + before_llm hook) and the boot
-pass wrapper `agent/startup/__init__.py:repair_dangling_tool_use_at_startup`.
+Covers `agent/hooks/repair.py`: the shared helper and the before_llm hook, which
+is the only repair pass (there is no boot-time pass).
 """
 
 from typing import Any, cast
-from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
@@ -26,7 +25,7 @@ from agent.hooks.repair import (
     _unpaired_tool_calls,
     dangling_tool_pairing_repairs,
 )
-from agent.startup import repair_dangling_tool_use_at_startup
+from base.agents.messages.kwargs import ExecStatus
 
 
 def _ai_tool_use(*ids: str) -> AIMessage:
@@ -48,7 +47,7 @@ def _full_rebuild(repairs: list[Any]) -> list[Any]:
 
 def _interrupted_tool_result(tool_call_id: str, message_id: str) -> ToolMessage:
     return ToolMessage(
-        content="[interrupted: the agent process was cancelled before this tool produced a result]",
+        content=repair_module._INTERRUPTED_TOOL_RESULT,
         tool_call_id=tool_call_id,
         id=message_id,
     )
@@ -127,16 +126,11 @@ def test_duplicate_results_drop_all_but_tail_real() -> None:
     assert _redundant_tool_results(merged) == []
 
 
-@pytest.mark.parametrize("legacy", [False, True])
-def test_duplicate_results_drop_a_synthetic_after_a_real(legacy: bool) -> None:
+def test_duplicate_results_drop_a_synthetic_after_a_real() -> None:
     """Synthetic content loses to a real result even when it is positioned later."""
     use = _ai_tool_use("c1")
     real = ToolMessage(content="real output", tool_call_id="c1", id="t-real")
-    synthetic = (
-        _interrupted_tool_result("c1", "t-synthetic")
-        if legacy
-        else _full_rebuild(dangling_tool_pairing_repairs([use]))[-1]
-    )
+    synthetic = _full_rebuild(dangling_tool_pairing_repairs([use]))[-1]
 
     repairs = dangling_tool_pairing_repairs([use, real, synthetic])
 
@@ -240,9 +234,8 @@ def test_buried_partial_pairing_inserts_after_existing_tool_run() -> None:
 
 
 def test_rebuild_applies_through_real_add_messages_reducer() -> None:
-    # Both callers hand the repair value to langgraph's add_messages (boot pass
-    # via aupdate_state, hook pass via the node update). Pin the REMOVE_ALL
-    # interaction against the real reducer, not a fake: existing messages
+    # The hook hands the repair value to langgraph's add_messages via the node
+    # update. Pin the REMOVE_ALL interaction against the real reducer, not a fake: existing messages
     # survive by identity of id/content, the synthetic lands in position, and
     # the merged history is pairing-valid.
     msgs: list[AnyMessage] = [
@@ -379,6 +372,10 @@ class _FakeState:
 _CONFIG = {"configurable": {"thread_id": "236"}}
 
 
+async def _run_hook(state: _FakeState) -> dict[str, Any] | None:
+    return await _repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
+
+
 async def test_hook_returns_none_when_history_valid() -> None:
     state = _FakeState([_ai_tool_use("c1"), ToolMessage(content="o", tool_call_id="c1")])
     assert await _repair_dangling_tool_pairing(state, None, _CONFIG) is None  # type: ignore[arg-type]
@@ -391,91 +388,32 @@ async def test_hook_returns_messages_update_for_buried_dangling() -> None:
     assert isinstance(update["messages"][0], RemoveMessage)
 
 
+async def test_hook_synthesizes_unknown_result_for_dangling_tail() -> None:
+    update = await _run_hook(_FakeState([_ai_tool_use("call_x")]))
+    assert update is not None
+    repaired = _full_rebuild(update["messages"])
+    synthetic = repaired[1]
+    assert isinstance(synthetic, ToolMessage)
+    assert synthetic.tool_call_id == "call_x"
+    assert synthetic.additional_kwargs["ava_msg_type"] == "exec_output"  # pyright: ignore[reportUnknownMemberType]
+    assert synthetic.additional_kwargs["ava_exec_status"] == ExecStatus.UNKNOWN.value  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_hook_drops_orphan_tool_result_in_the_5333_shape() -> None:
+    orphan = ToolMessage(content="lost result", tool_call_id="KaN9", id="t1")
+    state = _FakeState([HumanMessage(content="now restart", id="h1"), orphan])
+    update = await _run_hook(state)
+    assert update is not None
+    repaired = _full_rebuild(update["messages"])
+    assert [m.content for m in repaired] == ["now restart"]
+
+
 def test_repair_is_the_first_framework_before_llm_hook() -> None:
     assert framework_hooks()["before_llm"][0] is _repair_dangling_tool_pairing
 
 
-# --- boot pass over the compiled graph ------------------------------------------
-
-
-class _FakeSnapshot:
-    def __init__(self, messages: list[Any], pending_notes: list[AnyMessage]) -> None:
-        self.values = {"messages": messages, "pending_exec_notes": pending_notes}
-
-
-class _FakeGraph:
-    """Minimal stand-in for the compiled graph: records aupdate_state calls."""
-
-    def __init__(self, messages: list[Any], pending_notes: list[AnyMessage] | None = None) -> None:
-        self._messages = messages
-        self._pending_notes = pending_notes or []
-        self.updates: list[dict[str, Any]] = []
-        self.checkpointer = object()
-
-    async def aget_state(self, _config: Any) -> _FakeSnapshot:
-        return _FakeSnapshot(self._messages, self._pending_notes)
-
-    async def aupdate_state(self, _config: Any, values: dict[str, Any]) -> None:
-        self.updates.append(values)
-
-
-async def test_startup_repair_rebuilds_tool_result_for_dangling() -> None:
-    graph = _FakeGraph([_ai_tool_use("call_x")])
-    await repair_dangling_tool_use_at_startup(graph, agent_id=167)  # type: ignore[arg-type]
-    assert len(graph.updates) == 1
-    repaired = graph.updates[0]["messages"]
-    assert isinstance(repaired[0], RemoveMessage)
-    assert isinstance(repaired[2], ToolMessage)
-    assert repaired[2].tool_call_id == "call_x"
-
-
-async def test_startup_repair_rebuilds_for_buried_dangling() -> None:
-    graph = _FakeGraph([_ai_tool_use("call_x"), HumanMessage(content="buried")])
-    await repair_dangling_tool_use_at_startup(graph, agent_id=236)  # type: ignore[arg-type]
-    assert len(graph.updates) == 1
-    repaired = graph.updates[0]["messages"]
-    assert isinstance(repaired[0], RemoveMessage)
-    assert repaired[0].id == REMOVE_ALL_MESSAGES
-
-
-async def test_startup_repair_drops_orphan_tool_result_with_rebuild() -> None:
-    orphan = ToolMessage(content="lost result", tool_call_id="KaN9", id="t1")
-    graph = _FakeGraph([HumanMessage(content="now restart", id="h1"), orphan])
-
-    await repair_dangling_tool_use_at_startup(graph, agent_id=5333)  # type: ignore[arg-type]
-
-    assert len(graph.updates) == 1
-    repaired = graph.updates[0]["messages"]
-    assert isinstance(repaired[0], RemoveMessage)
-    assert repaired[0].id == REMOVE_ALL_MESSAGES
-    assert repaired[1].content == "now restart"
-    assert all(not isinstance(message, ToolMessage) for message in repaired[1:])
-
-
-async def test_startup_repair_flushes_a_skipped_checkpoint_update() -> None:
-    graph = _FakeGraph([_ai_tool_use("call_x")])
-    flush = AsyncMock()
-    graph.checkpointer = type("_NstepSaver", (), {"_ava_nstep_flush": flush})()
-
-    await repair_dangling_tool_use_at_startup(graph, agent_id=167)  # type: ignore[arg-type]
-
-    flush.assert_awaited_once_with("167")
-
-
-async def test_startup_repair_is_noop_when_history_valid() -> None:
-    graph = _FakeGraph([_ai_tool_use("c1"), ToolMessage(content="o", tool_call_id="c1")])
-    await repair_dangling_tool_use_at_startup(graph, agent_id=1)  # type: ignore[arg-type]
-    assert graph.updates == []
-
-
-async def test_startup_repair_is_noop_for_brand_new_agent() -> None:
-    graph = _FakeGraph([])
-    await repair_dangling_tool_use_at_startup(graph, agent_id=2)  # type: ignore[arg-type]
-    assert graph.updates == []
-
-
 @pytest.mark.parametrize("first_finished", [False, True])
-async def test_startup_repair_flushes_notes_after_all_tool_results(first_finished: bool) -> None:
+async def test_hook_appends_notes_after_all_tool_results(first_finished: bool) -> None:
     ai = AIMessage(
         content="",
         tool_calls=[
@@ -487,9 +425,10 @@ async def test_startup_repair_flushes_notes_after_all_tool_results(first_finishe
     if first_finished:
         messages.append(ToolMessage(content="first done", tool_call_id="c1"))
     note = HumanMessage(content="deferred context")
-    graph = _FakeGraph(messages, [note])
-    await repair_dangling_tool_use_at_startup(graph, agent_id=1)  # type: ignore[arg-type]
-    update = graph.updates[0]
+    state = _FakeState(messages)
+    state.pending_exec_notes = [note]
+    update = await _run_hook(state)
+    assert update is not None
     repaired = _full_rebuild(update["messages"])
     assert [message.tool_call_id for message in repaired[1:3]] == ["c1", "c2"]
     assert repaired[-1] == note

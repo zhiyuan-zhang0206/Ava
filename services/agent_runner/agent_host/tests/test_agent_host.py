@@ -409,7 +409,6 @@ def wired(
 
     monkeypatch.setattr(host_mod, "consume_claimed_inbounds", _noop_reconcile)
     monkeypatch.setattr(settlement, "consume_claimed_inbounds", _noop_reconcile)
-    monkeypatch.setattr(host_mod, "repair_dangling_tool_use_at_startup", _noop_reconcile)
     monkeypatch.setattr(host_mod, "publish_agent_updated", _noop_reconcile)
 
     async def _fake_boot_agent_scope(

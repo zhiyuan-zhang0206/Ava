@@ -17,7 +17,9 @@ The host attempts one diagnostic UNCERTAIN write; failure to save that diagnosti
 is logged too. An already admitted attempt is never generated or applied again
 on a later wake. Its pending continuation remains held for inspection. A later
 host does not materialize the summary, certify closure or automatically settle an
-associated guarded restart. Normal original compact and restart still complete
+associated guarded restart. A retained result exempts nothing: the later wake still
+runs native cancel recovery, which marks an unresolved cancel UNCERTAIN, before the held
+compact stops ordinary work. Normal original compact and restart still complete
 when all their writes succeed.
 
 A construction refusal before attempt admission releases REJECTED with

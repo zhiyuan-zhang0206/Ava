@@ -2,8 +2,7 @@
 
 One record per launch generation: ``coding-session-owners/<key digest>/<generation>.json``,
 where the key is ``(cluster, workspace, tool)``. Several generations may share a
-workspace. The single-slot layout that came before (``<key digest>.json``) is
-still readable so a launch can reclaim what it left behind.
+workspace.
 """
 
 from __future__ import annotations
@@ -161,16 +160,9 @@ def state_path(key: CodingSessionKey, generation: str) -> Path:
 def lock_path(key: CodingSessionKey) -> Path:
     """One transition lock per key, shared by all of its generations.
 
-    Transitions are short file writes (plus a sibling's cleanup), and the path
-    is the one the single-slot layout used, so a process still running that
-    code serializes with this one.
+    Transitions are short file writes (plus a sibling's cleanup).
     """
     return _host_owner_dir() / f"{key_digest(key)}.lock"
-
-
-def legacy_state_path(key: CodingSessionKey) -> Path:
-    """The single-slot record of the layout before per-generation records."""
-    return _host_owner_dir() / f"{key_digest(key)}.json"
 
 
 def generations(key: CodingSessionKey) -> list[str]:
@@ -396,15 +388,9 @@ def read_unlocked(key: CodingSessionKey, generation: str) -> CodingSessionOwner:
     return _read_path(key, state_path(key, generation), generation)
 
 
-def read_legacy_unlocked(key: CodingSessionKey) -> CodingSessionOwner:
-    """The single-slot record of the earlier layout, if one is left."""
-    return _read_path(key, legacy_state_path(key), None)
-
-
-def remove_unlocked(key: CodingSessionKey, generation: str | None) -> None:
-    """Drop a generation's record (``None``: the legacy single-slot record)."""
-    path = legacy_state_path(key) if generation is None else state_path(key, generation)
-    path.unlink(missing_ok=True)
+def remove_unlocked(key: CodingSessionKey, generation: str) -> None:
+    """Drop a generation's record."""
+    state_path(key, generation).unlink(missing_ok=True)
 
 
 def _payload(owner: CodingSessionOwner) -> dict[str, object]:

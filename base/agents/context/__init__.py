@@ -153,7 +153,7 @@ class AvaContext:
     """The exact admission this run received; never refreshed from a replacement row."""
 
     native_work: NativeWorkTarget | None = None
-    """The original invocation target, retained across database recovery."""
+    """The original invocation target of this run."""
 
     hosted_resources: HostedTurnResources | None = None
     """The actual turn's domains and late completions, shared by copied contexts."""

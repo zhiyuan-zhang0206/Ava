@@ -163,23 +163,6 @@ class TestAiMessageItems:
         assert (items[0].reasoning_ms, items[0].reasoning_tokens) == (3000, 500)
         assert (items[1].reasoning_ms, items[1].reasoning_tokens) == (1500, None)
 
-    def test_legacy_single_reasoning_ms_falls_back_to_first_block(self):
-        """Turns persisted before per-block timing carry a single turn-level
-        `ava_reasoning_ms`; it is read back onto the first thinking block only,
-        so old timelines still render 'Thought for X'."""
-        from langchain_core.messages import AIMessage
-
-        msg = AIMessage(
-            content=[
-                {"type": "thinking", "thinking": "first", "index": 0},
-                {"type": "thinking", "thinking": "second", "index": 1},
-            ],
-            additional_kwargs={"ava_reasoning_ms": 3000},
-        )
-        items = self._items(msg)  # pyright: ignore[reportUnknownMemberType]
-        assert items[0].reasoning_ms == 3000
-        assert items[1].reasoning_ms is None
-
     def test_no_reasoning_metadata_leaves_fields_none(self):
         """A plain thinking block with no persisted ms / no usage details keeps
         both summary fields None (e.g. historical checkpoint before the field existed)."""

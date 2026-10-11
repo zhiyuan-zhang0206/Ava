@@ -14,20 +14,16 @@ payload, so synthesizing the missing pair leaves the request invalid. Drop the
 orphan result instead: it carries no model-visible request, so its removal loses
 nothing the model can honestly observe; the interrupted turn is absent.
 
-Two repair passes share `dangling_tool_pairing_repairs`:
-
-- **Boot pass** (`agent/startup/__init__.py:repair_dangling_tool_use_at_startup`, runs
-  before the first ainvoke): catches dangling committed to the checkpoint
-  before claim appends anything — including before a pending compact_request
-  runs its Compaction LLM call over the history in the claim node.
-- **before_llm hook** (registered here, runs after claim on every turn):
-  catches what the boot pass structurally cannot see. When the shutdown's
-  consolidating checkpoint `aput` fails, the dangling AIMessage survives only
-  in `checkpoint_writes` (a pending write) — invisible to `aget_state` at
-  boot, materialized by pregel only when the graph resumes. By then claim has
-  appended restart_completed / resurrect / reminder inbounds, burying the
-  dangling tool_use mid-history (the 2026-07-13 shape: wedged 236/238 in a
-  permanent per-turn 400 retry loop for 18h).
+The repair runs only as a before_llm hook (registered here), on every turn after
+claim. It sees the materialized graph state, including a dangling AIMessage that
+survives only in `checkpoint_writes` (a pending write) when the shutdown's
+consolidating checkpoint `aput` failed: pregel materializes that write only when
+the graph resumes, by which point claim has appended restart_completed /
+resurrect / reminder inbounds and buried the dangling tool_use mid-history (the
+2026-07-13 shape that wedged 236/238 in a permanent per-turn 400 retry loop for
+18h). There is no separate boot-time pass: a claim-stage compact_request that
+summarizes a still-dangling history fails that one compaction and aborts the
+turn, and the next turn's hook repairs the history.
 
 The synthetic tool_result records the missing result without inventing an
 execution outcome. Effects may already exist, so the agent must inspect state
@@ -78,14 +74,6 @@ _INTERRUPTED_TOOL_RESULT = (
     "have had effects; inspect the current state before retrying.]"
 )
 
-# Persisted checkpoints may still contain the earlier marker.
-_INTERRUPTED_TOOL_RESULTS = frozenset(
-    {
-        _INTERRUPTED_TOOL_RESULT,
-        "[interrupted: the agent process was cancelled before this tool produced a result]",
-    }
-)
-
 
 def _unpaired_tool_calls(messages: Sequence[AnyMessage]) -> list[tuple[int, list[str]]]:
     """(index, ids) whose AI tool_calls lack a kept result anywhere later.
@@ -118,7 +106,7 @@ def _unpaired_tool_calls(messages: Sequence[AnyMessage]) -> list[tuple[int, list
 def _is_synthetic_tool_result(message: ToolMessage) -> bool:
     """Whether this ToolMessage is the recovery marker, not a real result."""
     content = cast(Any, message).content
-    return isinstance(content, str) and content in _INTERRUPTED_TOOL_RESULTS
+    return isinstance(content, str) and content == _INTERRUPTED_TOOL_RESULT
 
 
 def _redundant_tool_results(messages: Sequence[AnyMessage]) -> list[int]:
