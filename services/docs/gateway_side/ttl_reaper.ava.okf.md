@@ -8,7 +8,7 @@ tags: []
 # TTL Reaper — wall-clock deadline enforcement
 
 ## What is it
-The service that enforces every deadline the cluster hands out. It runs once per cluster on the gateway side (`ServiceSpec.capabilities=_GATEWAY`, health port slot `ttl_reaper` = 8121), as its own root unit: stopping or restarting it never touches the HTTP gateway, and the gateway holds no loop that can kill a shell.
+The service that enforces every deadline the cluster hands out. It runs once per cluster on the gateway side (`ServiceSpec.capabilities=GATEWAY`, health port slot `ttl_reaper` = 8121), as its own root unit: stopping or restarting it never touches the HTTP gateway, and the gateway holds no loop that can kill a shell.
 
 ## Loops
 Two resident sequential loops under one `TaskGroup` (`services/upkeep/ttl_reaper/daemon.py`), each running a round every `AVA_TTL_REAPER_POLL_INTERVAL_SECONDS` (default 60s). A loop that raises cancels its sibling and ends the process; the supervisor restarts it. An unreachable database skips a round. Each loop reports its own progress to `/healthz`.

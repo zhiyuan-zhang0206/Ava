@@ -98,7 +98,7 @@ def read_all(db: Database) -> dict[str, HostDeployState]:
 def set_posture(db: Database, posture: str, *, machine: str) -> None:
     """Transition THIS host's posture (idle/paused).
 
-    Called by the pause/unpause lifecycle (`ops.cluster.pause`) and the `ava
+    Called by the pause/unpause lifecycle (`ops.cluster_status.pause`) and the `ava
     start` tail. A DB write failure raises (the caller decides).
     """
     if posture not in _VALID_POSTURES:

@@ -13,7 +13,7 @@ Groupings of background services running on machines whose capabilities set incl
 `services/docs/gateway_side/` is a **capability grouping, not a directory of code** — there is no `services/gateway_side/` package. Each daemon's code lives in a domain group under `services/<group>/<name>/` (groups: `wake`, `upkeep`, `derived`, `entrypoints`, `backup`, ...); which side it runs on is a `ServiceSpec.capabilities` attribute, which cuts across the filesystem and cannot be expressed by co-location. This node and its children are the index layer for that attribute, the same way the domain roots under `docs/` are the index layer for the whole graph. Do not "fix" it by moving the capability split into the code tree — that deletes the only place the capability split is represented in the hierarchy.
 
 ## Service List
-Source of truth = services in `build_services()` of `ops/spec.py` whose `ServiceSpec.capabilities` include `gateway` (the `_GATEWAY` / `_BOTH` groups), including plugin-declared entries folded in via `ops.spec.plugin_services()` — this table is the **merged roster**'s gateway-side view.
+Source of truth = services in `build_services()` of `ops/roster/__init__.py` whose `ServiceSpec.capabilities` include `gateway` (the `GATEWAY` / `BOTH` groups), including plugin-declared entries folded in via `ops.roster.plugin_services.plugin_services()` — this table is the **merged roster**'s gateway-side view.
 
 | Service | Responsibility | File |
 |---------|----------------|------|
@@ -30,10 +30,10 @@ Source of truth = services in `build_services()` of `ops/spec.py` whose `Service
 | walg (no service) | WAL archiving to OSS through WAL-G: launch arguments, configuration, key pin, health probe; the daily base-backup tick; restore and the weekly recovery drill | [[services/backup/walg/docs/walg.ava.okf.md]], [[services/backup/walg/docs/walg-tick.ava.okf.md]], [[services/backup/walg/docs/walg-restore.ava.okf.md]] |
 
 ## Also Owned by Gateway Capability, Documented Elsewhere
-The following services also run on the gateway capability (core `_GATEWAY` entries or plugin-folded-in entries), but their concept docs live in their own subtrees and are not repeated here:
+The following services also run on the gateway capability (core `GATEWAY` entries or plugin-folded-in entries), but their concept docs live in their own subtrees and are not repeated here:
 
 - **gateway** — HTTP gateway itself (see [[gateway/docs/gateway.ava.okf.md]])
-- **task-maintenance** — overdue task reminder + escalation. Registered by the `ava_fleet` plugin via `ava_builtins/plugins/ava_fleet/services.py`, folded into the roster by `ops/spec.py:plugin_services()`; runs on the gateway side, but **the node lives with its code in the plugin subtree** (see [[ava_builtins/plugins/ava_fleet/task_maintenance/docs/task_maintenance.ava.okf.md|ava_fleet › Task Maintenance]])
+- **task-maintenance** — overdue task reminder + escalation. Registered by the `ava_fleet` plugin via `ava_builtins/plugins/ava_fleet/services.py`, folded into the roster by `ops/roster/plugin_services.py:plugin_services()`; runs on the gateway side, but **the node lives with its code in the plugin subtree** (see [[ava_builtins/plugins/ava_fleet/task_maintenance/docs/task_maintenance.ava.okf.md|ava_fleet › Task Maintenance]])
 - **frontend** — Next.js frontend (`ui/web/` subtree)
 - **gate** — the public fleet UI entry, an ordinary gateway `ServiceSpec` owned by root. It uses the `frontend` entry-port slot and proxies the Next.js app on the separate `app` slot. Root readiness checks `GET /__ava/healthz` and the captured listener lineage; status shows Gate in the ordinary service table. Gate stops with its selected application tree during planned downtime. See [[services/entrypoints/gate/docs/gate.ava.okf.md|Gate authentication and maintenance projection]].
 

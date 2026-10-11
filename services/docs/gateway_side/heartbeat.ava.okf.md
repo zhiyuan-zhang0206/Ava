@@ -10,7 +10,7 @@ tags: []
 ## What is it
 Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` (default 5 minutes) scans idle agents that have been parked longer than `AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS` (default 5 minutes) and whose heartbeat is not paused, inserting a `heartbeat` inbound message for each agent to trigger wake-up. Cluster-wide (cross-machine), not limited to local.
 
-**Role affiliation**: gateway side (pure agent-runner does not run) — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`; `services_for_capabilities` receives explicit roles and the root's retained `MachineIdentity`, whose `role()` supplies the local capability set.
+**Role affiliation**: gateway side (pure agent-runner does not run) — `ServiceSpec.capabilities=GATEWAY` in `ops/spec.py`; `services_for_capabilities` receives explicit roles and the root's retained `MachineIdentity`, whose `role()` supplies the local capability set.
 
 ## Core Responsibilities
 - **Idle detection**: Select eligible `idling` identities whose real `last_active_at` and last heartbeat are old enough. No per-agent PID or live-process lease is required. The insert atomically stamps `last_heartbeat_at`, preventing repeated reminders when a wake performs no model work. Maintenance and circuit-breaker policy remain separate gates; operational status changes do not reset the real activity clock.

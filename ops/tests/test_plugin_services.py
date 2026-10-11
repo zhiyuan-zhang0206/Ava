@@ -1,7 +1,7 @@
-"""Plugin-registered ops services — the discovery + folding machinery in ops.spec.
+"""Plugin-registered ops services — the discovery + folding machinery in ops.roster.plugin_services.
 
 A plugin ships a `services.py` exposing `services() -> tuple[ServiceSpec, ...]`;
-`ops.spec.plugin_services()` discovers the INSTALLED plugins (by code presence,
+`ops.roster_plugins.plugin_services()` discovers the INSTALLED plugins (by code presence,
 via `base.packages.plugins.enable_config`) and folds their specs onto `build_services()` so the
 roster stays single-source. These lock the load-bearing invariants:
 - the real ava_fleet plugin registers task-maintenance (venv-direct cmd whose
@@ -24,6 +24,7 @@ import pytest
 import base.packages.plugins.enable_config as pc
 from base.cluster.machine import MachineIdentity
 from ops import roster, spec
+from ops.roster import plugin_services as roster_plugins
 from ops.roster import service_spec
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -111,8 +112,8 @@ def test_session_collision_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
         capabilities=frozenset({"gateway"}),
         requires_db=True,
     )
-    monkeypatch.setattr(spec, "plugin_services", lambda: (collider,))
-    with pytest.raises(spec.PluginServiceError, match="collides"):
+    monkeypatch.setattr(roster_plugins, "plugin_services", lambda: (collider,))
+    with pytest.raises(roster_plugins.PluginServiceError, match="collides"):
         roster.build_services()
 
 
@@ -125,8 +126,8 @@ def test_services_py_without_declare_reports_and_raises(
     (plugin_dir / "services.py").write_text("X = 1  # no services() function\n")
     monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {"brokenplugin": plugin_dir})
 
-    with pytest.raises(spec.PluginServiceError, match="callable services"):
-        spec.plugin_services()
+    with pytest.raises(roster_plugins.PluginServiceError, match="callable services"):
+        roster_plugins.plugin_services()
 
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
@@ -155,7 +156,7 @@ def test_broken_services_py_reports_and_aborts_roster(
     )
 
     with pytest.raises(RuntimeError, match="services boom"):
-        spec.plugin_services()
+        roster_plugins.plugin_services()
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
     )
@@ -193,7 +194,7 @@ def test_external_service_healthcheck_loads_without_agent_bootstrap(
         "            healthcheck_module=__name__),)\n"
     )
     monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {name: plugin_dir})
-    declared = spec.plugin_services()
+    declared = roster_plugins.plugin_services()
     assert len(declared) == 1
     assert declared[0].healthcheck_module == dotted
     assert importlib.import_module(dotted).main() == 1
@@ -215,7 +216,7 @@ def test_failed_service_import_does_not_publish_partial_module(
     services_py = tmp_path / "services.py"
     services_py.write_text("PARTIAL = True\nraise RuntimeError('broken collector')\n")
     with pytest.raises(RuntimeError, match="broken collector"):
-        spec._load_plugin_module("quota_failed_probe", services_py)
+        roster_plugins.load_plugin_module("quota_failed_probe", services_py)
     assert sys.modules.get(dotted) is previous
 
 
@@ -223,8 +224,12 @@ def test_failed_service_import_does_not_publish_partial_module(
     ("body", "error", "match"),
     [
         ("def services():\n    return undefined_roster\n", NameError, "undefined_roster"),
-        ("def services():\n    return [1]\n", spec.PluginServiceError, "tuple\\[ServiceSpec"),
-        ("services = 3\n", spec.PluginServiceError, "callable services"),
+        (
+            "def services():\n    return [1]\n",
+            roster_plugins.PluginServiceError,
+            "tuple\\[ServiceSpec",
+        ),
+        ("services = 3\n", roster_plugins.PluginServiceError, "callable services"),
         (
             "from pydantic import BaseModel\n"
             "class Config(BaseModel):\n    enabled: bool\n"
@@ -259,7 +264,7 @@ def test_absent_optional_service_face_does_not_fail_discovery(
     plugin_dir = tmp_path / "no_service_face"
     plugin_dir.mkdir()
     monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {"no_service_face": plugin_dir})
-    assert spec.plugin_services() == ()
+    assert roster_plugins.plugin_services() == ()
 
 
 @pytest.mark.parametrize("diagnostic", [False, True])

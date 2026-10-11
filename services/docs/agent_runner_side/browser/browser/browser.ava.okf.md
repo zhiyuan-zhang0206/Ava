@@ -10,7 +10,7 @@ tags: []
 ## What is it
 A shared headed Chrome management service on agent-runner — a three-component architecture that enables one Chrome instance to be reused by all agents, replacing the previous N-fold memory waste of each agent spawning its own Chrome.
 
-**Role affiliation**: agent-runner side (gateway does not run) — `ServiceSpec.capabilities=_AGENT_RUNNER` in `ops/roster/__init__.py`; the roster is derived by `services_for_capabilities` intersecting with the local `machine_role()`.
+**Role affiliation**: agent-runner side (gateway does not run) — `ServiceSpec.capabilities=AGENT_RUNNER` in `ops/roster/__init__.py`; the roster is derived by `services_for_capabilities` intersecting with the local `machine_role()`.
 
 ## Core Responsibilities
 - **Shared Chrome instance**: `daemon.py` launches a headed Chrome with a CDP remote-debugging port and a dedicated persistent profile. `os.execvp` replaces the supervised session process with Chrome, so the session owns its native PID.

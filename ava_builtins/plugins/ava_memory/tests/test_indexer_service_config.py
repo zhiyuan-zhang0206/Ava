@@ -15,7 +15,7 @@ from base.packages.plugins.config_registration import (
     disk_image_path,
 )
 from base.packages.plugins.enable_config import update_all_disk_images
-from ops import spec as ops_spec
+from ops.roster import plugin_services as roster_plugins
 from services.supervision.ava_root.inputs import InputChangedError, InputSeal
 from services.supervision.ava_root_glue.manifests import build_units
 
@@ -31,7 +31,7 @@ def test_missing_image_runs_indexer_without_writing_home(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch, inject: bool, memory_only_discovery: None
 ) -> None:
     monkeypatch.setattr(settings.agent, "memory_index_inject_enabled", inject)
-    spec = ops_spec.plugin_services()[0]
+    spec = roster_plugins.plugin_services()[0]
     assert spec.session == "memory-indexer"
     assert spec.capabilities == frozenset({"gateway"})
     assert spec.gate is not None and spec.gate() is None
@@ -47,7 +47,7 @@ def test_independent_host_switch_disables_indexer(
     image = disk_image_path("ava_memory")
     image.parent.mkdir(parents=True)
     image.write_text('{"indexer_enabled": false}\n')
-    spec = ops_spec.plugin_services()[0]
+    spec = roster_plugins.plugin_services()[0]
     assert spec.gate is not None
     assert spec.gate() == "disabled (ava_memory.indexer_enabled off)"
 
@@ -80,7 +80,7 @@ def test_invalid_image_fails_composition_before_a_gate_can_fail_open(
 
     monkeypatch.setattr(load_report, "report_plugin_load_failure", record_failure)
     with pytest.raises(error):
-        ops_spec.plugin_services()
+        roster_plugins.plugin_services()
     assert len(failures) == 1
     assert failures[0][0] == "ava_memory"
     assert isinstance(failures[0][1], error)
@@ -90,7 +90,7 @@ def test_invalid_image_fails_composition_before_a_gate_can_fail_open(
 def test_first_converge_materializes_and_seals_the_declared_input(
     unit_home: Path, memory_only_discovery: None
 ) -> None:
-    before = ops_spec.plugin_services()[0]
+    before = roster_plugins.plugin_services()[0]
     assert before.gate is not None and before.gate() is None
     assert not disk_image_path("ava_memory").exists()
     update = update_all_disk_images()
@@ -98,7 +98,7 @@ def test_first_converge_materializes_and_seals_the_declared_input(
     assert memory.status == "updated"
     image = disk_image_path("ava_memory")
     assert image.read_text() == MemoryConfig().model_dump_json(indent=2) + "\n"
-    spec = ops_spec.plugin_services()[0]
+    spec = roster_plugins.plugin_services()[0]
     assert spec.gate is not None and spec.gate() is None
     units = build_units([spec], capabilities={"gateway"}, repo_root=Path(__file__).parents[4])
     inputs = cast("list[object]", units[0]["inputs"])

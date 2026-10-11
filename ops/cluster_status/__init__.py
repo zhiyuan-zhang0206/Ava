@@ -35,7 +35,7 @@ from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
 from base.sessions.page_session import is_page_label
-from ops.cluster import pause as cluster_pause
+from ops.cluster_status import pause as cluster_pause
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
 

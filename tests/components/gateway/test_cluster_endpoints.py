@@ -31,7 +31,7 @@ from gateway.app import app
 from gateway.events import telemetry_rows
 from gateway.http.auth.cors import cors_allowed_origins
 from ops import agent_pause, cluster_status
-from ops.cluster import pause as cluster_pause
+from ops.cluster_status import pause as cluster_pause
 from tests.fixtures.unit.gateway_auth import without_credentials
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -85,7 +85,7 @@ def fake_flag(
 
     monkeypatch.setattr("gateway.cluster.router.cluster_is_paused", paused)
     monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", paused)
-    monkeypatch.setattr("ops.cluster.pause.is_paused", _snapshot_paused)
+    monkeypatch.setattr("ops.cluster_status.pause.is_paused", _snapshot_paused)
     return flag
 
 

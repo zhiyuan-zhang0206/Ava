@@ -16,7 +16,7 @@ in-memory matrix (~2k rows x 3072 dims float32 ≈ 24MB) and its npz
 persistence.
 
 **Role attribution**: gateway side (pure agent-runner doesn't run) —
-`ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`.
+`ServiceSpec.capabilities=GATEWAY` in `ops/spec.py`.
 
 ## Core Responsibilities
 - **Exact search**: one matrix product per query over every row, aggregated

@@ -527,7 +527,7 @@ def is_paused():
 ```
 
 Runtime only, on that branch only, and neither ruff nor pyright reports it.
-`ops/cluster/pause.py` was exactly this shape, so its conversion had to hoist
+`ops/cluster_status/pause.py` was exactly this shape, so its conversion had to hoist
 `import base.db` to module level first. Hit blind, it reads as the whole approach
 being unworkable rather than as one import in the wrong place. A function-local
 `from base.x import y` is safe — it binds `y`, not `base`.
