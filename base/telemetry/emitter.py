@@ -251,7 +251,7 @@ _jsonl_failures = 0
 
 # Loguru extra key marking the emitter's own diagnostics. Records carrying it
 # are filtered OUT of the emitter adapter's sink (see
-# `base.log.add_postgres_sink`) so they reach stderr / JSONL file sinks only
+# `base.log.add_event_sink`) so they reach stderr / JSONL file sinks only
 # and never re-enter this pipeline — a mirror-down process would otherwise loop
 # failure → warning → emit → failure forever.
 _NO_EMITTER = "_no_emitter"
@@ -373,7 +373,7 @@ def init_telemetry(
 
     Called from the loguru `init_*` entry points (the single boot seam every
     process shares): `init_gateway_process(name)` → process=name; the exec
-    child's `add_postgres_sink` → process="agent-exec" plus its agent id. The
+    child's `add_event_sink` → process="agent-exec" plus its agent id. The
     first call opens the drain thread; later calls only refresh the identity
     binding. Startup never depends on the DB (the `telemetry_events` sink connects
     lazily on the drain thread)."""
@@ -546,11 +546,11 @@ def flush() -> DrainResult:
     return DrainResult(DrainStatus.COMPLETED, DrainPhase.DRAIN)
 
 
-def sync(timeout: float = 5.0, *, bounded: bool = False) -> DrainResult:
-    """Drain and acknowledge the event pipeline; close uses the bounded form."""
+def sync(timeout: float = 5.0) -> DrainResult:
+    """Drain and acknowledge the event pipeline within `timeout` seconds."""
     pipeline = _state["pipeline"]
     if pipeline is not None:
-        return pipeline.sync(timeout, bounded=bounded)
+        return pipeline.sync(timeout)
     return DrainResult(DrainStatus.COMPLETED, DrainPhase.DRAIN)
 
 

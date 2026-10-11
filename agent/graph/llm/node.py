@@ -612,7 +612,7 @@ async def _llm_node_impl(
     # printed separately from code
     text = final_msg.text  # langchain-normalized text extraction (handles str + list-of-blocks)
     if text:
-        logger.info("[{label}] {body}", label="text", body=text)
+        logger.info("[text] {body}", event="text", body=text)
     await _persist_last_active(ctx, agent_id, text)
     _finalize_turn_observability(
         ctx.event_publisher,
@@ -664,19 +664,19 @@ async def _llm_node_impl(
             # Distinct WARNING so these turns are countable and the UI symptom
             # maps to a log line.
             logger.warning(
-                "[{label}] {body}",
-                label="halt",
+                "[halt] {body}",
+                event="halt",
                 body="no tool_call and EMPTY text — empty turn, user sees no reply",
             )
         else:
-            logger.info("[{label}] {body}", label="halt", body="no tool_call (idle)")
+            logger.info("[halt] {body}", event="halt", body="no tool_call (idle)")
         return Command[LlmGoto](
             update={"messages": [final_msg], "halted": True, **cut_update},
             goto=AFTER_EXEC,
         )
     logger.info(
-        "[{label}] {body}",
-        label="code",
+        "[code] {body}",
+        event="code",
         body=code_from_args(final_msg.tool_calls[0]["args"], source="llm final_msg tool_call"),
     )
     # CodeStart + CodeDelta have already been incrementally published by

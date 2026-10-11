@@ -31,11 +31,6 @@ def run_dir() -> Path:
     return target
 
 
-def plugins_config_path() -> Path:
-    """plugins.json path — returns the path only; load() decides whether to write defaults."""
-    return ava_home() / "plugins.json"
-
-
 def install_registry_path() -> Path:
     """Install registry file ($AVA_HOME/installed.json) — records externally
     installed packages and their enable state. Returns the path only; the

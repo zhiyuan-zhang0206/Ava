@@ -31,8 +31,7 @@ __all__ = ["EventPipeline"]
 class EventPipeline:
     """Bounded queue + drain thread owning all event persistence for the process.
 
-    Same shape as the former loguru Postgres sink (which this replaces): the
-    queue bound is the backpressure, the drain thread batches, and shed records
+    The queue bound is the backpressure, the drain thread batches, and shed records
     are counted and reported as one `event_log_drop` event per flush so the ops
     monitor panel keeps its backlog metric."""
 
@@ -111,15 +110,14 @@ class EventPipeline:
             )
         return result
 
-    def sync(self, timeout: float = 5.0, *, bounded: bool = False) -> DrainResult:
+    def sync(self, timeout: float = 5.0) -> DrainResult:
         """Wait on a distinct FIFO receipt within one end-to-end deadline.
 
-        All ordinary telemetry barriers are finite. ``bounded`` remains accepted
-        for existing close callers. A stuck writer is never rescued by another
-        writer; unfinished delivery is reported and returned to the caller.
-        A terminal worker failure is raised with its original exception.
+        All ordinary telemetry barriers are finite. A stuck writer is never
+        rescued by another writer; unfinished delivery is reported and returned
+        to the caller. A terminal worker failure is raised with its original
+        exception.
         """
-        del bounded  # retained call compatibility; every ordinary barrier is now finite
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("event drain timeout must be finite and non-negative")
         if threading.current_thread() is self._thread:

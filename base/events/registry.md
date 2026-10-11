@@ -49,7 +49,7 @@ monitoring alerts (design doc §5):
 |----------|--------|---------|
 | `audit` | business-operation facts: who did what to whom (spawn/message/task/status) | `events` |
 | `telemetry` | runtime observations: token, turn, exec, node, health, delivery | `events` |
-| `log` | bare log lines (logger calls without event=/label=) | `events` |
+| `log` | bare log lines (logger calls without event=) | `events` |
 
 SSE roles are not persisted and have no retention concept — live projection; OTel
 spans go through the trace channel (30d).
@@ -92,10 +92,9 @@ Emit sites and consumers: see the comments at each emit point.
 ## 3. Telemetry events (category=telemetry)
 
 Telemetry-side event name resolution (`base/log/__init__.py`): **explicit `event=` →
-`label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
-(formatted full text) + exception traceback. `(L)` marks names currently produced via
-**label fallback** (no explicit event=); `(SQL)` marks writes that bypass loguru and
-write SQL directly — both are annotated in the registry doc field. Emit sites and
+default `"log"`**. Payload = logger extra fields + `msg`
+(formatted full text) + exception traceback. `(SQL)` marks writes that bypass loguru and
+write SQL directly — annotated in the registry doc field. Emit sites and
 consumers: see the comments at each emit point.
 
 **Stored in `telemetry_events`**: the `stored` column is `EventSpec.persist` — a Postgres
@@ -373,8 +372,7 @@ Under the unified model `event_name` is a globally unique event name (OTel
    `dropped`...).
    Examples: `llm_usage` ✓, `db_pool_acquire_timeout` ✓, `exec(timeout)` ✗.
 2. **No bare `log`**: every logger call must carry an explicit `event=`; `label=` is a
-   UI display field only and must not be reused as an event name (the fallback
-   remains only for migration-period compatibility).
+   UI display field only and never names an event.
 3. **No dynamic event_name values**: event_name must come from a static literal or an
    in-code registry constant. Dynamic dimensions (agent_id, machine, node, status)
    always go into `attributes`/payload, **never into the event_name string**.
@@ -399,7 +397,7 @@ Under the unified model `event_name` is a globally unique event name (OTel
    pre-commit `events-registry-fresh` hook verifies no drift).
 2. **Code-literal cross-check**: `python base/events/scan_kinds.py` — scans
    production Python code (excluding tests/worktrees/node_modules) for `event=`,
-   `label=`, `event_type=`, SSE roles, emits four inventories, and cross-checks them
+   `event_type=`, SSE roles, emits three inventories, and cross-checks them
    bidirectionally against the registry (`tests/contracts/test_lint_event_kinds.py`).
 3. **Coverage statement**: this document covers every registered event_name (audit +
    telemetry + log + destination=file + SSE role). Not covered: test-fixture
@@ -407,7 +405,7 @@ Under the unified model `event_name` is a globally unique event name (OTel
 
 **CI wiring**: `tests/contracts/test_lint_event_kinds.py` is a three-way guard — every static
 `event=` literal in code must be registered (in `EVENTS`), every registry entry must
-have a producer (event=/label=/SQL/dynamic inventories), and this document must match
+have a producer (event=/SQL/dynamic inventories), and this document must match
 the generator output (drift = red). Emit-side fail-fast additionally raises
 `ValueError` for unregistered names.
 

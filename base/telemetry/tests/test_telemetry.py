@@ -378,9 +378,9 @@ def test_loguru_adapter_sets_source_from_extra(
     'system')."""
     from loguru import logger as _g
 
-    from base.log import _postgres_sink
+    from base.log import _event_sink
 
-    sink_id = _g.add(_postgres_sink, level="INFO", enqueue=False, catch=False)
+    sink_id = _g.add(_event_sink, level="INFO", enqueue=False, catch=False)
     try:
         _g.configure(extra={"agent_id": str(_AGENT)})
         _g.info("a line from the user path", event="label_change", source="user")

@@ -142,8 +142,8 @@ def _apply_fix_pipeline(code: str, *, ruff_format: bool) -> tuple[str, list[str]
     det_fixed, det_applied = apply_all_deterministic_fixes(fixed_code)
     if det_applied:
         logger.info(
-            "[{label}] det_fix: patterns={patterns}",
-            label="syntax_fix",
+            "[syntax_fix] det_fix: patterns={patterns}",
+            event="syntax_fix",
             patterns=",".join(det_applied),
         )
         fixed_code = det_fixed
@@ -173,8 +173,8 @@ def _finalize_success(
 
     if fixes_applied:
         logger.info(
-            "[{label}] applied: {fixes}",
-            label="syntax_fix",
+            "[syntax_fix] applied: {fixes}",
+            event="syntax_fix",
             fixes=",".join(fixes_applied),
         )
         # Trace-v2 retention event: deterministic fix, before-only (after is
@@ -213,8 +213,8 @@ async def _handle_compile_failure(
     if repaired is not None and repaired != fixed_code:
         # _llm_repair_syntax only returns source that compiles.
         logger.info(
-            "[{label}] llm_repair: {msg} (deterministic fixes: {fixes})",
-            label="syntax_fix",
+            "[syntax_fix] llm_repair: {msg} (deterministic fixes: {fixes})",
+            event="syntax_fix",
             msg=str(e),
             fixes=",".join(fixes_applied) or "none",
         )
@@ -232,8 +232,8 @@ async def _handle_compile_failure(
         return {"messages": [replace_execute_code(last_msg, tool_call_id, repaired)]}
 
     logger.info(
-        "[{label}] compile_failed: {msg} (fixes: {fixes})",
-        label="syntax_fix",
+        "[syntax_fix] compile_failed: {msg} (fixes: {fixes})",
+        event="syntax_fix",
         msg=str(e),
         fixes=",".join(fixes_applied) or "none",
     )

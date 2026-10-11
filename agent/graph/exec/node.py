@@ -294,8 +294,8 @@ def _dispatch_exec_result(
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
             )
-            logger.info("[{label}] {body}", label="exec", body=envelope.text)
-            logger.info("[{label}] {body}", label="halt", body="system_halt (compact)")
+            logger.info("[exec] {body}", event="exec", body=envelope.text)
+            logger.info("[halt] {body}", event="halt", body="system_halt (compact)")
         case _ExecLifecycle(
             output=output, exc=AgentTermination() | AgentRestart() | AgentImpersonation() as exc
         ):
@@ -309,10 +309,10 @@ def _dispatch_exec_result(
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
             )
-            logger.info("[{label}] {body}", label="exec", body=envelope.text)
+            logger.info("[exec] {body}", event="exec", body=envelope.text)
             logger.info(
-                "[{label}] {body}",
-                label="halt",
+                "[halt] {body}",
+                event="halt",
                 body=f"lifecycle {type(exc).__name__}",
             )
         case _ExecLifecycle(exc=other_exc):
@@ -406,7 +406,7 @@ def _dispatch_exec_result(
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
             )
-            logger.info("[{label}] {body}", label="exec", body=envelope.text)
+            logger.info("[exec] {body}", event="exec", body=envelope.text)
     return halted, envelope, status
 
 
