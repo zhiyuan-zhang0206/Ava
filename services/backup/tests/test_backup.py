@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import textwrap
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -32,7 +31,6 @@ from services.backup.artifact import names, offsite
 from services.backup.artifact.passphrase import logical_backup_passphrase
 
 _CLUSTER_TZ = "America/Los_Angeles"
-_REPO = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture
@@ -71,22 +69,15 @@ def _spawn_backup_lock_holder(
     ava_home: Path, ready: Path, hold_s: float
 ) -> subprocess.Popen[bytes]:
     """A separate interpreter that takes `backup_lock`, signals, and holds it."""
-    code = textwrap.dedent(f"""
-        import sys
-        import time
-        from pathlib import Path
-
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.backup.dump import backup_lock
-
-        with backup_lock(timeout_s=60):
-            Path({str(ready)!r}).write_text("1", encoding="utf-8")
-            time.sleep({hold_s})
-    """)
     env = dict(os.environ)
     env["AVA_HOME"] = str(ava_home)
     return subprocess.Popen(  # noqa: S603
-        [sys.executable, "-c", code],
+        [
+            sys.executable,
+            str(Path(__file__).with_name("child_backup_lock_holder.py")),
+            str(ready),
+            str(hold_s),
+        ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

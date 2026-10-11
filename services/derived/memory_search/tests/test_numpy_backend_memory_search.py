@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import threading
+import time
 from collections.abc import Iterator
 
 import httpx
@@ -60,11 +61,11 @@ def memory_search_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    deadline = __import__("time").time() + 10.0
+    deadline = time.time() + 10.0
     while not server.started:
-        if __import__("time").time() > deadline:
+        if time.time() > deadline:
             raise RuntimeError("memory_search test server failed to start")
-        __import__("time").sleep(0.05)
+        time.sleep(0.05)
     yield f"http://127.0.0.1:{port}"
     server.should_exit = True
     thread.join(timeout=5.0)
