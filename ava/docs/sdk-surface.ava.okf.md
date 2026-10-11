@@ -22,9 +22,10 @@ that installation's configuration affects subsequent reads. Explicit arguments
 still take precedence over defaults. A claim-side security scan receives its
 policy from the agent's own slices, while SDK scans use the installed agent
 configuration. Missing required installation inputs fail at their first use.
-Default SDK clients capture startup's delivered environment at their first
-configuration read. Bare plugin installation uses the same read-only capture;
-neither operation repeats dotenv delivery or changes the process environment.
+A launched script captures startup's delivered environment once when its first
+parent import composes the context and plugin installation. Both cold client
+owners retain that same configuration; constructing them does not open runtime
+connections. Neither owner repeats dotenv delivery or changes the environment.
 Explicit process roots retain their supplied configuration owner and overlays.
 Timestamped SDK operations obtain a fresh clock from their bound context, or
 from the installed process factory when no context is bound. Neither binding
@@ -60,8 +61,14 @@ bootstrap supplies its own or borrowed machine to that load, but the
 installation's fallback event producer owns separate cold clients until process
 exit. Detaching an attachment closes only its owned clients; subsequent bare
 calls never borrow those closed clients. Surface loading and the later runtime
-faces upgrade each happen once. Agent-launched bare scripts retain their current
-import-time plugin bootstrap.
+faces upgrade each happen once. Agent-launched bare scripts complete context
+and plugin composition before the first parent import returns: configuration,
+machine, clock and both cold client owners share one startup configuration.
+Core and plugin namespace from-imports therefore obtain installed interfaces.
+Constructing these owners opens no database, Redis, HTTP or event-pipeline
+resources; the first resource use does. Re-importing retains the installation
+and context. Formal execution children initialize after request validation,
+attachments after lease validation, and hosts keep explicit caller contexts.
 - `ava.context` — the `AvaContext` this process runs as: `ava.context.identity` (`agent_id`, `owns_loop`, `actor`). The exec child rebuilds the host's context from the exec request envelope and installs it before plugin loading and user code; a script an agent launched derives it from `AVA_AGENT_ID`. It does not exist (raises `AttributeError`) in the agent host and in a bare script, as `ava.state` does not outside an exec turn. `ava.context.sql` / `.redis` / `.gateway` are the connections (lazy; released when the process ends); `ava.DB` / `ava.REDIS` are the same objects under their SDK names. Free functions such as `ava.agents.*` read the identity and clients from this one entry and keep their call shapes. All threads inside that child observe the same binding through normal imports, without a ContextVar or a patch to thread startup. The shared host supplies dependencies explicitly to its helpers and plugin callbacks, and never binds a current agent to the SDK module. Its boot entry fixes a shared-host purpose in the existing SDK process slot before plugins or graph work, so inherited `AVA_AGENT_ID` cannot turn it into a launched child or allow an external attachment. Context bind/release cannot clear that startup purpose. An external controller may bind one attachment for its process and restores its previous context on detach. Lifecycle writes with an omitted source require an established actor before HTTP; an absent identity is an error.
 
 ### Self & User

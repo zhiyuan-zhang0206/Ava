@@ -1,5 +1,6 @@
 import sys as _sys
 from collections.abc import Callable
+from dataclasses import replace as _replace
 from pathlib import Path as _Path
 from types import ModuleType as _ModuleType
 from types import SimpleNamespace
@@ -296,12 +297,14 @@ def ensure_plugins_loaded(
     clock_factory: Callable[[], Clock] | None = None,
     producer: Callable[[], Any] | None = None,
     machine: _MachineIdentity | None = None,
+    _from_import: bool = False,
 ) -> None:
     """Idempotently load plugin namespaces (`ava.tasks` etc.) into *this* process.
 
     The entry point for a process an agent launched: a watcher / schedule
-    bootstrap calls it explicitly before running agent code, and a persistent-shell
-    child reaches it lazily from `__getattr__` on the first unknown `ava.X`.
+    bootstrap calls it explicitly before running agent code. A persistent-shell
+    child completes the same composition before its first parent import returns;
+    `__getattr__` remains the backstop for a deferred plugin load.
     `surface=True` (the default) loads the plugin *surfaces* only — the child
     contract (task #3633). `surface=False` loads the full agent-runtime faces
     too (state fields / hooks / prompt sections), called when a stateful
@@ -330,6 +333,9 @@ def ensure_plugins_loaded(
     attachment's shorter-lived clients. Bound SDK calls use their own context's
     producer instead.
     """
+    if _from_import:
+        _initialize_launched_process()
+        return
     from .sdk_surface import install as _sdk_install
     from .sdk_surface import sdk_disable
 
@@ -387,6 +393,64 @@ def ensure_plugins_loaded(
     except BaseException as exc:
         _sdk_install.mark_load_failed(exc)
         raise
+
+
+def initialize_context(
+    context: AvaContext,
+    *,
+    surface: bool = True,
+    config: ConfigBoot | None = None,
+    clock_factory: Callable[[], Clock] | None = None,
+    producer: Callable[[], Any] | None = None,
+) -> None:
+    """Bind a root-supplied context and complete its SDK installation.
+
+    Framework-internal: callers validate their request or lease first and own
+    context-client cleanup and prior-context restoration. Installation producers
+    keep their separate lifetime. Shared hosts cannot bind an ambient context.
+    """
+    bind_context(context)
+    ensure_plugins_loaded(
+        surface=surface,
+        config=config,
+        clock_factory=clock_factory or context.clock_factory,
+        machine=context.machine,
+        producer=producer,
+    )
+    from .sdk_surface import install as _sdk_install
+    from .sdk_surface import settings as _settings
+
+    # A loader still being imported deferred its work; it is not ready yet.
+    if _sdk_install.installed() is not None:
+        catalog = _settings.model_catalog()
+        if context.catalog is not catalog:
+            bind_context(_replace(context, catalog=catalog))
+
+
+def _initialize_launched_process() -> None:
+    """Complete a launched script's context and surface before import returns."""
+    bound = globals().get(_CONTEXT_KEY)
+    if bound is not None:
+        from .sdk_surface import agent_identity
+
+        if not agent_identity.is_launched_child():
+            return
+        from .sdk_surface import install as _sdk_install
+
+        _sdk_install.raise_load_failure()
+        if _sdk_install.installed() is not None:
+            return
+        initialize_context(bound)
+        return
+    # The existing process-context owner validates the launched identity channel.
+    config = ConfigBoot()
+    context = process_context.launched_context(config=config)
+    if context is None:
+        return
+    import atexit
+
+    atexit.register(context.clients.close)
+    initialize_context(context, config=config)
 
 
 def _maybe_load_plugins_for_missing(name: str) -> bool:
@@ -549,14 +613,11 @@ _init_complete = True
 # Only an agent-launched child reaches this load — the one import-time trigger
 # the ambient-state lint keeps for the ava package. Metering installs with the
 # SDK surface (`ava.sdk_surface.install.install`), not here.
-from .sdk_surface import agent_identity
-
 # The formal execution entry validates its request and supplies its own boot
 # owner before loading the surface. An arbitrary request env string in a bare
 # launched script cannot select this posture; the interpreter entry owns it.
 if (
     getattr(getattr(_sys.modules.get("__main__"), "__spec__", None), "name", None)
     != "agent.execution.child"
-    and agent_identity.is_launched_child()
 ):
-    ensure_plugins_loaded()
+    ensure_plugins_loaded(_from_import=True)

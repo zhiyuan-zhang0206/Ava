@@ -570,16 +570,14 @@ def _run(
     # upgrades to the agent-runtime faces (state fields feed the state schema)
     # — the child start stays off the agent runtime either way (task #3633).
     # The install applies the env baseline AVA_SDK_DISABLE as part of the load.
-    child.ava.ensure_plugins_loaded(
+    ava.initialize_context(
+        ava.context,
         config=config,
         clock_factory=clock_factory,
         producer=ava.context.clients.event_pipeline,
     )
-    from dataclasses import replace
-
     from ava.sdk_surface import settings as sdk_settings
 
-    ava.bind_context(replace(ava.context, catalog=sdk_settings.model_catalog()))
     _apply_overlay_scope(birth, overlay, scope="plugin")
 
     def read_agent_default(_domain: str, field: str) -> Any:

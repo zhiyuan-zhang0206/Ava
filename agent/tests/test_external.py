@@ -116,7 +116,8 @@ def test_attach_requests_native_plugin_load(
     assert calls[0]["surface"] is False
     assert calls[0]["config"] is None
     assert calls[0]["machine"] is ava.context.require_machine()
-    assert set(calls[0]) == {"surface", "config", "clock_factory", "machine"}
+    assert set(calls[0]) == {"surface", "config", "clock_factory", "machine", "producer"}
+    assert calls[0]["producer"] is None
     assert callable(calls[0]["clock_factory"])
 
 
