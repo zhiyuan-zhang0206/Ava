@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -163,20 +164,11 @@ def test_loaded_source_identity_is_explicit_and_changes_with_source(
 
 
 def test_loaded_verifier_imports_without_settings() -> None:
-    import sys
-
-    program = """
-import importlib.abc
-import sys
-class Poison(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname in {'base.config', 'base.paths', 'base.host.env.dotenv_boot'}:
-            raise AssertionError('Settings preload: ' + fullname)
-sys.meta_path.insert(0, Poison())
-import base.deploy.release.runtime_interpreter
-assert 'base.config' not in sys.modules
-"""
-    subprocess.run([sys.executable, "-c", program], check=True, timeout=20)
+    subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("child_loaded_verifier_import.py"))],
+        check=True,
+        timeout=20,
+    )
 
 
 def test_generation_binds_the_delivered_write_generation(

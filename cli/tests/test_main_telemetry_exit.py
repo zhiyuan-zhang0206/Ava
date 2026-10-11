@@ -15,39 +15,7 @@ from typing import Any
 import pytest
 from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
 
-_CHILD = r"""
-import argparse
-import concurrent.futures.thread
-import sys
-from cli import main, parsers
-from base import telemetry
-from base.telemetry import emitter, event_store
-from base.telemetry.metrics import observed_metrics
-
-# Isolate data persistence; receiver and OTel providers are real. A long batch
-# interval makes first initialization at exit deterministic without sleeps.
-emitter._FLUSH_INTERVAL_S = 60
-event_store.store_events = lambda *args: None
-observed_metrics.project_events = lambda *args: None
-
-def dispatch(args):
-    if sys.argv[1] != "empty":
-        telemetry.init_telemetry(process="cli-health-probe", pipeline=args.producer())
-        telemetry.emit("telemetry", "health_probe_ran", attributes={"unhealthy_checks": 0})
-    if sys.argv[1] == "exception":
-        raise RuntimeError("handler failure")
-    return 7
-
-parser = argparse.ArgumentParser()
-parser.set_defaults(func=dispatch)
-parsers.build_parser = lambda *, retained_children: parser
-try:
-    result = main.main([])
-except RuntimeError as exc:
-    assert str(exc) == "handler failure"
-else:
-    assert result == 7
-"""
+_CHILD = Path(__file__).with_name("bootstrap") / "child_telemetry_exit.py"
 
 
 @pytest.fixture
@@ -91,7 +59,7 @@ def test_cli_first_event_reaches_otlp_before_exit(
         AVA_TELEMETRY_OTLP_ENDPOINT=f"http://127.0.0.1:{server.server_address[1]}",
     )
     child = subprocess.run(  # noqa: S603 — fixed program and this checkout's interpreter
-        [sys.executable, "-I", "-c", _CHILD, mode],
+        [sys.executable, "-I", str(_CHILD), mode],
         env=env,
         capture_output=True,
         text=True,
