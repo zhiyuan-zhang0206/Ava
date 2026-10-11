@@ -11,33 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from base.config import ConfigBoot
-from cli.commands.converge import _steps
 from cli.commands.converge import host as converge_host
 
 # The converge step through which a first start (`_prepare_cold_start`) wires the
 # CLI, taken from CONVERGE_STEPS with its real host-global gating.
 _CLI_LINK_STEPS = tuple(step for step in converge_host.CONVERGE_STEPS if step.name == "ava on PATH")
-
-
-def test_cli_link_step_skips_hosts_without_the_symlink_model(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Windows has no `~/.local/bin/ava`: the link step writes nothing."""
-
-    class _NoSymlink:
-        def supports_ava_symlink(self) -> bool:
-            return False
-
-    monkeypatch.setattr(_steps, "get_backend", _NoSymlink)
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    ctx = converge_host.ConvergeCtx(
-        repo=tmp_path / "repo", ava_home=tmp_path / "cluster-home", roles=None, config=ConfigBoot()
-    )
-    for step in _CLI_LINK_STEPS:
-        step.apply(ctx)
-    assert not (tmp_path / "cluster-home").exists()
-    assert not (tmp_path / "home").exists()
 
 
 def _first_start_converge(

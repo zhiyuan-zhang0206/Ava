@@ -18,9 +18,9 @@ def test_prompts_are_off_and_ssh_is_bounded() -> None:
 def test_overrides_an_inherited_ssh_command(monkeypatch: pytest.MonkeyPatch) -> None:
     """An inherited `GIT_SSH_COMMAND` does not win. This is the posture Ava
     requires of its own git calls, not a default — and `GIT_SSH_COMMAND` also
-    outranks the `core.sshCommand` a debug script left in the Windows box's global
-    gitconfig, which is why the neutralisation happens here."""
-    monkeypatch.setenv("GIT_SSH_COMMAND", '"C:/Windows/System32/OpenSSH/ssh.exe"')
+    outranks any `core.sshCommand` in a global gitconfig, which is why the
+    neutralisation happens here."""
+    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -i /tmp/inherited-key")
     monkeypatch.setenv("GIT_TERMINAL_PROMPT", "1")
     env = git_env()
     assert env["GIT_SSH_COMMAND"].startswith("ssh -o BatchMode=yes")

@@ -115,7 +115,7 @@ panel and the stall-pair rule are its display surface (tasks #3889/#3948).
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
 own scrapes, labelled `host` (OS hostname / physical identity) and
 `machine_name` (Ava roster identity). Per the 2026-08-24 user ruling, alerts
-group by `machine_name`, so win and wsl remain separate series. These
+group by `machine_name`, so units on one host remain separate series. These
 thresholds are deployment facts, not framework constants — what counts as
 "too much CPU" depends on box specs and co-tenancy:
 
@@ -123,7 +123,7 @@ thresholds are deployment facts, not framework constants — what counts as
 |-----|--------|-----------|-------|----------|
 | `ava-ops-host-cpu-saturated` | non-idle CPU | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
 | `ava-ops-host-memory-pressure` | memory utilization | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
-| `ava-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90, excluding /mnt/wsl/docker-desktop/*, /Volumes/*, /private/tmp/*, /private/var/folders/* (Prometheus) | 15m | warning |
+| `ava-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90, excluding /Volumes/*, /private/tmp/*, /private/var/folders/* (Prometheus) | 15m | warning |
 | `ava-ops-host-disk-watermark-93` | filesystem utilization | same series > 0.93 — approaching the Loki WAL hard stop (Prometheus) | 15m | warning |
 | `ava-ops-host-disk-watermark-95` | filesystem utilization | same series > 0.95 — at the Loki WAL hard stop (Prometheus) | 5m | critical |
 | `ava-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |

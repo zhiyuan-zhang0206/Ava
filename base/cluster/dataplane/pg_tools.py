@@ -3,7 +3,7 @@ and spin up throwaway clusters for tests.
 
 macOS runs Homebrew's keg-only `postgresql@17` (binaries are not symlinked
 onto PATH, so the full keg path is required); Linux runs the apt
-`postgresql-17` layout; Windows uses the EDB installer path. Shared by the
+`postgresql-17` layout. Shared by the
 per-cluster data-plane bring-up (`cli/commands/data_plane/cluster_instance.py`), the local
 backup path (`services/backup/dump.py`), and the throwaway clusters the test suite
 (`tests/_containers.py`), migration smoke (`scripts/ci/migration_smoke.py`), and eval
@@ -38,10 +38,9 @@ from base.cluster.dataplane.pg_foreground import (
 from base.cluster.dataplane.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
 from base.log import logger
 from base.native_process.child_env import daemon_process_env
-from base.native_process.os_platform import is_macos, is_windows
+from base.native_process.os_platform import is_macos
 
 PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")
-PG_BIN_WINDOWS = Path("C:\\Program Files\\PostgreSQL\\17\\bin")  # EDB installer default
 
 # mmap-backed shared memory for every Postgres this codebase starts (Task #1263).
 # Both settings make Postgres keep shared memory in files under the data
@@ -55,8 +54,8 @@ _PG_SHM_ARGS = "-c shared_memory_type=mmap -c dynamic_shared_memory_type=mmap"
 # line); mmap is already the default for the main region on macOS and DSM mmap
 # has been supported since PG 15. If a future macOS PG build rejects either
 # option, flip this to False: `pg_shm_args` then keeps macOS on its status quo
-# (no explicit settings) while Linux/WSL keeps the pin — the fallback the task
-# named ("incompatible -> Linux/WSL only").
+# (no explicit settings) while Linux keeps the pin — the fallback the task
+# named ("incompatible -> Linux only").
 _PG_SHM_MMAP_OK_ON_MACOS = True
 
 
@@ -165,7 +164,6 @@ def pg_tool(name: str) -> Path:
     vendored tree is missing entirely (a dev box not yet converged):
     - macOS: Homebrew keg-only postgresql@17 path.
     - Linux: apt postgresql-17 layout under /usr/lib/postgresql/17/bin.
-    - Windows: EDB installer default path.
     - Other: PATH lookup via shutil.which (best-effort fallback)."""
     from base.cluster.dataplane.runtime_binaries import vendored_pg_bin_dir
 
@@ -279,18 +277,16 @@ class _Registration(NamedTuple):
     lock: Path
 
 
-def _register_throwaway(instance_dir: Path, port: int) -> _Registration | None:
+def _register_throwaway(instance_dir: Path, port: int) -> _Registration:
     """Claim `instance_dir` as this process's throwaway cluster by taking the
-    lifetime flock on its own `owner.lock`. None on Windows (no flock, and the sweep
-    is a no-op there too). The body carries owner diagnostics only — never a path.
+    lifetime flock on its own `owner.lock`. The body carries owner diagnostics only —
+    never a path.
 
     The claim is published already-locked — claim file, flock, body, rename — so
     `owner.lock` comes into existence only as the rename target of the file whose
     flock this process already holds. That is the invariant the sweep's whole
     judgment rests on (`flock acquirable => owner dead`): it can never open a
     created-but-unlocked `owner.lock` and reap a claim in flight (#3629)."""
-    if is_windows():
-        return None
     import fcntl
 
     lock = instance_dir / _OWNER_LOCK_NAME
@@ -302,12 +298,10 @@ def _register_throwaway(instance_dir: Path, port: int) -> _Registration | None:
     return _Registration(fd, lock)
 
 
-def _unregister_throwaway(registration: _Registration | None) -> None:
+def _unregister_throwaway(registration: _Registration) -> None:
     """Release the flock and drop the lock file — the instance is torn down. The
     instance dir (and with it the lock) is usually already gone by this point; the
     close is what matters, and it cannot fail."""
-    if registration is None:
-        return
     os.close(registration.fd)
     registration.lock.unlink(missing_ok=True)
 
@@ -398,9 +392,7 @@ def sweep_orphaned_throwaway_clusters() -> int:
     the reap lock too, so one instance is reaped once, and a claim mid-flight is not
     observable — `owner.lock` is published only already-locked (see
     `_register_throwaway`). On a shared tmpfs another user's instance dirs are
-    `0700`, so the glob simply does not see them. No-op on Windows."""
-    if is_windows():
-        return 0
+    `0700`, so the glob simply does not see them."""
     import fcntl
 
     reaped = 0
@@ -439,7 +431,7 @@ def sweep_orphaned_throwaway_clusters() -> int:
 #   then safe — either the orphaned postmaster still holds it (the OS probe refuses
 #   it) or it is truly free.
 # - A start that loses the race anyway (a non-throwaway process bound the port in
-#   the window, or Windows, which has no flock) is retried on a fresh port.
+#   the window) is retried on a fresh port.
 #
 # The flock lives on the root DIRECTORY rather than a lock file: nothing to create
 # (so no permission fights between users on a shared /dev/shm), nothing for the
@@ -483,16 +475,11 @@ def _port_lock_root() -> Path:
     return _throwaway_base.default_base()
 
 
-def _allocate_port(instance_dir: Path) -> tuple[int, _Registration | None]:
+def _allocate_port(instance_dir: Path) -> tuple[int, _Registration]:
     """Reserve a localhost TCP port no LIVE throwaway cluster already holds, and
     register it under `instance_dir`'s owner lock. Probe, registry check, and
     registration all happen under one host-wide flock, so the reservation is
-    visible to every other worker before ours is released. Windows has no flock:
-    the plain probe is used there, and the retry in `throwaway_postgres` is the
-    only protection."""
-    if is_windows():
-        port = _free_port()
-        return port, _register_throwaway(instance_dir, port)
+    visible to every other worker before ours is released."""
     import fcntl
 
     root_fd = os.open(_port_lock_root(), os.O_RDONLY)
@@ -591,7 +578,7 @@ def _is_port_bind_failure(exc: subprocess.CalledProcessError, log: Path) -> bool
 def _teardown_throwaway(
     tmp: Path,
     data: Path,
-    registration: _Registration | None,
+    registration: _Registration,
     process: subprocess.Popen[bytes] | None = None,
     *,
     foreground: bool = False,
@@ -649,7 +636,6 @@ def throwaway_postgres(
     sweep_orphaned_throwaway_clusters()
     tmp = data = Path()
     port = 0
-    registration: _Registration | None = None
     process: subprocess.Popen[bytes] | None = None
     attempt = 0
     while True:

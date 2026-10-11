@@ -93,7 +93,6 @@ def test_docstring_cannot_hide_executable_statement_on_same_line(tmp_path: Path)
         "Mach",
         # other platform-mechanism group
         "systemd",
-        "schtasks",
     ],
 )
 def test_forbidden_symbol_is_flagged(tmp_path: Path, symbol: str) -> None:

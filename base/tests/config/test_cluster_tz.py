@@ -42,8 +42,7 @@ def _restore_process_tz() -> Generator[None, None, None]:
         os.environ.pop("TZ", None)
     else:
         os.environ["TZ"] = original_tz
-    if hasattr(time, "tzset"):
-        time.tzset()
+    time.tzset()
 
 
 def _set_cluster_tz(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
@@ -91,16 +90,12 @@ def test_cluster_tz_none_for_invalid_name(monkeypatch: pytest.MonkeyPatch) -> No
 def test_apply_sets_tz_and_rezones_posix(monkeypatch: pytest.MonkeyPatch) -> None:
     """With an authoritative AVA_TIMEZONE, the process wall clock follows the
     cluster zone: os.environ["TZ"] is set and time.localtime() re-resolves to
-    it (tm_gmtoff is the POSIX-local observable; skip where unavailable)."""
-    if not hasattr(time, "tzset"):
-        pytest.skip("time.tzset is POSIX-only")
+    it (tm_gmtoff is the observable)."""
     _set_cluster_tz(monkeypatch, "Asia/Shanghai")
     monkeypatch.delenv("TZ", raising=False)
     apply_cluster_timezone()
     assert os.environ["TZ"] == "Asia/Shanghai"
-    gmtoff = getattr(time.localtime(), "tm_gmtoff", None)
-    if gmtoff is not None:
-        assert gmtoff == 8 * 3600
+    assert time.localtime().tm_gmtoff == 8 * 3600
 
 
 def test_apply_noop_without_authoritative_value(
@@ -113,23 +108,6 @@ def test_apply_noop_without_authoritative_value(
     monkeypatch.delenv("TZ", raising=False)
     apply_cluster_timezone()
     assert "TZ" not in os.environ
-
-
-def test_apply_sets_env_even_without_tzset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """On Windows there is no time.tzset: the hook still exports TZ for
-    subprocess children and must not raise. The tzset indirection (_tzset) is
-    patched — never the time module itself — so the process wall clock stays
-    untouched and no TZ state leaks into later tests."""
-    monkeypatch.setattr("base.config._tzset", lambda: None)
-    _set_cluster_tz(monkeypatch, "Asia/Shanghai")
-    # apply_cluster_timezone assigns os.environ["TZ"] directly — monkeypatch
-    # does not track a plain dict assignment, so the assignment must be
-    # undone explicitly (delenv registers the restore); otherwise the
-    # autouse fixture's tzset() would apply the leaked TZ to the process wall
-    # clock (gmtoff 0 -> 28800 on a UTC host; a CST host masked it).
-    monkeypatch.delenv("TZ", raising=False)
-    apply_cluster_timezone()
-    assert os.environ["TZ"] == "Asia/Shanghai"
 
 
 def _realpath_to(target: str) -> Callable[[str], str]:
@@ -150,7 +128,7 @@ def test_host_tz_name_resolves_zoneinfo_symlink(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_host_tz_name_falls_back_to_utc(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No zoneinfo symlink (Windows) or an unreadable link yields UTC."""
+    """No zoneinfo symlink or an unreadable link yields UTC."""
 
     def _raise(path: str) -> str:
         raise OSError("no such file")

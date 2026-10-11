@@ -86,8 +86,6 @@ class ResourceProcess(_StrictEvidence):
                 valid = self.starttime is not None and self.boot_id is not None
             case "darwin":
                 valid = self.starttime is None and self.boot_id is not None
-            case "win32":
-                valid = self.starttime is None and self.boot_id is None
             case _:
                 valid = False
         if not valid:

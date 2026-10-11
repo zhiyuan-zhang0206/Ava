@@ -51,9 +51,7 @@ def owned_config_environment() -> Iterator[None]:
         with patch.dict(os.environ):
             yield
     finally:
-        tzset = getattr(time, "tzset", None)
-        if tzset is not None:
-            tzset()
+        time.tzset()
 
 
 def test_reconcile_embed_error_truncates_and_returns_false(

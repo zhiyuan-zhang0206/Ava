@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -59,20 +58,6 @@ print(json.dumps({
     'versions': [subprocess.check_output([tool, '--version'], text=True).strip() for tool in tools],
 }))
 """
-    # Real boot retry owner, replacing only `ava start` with the safe resolver
-    # probe. It still launches a fresh interpreter with cron's inherited env.
-    code = (
-        "import subprocess, sys\n"
-        "from cli import boot_retry\n"
-        "run = subprocess.run\n"
-        "def probe(command, **kwargs):\n"
-        "    assert command[:4] == [sys.executable, '-m', 'cli.main', 'start']\n"
-        f"    result = run([sys.executable, '-c', {code!r}], check=False)\n"
-        "    assert result.returncode == 0\n"
-        "    return result\n"
-        "boot_retry.subprocess.run = probe\n"
-        "raise SystemExit(boot_retry.run_boot([]))\n"
-    )
     result = subprocess.run(  # noqa: S603 — fixed interpreter and test-owned source/config.
         [sys.executable, "-c", code],
         env=env,
@@ -85,7 +70,6 @@ print(json.dumps({
     return json.loads(result.stdout)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="Redis server is POSIX-only")
 def test_home_selection_survives_a_polluted_boot_env(tmp_path: Path) -> None:
     selected = _tools(tmp_path / "Redis 8" / "bin", "selected-8")
     system_bin = _tools(tmp_path / "system-bin", "system-7")
@@ -117,7 +101,6 @@ def test_explicit_directory_requires_both_tools(
             resolver()
 
 
-@pytest.mark.skipif(os.name != "posix", reason="POSIX executable permission")
 def test_explicit_nonexecutable_tool_never_falls_back(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

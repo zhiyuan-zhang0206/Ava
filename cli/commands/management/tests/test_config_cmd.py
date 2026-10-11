@@ -582,7 +582,7 @@ def test_the_walg_key_is_official_local_config(local_env_home: Path) -> None:
 def test_local_set_can_pin_the_hosted_runner_health_port(
     local_env_home: Path,
 ) -> None:
-    """2026-09-02 (win and wsl both fell back to the shared 8114): the
+    """2026-09-02 (two units fell back to the shared 8114): the
     agent-host health port was read-only with no official repair surface, so the
     emergency fix was a direct `.env` hand-edit. The field is now host-writable:
     `config set` IS the repair surface. remote_writable stays False, so a remote

@@ -52,7 +52,6 @@ def test_relay_token_channels(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cli.relay_token_from_stdin() == "from-stdin"
 
 
-@pytest.mark.skipif(cli.os.name == "nt", reason="fchmod is POSIX-only")
 def test_failed_relay_stub_write_removes_partial_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
