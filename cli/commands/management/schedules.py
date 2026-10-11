@@ -355,8 +355,8 @@ def cmd_schedules_runs(identifier: str, limit: int) -> int:
 def cmd_schedules_provision(*, database_factory: DatabaseFactory) -> int:
     """`ava schedules provision` — bring the built-in schedules in line with this
     checkout's schedules/manifest.json: create the missing ones (product schedules —
-    self-evolution, memory — enabled; cluster-operator schedules — e.g.
-    trace-ship-tempo — present but disabled) and resync the `script` / `command` of
+    self-evolution, memory — enabled; cluster-operator schedules, none today,
+    would be present but disabled) and resync the `script` / `command` of
     existing ones whose DB snapshot differs from the repo template (a live session is
     relaunched onto it by the schedule-manager; a stopped one picks it up when started).
 

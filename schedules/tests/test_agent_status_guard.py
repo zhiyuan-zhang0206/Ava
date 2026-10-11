@@ -38,7 +38,6 @@ EXPECTED_STATUS_MEMBERS: dict[str, set[str]] = {
     },
     "self-evolution-daily-schedule.py": {"TERMINATED"},
     "self-evolution-weekly-schedule.py": {"TERMINATED"},
-    "trace-ship-tempo-schedule.py": set(),
 }
 
 SCHEDULE_NAMES = {
@@ -50,7 +49,6 @@ SCHEDULE_NAMES = {
     "model-update-tracker-schedule.py": "model-update-tracker",
     "self-evolution-daily-schedule.py": "self-evolution-daily",
     "self-evolution-weekly-schedule.py": "self-evolution-weekly",
-    "trace-ship-tempo-schedule.py": "trace-ship-tempo",
 }
 
 

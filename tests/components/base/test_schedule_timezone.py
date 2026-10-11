@@ -27,9 +27,7 @@ import pytest
 from base.daemon.schedules.watcher import next_fire
 
 _SCHEDULES = Path(__file__).resolve().parents[3] / "schedules"
-# Templates whose cron expressions are wall-clock-sensitive. trace-ship-tempo is
-# excluded on purpose: `*/5 * * * *` is a period, not a time of day, and it says
-# so by passing "UTC" explicitly.
+# Templates whose cron expressions are wall-clock-sensitive.
 _CLUSTER_CLOCK_TEMPLATES = {
     "debt-sweep-daily-schedule.py": "TZ",
     "dev-ci-metrics-schedule.py": "TZ",
@@ -77,7 +75,7 @@ def _timezone_arguments(tree: ast.Module) -> list[str]:
 
 @pytest.mark.parametrize(
     "path",
-    sorted(p for p in _SCHEDULES.glob("*-schedule.py") if p.name != "trace-ship-tempo-schedule.py"),
+    sorted(_SCHEDULES.glob("*-schedule.py")),
     ids=lambda p: p.name,
 )
 def test_template_timezone_is_the_cluster_setting(path: Path) -> None:
