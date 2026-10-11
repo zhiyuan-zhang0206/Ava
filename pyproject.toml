@@ -608,7 +608,6 @@ check-typed-exception = true
 "ava/mcps/tests/test_daemon.py" = ["S110"]
 "agent/graph/claim/tests/test_core.py" = ["S110"]
 "base/deploy/schema/tests/test_migration_reset.py" = ["S110"]
-"gateway/tests/extensions/test_schedule_runner.py" = ["S110"]
 "tests/integration/test_grafana_native_runtime.py" = ["S110"]
 "tests/components/services/test_backup_scheduler_shutdown.py" = ["S110"]
 # T20 exemptions — print() is legitimate here: cli/ writes to the user's

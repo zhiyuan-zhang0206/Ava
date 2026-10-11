@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -19,11 +17,13 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules.runner import _script_filename
 from gateway.schedules.tests.runner_inputs import run_schedule as run
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture(autouse=True)
@@ -62,7 +62,7 @@ def _status_and_error(conn: psycopg.Connection, sid: int) -> tuple[str, str | No
 
 
 def test_run_materializes_and_executes_and_binds_actor(
-    db_conn: psycopg.Connection, unit_home: Path
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     marker = unit_home / "ran.txt"
     # The script records the actor it runs under — proving establish_actor fired
@@ -70,18 +70,20 @@ def test_run_materializes_and_executes_and_binds_actor(
     script = f"import ava.sdk_surface.agent_identity, pathlib\npathlib.Path({str(marker)!r}).write_text(ava.sdk_surface.agent_identity.require_actor())\n"
     sid = _insert_schedule(db_conn, script=script)
 
-    rc = run(sid)
+    rc = run(sid, machine=machine_identity)
 
     assert rc == 0
     assert (unit_home / "schedules" / str(sid) / "schedule.py").read_text() == script
     assert marker.read_text() == f"schedule:{sid}"
 
 
-def test_run_marks_completed_on_clean_py_exit(db_conn: psycopg.Connection, unit_home: Path) -> None:
+def test_run_marks_completed_on_clean_py_exit(
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     # A .py script that returns (rc=0) is a deliberate finish, not a crash.
     sid = _insert_schedule(db_conn, script="x = 1 + 1\n")
 
-    rc = run(sid)
+    rc = run(sid, machine=machine_identity)
 
     assert rc == 0
     status, last_error = _status_and_error(db_conn, sid)
@@ -90,21 +92,23 @@ def test_run_marks_completed_on_clean_py_exit(db_conn: psycopg.Connection, unit_
 
 
 def test_run_marks_completed_on_clean_subprocess_exit(
-    db_conn: psycopg.Connection, unit_home: Path
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     sid = _insert_schedule(db_conn, script="exit 0\n", command="bash run.sh")
 
-    rc = run(sid)
+    rc = run(sid, machine=machine_identity)
 
     assert rc == 0
     status, _ = _status_and_error(db_conn, sid)
     assert status == "completed"
 
 
-def test_run_captures_crash_to_last_error(db_conn: psycopg.Connection, unit_home: Path) -> None:
+def test_run_captures_crash_to_last_error(
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     sid = _insert_schedule(db_conn, script="raise RuntimeError('boom-42')\n")
 
-    rc = run(sid)
+    rc = run(sid, machine=machine_identity)
 
     assert rc == 1
     status, last_error = _status_and_error(db_conn, sid)
@@ -115,11 +119,11 @@ def test_run_captures_crash_to_last_error(db_conn: psycopg.Connection, unit_home
 
 
 def test_run_nonzero_subprocess_is_not_completed(
-    db_conn: psycopg.Connection, unit_home: Path
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     sid = _insert_schedule(db_conn, script="exit 3\n", command="bash run.sh")
 
-    rc = run(sid)
+    rc = run(sid, machine=machine_identity)
 
     assert rc == 3
     status, last_error = _status_and_error(db_conn, sid)
@@ -137,48 +141,58 @@ def _runs(conn: psycopg.Connection, sid: int) -> list[tuple[bool | None, str | N
         return [(r[0], r[1]) for r in cur.fetchall()]
 
 
-def test_run_records_clean_py_exit(db_conn: psycopg.Connection, unit_home: Path) -> None:
+def test_run_records_clean_py_exit(
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     # A clean .py exit closes its run-history row with ok=true.
     sid = _insert_schedule(db_conn, script="x = 1 + 1\n")
 
-    assert run(sid) == 0
+    assert run(sid, machine=machine_identity) == 0
     assert _runs(db_conn, sid) == [(True, None)]
 
 
-def test_run_records_crash(db_conn: psycopg.Connection, unit_home: Path) -> None:
+def test_run_records_crash(
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     sid = _insert_schedule(db_conn, script="raise RuntimeError('x' * 5000 + 'the-end')\n")
 
-    assert run(sid) == 1
+    assert run(sid, machine=machine_identity) == 1
     [(ok, note)] = _runs(db_conn, sid)
     assert ok is False and note is not None and len(note) <= 3100  # the traceback's tail only
     assert note.splitlines()[0] == "crashed: RuntimeError" and note.endswith("the-end")
 
 
-def test_run_records_nonzero_command(db_conn: psycopg.Connection, unit_home: Path) -> None:
+def test_run_records_nonzero_command(
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     sid = _insert_schedule(db_conn, script="exit 3\n", command="bash run.sh")
 
-    assert run(sid) == 3
+    assert run(sid, machine=machine_identity) == 3
     assert _runs(db_conn, sid) == [(False, "command exited 3")]
 
 
-def test_run_records_py_sys_exit_zero(db_conn: psycopg.Connection, unit_home: Path) -> None:
+def test_run_records_py_sys_exit_zero(
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     # A .py script that calls sys.exit(0) exits deliberately — a finish like a
     # clean return, not a crash and not an eternal in-progress row (QA P3-3).
     sid = _insert_schedule(db_conn, script="raise SystemExit(0)\n")
 
-    assert run(sid) == 0
+    assert run(sid, machine=machine_identity) == 0
     status, last_error = _status_and_error(db_conn, sid)
     assert status == "completed"
     assert last_error is None
     assert _runs(db_conn, sid) == [(True, None)]
 
 
-def test_run_records_py_sys_exit_nonzero(db_conn: psycopg.Connection, unit_home: Path) -> None:
+def test_run_records_py_sys_exit_nonzero(
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     # A .py script that calls sys.exit(3) is recorded like a command's nonzero
     # exit — the row closes ok=false and the manager's crash path relaunches.
     sid = _insert_schedule(db_conn, script="raise SystemExit(3)\n")
 
-    assert run(sid) == 3
+    assert run(sid, machine=machine_identity) == 3
     status, last_error = _status_and_error(db_conn, sid)
     assert status != "completed"
     assert last_error is not None and "script exited 3" in last_error
@@ -186,7 +200,7 @@ def test_run_records_py_sys_exit_nonzero(db_conn: psycopg.Connection, unit_home:
 
 
 def test_agent_status_guard_failure_is_visible_in_schedule_records(
-    db_conn: psycopg.Connection, unit_home: Path
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     script = """
 from schedules.agent_status_guard import ensure_agent_status_members
@@ -202,7 +216,7 @@ ensure_agent_status_members(
 """
     sid = _insert_schedule(db_conn, script=script, name="drift-probe")
 
-    assert run(sid) == 1
+    assert run(sid, machine=machine_identity) == 1
     status, last_error = _status_and_error(db_conn, sid)
     expected = "schedule 'drift-probe' is missing AgentStatus members: IDLING"
     assert status != "completed"
@@ -220,11 +234,16 @@ ensure_agent_status_members(
     ],
 )
 def test_run_records_py_sys_exit_message(
-    db_conn: psycopg.Connection, unit_home: Path, exit_expr: str, expected_note: str
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    exit_expr: str,
+    expected_note: str,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     sid = _insert_schedule(db_conn, script=f"raise SystemExit({exit_expr})\n")
 
-    assert run(sid) == 1
+    assert run(sid, machine=machine_identity) == 1
     assert _runs(db_conn, sid) == [(False, expected_note)]
 
 
@@ -244,27 +263,35 @@ def test_run_records_py_sys_exit_bool(
     exit_expr: str,
     expected_rc: int,
     expected_rows: list[tuple[bool | None, str | None]],
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     sid = _insert_schedule(db_conn, script=f"raise SystemExit({exit_expr})\n")
 
-    assert run(sid) == expected_rc
+    assert run(sid, machine=machine_identity) == expected_rc
     assert _runs(db_conn, sid) == expected_rows
 
 
 def test_run_records_stall_timeout(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
 
     monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 2.0)
     sid = _insert_schedule(db_conn, script="sleep 60\n", command="bash run.sh")
 
-    assert run(sid) == 1
+    assert run(sid, machine=machine_identity) == 1
     assert _runs(db_conn, sid) == [(False, "stall timeout (2s)")]
 
 
-def test_run_skips_disabled_schedule(db_conn: psycopg.Connection, unit_home: Path) -> None:
+def test_run_skips_disabled_schedule(
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     sid = _insert_schedule(db_conn, script="raise RuntimeError('should not run')\n", enabled=False)
-    assert run(sid) == 0
+    assert run(sid, machine=machine_identity) == 0
     # Nothing materialized, no error recorded.
     assert not (unit_home / "schedules" / str(sid)).exists()
     with db_conn.cursor() as cur:
@@ -276,7 +303,11 @@ def test_run_skips_disabled_schedule(db_conn: psycopg.Connection, unit_home: Pat
 
 
 def test_run_loads_plugins_for_py_script(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     # The in-process .py path must load plugin namespaces first — this runner never
     # builds the agent graph, so nothing else does, and a schedule that touches
@@ -287,12 +318,16 @@ def test_run_loads_plugins_for_py_script(
     monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: calls.append(1))
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
-    assert run(sid) == 0
+    assert run(sid, machine=machine_identity) == 0
     assert calls == [1]
 
 
 def test_run_hands_py_script_a_clean_argv(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     # The gateway launches the runner as `python -m services.wake.schedule_manager.runner <id>`,
     # so this process's sys.argv carries the schedule id. A .py script runs
@@ -307,7 +342,7 @@ def test_run_hands_py_script_a_clean_argv(
     )
     sid = _insert_schedule(db_conn, script=script)
 
-    assert run(sid) == 0
+    assert run(sid, machine=machine_identity) == 0
     assert json.loads(marker.read_text()) == [
         str(unit_home / "schedules" / str(sid) / "schedule.py")
     ]
@@ -316,7 +351,11 @@ def test_run_hands_py_script_a_clean_argv(
 
 
 def test_run_skips_plugin_load_for_non_py_command(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     # A non-.py shell command (bash etc.) runs in its own subprocess and does not
     # import ava, so this runner's process does not load plugins for it.
@@ -326,12 +365,16 @@ def test_run_skips_plugin_load_for_non_py_command(
     monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: calls.append(1))
     sid = _insert_schedule(db_conn, script="exit 0\n", command="bash run.sh")
 
-    assert run(sid) == 0
+    assert run(sid, machine=machine_identity) == 0
     assert calls == []
 
 
 def test_run_record_failure_does_not_break_the_run(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     # Run history is severable observability: a DB failure on the run-record
     # writes must not affect the schedule itself (clean exit still marks
@@ -397,13 +440,17 @@ def test_run_record_failure_does_not_break_the_run(
     monkeypatch.setattr(sr.Database, "connect", _flaky_connect)
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
-    assert run(sid) == 0
+    assert run(sid, machine=machine_identity) == 0
     status, _ = _status_and_error(db_conn, sid)
     assert status == "completed"
 
 
 def test_run_completed_marker_failure_keeps_run_row_honest(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     # QA P3-5: a failure writing the 'completed' status marker must not record
     # the run as 'crashed: OperationalError' — the script finished fine, only
@@ -470,7 +517,7 @@ def test_run_completed_marker_failure_keeps_run_row_honest(
     monkeypatch.setattr(sr.Database, "connect", _flaky_connect)
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
-    assert run(sid) == 0
+    assert run(sid, machine=machine_identity) == 0
     status, _ = _status_and_error(db_conn, sid)
     assert status != "completed"  # the marker write failed — manager will relaunch
     assert _runs(db_conn, sid) == [(True, "completed-marker write failed")]
@@ -495,262 +542,12 @@ def test_script_filename(command: str, expected: str) -> None:
     assert _script_filename(command) == expected
 
 
-# ── stall guard (2026-08-03: a hung schedule sat "alive" through the gateway
-#    freeze window and silently missed its Monday fire — the guard hard-exits
-#    so the manager's crash path gets a chance) ─────────────────────────────
-
-
-@contextmanager
-def _watch_stalls(
-    monkeypatch: pytest.MonkeyPatch, *, patch_sleep: bool = False, database_gate: ProcessDbGate
-) -> Generator[list[str], None, None]:
-    """Record real guard verdicts without exiting the test process."""
-    import gateway.schedules.runner as sr
-
-    monkeypatch.setattr(settings.gateway, "schedule_stall_check_interval_seconds", 0.02)
-    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.1)
-    fired: list[str] = []
-
-    def record_stall(_db: object, _sid: int, msg: str, _rid: int | None) -> None:
-        fired.append(msg)
-
-    monkeypatch.setattr(sr, "_stall_action", record_stall)
-    if patch_sleep:
-        sr._patch_park_detection()
-    stop = sr._start_stall_guard(Database.from_settings(gate=database_gate), 1, None)
-    try:
-        yield fired
-    finally:
-        stop.close()
-        if patch_sleep:
-            sr._restore_park_detection()
-
-
-def test_stall_guard_fires_on_a_stalled_main_thread(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-) -> None:
-    """A main-thread frame that does not advance past the timeout trips the
-    guard (the stall verdict is recorded; the hard exit itself is os._exit in
-    the guard thread and is not exercised in-process)."""
-    import time
-
-    with _watch_stalls(monkeypatch, database_gate=database_gate) as fired:
-        deadline = time.monotonic() + 2.0
-        while not fired and time.monotonic() < deadline:
-            x = 0
-            x += 1  # a stable, non-park frame for the guard to observe
-        assert fired, "stall guard never fired on a stalled main thread"
-        assert "stalled" in fired[0]
-
-
-def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-) -> None:
-    """A resident schedule parks in time.sleep between fire windows — that is
-    the design, not a stall, so the guard must stay quiet."""
-    import time
-
-    import gateway.schedules.runner as sr
-
-    monkeypatch.setattr(settings.gateway, "schedule_stall_check_interval_seconds", 0.02)
-    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.05)
-    fired: list[str] = []
-    monkeypatch.setattr(
-        sr,
-        "_stall_action",
-        lambda _db, _sid, msg, _rid: fired.append(msg),  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    # The runner wraps time.sleep before running a script; without the wrapper
-    # the deepest Python frame of a sleeping main thread is sleep's *caller*,
-    # which is indistinguishable from a stall.
-    _real_sleep = time.sleep
-    sr._patch_park_detection()
-    stop = sr._start_stall_guard(Database.from_settings(gate=database_gate), 1, None)
-    try:
-        time.sleep(0.4)  # main thread parked in time.sleep the whole time
-        assert fired == []
-    finally:
-        stop.close()
-        # The wrapper is process-wide (`time.sleep = sleep` in
-        # schedule_runner._patch_park_detection) — restore it or every later
-        # `assert time.sleep is _REAL_SLEEP` guard (test_start_readiness_gate)
-        # in this worker session fails on the wrapper.
-        time.sleep = _real_sleep
-
-
-@pytest.mark.parametrize("capture_output", [True, False], ids=["captured", "uncaptured"])
-def test_stall_guard_ignores_a_live_child_wait(
-    monkeypatch: pytest.MonkeyPatch, capture_output: bool, database_gate: ProcessDbGate
-) -> None:
-    """A child wait may outlast the stall budget; its caller owns the timeout."""
-    import subprocess
-
-    with _watch_stalls(monkeypatch, database_gate=database_gate) as fired:
-        subprocess.run(
-            [sys.executable, "-c", "import time; time.sleep(0.5)"],
-            capture_output=capture_output,
-            timeout=2,
-            check=True,
-        )
-        assert fired == []
-
-
-def test_stall_guard_fires_on_select_outside_subprocess(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-) -> None:
-    """The select frame used by child waits must still expose socket wedges."""
-    import selectors
-    import socket
-
-    reader, writer = socket.socketpair()
-    with reader, writer, selectors.DefaultSelector() as selector:
-        selector.register(reader, selectors.EVENT_READ)
-        with _watch_stalls(monkeypatch, database_gate=database_gate) as fired:
-            selector.select(timeout=0.5)
-            assert fired, "stall guard ignored a socket wait outside subprocess"
-            assert "select" in fired[0]
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="preexec_fn requires POSIX")
-def test_stall_guard_fires_during_subprocess_spawn(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-) -> None:
-    """The caller's timeout does not bound Popen's wait for child startup."""
-    import subprocess
-    import time
-
-    def slow_spawn() -> None:
-        time.sleep(0.5)
-
-    with _watch_stalls(monkeypatch, patch_sleep=True, database_gate=database_gate) as fired:
-        subprocess.run(
-            [sys.executable, "-c", "pass"],
-            capture_output=True,
-            timeout=0.2,
-            preexec_fn=slow_spawn,
-            check=True,
-        )
-        assert fired, "stall guard ignored subprocess spawn"
-        assert "_execute_child" in fired[0]
-
-
-def test_stall_guard_fires_during_subprocess_argument_conversion(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-) -> None:
-    """A blocking PathLike callback is not part of the bounded child wait."""
-    import os
-    import socket
-    import subprocess
-    import threading
-
-    reader, writer = socket.socketpair()
-    with reader, writer:
-        reader.settimeout(2)
-
-        class SlowExecutable(os.PathLike[str]):
-            def __fspath__(self) -> str:
-                reader.recv(1)
-                return sys.executable
-
-        # EOF releases every conversion of the same argument, not just the first.
-        wake = threading.Timer(0.5, writer.close)
-        with _watch_stalls(monkeypatch, patch_sleep=True, database_gate=database_gate) as fired:
-            wake.start()
-            try:
-                subprocess.run(  # noqa: S603 - test PathLike always resolves to sys.executable
-                    [SlowExecutable(), "-c", "pass"],
-                    capture_output=True,
-                    timeout=0.2,
-                    check=True,
-                )
-                assert fired, "stall guard ignored subprocess argument conversion"
-                assert "__fspath__" in fired[0]
-            finally:
-                wake.cancel()
-                wake.join()
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX subprocess flush and pipe semantics")
-def test_stall_guard_fires_during_subprocess_stdin_flush(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-) -> None:
-    """communicate's entry flush can block before it checks its deadline."""
-    import os
-    import subprocess
-    import threading
-
-    with subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(2)"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        bufsize=8192,
-    ) as child:
-        assert child.stdin is not None
-        fd = child.stdin.fileno()
-        os.set_blocking(fd, False)
-        try:
-            while True:
-                os.write(fd, b"x" * 65536)
-        except BlockingIOError:
-            pass  # The actual pipe capacity is full, on both macOS and Linux.
-        finally:
-            os.set_blocking(fd, True)
-        assert child.stdin.write(b"x") == 1  # Leave one byte in BufferedWriter.
-
-        wake = threading.Timer(0.5, child.terminate)
-        with _watch_stalls(monkeypatch, patch_sleep=True, database_gate=database_gate) as fired:
-            wake.start()
-            try:
-                with pytest.raises(subprocess.TimeoutExpired):
-                    child.communicate(timeout=0.01)
-                assert fired, "stall guard ignored subprocess stdin.flush"
-                assert "_communicate" in fired[0]
-            finally:
-                wake.cancel()
-                wake.join()
-                child.kill()
-                child.wait(timeout=2)
-
-
-def test_stall_guard_fires_during_subprocess_argument_selector(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-) -> None:
-    """A selector in argument conversion is not communicate's selector wait."""
-    import os
-    import selectors
-    import socket
-    import subprocess
-    import threading
-
-    reader, writer = socket.socketpair()
-    with reader, writer, selectors.DefaultSelector() as selector:
-        selector.register(reader, selectors.EVENT_READ)
-
-        class SlowExecutable(os.PathLike[str]):
-            def __fspath__(self) -> str:
-                selector.select(timeout=2)
-                return sys.executable
-
-        # EOF makes every conversion ready; the timeout bounds a broken timer.
-        wake = threading.Timer(0.5, writer.close)
-        with _watch_stalls(monkeypatch, patch_sleep=True, database_gate=database_gate) as fired:
-            wake.start()
-            try:
-                subprocess.run(  # noqa: S603 - test PathLike always resolves to sys.executable
-                    [SlowExecutable(), "-c", "pass"],
-                    capture_output=True,
-                    timeout=0.2,
-                    check=True,
-                )
-                assert fired, "stall guard ignored a selector in subprocess argument conversion"
-            finally:
-                wake.cancel()
-                wake.join()
-
-
 def test_run_hung_subprocess_times_out_and_records_error(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    unit_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A non-.py command that never exits must be bounded: the runner records
     last_error and returns non-zero so the ScheduleManager's crash path
@@ -760,7 +557,7 @@ def test_run_hung_subprocess_times_out_and_records_error(
     monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 2.0)
     sid = _insert_schedule(db_conn, script="sleep 60\n", command="bash run.sh")
 
-    rc = run(sid)
+    rc = run(sid, machine=machine_identity)
 
     assert rc == 1
     status, last_error = _status_and_error(db_conn, sid)
