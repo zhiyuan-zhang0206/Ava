@@ -1,9 +1,7 @@
 """The preview replay entry owns its captured database admission gate."""
 
-import importlib.util
 import sys
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import Mock
 
 import pytest
@@ -11,20 +9,11 @@ import pytest
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
-
-
-@pytest.fixture
-def replay() -> ModuleType:
-    source = Path(__file__).resolve().parents[2] / "scripts/verify/understanding_replay.py"
-    spec = importlib.util.spec_from_file_location("entry_probe_replay", source)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from scripts.verify import understanding_replay as replay
 
 
 def test_report_uses_one_captured_gated_database(
-    replay: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     capture = Mock(return_value=LoadedCommit(tmp_path, "captured-before-move"))
     count = Mock(return_value=7)
@@ -53,7 +42,7 @@ def test_report_uses_one_captured_gated_database(
 
 
 def test_preview_refusal_precedes_capture_and_database(
-    replay: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     capture = Mock()
     create = Mock()

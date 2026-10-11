@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import socket
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,20 +11,9 @@ from typing import Any
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPT = _REPO_ROOT / "scripts" / "model_registry" / "check_model_updates.py"
+from scripts.model_registry import check_model_updates
 
-
-def _load_script() -> Any:
-    spec = importlib.util.spec_from_file_location("check_model_updates", _SCRIPT)
-    assert spec and spec.loader
-    module: Any = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    # The CLI composition root builds a catalog. These tests replace that
-    # constructor with an explicit test-owned comparison registry.
-    module.build_model_catalog = lambda: SimpleNamespace(models={})
-    return module
+_SCRIPT = Path(check_model_updates.__file__)
 
 
 def _write_env_file(tracker: Any, path: Path, *, missing: str | None = None) -> None:
@@ -80,8 +67,7 @@ def test_tracker_script_exists() -> None:
     assert _SCRIPT.is_file()
 
 
-def test_fake_ip_range_boundaries() -> None:
-    tracker = _load_script()
+def test_fake_ip_range_boundaries(tracker: Any) -> None:
 
     assert tracker._is_fake_ip("198.18.0.0")
     assert tracker._is_fake_ip("198.19.255.255")
@@ -92,9 +78,8 @@ def test_fake_ip_range_boundaries() -> None:
 
 
 def test_doh_real_ip_falls_back_to_second_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tracker: Any
 ) -> None:
-    tracker = _load_script()
     host = "api.example.com"
     calls: list[str] = []
 
@@ -119,8 +104,7 @@ def test_doh_real_ip_falls_back_to_second_endpoint(
     assert calls == list(tracker._DOH_ENDPOINTS)
 
 
-def test_doh_real_ip_skips_fake_ip_answers(monkeypatch: pytest.MonkeyPatch) -> None:
-    tracker = _load_script()
+def test_doh_real_ip_skips_fake_ip_answers(monkeypatch: pytest.MonkeyPatch, tracker: Any) -> None:
     host = "api.example.com"
     calls: list[str] = []
     addresses = iter(["198.18.0.5", "104.18.1.2"])
@@ -143,9 +127,8 @@ def test_doh_real_ip_skips_fake_ip_answers(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_doh_real_ip_raises_when_all_endpoints_fail(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tracker: Any
 ) -> None:
-    tracker = _load_script()
     calls: list[str] = []
 
     def get(url: str, **_kwargs: object) -> _JSONResponse:
@@ -159,8 +142,7 @@ def test_doh_real_ip_raises_when_all_endpoints_fail(
     assert calls == list(tracker._DOH_ENDPOINTS)
 
 
-def test_doh_real_ip_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
-    tracker = _load_script()
+def test_doh_real_ip_is_cached(monkeypatch: pytest.MonkeyPatch, tracker: Any) -> None:
     host = "api.example.com"
     calls: list[str] = []
 
@@ -176,9 +158,8 @@ def test_doh_real_ip_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_session_for_host_healthy_resolution_returns_none(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tracker: Any
 ) -> None:
-    tracker = _load_script()
     host = "api.example.com"
 
     def getaddrinfo(
@@ -197,9 +178,8 @@ def test_session_for_host_healthy_resolution_returns_none(
 
 
 def test_session_for_host_fake_ip_returns_pinned_session(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tracker: Any
 ) -> None:
-    tracker = _load_script()
     host = "api.example.com"
     pinned_ip = "140.82.113.3"
 
@@ -236,9 +216,8 @@ def test_session_for_host_fake_ip_returns_pinned_session(
 
 
 def test_fetch_json_uses_pinned_session_when_fake_ip(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tracker: Any
 ) -> None:
-    tracker = _load_script()
     url = "https://api.example.com/models"
     headers = {"Authorization": "Bearer test-key"}
     params = {"limit": 100}
@@ -285,9 +264,11 @@ def test_fetch_json_uses_pinned_session_when_fake_ip(
 
 
 def test_candidate_is_reported_once_then_recorded_in_state(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    tracker: Any,
 ) -> None:
-    tracker = _load_script()
     env_file = tmp_path / ".env"
     _write_env_file(tracker, env_file)
     monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
@@ -309,12 +290,11 @@ def test_candidate_is_reported_once_then_recorded_in_state(
 
 
 def test_check_sources_compares_against_the_provider_catalog(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
 ) -> None:
     """The comparison must see the catalog the enabled provider plugins build:
     a registered id is skipped, not surfaced as a new candidate. Comparing
     against nothing re-reported every registered id once."""
-    tracker = _load_script()
     registered = type("Spec", (), {"provider": "gemini"})()
 
     monkeypatch.setattr(
@@ -340,11 +320,10 @@ def test_check_sources_compares_against_the_provider_catalog(
     assert reports["gemini"].candidates == ["gemini-3.6-flash-lite"]
 
 
-def test_gpt6_family_ids_are_classified_not_dropped_as_other() -> None:
+def test_gpt6_family_ids_are_classified_not_dropped_as_other(tracker: Any) -> None:
     """gpt-6-* must stay inside the gpt family patterns: a registered gpt-6
     member is skipped, and a same-series gpt-6 variant compares against the
     5.x registry head (older major) and stays actionable."""
-    tracker = _load_script()
     registry = {
         "gpt-6-astra": type("Spec", (), {"provider": "gpt"})(),
         "gpt-5.6-sol": type("Spec", (), {"provider": "gpt"})(),
@@ -362,8 +341,9 @@ def test_gpt6_family_ids_are_classified_not_dropped_as_other() -> None:
     assert comparison.series_models["gpt-6-sol"] == ["gpt-5.6-sol"]
 
 
-def test_newer_same_series_is_actionable_while_older_upstream_member_is_suppressed() -> None:
-    tracker = _load_script()
+def test_newer_same_series_is_actionable_while_older_upstream_member_is_suppressed(
+    tracker: Any,
+) -> None:
     registry = {
         "gemini-3.7-flash": type("Spec", (), {"provider": "gemini"})(),
     }
@@ -379,7 +359,7 @@ def test_newer_same_series_is_actionable_while_older_upstream_member_is_suppress
     assert comparison.series_models["gemini-3.8-flash"] == ["gemini-3.7-flash"]
 
 
-def test_gemini_flash_lite_ids_are_classified_not_dropped_as_other() -> None:
+def test_gemini_flash_lite_ids_are_classified_not_dropped_as_other(tracker: Any) -> None:
     """Flash-Lite is a roster family Ava evaluates: its numbered upstream ids
     must reach the report (registered member skipped, unregistered member a
     candidate against the registered head) instead of falling through to
@@ -387,7 +367,6 @@ def test_gemini_flash_lite_ids_are_classified_not_dropped_as_other() -> None:
     other_ids: it is the registered id, and an alias with no version cannot
     take part in the version compare — a newly numbered flash-lite id showing
     up as a candidate is what signals the alias moved."""
-    tracker = _load_script()
     registry = {
         "gemini-3.5-flash-lite": type("Spec", (), {"provider": "gemini"})(),
         "gemini-flash-lite-latest": type("Spec", (), {"provider": "gemini"})(),
@@ -410,12 +389,13 @@ def test_gemini_flash_lite_ids_are_classified_not_dropped_as_other() -> None:
     assert comparison.other_ids == ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-image"]
 
 
-def test_older_flash_lite_member_is_suppressed_while_preview_series_is_separate() -> None:
+def test_older_flash_lite_member_is_suppressed_while_preview_series_is_separate(
+    tracker: Any,
+) -> None:
     """Supersession and series splitting behave inside Flash-Lite exactly as in
     the pro/flash families: an older GA member of the registered series is
     suppressed, and a `-preview` member is its own series (never compared
     against the GA head)."""
-    tracker = _load_script()
     registry = {
         "gemini-3.5-flash-lite": type("Spec", (), {"provider": "gemini"})(),
     }
@@ -431,9 +411,10 @@ def test_older_flash_lite_member_is_suppressed_while_preview_series_is_separate(
     assert comparison.series_models["gemini-3.1-flash-lite-preview"] == []
 
 
-def test_qwen_major_only_variant_is_suppressed_but_same_version_variant_is_actionable() -> None:
+def test_qwen_major_only_variant_is_suppressed_but_same_version_variant_is_actionable(
+    tracker: Any,
+) -> None:
     """Qwen variants without a minor version are older than the registered 3.8 head."""
-    tracker = _load_script()
     registry = {
         "qwen3.8-max": type("Spec", (), {"provider": "qwen"})(),
     }
@@ -448,8 +429,7 @@ def test_qwen_major_only_variant_is_suppressed_but_same_version_variant_is_actio
     assert comparison.suppressed == ["qwen3-max-2025-09-23"]
 
 
-def test_qwen_dated_snapshots_of_registered_aliases_are_suppressed() -> None:
-    tracker = _load_script()
+def test_qwen_dated_snapshots_of_registered_aliases_are_suppressed(tracker: Any) -> None:
     registry = {
         "qwen3.8-max": type("Spec", (), {"provider": "qwen"})(),
     }
@@ -473,8 +453,7 @@ def test_qwen_dated_snapshots_of_registered_aliases_are_suppressed() -> None:
     ]
 
 
-def test_qwen_date_suffixes_with_unregistered_remainders_fall_through() -> None:
-    tracker = _load_script()
+def test_qwen_date_suffixes_with_unregistered_remainders_fall_through(tracker: Any) -> None:
     registry = {
         "qwen3.8-max": type("Spec", (), {"provider": "qwen"})(),
     }
@@ -490,9 +469,8 @@ def test_qwen_date_suffixes_with_unregistered_remainders_fall_through() -> None:
 
 
 def test_openai_response_shape_drift_raises_instead_of_reading_no_models(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tracker: Any
 ) -> None:
-    tracker = _load_script()
 
     def malformed_response(
         url: str, *, headers: dict[str, str], params: dict[str, str | int]
@@ -510,8 +488,9 @@ def test_openai_response_shape_drift_raises_instead_of_reading_no_models(
         tracker.fetch_provider_models(tracker.SOURCES["gpt"], "test-key")
 
 
-def test_missing_key_is_a_provider_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tracker = _load_script()
+def test_missing_key_is_a_provider_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
+) -> None:
     env_file = tmp_path / ".env"
     _write_env_file(tracker, env_file, missing="GLM_API_KEY")
     monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
@@ -525,9 +504,8 @@ def test_missing_key_is_a_provider_error(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 @pytest.mark.usefixtures("retry_waits")
 def test_fetch_json_retries_a_transient_connection_error(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tracker: Any
 ) -> None:
-    tracker = _load_script()
     url = "https://api.example.com/models"
     payload: dict[str, object] = {"data": []}
     calls: list[str] = []
@@ -550,9 +528,8 @@ def test_fetch_json_retries_a_transient_connection_error(
 
 @pytest.mark.usefixtures("retry_waits")
 def test_fetch_json_raises_after_the_retry_budget_is_exhausted(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tracker: Any
 ) -> None:
-    tracker = _load_script()
     calls: list[str] = []
 
     def get(request_url: str, **kwargs: object) -> _JSONResponse:
@@ -571,10 +548,7 @@ def test_fetch_json_raises_after_the_retry_budget_is_exhausted(
 
 
 @pytest.mark.usefixtures("retry_waits")
-def test_permanent_http_error_is_not_retried(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    tracker = _load_script()
+def test_permanent_http_error_is_not_retried(monkeypatch: pytest.MonkeyPatch, tracker: Any) -> None:
     url = "https://api.example.com/models"
     calls: list[str] = []
 
@@ -597,9 +571,8 @@ def test_permanent_http_error_is_not_retried(
 
 @pytest.mark.usefixtures("retry_waits")
 def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
 ) -> None:
-    tracker = _load_script()
     env_file = tmp_path / ".env"
     _write_env_file(tracker, env_file)
     monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
@@ -635,9 +608,8 @@ def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
 
 @pytest.mark.usefixtures("retry_waits")
 def test_repeated_provider_failure_announces_once_and_never_repeats(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
 ) -> None:
-    tracker = _load_script()
     env_file = tmp_path / ".env"
     _write_env_file(tracker, env_file)
     monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)

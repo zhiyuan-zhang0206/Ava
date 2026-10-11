@@ -4,10 +4,10 @@ registered or prove a root subject LCA; incomplete evidence never certifies plac
 from __future__ import annotations
 
 import ast
+import json
 import pathlib
 import subprocess
 import sys
-import textwrap
 
 import pytest
 
@@ -20,6 +20,7 @@ from scripts.structure import (
 from scripts.structure import tests_location as tl
 
 _ROOT = pathlib.Path(__file__).resolve().parents[3]
+_CHILD = pathlib.Path(__file__).with_name("child_registered_checks.py")
 _REGISTERED = {
     "tests/components/base/test_x.py": ("contract", "a registered test the fixtures start from")
 }
@@ -340,21 +341,11 @@ def test_the_verdicts_do_not_depend_on_where_the_checkout_sits(
 
 def test_registered_checks_do_not_load_the_placement_rule(repo: pathlib.Path) -> None:
     """A hook run is a path lookup: no module index, no import graph, no `place()`."""
-    code = textwrap.dedent(
-        f"""
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, {str(_ROOT)!r})
-        from scripts.structure import tests_location as tl
-        status = tl.main([], repo_root=Path({str(repo)!r}), allowed={_REGISTERED!r})
-        assert status == 0
-        loaded = [m for m in sys.modules if m.startswith("scripts.structure.placement")]
-        assert not loaded, loaded
-        assert "scripts.structure.tests_location_suggest" not in sys.modules
-        """
-    )
-    done = subprocess.run(  # noqa: S603 — fixed interpreter, test-owned source
-        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    done = subprocess.run(  # noqa: S603 — fixed interpreter, in-repo helper
+        [sys.executable, str(_CHILD), str(_ROOT), str(repo), json.dumps(_REGISTERED)],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert done.returncode == 0, done.stderr
 
