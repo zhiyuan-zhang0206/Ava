@@ -32,16 +32,7 @@ from tests.path_scoped.pty_service import _REPO, PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 from tests.path_scoped.pty_shells import new, output_until, type_line, wait_for
 
-# A stand-in for the agent host: a separate process that creates a session through the
-# client, reports it, and stays alive until it is killed.
-_AGENT_HOST = """
-import sys, time
-from base.sessions.pty import client
-client.create_session(sys.argv[1], sys.argv[2], {}, sys.argv[3])
-print("created", flush=True)
-while True:
-    time.sleep(1)
-"""
+_CHILD = Path(__file__).with_name("child_pty_clients.py")
 
 # Publish complete snapshots so concurrent readers never observe a truncated count.
 _COUNTER_JOB = (
@@ -69,8 +60,8 @@ def test_a_session_outlives_the_process_that_created_it(unit_home: Path) -> None
     host = subprocess.Popen(  # noqa: S603 — repo-internal interpreter + inline program
         [
             sys.executable,
-            "-c",
-            _AGENT_HOST,
+            str(_CHILD),
+            "agent_host",
             name,
             str(unit_home),
             f"python3 -u {script} {counter} &",
@@ -94,19 +85,6 @@ def test_a_session_outlives_the_process_that_created_it(unit_home: Path) -> None
     assert client.kill(name, graceful=False).interrupted is False
 
 
-# The same stand-in, through the backend every SDK call goes through.
-_BACKEND_HOST = """
-import sys, time
-from pathlib import Path
-from collections.abc import Iterable
-from base.sessions.backend import get_shell_backend
-assert get_shell_backend().new_session(sys.argv[1], "", Path(sys.argv[2]), env={})
-print("created", flush=True)
-while True:
-    time.sleep(1)
-"""
-
-
 @pytest.mark.usefixtures("pty_service")
 def test_a_backend_session_outlives_the_process_that_created_it(unit_home: Path) -> None:
     """The SDK's transport: kill the process that created a session through
@@ -116,7 +94,7 @@ def test_a_backend_session_outlives_the_process_that_created_it(unit_home: Path)
 
     name = "ava-agent-987-shell-2-backend"
     host = subprocess.Popen(  # noqa: S603 — repo-internal interpreter + inline program
-        [sys.executable, "-c", _BACKEND_HOST, name, str(unit_home)],
+        [sys.executable, str(_CHILD), "backend_host", name, str(unit_home)],
         cwd=_REPO,
         stdout=subprocess.PIPE,
         text=True,
@@ -145,9 +123,10 @@ def test_a_session_outlives_every_client_restarting_in_turn(unit_home: Path) -> 
         result = subprocess.run(  # noqa: S603 — repo-internal interpreter + inline program
             [
                 sys.executable,
-                "-c",
-                "from base.sessions.pty import client; "
-                f"client.send({name!r}, b'echo generation-{generation}\\r')",
+                str(_CHILD),
+                "send",
+                name,
+                f"echo generation-{generation}",
             ],
             cwd=_REPO,
             capture_output=True,

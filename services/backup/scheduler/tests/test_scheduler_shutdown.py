@@ -43,16 +43,18 @@ def postgres_base(tmp_path: Path) -> Iterator[Path]:
 
 
 def _block(root: Path, mode: str) -> None:
-    child_code = (
-        "import os, signal, time; from pathlib import Path; "
-        + ("signal.signal(signal.SIGTERM, signal.SIG_IGN); " if mode == "stubborn" else "")
-        + f"Path({str(root / 'child')!r}).write_text(str(os.getpid())); time.sleep(600)"
-    )
     if mode == "stubborn":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     (root / "worker").write_text(str(os.getpid()))
     subprocess.run(  # noqa: S603 -- fixed disposable test child
-        [sys.executable, "-c", child_code], check=True, timeout=600
+        [
+            sys.executable,
+            str(Path(__file__).with_name("shutdown_blocker.py")),
+            str(root / "child"),
+            *(["stubborn"] if mode == "stubborn" else []),
+        ],
+        check=True,
+        timeout=600,
     )
 
 
@@ -279,13 +281,14 @@ def _assert_sigterm_reaps_job_before_scheduler_exits(
     artifacts.mkdir()
     retained = artifacts / "retained.dump.enc"
     retained.write_bytes(b"previous complete backup")
-    code = (
-        "from pathlib import Path; "
-        "from services.backup.scheduler.tests.test_scheduler_shutdown import _exercise_daemon; "
-        f"_exercise_daemon(Path({str(tmp_path)!r}), {mode!r}, Path({str(postgres_base)!r}))"
-    )
     process = subprocess.Popen(  # noqa: S603 -- fixed disposable scheduler harness
-        [sys.executable, "-c", code],
+        [
+            sys.executable,
+            str(Path(__file__).with_name("shutdown_daemon.py")),
+            str(tmp_path),
+            mode,
+            str(postgres_base),
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

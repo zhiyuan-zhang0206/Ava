@@ -176,11 +176,11 @@ def test_unfinished_actual_task_reaches_existing_hard_exit(tmp_path: Path) -> No
     )
     env.pop("AVA_PERMISSIONS_HELPER_PID", None)
     started = time.monotonic()
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 -- fixed interpreter and repository-owned helper
         [
             sys.executable,
-            "-c",
-            "from services.agent_runner.agent_host.tests.runtime.test_resource_join import _exercise_unfinished_main; _exercise_unfinished_main()",
+            str(Path(__file__).resolve().parents[1] / "agent_host" / "child_runtime_scenarios.py"),
+            "resource_join",
         ],
         env=env,
         capture_output=True,
