@@ -154,6 +154,13 @@ EVENTS: dict[str, EventSpec] = {
     "thinking_block_sanitized": telemetry_event(
         "thinking_block_sanitized", "thinking block sanitized", tier="noise"
     ),
+    "web_fetch_injection_check_failed": telemetry_event(
+        "web_fetch_injection_check_failed",
+        "the decision-model injection check of a fetched page failed (request error, bad "
+        "response or missing key) — the page is returned without a verdict. Carries model "
+        "and error_type",
+        tier="anomaly",
+    ),
     "llm_cancelled": telemetry_event("llm_cancelled", "LLM call cancelled", tier="anomaly"),
     "compaction_completed": telemetry_event(
         "compaction_completed",
