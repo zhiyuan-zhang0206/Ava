@@ -180,19 +180,16 @@ def test_instrument_targets_selects_routines_not_classes_or_constants() -> None:
     assert {"files.read", "shell.run", "shell.sessions.new", "self.compact", "understand"} <= fqs
     # ava.mcps has no list __all_for_ava__, but its own module helpers are still metered
     # via the dir() fallback (dynamic tool calls are metered separately at _call_raw).
-    assert {"mcps.servers", "mcps.description", "mcps.help"} <= fqs
+    assert {"mcps.servers", "mcps.description"} <= fqs
     # classes and constants exposed in __all_for_ava__ are never wrapped
     assert "agents.AgentRow" not in fqs  # a class
     assert "self.AGENT_ID" not in fqs  # a constant
     assert "memory.PATH" not in fqs  # a constant
-    # ava.skills' __all_for_ava__ is the live skill index plus one real utility
-    # (`read`). The index entries are served by module __getattr__ and the static
-    # walk resolves none of them, so they are never wrapped (skill use is
-    # attributed by skill_invoked events instead); `read` is a genuine routine
-    # and belongs in the metered surface. Dynamic MCP server proxies are never
-    # recursed into either.
-    assert "skills.read" in fqs
-    assert not any(fq.startswith("skills.") and fq != "skills.read" for fq in fqs)
+    # ava.skills' __all_for_ava__ is the live skill index only. Its entries are
+    # served by module __getattr__ and the static walk resolves none of them, so
+    # they are never wrapped (skill use is attributed by skill_invoked events
+    # instead). Dynamic MCP server proxies are never recursed into either.
+    assert not any(fq.startswith("skills.") for fq in fqs)
     assert not any(fq.startswith("mcps.") and fq.count(".") > 1 for fq in fqs)
 
 
@@ -200,7 +197,7 @@ def test_instrument_targets_selects_routines_not_classes_or_constants() -> None:
 def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression: ava.self.MACHINE_SPEC / SELF_MACHINE_NAME are served via module
+    """Regression: ava.self.MACHINE_SPEC is served via module
     __getattr__ that computes machine identity and raises MachineNameMissing when unset
     (CI / isolated $AVA_HOME / schedule runner). The walk resolves members statically, so
     it never force-evaluates them — otherwise install() crashes load_extensions in the
@@ -215,12 +212,11 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
     with patch.dict(os.environ):
         # sanity: normal attribute access really does raise under this condition
         with pytest.raises(base.cluster.machine.MachineNameMissing):
-            _ = ava.self.SELF_MACHINE_NAME
+            _ = ava.self.MACHINE_SPEC
 
         fqs = {fq for _parent, _attr, fq in metering._instrument_targets()}
         assert "self.compact" in fqs  # real functions still enumerated
-        assert "self.SELF_MACHINE_NAME" not in fqs  # dynamic constant skipped, not evaluated
-        assert "self.MACHINE_SPEC" not in fqs
+        assert "self.MACHINE_SPEC" not in fqs  # dynamic constant skipped, not evaluated
 
 
 # ── recorder wrapping (agent side; call / emit logic is in test_sdk_telemetry) ───

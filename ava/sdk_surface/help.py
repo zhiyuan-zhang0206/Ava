@@ -52,16 +52,25 @@ class _Render:
 _DEFAULT_RENDER = _Render()
 
 
-def help(
+def help(*targets: Any) -> None:
+    """Print documentation for one or more SDK targets, e.g. `ava.help(ava.shell)`.
+
+    With no targets, show the SDK overview. Members unavailable to your model
+    are hidden automatically."""
+    render(*targets)
+
+
+def render(
     *targets: Any,
     compact_classes: bool = False,
     hidden_members: frozenset[str] | None = None,
 ) -> None:
-    """Print documentation for one or more SDK targets, e.g. `ava.help(ava.shell)`.
+    """Framework-internal render entry behind `ava.help`; not part of the SDK.
 
-    With no targets, show the SDK overview. `compact_classes` shows class fields
+    The system prompt builder calls this with the render parameters that
+    `ava.help` deliberately does not take. `compact_classes` shows class fields
     without methods. `hidden_members` omits the named dotted SDK members; when
-    omitted, members unavailable to your model are hidden automatically."""
+    omitted, members unavailable to the model are hidden automatically."""
     import ava as _ava
 
     if hidden_members is None:

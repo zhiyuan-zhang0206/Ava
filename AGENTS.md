@@ -18,6 +18,9 @@ changing them. A request to inspect or discuss does not authorize edits.
   i18n locale files are the only raw-CJK exception.
 - Keep one owner for shared facts and vocabulary. Respect the enforced import
   contracts and generate derived schema/types/constants from their owners.
+- A public SDK entry must guard an invariant or make a frequent operation
+  shorter or harder to misuse; pure aliases are removed. See
+  [when a public SDK entry earns its place](docs/conventions/python-conventions.md#when-a-public-sdk-entry-earns-its-place).
 - Behavior changes need meaningful tests. Trace consumers before changing a
   contract; do not widen local checks into unrelated suites.
 - Development is separate from a running deployment. Use an isolated checkout,

@@ -20,7 +20,7 @@ MCP servers run as child processes managed by the shared per-machine MCP
 daemon (`ava/mcps/_daemon.py`, ops roster session "mcp-daemon"). Tool
 discovery is **lazy, not at startup**: config reloads on every call
 (`_load_config`), and tool lists load on first access (daemon → 24h disk
-cache → local connection) — `servers()`/`help()` prioritize the cache so
+cache → local connection) — `servers()` and `ava.help(ava.mcps)` prioritize the cache so
 they trigger no connections; the daemon does not prefetch at boot.
 
 Remote `url` entries spawn no child: the daemon dials the Streamable HTTP endpoint directly, and the local fallback (`_connect`) has the same `url` branch when the daemon socket is absent.
@@ -64,7 +64,6 @@ a cached session retains that value until invalidated and reconnected.
 - `ava.mcps.<server>.raw(tool, **args) → dict` — get the raw structured return of a tool (default call returns text).
 - `servers() → list[str]` — list all configured MCP server names.
 - `description(server) → str | None` — get a one-line description of a server.
-- `help()` — print summary of all MCP servers.
 
 ## Where Servers Come From
 

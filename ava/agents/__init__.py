@@ -33,6 +33,7 @@ from base.agents import InvalidModelConfig as InvalidModelConfig
 from base.agents import MachineNotRegistered as MachineNotRegistered
 from base.agents import ResurrectError as ResurrectError
 from base.agents import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
+from base.cluster.machine import machine_name
 
 from . import compaction as compaction
 from . import presets as presets
@@ -506,7 +507,7 @@ def spawn_impl(
         prompt=prompt,
         fork_from=fork_from,
         prompt_source=spawner,
-        machine=machine if machine is not None else ava.self.SELF_MACHINE_NAME,
+        machine=machine if machine is not None else machine_name(),
         config=config,
         label=label,
         idempotency_key=idempotency_key,

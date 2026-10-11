@@ -25,7 +25,7 @@ Creates a new agent, returns its agent_id.
 |------|------|
 | `prompt` | First message; omit = agent idle after creation |
 | `fork_from` | Copy that agent's conversation state to the new agent |
-| `machine` | Target machine; omit = current machine (`ava.self.SELF_MACHINE_NAME`) |
+| `machine` | Target machine; omit = current machine (`ava.self.MACHINE_SPEC.name`) |
 | `config_overlay` | Per-field config override, e.g. `{"llm_model": "..."}`; a preset template is named inside it as `{"preset": "name"}` (explicit fields win per-key) |
 | `label` | Initial role/name; omit = auto-named. **fleet-only**: provided by fleet's spawn wrap; unavailable when fleet is disabled |
 

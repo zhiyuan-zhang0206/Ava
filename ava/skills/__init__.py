@@ -583,7 +583,7 @@ def _consume_skill_body(skill: Skill) -> str:
     """Read one skill's SKILL.md body, record the `skill_invoked` attribution,
     and return the consumed shape — a path line (tilde-shortened) then the raw
     body, the shape a proxy's `__doc__` carries. The one body-consumption
-    point shared by the lazy proxies and `read()`, so every access path records
+    point behind every proxy `__doc__` and `ava.help` render, so each records
     identically."""
     from pathlib import Path as _Path
 
@@ -614,21 +614,6 @@ def record_skill_invoked_by_path(path: str | Path) -> bool:
             _record_skill_invoked(skill)
             return True
     return False
-
-
-def read(name: str) -> str:
-    """Read the full instructions for a skill.
-
-    `name` accepts its display identifier, such as `"web-ai:deep-research"`, the
-    corresponding Python spelling, such as `"web_ai.deep_research"`, or the skill's
-    frontmatter name. Returns the skill's instructions. Unknown names raise ValueError."""
-    from ava.sdk_surface.validation import coerce_str
-
-    key = match_key(coerce_str(name, "name"))
-    for skill in names():
-        if match_key(identifier(skill)) == key or match_key(skill["name"]) == key:
-            return _consume_skill_body(skill)
-    raise ValueError(f"no skill named {name!r} — `ava.help(ava.skills)` lists the loaded catalog")
 
 
 def _note_skill_read(skill_identifier: str) -> None:
@@ -732,12 +717,11 @@ def __getattr__(name: str) -> _SkillProxy | _Namespace:
 
 
 def __dir__() -> list[str]:
-    """`dir(ava.skills)` returns top-level skill attrs + namespace names +
-    public utility methods (`read`).
+    """`dir(ava.skills)` returns top-level skill attrs + namespace names.
 
     Parse failures propagate (fail-fast); don't silently hide broken skills.
     """
-    return sorted({*_scan_tree(), "read"})
+    return sorted(_scan_tree())
 
 
 class _SkillsModule(types.ModuleType):
@@ -756,12 +740,11 @@ class _SkillsModule(types.ModuleType):
 
     @property
     def __all_for_ava__(self) -> list[str]:
-        """Top-level skill and namespace names plus the `read` utility — the
-        index a bare `ava.help(ava.skills)` renders, one heading + one-line
-        description per entry, and the `read` function's contract. Bodies
-        never render from here; `ava.help(ava.skills.<name>)` /
-        `ava.skills.read(<name>)` open one."""
-        return sorted({*_scan_tree(), "read"})
+        """Top-level skill and namespace names — the index a bare
+        `ava.help(ava.skills)` renders, one heading + one-line description per
+        entry. Bodies never render from here; `ava.help(ava.skills.<name>)`
+        opens one."""
+        return sorted(_scan_tree())
 
 
 sys.modules[__name__].__class__ = _SkillsModule

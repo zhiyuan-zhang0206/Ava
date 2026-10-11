@@ -92,7 +92,7 @@ def test_default_index_lists_every_loaded_skill(
         catalog=build_model_catalog(),
     )
     assert "- `ava.skills.alpha` — Alpha desc" in text
-    assert "- `ava.skills.grp:beta` — Beta desc" in text
+    assert "- `ava.skills.grp.beta` — Beta desc" in text
     assert "ALPHA_BODY" not in text
     assert "BETA_BODY" not in text
 
@@ -132,11 +132,11 @@ def test_wildcard_groups_descendants_under_real_entry_skills(
         catalog=build_model_catalog(),
     )
 
-    assert "- `ava.skills.work-flow`" in text
+    assert "- `ava.skills.work_flow`" in text
     assert "2 sub-skills; inspect with `ava.help(ava.skills.work_flow)`" in text
-    assert "- `ava.skills.work-flow:align`" not in text
-    assert "- `ava.skills.work-flow:align:deep`" not in text
-    assert "- `ava.skills.orphans:review`" in text
+    assert "- `ava.skills.work_flow.align`" not in text
+    assert "- `ava.skills.work_flow.align.deep`" not in text
+    assert "- `ava.skills.orphans.review`" in text
     assert indexed_skill_identifiers(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
@@ -147,7 +147,7 @@ def test_wildcard_groups_descendants_under_real_entry_skills(
         "work-flow:align:deep",
         "orphans:review",
     }
-    assert "Deep alignment" in ava.skills.read("work-flow:align:deep")
+    assert "Deep alignment" in ava.skills.work_flow.align.deep.__doc__
 
 
 def test_explicit_parent_and_child_both_remain_visible(
@@ -167,7 +167,7 @@ def test_explicit_parent_and_child_both_remain_visible(
     )
 
     assert "- `ava.skills.workflow`" in text
-    assert "- `ava.skills.workflow:align`" in text
+    assert "- `ava.skills.workflow.align`" in text
     assert "sub-skills; inspect" not in text
 
 
