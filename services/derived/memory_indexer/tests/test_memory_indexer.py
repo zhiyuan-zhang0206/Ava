@@ -33,7 +33,11 @@ from base.daemon import health
 from base.daemon.health import Liveness
 from base.lm.plugin_providers import build_model_catalog
 from services.derived.memory_indexer import config, daemon
-from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
+from services.derived.memory_indexer.backends.base import (
+    ChunkHit,
+    MemorySearchBackend,
+    content_hash,
+)
 from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.tests.store_backend import StoreBackend
@@ -382,12 +386,12 @@ class _RecordingBackend(MemorySearchBackend):
     ) -> None:
         self.upsert_many([(path, mtime, content_hash, embedding, kind, chunk_idx)])
 
-    def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:
+    def search_topk(self, query_vector: np.ndarray, k: int) -> list[ChunkHit]:
         raise AssertionError("indexing must not search")
 
     async def search_topk_async(
         self, query_vector: np.ndarray, k: int, *, timeout: float
-    ) -> list[str]:
+    ) -> list[ChunkHit]:
         raise AssertionError("indexing must not search")
 
     def all_meta(self) -> dict[str, tuple[float, str, str]]:

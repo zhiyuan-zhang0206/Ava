@@ -1,9 +1,11 @@
-"""Passive memory recall rendering (`agent/graph/recall/memory_recall.py`).
+"""Passive memory recall (`agent/graph/recall/memory_recall.py`).
 
-Recall presents the pool-relative path plus the note's frontmatter `description`
--- two of the three fields `ava.memory.search` returns. It deliberately omits
-tags because the injected note is a pointer, not a tag list. The description is
-empty when absent, never synthesized from title/body, and is not truncated.
+Recall injects the notes the gateway's search scores at or above
+`memory_recall_inject_threshold`, best first, at most `memory_recall_inject_max`, and presents
+each as its pool-relative path, score, frontmatter description and matched passage. Tags are
+left out: the injected note is a pointer, not a tag list. The description is empty when absent,
+never synthesized from title/body, and is not truncated. Recall makes no model call of its own;
+the scores come from the search result.
 """
 
 from pathlib import Path
@@ -20,23 +22,14 @@ from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.config import settings
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
-from base.lm.catalog import ModelCatalog
+from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 
 
 @pytest.fixture
 def memory_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Enable the feature and point the on-disk sync check at a temp pool.
-
-    The relevance filter is switched off for these: they are about what recall
-    retrieves, dedups, and renders. Leaving it on would route every one of them
-    through a model call — and pass only via its fallback, which is the opposite
-    of testing the thing named in the test. The filter has its own file
-    (`test_memory_filter.py`), and the two-stage composition is covered below.
-    """
+    """Enable the feature and point the on-disk sync check at a temp pool."""
     monkeypatch.setattr("base.config.settings.agent.passive_memory_recall_enabled", True)
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", False)
     monkeypatch.setattr(recall, "memory_dir", lambda: tmp_path)
     return tmp_path
 
@@ -47,11 +40,27 @@ def _write_note(root: Path, rel: str, text: str) -> None:
     note.write_text(text, encoding="utf-8")
 
 
-def _set_search(monkeypatch: pytest.MonkeyPatch, results: list[MemorySearchResult]) -> None:
-    monkeypatch.setattr(recall.gateway_client, "memory_search", lambda _q, _k, **_kwargs: results)  # pyright: ignore[reportUnknownArgumentType]
+def _result(
+    path: str,
+    *,
+    score: float = 0.9,
+    description: str = "",
+    chunk: str = "",
+    tags: tuple[str, ...] = (),
+) -> MemorySearchResult:
+    return MemorySearchResult(path, description, tags, score, chunk)
 
 
-_KEY = b"test-key"
+def _set_search(monkeypatch: pytest.MonkeyPatch, results: list[MemorySearchResult]) -> list[int]:
+    """Serve `results` from search; the returned list records each `k` search was asked for."""
+    asked: list[int] = []
+
+    def _search(_q: str, k: int, **_kwargs: object) -> list[MemorySearchResult]:
+        asked.append(k)
+        return results
+
+    monkeypatch.setattr(recall.gateway_client, "memory_search", _search)
+    return asked
 
 
 def _conversation() -> list[AnyMessage]:
@@ -62,162 +71,256 @@ def _conversation() -> list[AnyMessage]:
     ]
 
 
-async def test_renders_path_and_description(
+def _agent() -> AgentSlices:
+    return AgentSlices.resolve(
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+    )
+
+
+def _context() -> AvaContext:
+    return AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings)  # pyright: ignore[reportUnknownArgumentType]
+
+
+async def _recall(injected: set[str] | None = None) -> recall.PassiveRecall | None:
+    return await recall.passive_memory_recall(
+        _conversation(),
+        context=_context(),
+        agent=_agent(),
+        injected_paths=injected or frozenset(),
+    )
+
+
+def _content(result: recall.PassiveRecall) -> str:
+    content = result.note.content  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(content, str)
+    return content
+
+
+# ── rendering ──
+
+
+async def test_renders_path_score_description_and_matched_passage(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Each hit renders as `- <path>: <description>` from the search result."""
     _write_note(memory_root, "a.md", "note a")
     _write_note(memory_root, "sub/b.md", "note b")
     _set_search(
         monkeypatch,
         [
-            MemorySearchResult(path="a.md", description="deploy runbook"),
-            MemorySearchResult(path="sub/b.md", description="gateway ports"),
+            _result("a.md", score=0.83, description="deploy runbook", chunk="restart the gateway"),
+            _result(
+                "sub/b.md",
+                score=0.71,
+                description="gateway ports",
+                chunk="line one\n\nline three",
+            ),
         ],
     )
 
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
+    result = await _recall()
 
     assert result is not None
-    assert "- a.md: deploy runbook" in result.note.content  # pyright: ignore[reportUnknownMemberType]
-    assert "- sub/b.md: gateway ports" in result.note.content  # pyright: ignore[reportUnknownMemberType]
+    content = _content(result)
+    assert "- a.md (score 0.83): deploy runbook\n  > restart the gateway" in content
+    assert "- sub/b.md (score 0.71): gateway ports\n  > line one\n  >\n  > line three" in content
+    assert content.index("a.md") < content.index("sub/b.md")
     assert result.paths == {"a.md", "sub/b.md"}
 
 
-async def test_empty_description_renders_path_only_no_synthesis(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A hit with no frontmatter description renders bare `- <path>` -- recall
-    does NOT fall back to the note's title or first body line (fail-fast: the
-    injected note carries only what search returns)."""
-    _write_note(
-        memory_root,
-        "c.md",
-        "---\ntitle: A Human Title\n---\nfirst body line\n",
+async def test_tags_are_not_rendered(memory_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_note(memory_root, "a.md", "note a")
+    _set_search(
+        monkeypatch, [_result("a.md", description="d", chunk="c", tags=("type/user", "tech-ops"))]
     )
-    _set_search(monkeypatch, [MemorySearchResult(path="c.md", description="")])
 
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
+    result = await _recall()
 
     assert result is not None
-    content = result.note.content  # pyright: ignore[reportUnknownMemberType]
-    assert isinstance(content, str)
-    assert "- c.md" in content.splitlines()
+    assert "type/user" not in _content(result)
+    assert "tech-ops" not in _content(result)
+
+
+async def test_empty_description_is_not_synthesized(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hit with no frontmatter description renders no description -- recall does NOT fall back
+    to the note's title or first body line (the injected note carries only what search returns)."""
+    _write_note(memory_root, "c.md", "---\ntitle: A Human Title\n---\nfirst body line\n")
+    _set_search(monkeypatch, [_result("c.md", score=0.8, description="", chunk="")])
+
+    result = await _recall()
+
+    assert result is not None
+    content = _content(result)
+    assert "- c.md (score 0.80)" in content.splitlines()
     assert "A Human Title" not in content
     assert "first body line" not in content
-    assert result.paths == {"c.md"}
 
 
-async def test_description_is_not_truncated(
+async def test_passage_equal_to_the_description_is_not_repeated(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The description is used verbatim (matching search, which does not
-    truncate) -- no per-line char cap."""
-    long_desc = "x" * 300
+    """A description-line hit matched the description itself; the passage would only repeat it."""
     _write_note(memory_root, "a.md", "note a")
-    _set_search(monkeypatch, [MemorySearchResult(path="a.md", description=long_desc)])
+    _set_search(monkeypatch, [_result("a.md", description="one-liner", chunk="one-liner")])
 
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
+    result = await _recall()
 
     assert result is not None
-    assert f"- a.md: {long_desc}" in result.note.content  # pyright: ignore[reportUnknownMemberType]
+    assert _content(result).count("one-liner") == 1
 
 
-async def test_skips_already_injected_paths(
+async def test_description_and_passage_are_not_truncated(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A path already surfaced this session is dropped; only fresh paths return."""
+    long_desc, long_chunk = "x" * 300, "y" * 1800
     _write_note(memory_root, "a.md", "note a")
-    _write_note(memory_root, "b.md", "note b")
+    _set_search(monkeypatch, [_result("a.md", description=long_desc, chunk=long_chunk)])
+
+    result = await _recall()
+
+    assert result is not None
+    assert f"{long_desc}\n  > {long_chunk}" in _content(result)
+
+
+# ── threshold, cap, dedup ──
+
+
+async def test_only_results_reaching_the_threshold_are_injected(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_threshold", 0.7)
+    for name in ("hi", "edge", "lo"):
+        _write_note(memory_root, f"{name}.md", name)
+    _set_search(
+        monkeypatch,
+        [_result("hi.md", score=0.95), _result("edge.md", score=0.7), _result("lo.md", score=0.69)],
+    )
+
+    result = await _recall()
+
+    assert result is not None
+    assert result.paths == {"hi.md", "edge.md"}
+
+
+async def test_nothing_is_injected_when_no_result_reaches_the_threshold(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Vector search always returns something; a turn where nothing scores high enough
+    injects nothing rather than the best of a weak lot."""
+    _write_note(memory_root, "a.md", "note a")
+    _set_search(monkeypatch, [_result("a.md", score=0.3)])
+
+    assert await _recall() is None
+
+
+async def test_the_cap_keeps_the_best_scores_whatever_order_search_returned(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_max", 2)
+    scores = {"a": 0.75, "b": 0.99, "c": 0.8, "d": 0.9}
+    for name in scores:
+        _write_note(memory_root, f"{name}.md", name)
+    _set_search(monkeypatch, [_result(f"{n}.md", score=s) for n, s in scores.items()])
+
+    result = await _recall()
+
+    assert result is not None
+    assert result.paths == {"b.md", "d.md"}
+    content = _content(result)
+    assert content.index("b.md") < content.index("d.md")
+
+
+async def test_zero_cap_disables_injection_without_searching(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_max", 0)
+    asked = _set_search(monkeypatch, [])
+
+    assert await _recall() is None
+    assert asked == []
+
+
+async def test_already_injected_notes_are_set_aside_before_the_cap(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A note surfaced earlier this session does not use up a slot: the cap fills with the
+    next-best qualifying notes."""
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_max", 2)
+    for name in ("a", "b", "c", "d"):
+        _write_note(memory_root, f"{name}.md", name)
     _set_search(
         monkeypatch,
         [
-            MemorySearchResult(path="a.md", description="desc a"),
-            MemorySearchResult(path="b.md", description="desc b"),
+            _result("a.md", score=0.99),
+            _result("b.md", score=0.95),
+            _result("c.md", score=0.9),
+            _result("d.md", score=0.85),
         ],
     )
 
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        injected_paths={"a.md"},
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
+    result = await _recall(injected={"a.md", "b.md"})
 
     assert result is not None
-    assert result.paths == {"b.md"}
-    assert "- a.md" not in result.note.content  # pyright: ignore[reportUnknownMemberType]
+    assert result.paths == {"c.md", "d.md"}
+    assert "- a.md" not in _content(result)
+
+
+async def test_returns_none_when_every_qualifying_note_is_already_injected(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_note(memory_root, "a.md", "note a")
+    _set_search(monkeypatch, [_result("a.md")])
+
+    assert await _recall(injected={"a.md"}) is None
 
 
 async def test_skips_path_not_synced_to_this_machine(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Search can return a path this machine has not synced yet; the missing
-    file is skipped rather than crashing on read."""
+    """Search can return a path this machine has not synced yet; the missing file is skipped
+    rather than crashing on read, and does not use up a slot."""
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_max", 1)
     _write_note(memory_root, "here.md", "present")
-    _set_search(
-        monkeypatch,
-        [
-            MemorySearchResult(path="here.md", description="local"),
-            MemorySearchResult(path="not-yet.md", description="remote"),
-        ],
-    )
+    _set_search(monkeypatch, [_result("not-yet.md", score=0.99), _result("here.md", score=0.8)])
 
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
+    result = await _recall()
 
     assert result is not None
     assert result.paths == {"here.md"}
-    assert "not-yet.md" not in result.note.content  # pyright: ignore[reportUnknownMemberType]
+    assert "not-yet.md" not in _content(result)
 
 
-async def test_returns_none_when_all_matches_already_injected(
+# ── what search is asked for ──
+
+
+async def test_search_asks_for_the_cap_plus_the_notes_already_injected(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _write_note(memory_root, "a.md", "note a")
-    _set_search(monkeypatch, [MemorySearchResult(path="a.md", description="desc a")])
+    """Already-injected notes still rank, so the request leaves room for them."""
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_max", 5)
+    asked = _set_search(monkeypatch, [])
 
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        injected_paths={"a.md"},
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
+    await _recall()
+    await _recall(injected={"a.md", "b.md", "c.md"})
 
-    assert result is None
+    assert asked == [5, 8]
+
+
+async def test_search_request_never_exceeds_the_gateway_limit(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = _set_search(monkeypatch, [])
+
+    await _recall(injected={f"n{i}.md" for i in range(500)})
+
+    assert asked == [100]
+
+
+def test_defaults_match_the_documented_provisional_values() -> None:
+    """The threshold is provisional (pending benchmark calibration); the cap is 5."""
+    assert settings.agent.memory_recall_inject_threshold == 0.7
+    assert settings.agent.memory_recall_inject_max == 5
 
 
 # ── search failure degrades, never propagates ──
@@ -255,16 +358,8 @@ async def test_http_error_degrades_to_no_recall_and_logs_error(
     _write_note(memory_root, "a.md", "note a")
     _raise_on_search(monkeypatch, _status_error(500))
 
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
+    assert await _recall() is None
 
-    assert result is None
     errors = [r for r in loguru_records if r["level"].name == "ERROR"]  # pyright: ignore[reportUnknownMemberType]
     assert len(errors) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert errors[0]["extra"]["event"] == "passive_recall"
@@ -275,21 +370,13 @@ async def test_http_error_degrades_to_no_recall_and_logs_error(
 async def test_modelled_outage_degrades_without_an_error_log(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict]
 ) -> None:
-    """The gateway naming its own outage in the wire contract is a self-clearing
-    state (a restart, a stalled embedder), so it degrades the same way but stays
-    below error — otherwise every gateway bounce reads as a bug."""
-    _raise_on_search(monkeypatch, IndexerUnavailable("memory search failed"))
+    """The gateway naming its own outage in the wire contract — including a failed ranking
+    model call — is a self-clearing state, so it degrades the same way but stays below
+    error. There is no fallback to unscored results."""
+    _write_note(memory_root, "a.md", "note a")
+    _raise_on_search(monkeypatch, IndexerUnavailable("memory rerank failed (jev): upstream 503"))
 
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
-
-    assert result is None
+    assert await _recall() is None
     assert [r for r in loguru_records if r["level"].name == "ERROR"] == []  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -302,359 +389,52 @@ async def test_programming_error_in_search_still_propagates(
     _raise_on_search(monkeypatch, TypeError("memory_search() got an unexpected keyword"))
 
     with pytest.raises(TypeError):
-        await recall.passive_memory_recall(
-            _conversation(),
-            context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
-            log_key=_KEY,
-        )
+        await _recall()
+
+
+# ── gating ──
 
 
 async def test_returns_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("base.config.settings.agent.passive_memory_recall_enabled", False)
 
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
-
-    assert result is None
+    assert await _recall() is None
 
 
 async def test_returns_none_when_eval_isolated(monkeypatch: pytest.MonkeyPatch) -> None:
     """Eval isolation must stop the direct index call that passive recall bypasses."""
     monkeypatch.setattr("base.config.settings.agent.eval_isolation", True)
-    called = False
+    asked = _set_search(monkeypatch, [])
 
-    def _fake(_q: str, _k: int) -> list[MemorySearchResult]:
-        nonlocal called
-        called = True
-        return []
-
-    monkeypatch.setattr(recall.gateway_client, "memory_search", _fake)
-
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
-    assert result is None
-    assert called is False
+    assert await _recall() is None
+    assert asked == []
 
 
 async def test_returns_none_when_no_query(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An empty conversation yields no query, so recall no-ops before searching."""
-    called = False
+    asked = _set_search(monkeypatch, [])
 
-    def _fake(_q: str, _k: int) -> list[MemorySearchResult]:
-        nonlocal called
-        called = True
-        return []
-
-    monkeypatch.setattr(recall.gateway_client, "memory_search", _fake)
-
-    result = await recall.passive_memory_recall(
-        [],
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
+    result = await recall.passive_memory_recall([], context=_context(), agent=_agent())
 
     assert result is None
-    assert called is False
+    assert asked == []
 
 
-# ── two-stage recall ──
-# Retrieval goes wide so the filter has candidates to reject; injection stays
-# narrow. The two numbers were one before the filter existed.
-
-
-async def test_retrieval_default_is_top_100(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+async def test_recall_logs_search_time_and_injected_count(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict]
 ) -> None:
-    """Retrieval goes wide by default — the relaxed filter lists rather than
-    rejects, so it needs real candidates to judge; the default lives in
-    `base/config/domains/agent/settings.py` (memory_recall_retrieve_k = 100)."""
-    assert settings.agent.memory_recall_retrieve_k == 100
-    asked: dict[str, int] = {}
+    """The completed-pass event the `ava_memory` panels read carries `search_ms` and `injected`."""
+    _write_note(memory_root, "a.md", "note a")
+    _set_search(monkeypatch, [_result("a.md", score=0.9), _result("b.md", score=0.1)])
 
-    def _search(_q: str, k: int, *, context: AvaContext) -> list[MemorySearchResult]:
-        asked["k"] = k
-        return []
+    await _recall()
 
-    monkeypatch.setattr(recall.gateway_client, "memory_search", _search)
-
-    await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )  # pyright: ignore[reportUnknownArgumentType]
-
-    assert asked["k"] == 100
-
-
-async def test_retrieval_is_wider_than_injection(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`retrieve_k` is what search is asked for — not `inject_k`. A filter with
-    only as many candidates as it may inject can rank but never reject."""
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_retrieve_k", 10)
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_k", 3)
-    asked: dict[str, int] = {}
-
-    def _search(_q: str, k: int, *, context: AvaContext) -> list[MemorySearchResult]:
-        asked["k"] = k
-        return []
-
-    monkeypatch.setattr(recall.gateway_client, "memory_search", _search)
-
-    await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=build_model_catalog(), clock_factory=Clock.from_settings),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )  # pyright: ignore[reportUnknownArgumentType]
-
-    assert asked["k"] == 10
-
-
-async def test_only_what_the_filter_kept_is_injected(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", True)
-    for rel in ("a.md", "b.md", "c.md"):
-        _write_note(memory_root, rel, "body")
-    _set_search(
-        monkeypatch,
-        [
-            MemorySearchResult(path="a.md", description="one"),
-            MemorySearchResult(path="b.md", description="two"),
-            MemorySearchResult(path="c.md", description="three"),
-        ],
-    )
-
-    async def _keep_b(
-        _query: str,
-        _candidates: list,
-        _memory: object,
-        _log_key: bytes,
-        *,
-        catalog: ModelCatalog,
-        overrides: ModelOverrides,
-        llm_override: str,
-    ) -> list[str]:
-        assert catalog is model_catalog
-        return ["b.md"]
-
-    monkeypatch.setattr(recall, "filter_candidates", _keep_b)  # pyright: ignore[reportUnknownArgumentType]
-
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=model_catalog, clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
-
-    assert result is not None
-    assert result.paths == {"b.md"}
-    assert "a.md" not in result.note.content  # pyright: ignore[reportUnknownMemberType]
-
-
-async def test_nothing_is_injected_when_the_filter_keeps_nothing(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
-    """The point of having a filter: an unfiltered recall always had its top-k to
-    show, however weakly they matched."""
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", True)
-    _write_note(memory_root, "a.md", "body")
-    _set_search(monkeypatch, [MemorySearchResult(path="a.md", description="one")])
-
-    async def _keep_none(
-        _query: str,
-        _candidates: list,
-        _memory: object,
-        _log_key: bytes,
-        *,
-        catalog: ModelCatalog,
-        overrides: ModelOverrides,
-        llm_override: str,
-    ) -> list[str]:
-        assert catalog is model_catalog
-        return []
-
-    monkeypatch.setattr(recall, "filter_candidates", _keep_none)  # pyright: ignore[reportUnknownArgumentType]
-
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=model_catalog, clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
-    assert result is None
-
-
-async def test_the_filter_sees_the_type_tag_search_returned(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
-    """Tags travel from the search result into the candidate — without them the
-    filter cannot be stricter with a profile note than with a procedure."""
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", True)
-    _write_note(memory_root, "a.md", "body")
-    _set_search(
-        monkeypatch,
-        [MemorySearchResult(path="a.md", description="one", tags=("type/user", "tech-ops"))],
-    )
-    seen: dict[str, list] = {}
-
-    async def _capture(
-        _query: str,
-        candidates: list,
-        _memory: object,
-        _log_key: bytes,
-        *,
-        catalog: ModelCatalog,
-        overrides: ModelOverrides,
-        llm_override: str,
-    ) -> list[str]:
-        assert catalog is model_catalog
-        seen["candidates"] = candidates
-        return []
-
-    monkeypatch.setattr(recall, "filter_candidates", _capture)  # pyright: ignore[reportUnknownArgumentType]
-
-    await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=model_catalog, clock_factory=Clock.from_settings),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )  # pyright: ignore[reportUnknownArgumentType]
-
-    assert seen["candidates"][0].tags == ["type/user", "tech-ops"]  # pyright: ignore[reportUnknownMemberType]
-
-
-async def test_already_injected_notes_still_reach_the_filter_then_dedup(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
-    """The filter judges the full candidate set even when some are already
-    injected: dropping them first would leave a second, similar message with
-    its best matches pre-removed, and the filter would inject unrelated notes
-    that merely outranked the deduped ones. Dedup applies after the filter, to
-    what it judged relevant."""
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", True)
-    for rel in ("a.md", "b.md"):
-        _write_note(memory_root, rel, "body")
-    _set_search(
-        monkeypatch,
-        [
-            MemorySearchResult(path="a.md", description="one"),
-            MemorySearchResult(path="b.md", description="two"),
-        ],
-    )
-    seen: dict[str, list] = {}
-
-    async def _capture(
-        _query: str,
-        candidates: list,
-        _memory: object,
-        _log_key: bytes,
-        *,
-        catalog: ModelCatalog,
-        overrides: ModelOverrides,
-        llm_override: str,
-    ) -> list[str]:
-        assert catalog is model_catalog
-        seen["candidates"] = candidates
-        # filter judges both notes relevant — the already-injected one included
-        return [c.path for c in candidates]  # pyright: ignore[reportUnknownMemberType]
-
-    monkeypatch.setattr(recall, "filter_candidates", _capture)  # pyright: ignore[reportUnknownArgumentType]
-
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=model_catalog, clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        injected_paths={"a.md"},
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
-
-    # the filter saw both candidates (dedup did not run before it)
-    assert [c.path for c in seen["candidates"]] == ["a.md", "b.md"]  # pyright: ignore[reportUnknownMemberType]
-    # but only the fresh one is injected
-    assert result is not None
-    assert result.paths == {"b.md"}
-    assert "a.md" not in result.note.content  # pyright: ignore[reportUnknownMemberType]
-
-
-async def test_returns_none_when_everything_the_filter_kept_is_already_injected(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
-    """The filter picks the same relevant note again on a similar second
-    message; it is already in front of the agent, so nothing new is injected —
-    and critically, no unrelated note is injected in its place."""
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", True)
-    for rel in ("a.md", "b.md", "c.md"):
-        _write_note(memory_root, rel, "body")
-    _set_search(
-        monkeypatch,
-        [
-            MemorySearchResult(path="a.md", description="one"),
-            MemorySearchResult(path="b.md", description="two"),
-            MemorySearchResult(path="c.md", description="three"),
-        ],
-    )
-
-    async def _keep_a(
-        _query: str,
-        candidates: list,
-        _memory: object,
-        _log_key: bytes,
-        *,
-        catalog: ModelCatalog,
-        overrides: ModelOverrides,
-        llm_override: str,
-    ) -> list[str]:
-        assert catalog is model_catalog
-        return ["a.md"]
-
-    monkeypatch.setattr(recall, "filter_candidates", _keep_a)  # pyright: ignore[reportUnknownArgumentType]
-
-    result = await recall.passive_memory_recall(
-        _conversation(),
-        context=AvaContext(catalog=model_catalog, clock_factory=Clock.from_settings),  # pyright: ignore[reportUnknownArgumentType]
-        injected_paths={"a.md"},
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        log_key=_KEY,
-    )
-
-    assert result is None
+    events = [r for r in loguru_records if r["extra"].get("event") == "passive_recall"]  # pyright: ignore[reportUnknownMemberType]
+    assert len(events) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert events[0]["extra"]["injected"] == 1
+    assert isinstance(events[0]["extra"]["search_ms"], int)
 
 
 async def test_gateway_search_receives_each_explicit_host_context(
@@ -682,14 +462,7 @@ async def test_gateway_search_receives_each_explicit_host_context(
     monkeypatch.setattr(recall.gateway_client, "memory_search", search)
     for context in contexts:
         assert (
-            await recall.passive_memory_recall(
-                _conversation(),
-                agent=AgentSlices.resolve(
-                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-                ),
-                context=context,
-                log_key=_KEY,
-            )
+            await recall.passive_memory_recall(_conversation(), agent=_agent(), context=context)
             is None
         )
     assert seen == contexts

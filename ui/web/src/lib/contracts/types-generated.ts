@@ -3332,8 +3332,13 @@ export interface paths {
         put?: never;
         /**
          * Post Memory Search
-         * @description Semantic search the memory pool; return **relative** paths of the
-         *     top-k most-relevant markdown files.
+         * @description Search the memory pool; return the `k` notes most relevant to the query,
+         *     each with the chunk that matched and a relevance score.
+         *
+         *     Two stages. Vector search finds the best chunk of the closest
+         *     `memory_rerank_candidates` notes; a decision model then judges each chunk
+         *     against the query, and the response is ordered by the probability that the
+         *     chunk is relevant (`score`). No text is generated on this path.
          *
          *     Paths are relative to memory pool root (settings.services.memory_root, e.g.
          *     `~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to
@@ -3347,8 +3352,8 @@ export interface paths {
          *     (agent-runners run no gateway process).
          *
          *     Raises:
-         *         IndexerUnavailable: embedder API / search backend unreachable, or the
-         *             search exceeded its deadline (wire 503)
+         *         IndexerUnavailable: embedder API / search backend unreachable, the
+         *             decision model failed, or the search exceeded its deadline (wire 503)
          */
         post: operations["post_memory_search_api_memory_search_post"];
         delete?: never;
@@ -6537,7 +6542,7 @@ export interface components {
             query: string;
             /**
              * K
-             * @description top-k result count
+             * @description result count
              * @default 5
              */
             k: number;
@@ -6550,7 +6555,8 @@ export interface components {
          *     reconstruct absolute paths. fs-neutral makes mismatched gateway
          *     (e.g. /Users/x) and agent-runner (/home/y) filesystems work.
          *
-         *     `results` carries path, description and tags for each match.
+         *     `results` carries path, description, tags, score and matched chunk for each
+         *     match, most relevant first.
          */
         MemorySearchResponse: {
             /** Results */
@@ -6558,8 +6564,8 @@ export interface components {
         };
         /**
          * MemorySearchResultItem
-         * @description A single search result: file path + the frontmatter a caller can judge the
-         *     hit by without opening it.
+         * @description A single search result: file path, the chunk that matched, its relevance
+         *     score, and the frontmatter a caller can judge the hit by without opening it.
          */
         MemorySearchResultItem: {
             /**
@@ -6578,6 +6584,16 @@ export interface components {
              * @description frontmatter tags, including the note's `type/<x>`, or empty
              */
             tags?: string[];
+            /**
+             * Score
+             * @description probability that the matched chunk is relevant to the query
+             */
+            score: number;
+            /**
+             * Chunk
+             * @description text of the note's best-matching chunk (or its description line), as indexed
+             */
+            chunk: string;
         };
         /**
          * MetricEvidence

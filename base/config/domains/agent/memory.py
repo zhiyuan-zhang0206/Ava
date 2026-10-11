@@ -1,6 +1,6 @@
 """Agent memory injection + recall — AgentMemorySettings.
 
-Index-injection toggles (pool index / per-agent index) and the passive recall pipeline (retrieve -> filter -> inject, with model / retries / timeout). Split out of the former flat AgentSettings schema; each field keeps its exact env alias so the .env surface is unchanged."""
+Index-injection toggles (pool index / per-agent index) and the passive recall pipeline (search with gateway-side rerank -> inject notes at or above a score threshold, capped per turn). Split out of the former flat AgentSettings schema; each field keeps its exact env alias so the .env surface is unchanged."""
 
 from __future__ import annotations
 
@@ -145,13 +145,17 @@ class AgentMemorySettings(EnvSettings):
         },
     )
 
-    memory_recall_retrieve_k: int = Field(
-        default=100,
-        alias="AVA_MEMORY_RECALL_RETRIEVE_K",
+    memory_recall_inject_threshold: float = Field(
+        # Placeholder pending calibration: the first benchmark of the rerank scores sets this.
+        default=0.7,
+        ge=0,
+        le=1,
+        alias="AVA_MEMORY_RECALL_INJECT_THRESHOLD",
         description=(
-            "How many notes passive recall retrieves before filtering. Wide "
-            "top-100 so the relaxed filter has candidates to judge; injection "
-            "stays capped at memory_recall_inject_k."
+            "Minimum relevance score (0..1, the decision model's probability that a "
+            "note's best chunk is relevant to the conversation) for passive recall to "
+            "inject a note. A turn where no note reaches it injects nothing. 0.7 is "
+            "provisional, pending calibration against a benchmark."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -163,81 +167,15 @@ class AgentMemorySettings(EnvSettings):
         },
     )
 
-    memory_recall_inject_k: int = Field(
-        default=3,
-        alias="AVA_MEMORY_RECALL_INJECT_K",
+    memory_recall_inject_max: int = Field(
+        default=5,
+        ge=0,
+        alias="AVA_MEMORY_RECALL_INJECT_MAX",
         description=(
-            "The most notes passive recall injects in one turn. Kept small: notes "
-            "crowd the context they are meant to inform."
+            "The most notes passive recall injects in one turn, taken best score first "
+            "among the notes that reach memory_recall_inject_threshold. Notes crowd the "
+            "context they are meant to inform, so the cap holds even when more qualify."
         ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
-    memory_recall_filter_enabled: bool = Field(
-        default=True,
-        alias="AVA_MEMORY_RECALL_FILTER",
-        description=(
-            "Judge each retrieved note against the conversation with a small model "
-            "before injecting it, and inject nothing when none fit. Without it "
-            "recall injects its top matches unconditionally, so a note that merely "
-            "shares a word with the question arrives looking relevant. Off falls "
-            "back to the unfiltered top matches."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
-    memory_recall_filter_model: str = Field(
-        default="deepseek-flash",
-        alias="AVA_MEMORY_RECALL_FILTER_MODEL",
-        description=(
-            "Model that judges retrieved notes for passive recall. Runs once per "
-            "inbound-woken turn on names and one-line descriptions only, with "
-            "reasoning pinned off (~1.5s for a top-100 pass). deepseek-flash "
-            "per user ruling (task #595): relaxed prompt + top-100 retrieval "
-            "make flash match pro on recall, so the cheap model stays."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
-    memory_recall_filter_max_retries: int = Field(
-        default=3,
-        alias="AVA_MEMORY_RECALL_FILTER_MAX_RETRIES",
-        description="How many times the recall-filter judging call is retried before a flaky model reply (unparseable output / transient provider error) is reported as a warning and nothing is injected. LLM replies are statistically flaky, so one failure is routine; only exhaustion of every attempt is worth surfacing (user ruling 2026-08-05).",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
-    memory_recall_filter_timeout_seconds: float = Field(
-        default=20.0,
-        alias="AVA_MEMORY_RECALL_FILTER_TIMEOUT_SECONDS",
-        description="Hard bound (seconds) on one recall-filter judging call. It sits in front of the agent's turn, so a slow filter is a slow agent; the bound only fires on a genuinely wedged provider (task #698 G8).",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -252,16 +190,13 @@ class AgentMemorySettings(EnvSettings):
         default=5.0,
         alias="AVA_MEMORY_RECALL_DEADLINE_SECONDS",
         description=(
-            "Wall-clock budget (seconds) for one passive-recall pass — the "
-            "semantic search plus the relevance-filter call. Recall runs before "
-            "the LLM on every inbound turn, so a congested gateway must not hold "
-            "the turn hostage: when the deadline expires the turn proceeds with "
-            "no recall this turn and the next turn retries. Covers a healthy "
-            "pass (search ~1.7s + filter ~1.5s) with headroom; a fleet wake that "
-            "queues searches behind the gateway's search endpoint exceeds it and "
-            "degrades instead of stalling the first LLM call. Also caps the "
-            "filter leg: raising memory_recall_filter_timeout_seconds alone has "
-            "no effect on recall passes unless this deadline is raised with it."
+            "Wall-clock budget (seconds) for one passive-recall pass — the search "
+            "request, which includes the gateway's rerank of the retrieved chunks. "
+            "Recall runs before the LLM on every inbound turn, so a congested gateway "
+            "or a slow ranking model must not hold the turn hostage: when the deadline "
+            "expires the turn proceeds with no recall this turn and the next turn "
+            "retries. A fleet wake that queues searches behind the gateway's search "
+            "endpoint exceeds it and degrades instead of stalling the first LLM call."
         ),
         json_schema_extra={
             "restart_required": "agent",

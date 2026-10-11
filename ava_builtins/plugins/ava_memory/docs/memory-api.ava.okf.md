@@ -1,7 +1,7 @@
 ---
 type: doc
 title: ava.memory — Long-term Memory Pool (Plugin Provided)
-description: '`ava.memory` is declared by the `ava_memory` plugin as an `SdkNamespace`. Disabling the plugin → the entire `ava.memory` becomes unavailable. Provides `PATH` (shared memory pool root directory), `search()` (semantic search), and `write()` (cwd-independent indexed memory authoring).'
+description: '`ava.memory` is declared by the `ava_memory` plugin as an `SdkNamespace`. Disabling the plugin → the entire `ava.memory` becomes unavailable. Provides `PATH` (shared memory pool root directory), `search()` (semantic search ranked by a decision model), and `write()` (cwd-independent indexed memory authoring).'
 tags:
 - plugin
 - memory
@@ -41,13 +41,18 @@ Standing guidance descendants should receive.
 ## Core API
 
 - `PATH: PosixPath` — shared memory pool root directory `~/.ava/memory`
-- `search(query, k=5, *, timeout=None) → list[tuple[Path, str, list[str]]]` — semantic search, returns `(absolute path, frontmatter description, tags)` tuples for the most relevant notes; `timeout` bounds one attempt (default = the gateway's own search deadline + 3s, 18s), and a congested index answers 503 (`IndexerUnavailable`) in ~1s instead of queueing the call
+- `search(query, k=5, *, timeout=None) → list[MemoryMatch]` — semantic search; returns up to `k` `MemoryMatch(path, description, tags, score, chunk)` named tuples, most relevant first. `path` is absolute, `score` is a decision model's probability (0..1) that the matched `chunk` (the note's best passage, or its description line) is relevant to the query, and every match is returned whatever its score — the caller decides what a weak match deserves. `timeout` bounds one attempt (default = the gateway's own search deadline + 3s, 18s), and a congested index answers 503 (`IndexerUnavailable`) in ~1s instead of queueing the call
 - `write(slug, content, *, title=None, description=None, tags=None, store="personal") → Path` — writes an absolute personal or shared entry, assembling the note's frontmatter (a block the content carries stays the note's only one, is completed with the missing fields, and has its bare values quoted where YAML would misread them) and upserting its index pointer (a shared topic-directory entry upserts the directory's own `index.md`, created when missing — its line never lands in the root `MEMORY.md`); the canonical writer, immune to `ava.cwd` drift
-- `IndexerUnavailable` — exception when the indexer service is unavailable
+- `MemoryMatch` — the result tuple above, exported in `__all_for_ava__` so `help(ava.memory)` renders its fields
+- `IndexerUnavailable` — exception when the indexer service is unavailable, or when the decision model that ranks results fails (search never falls back to unranked vector order)
 
-The gateway search response contains only `results`, each with a memory-root-relative
-`path`, frontmatter `description` and `tags`. The SDK resolves each path against
-the runner's memory root; the HTTP response has no duplicate bare-path list.
+Search is two stages, both on the gateway: vector search returns the best chunk of the
+closest `memory_rerank_candidates` notes (default 50), then the decision model
+`memory_rerank_model` answers one yes/no relevance question per chunk and the response is
+ordered by the probability of yes. No text is generated. The gateway response contains only
+`results`, each with a memory-root-relative `path`, frontmatter `description` and `tags`, the
+`score` and the matched `chunk`. The SDK resolves each path against the runner's memory root;
+the HTTP response has no duplicate bare-path list.
 
 Memory authoring and personal-index injection resolve the current SDK identity:
 an attached external lease takes precedence over a hosted turn, then the process

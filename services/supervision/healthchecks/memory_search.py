@@ -34,7 +34,7 @@ def _post_search(
 
 
 def _probe() -> DaemonProbe:
-    """Alive when the service answers a real search with a paths payload."""
+    """Alive when the service answers a real search with a hits payload."""
     config = ConfigBoot()
     config.read_process_environment()
     payload = _post_search(
@@ -43,6 +43,6 @@ def _probe() -> DaemonProbe:
     )
     if isinstance(payload, DaemonProbe):
         return payload
-    if "paths" in payload:
-        return DaemonProbe.up("POST /search answered with a paths payload")
-    return DaemonProbe.down("POST /search answered without a paths payload")
+    if "hits" in payload:
+        return DaemonProbe.up("POST /search answered with a hits payload")
+    return DaemonProbe.down("POST /search answered without a hits payload")

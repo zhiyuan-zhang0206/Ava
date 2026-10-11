@@ -30,6 +30,7 @@ class _MemorySearchResult(TypedDict):
     path: str
     tags: list[str] | None
     description: str | None
+    score: float
 
 
 def cmd_memory_init() -> int:
@@ -77,9 +78,9 @@ def cmd_memory_refresh() -> int:
     return 0
 
 
-def _human_search_rows(results: list[_MemorySearchResult]) -> list[tuple[str, str, str]]:
+def _human_search_rows(results: list[_MemorySearchResult]) -> list[tuple[str, str, str, str]]:
     """Normalize nullable display metadata without changing the JSON response."""
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str, str, str]] = []
     for result in results:
         if not isinstance(result, dict):
             raise TypeError("memory search results must contain objects")
@@ -88,17 +89,19 @@ def _human_search_rows(results: list[_MemorySearchResult]) -> list[tuple[str, st
         tags = ", ".join(str(tag) for tag in raw_tags) if raw_tags else ""
         raw_description = result.get("description")
         description = "" if raw_description is None else str(raw_description)
-        rows.append((path, tags, description))
+        rows.append((f"{result['score']:.2f}", path, tags, description))
     return rows
 
 
 def _print_search_table(results: list[_MemorySearchResult]) -> None:
     rows = _human_search_rows(results)
-    path_width = max(len("path"), *(len(path) for path, _, _ in rows))
-    tags_width = max(len("tags"), *(len(tags) for _, tags, _ in rows))
-    print(f"{'path'.ljust(path_width)}  {'tags'.ljust(tags_width)}  description")
-    for path, tags, description in rows:
-        print(f"{path.ljust(path_width)}  {tags.ljust(tags_width)}  {description}")
+    path_width = max(len("path"), *(len(path) for _, path, _, _ in rows))
+    tags_width = max(len("tags"), *(len(tags) for _, _, tags, _ in rows))
+    print(f"score  {'path'.ljust(path_width)}  {'tags'.ljust(tags_width)}  description")
+    for score, path, tags, description in rows:
+        print(
+            f"{score.ljust(5)}  {path.ljust(path_width)}  {tags.ljust(tags_width)}  {description}"
+        )
 
 
 def cmd_memory_search(query: str, *, limit: int, json_output: bool) -> int:

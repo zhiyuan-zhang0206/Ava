@@ -13,16 +13,16 @@ tags:
 
 ## What it is
 
-**Passive Memory Recall** is a mechanism in the agent graph's `claim` stage: when new inbound messages wake the agent, the system automatically performs a semantic search over the last 6 dialogue messages, retrieves the top-100 candidates from the shared memory pool, has a small filter model keep the relevant ones, and injects at most 3 as system annotations into the agent's context.
+**Passive Memory Recall** is a mechanism in the agent graph's `claim` stage: when new inbound messages wake the agent, the system automatically performs a semantic search over the last 6 dialogue messages, searches the shared memory pool through the gateway (vector retrieval, then a decision model scoring each candidate chunk's relevance), and injects the notes scoring at or above a threshold — at most 5 — as a system annotation into the agent's context.
 
-The agent **does not need to actively call `ava.memory.search()`**—relevant memories surface automatically. Each hit presents path + frontmatter description — two of the three fields `ava.memory.search` returns; recall deliberately omits tags (the injected note is a pointer, not a tag list). Description is empty when absent, never synthesized from title/body.
+The agent **does not need to actively call `ava.memory.search()`**—relevant memories surface automatically. Each injected note presents path, score, frontmatter description and the passage that matched — `ava.memory.search`'s fields minus tags (the injected note is a pointer, not a tag list). Description is empty when absent, never synthesized from title/body.
 
 ## Difference from Memory Injection
 
 | Mechanism | Trigger | Injected content | Quantity |
 |---|---|---|---|
 | **Memory Injection** (`notes.py`, laid down by the `init_context` node) | Whenever the context window is established (cold start / after compaction) | MEMORY.md index (shared pool + per-agent) | Fixed (full index text) |
-| **Memory Recall** (`memory_recall.py` + `_memory_filter.py`) | Every new inbound message (user / agent / schedule / system — watcher & shell wake-ups skipped) | Memory pool notes the filter listed as worth seeing | Retrieve 100 → inject ≤3, or none |
+| **Memory Recall** (`memory_recall.py`) | Every new inbound message (user / agent / schedule / system — watcher & shell wake-ups skipped) | Memory pool notes whose relevance score reaches the threshold, with the matched passage | Score ≥ `memory_recall_inject_threshold` → inject ≤ `memory_recall_inject_max` (5), or none |
 
 The two are complementary: injection gives the agent a "memory directory", while recall pushes relevant content automatically during conversation.
 
@@ -31,19 +31,22 @@ The two are complementary: injection gives the agent a "memory directory", while
 - **Trigger condition**: `passive_memory_recall_enabled` (default **on**; a cluster opts out by pinning `AVA_PASSIVE_MEMORY_RECALL=false` in its `.env` — `cluster-pinned` scope, so it applies cluster-wide), and memory index available. This node owns the recall settings' documented defaults; the authority they track is `base/config/domains/agent/settings.py`
 - **Query construction**: Takes the last 6 "real dialogue" messages (agent replies + inbound chats), excludes system heartbeats/lifecycle markers/previous recall injections (`agent/graph/recall/conversation_query.py:build_conversation_query`, shared with skill recall, [[agent/graph/docs/skill-recall.ava.okf.md]])
 - **Trigger gate**: fires on inbound from a real source — user chat, a peer agent (`agent:`), a scheduled turn (`schedule:`), or a system notice — and skips machine-originated wake-ups (`watcher:` / `shell:` prefixes; `tail_has_recallable_inbound` in `agent/messages/__init__.py`)
-- **Search**: retrieves `memory_recall_retrieve_k` (100) candidates — wide top-100 so the filter has real candidates to judge; injection stays capped at `memory_recall_inject_k`
-- **Filter**: `memory_recall_filter_model` (deepseek-flash) judges path + description + `type/<x>` tag against the conversation and lists the notes worth the agent's attention, at most `memory_recall_inject_k` (3), or none. The prompt is relaxed: when unsure it lists rather than rejects — the agent decides whether to read. The model is built with reasoning pinned off (see `agent/graph/recall/_memory_filter.py` — the registry's `max` default made every call time out); flash is the default per user ruling (task #595) — the relaxed prompt + top-100 retrieval made flash match pro on the recall cases, so the cheap model stays. Error / timeout / unreadable reply injects nothing, never the unfiltered top-k the filter exists to remove
-- **Dedup**: Runs **after** the filter, on what it judged relevant — the filter sees the full candidate set (dropping already-injected notes first would leave a similar second message with its best matches pre-removed, injecting unrelated notes instead). Notes already injected this session are not injected again; if everything the filter kept is already injected, nothing is
-- **Degradation**: Any failed search skips the turn instead of failing it — the hook runs inside `before_llm`, so an escaping exception ends the agent process rather than the recall. Three levels: an outage the gateway names in the wire contract (`IndexerUnavailable` / `GatewayUnavailable`) logs at debug, because a restart or a stalled embedder clears itself; an error **status** (`httpx.HTTPStatusError` — a body carrying no wire `reason`, e.g. a bare 500) logs at error under `event=passive_recall`, because the gateway failed in a way it does not model; and the whole pass runs under `memory_recall_deadline_seconds` (default 5.0) — on expiry the turn proceeds with no recall this turn (logged under `event=passive_recall`) and the next inbound turn retries, so a congested gateway (a fleet wake queueing searches) degrades to a bounded skip instead of stalling the first LLM call. A congested search gate now answers 503 in ~1s (`AVA_MEMORY_SEARCH_ACQUIRE_TIMEOUT_SECONDS`, default 1.0), so in practice the pass degrades within about a second rather than burning the whole recall deadline on the queue. Infrastructure only: a programming error in the call path still propagates
+- **Search**: the same gateway search `ava.memory.search` runs (see [[ava_builtins/plugins/ava_memory/docs/memory-api.ava.okf.md]]): vector retrieval of the best chunk of the closest `memory_rerank_candidates` (50) notes, then the decision model `memory_rerank_model` scores each chunk's relevance to the query. Recall holds no model call and no relevance judgement of its own, and no text is generated on this path. It asks for `memory_recall_inject_max` plus the number of already-injected paths results, so dedup cannot starve the cap
+- **Threshold**: injects the results scoring at least `memory_recall_inject_threshold` (default 0.7, provisional pending calibration against a benchmark), best first, at most `memory_recall_inject_max` (5). A turn where nothing reaches the threshold injects nothing; vector order alone never injects anything
+- **Dedup**: Applied before the cap, after the threshold: notes already injected this session are set aside and the cap fills with the next-best qualifying notes. If every qualifying note is already injected, nothing is
+- **Degradation**: Any failed search skips the turn instead of failing it — the hook runs inside `before_llm`, so an escaping exception ends the agent process rather than the recall. Three levels: an outage the gateway names in the wire contract (`IndexerUnavailable` / `GatewayUnavailable`, which includes a failed decision-model call — the gateway logs that one at warning) logs at debug, because a restart or a stalled embedder clears itself; an error **status** (`httpx.HTTPStatusError` — a body carrying no wire `reason`, e.g. a bare 500) logs at error under `event=passive_recall`, because the gateway failed in a way it does not model; and the whole pass runs under `memory_recall_deadline_seconds` (default 5.0, covering the search request including the gateway's ranking) — on expiry the turn proceeds with no recall this turn (logged under `event=passive_recall`) and the next inbound turn retries, so a congested gateway (a fleet wake queueing searches) degrades to a bounded skip instead of stalling the first LLM call. A congested search gate now answers 503 in ~1s (`AVA_MEMORY_SEARCH_ACQUIRE_TIMEOUT_SECONDS`, default 1.0), so in practice the pass degrades within about a second rather than burning the whole recall deadline on the queue. Infrastructure only: a programming error in the call path still propagates
 
 ## Injection Format
 
 ```markdown
-Memory notes related to the current conversation, retrieved automatically.
+Memory notes related to the current conversation, retrieved automatically, each with the passage that matched and its relevance score.
 These point into your note pool at ava.memory.PATH -- read a path in full when it looks relevant.
 
-- path/to/note.md: description from frontmatter
+- path/to/note.md (score 0.83): description from frontmatter
+  > the passage of the note that matched
 ```
+
+Telemetry: each completed pass logs `event=passive_recall` with `search_ms` and `injected`; the `ava_memory` Grafana panels (runs, empty ratio, search latency, notes injected, deadline skips) read those.
 
 ## Key Dependencies
 

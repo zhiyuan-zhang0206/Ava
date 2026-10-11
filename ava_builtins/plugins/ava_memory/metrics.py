@@ -15,28 +15,16 @@ panels use a fixed ``[5m]`` window. Every count wraps in
 ``sum(...)``: the unknown_service family has >500 streams over a day, and an
 unaggregated count_over_time hits Loki's per-query series cap.
 
-Data provenance: ``recall_filter`` (agent/graph/recall/_memory_filter.py) records
-the passive-recall relevance verdict, while ``passive_recall``
-(agent/graph/recall/memory_recall.py) records its successful search and filter
-durations. ``recall_filter`` is emitted with an explicit
-``event="recall_filter"`` and mapped to category='telemetry' (90d retention;
-event_name-category final convention, 2026-08-05, tracker #762 — the metrics
-below were moved off the legacy ``recall-filter`` spelling + category='log'
-pair that stopped matching the stream after the W8 rename). Its two levels
-carry distinct meaning:
-
-- INFO — the filter judged N candidates: body ``"N candidate(s) -> M kept"``.
-  M=0 means nothing was judged relevant enough to inject (an empty recall).
-- WARNING — the filter failed (model error / timeout / unparseable reply /
-  invented path): recall injected nothing that turn.
-
-The kept count lives in an unstructured body string, so the whitelist-safe
-signal for recall quality is the Loki regex match ``attributes_body =~ ".*-> 0 kept.*"``
-over INFO rows (the body label is the json-flattened ``attributes.body``) —
-the empty-recall share, reported as its inverse framing (the hit-rate proxy).
+Data provenance: every metric reads the ``passive_recall`` event
+(agent/graph/recall/memory_recall.py), emitted with ``category='telemetry'``
+(90d retention). A completed recall pass is an INFO row carrying ``search_ms``
+(the search request, which includes the gateway's ranking of the retrieved
+chunks) and ``injected`` (how many notes cleared the score threshold). A pass
+that ran out of its deadline is an INFO row whose ``body`` starts
+``skip: recall exceeded`` and carries neither number.
 """
 
-from base.events.contract import PASSIVE_RECALL_KEYS, RECALL_FILTER_KEYS
+from base.events.contract import PASSIVE_RECALL_KEYS
 from base.packages.plugins.extensions import PluginContributions
 from base.telemetry.metrics.logql import CATEGORY_MATCH, event_count
 from base.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep
@@ -44,12 +32,20 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep
 # Attribute labels are derived from the payload-key contract (a renamed
 # payload key fails loudly here instead of silently NULLing out) — the same
 # pattern the core panels use (_LLM_ATTR etc.).
-_RECALL_ATTR = {k: f"attributes_{k}" for k in RECALL_FILTER_KEYS}
 _PASSIVE_RECALL_ATTR = {k: f"attributes_{k}" for k in PASSIVE_RECALL_KEYS}
 
 
-def _passive_recall_average_ms(field: str) -> str:
-    """Average one recall leg's successful duration in a five-minute bucket."""
+_COMPLETED = f'{CATEGORY_MATCH} | level="info" | {_PASSIVE_RECALL_ATTR["search_ms"]}!=""'
+"""Pipeline selecting the passive-recall rows of completed passes."""
+
+_DEADLINE_SKIP = (
+    f'{CATEGORY_MATCH} | level="info" | {_PASSIVE_RECALL_ATTR["body"]} =~ "skip: recall exceeded.*"'
+)
+"""Pipeline selecting the passive-recall rows of passes that ran out of their deadline."""
+
+
+def _passive_recall_average(field: str) -> str:
+    """Average one numeric field of completed recall passes in a five-minute bucket."""
     attr = _PASSIVE_RECALL_ATTR[field]
     successful = f'{CATEGORY_MATCH} | level="info" | {attr}!=""'
     numerator = (
@@ -62,22 +58,20 @@ def _passive_recall_average_ms(field: str) -> str:
 
 METRICS: tuple[MetricSpec, ...] = (
     MetricSpec(
-        name="ava_memory_recall_filter_runs",
-        title="Memory recall filter runs",
+        name="ava_memory_recall_runs",
+        title="Memory recall runs",
         time_basis="per_minute",
         description=(
-            "Recall_filter INFO events per minute (5-minute buckets / 5) — how "
-            "often passive memory recall filters retrieval results for relevance "
-            "(event_name='recall_filter', level='info', category='telemetry', 90d "
+            "Completed passive-recall passes per minute (5-minute buckets / 5) — how "
+            "often recall searches the memory pool and scores the results "
+            "(event_name='passive_recall', level='info', category='telemetry', 90d "
             "retention)."
         ),
-        event_name="recall_filter",
+        event_name="passive_recall",
         category="telemetry",
         unit="ops",
         panel="timeseries",
-        query=event_count(
-            f'{CATEGORY_MATCH} | level="info"', "5m", matchers="event_name={event_name}"
-        ),
+        query=event_count(_COMPLETED, "5m", matchers="event_name={event_name}"),
         query_type="logql",
         target_names=["runs"],
         output=["grafana"],
@@ -87,61 +81,54 @@ METRICS: tuple[MetricSpec, ...] = (
         name="ava_memory_recall_search_latency_ms",
         title="Memory recall search latency",
         description=(
-            "Average successful passive-recall semantic-search duration in milliseconds "
+            "Average successful passive-recall search duration in milliseconds — the "
+            "search request including the gateway's ranking of the retrieved chunks "
             "(5-minute buckets; event_name='passive_recall', category='telemetry')."
         ),
         event_name="passive_recall",
         category="telemetry",
         unit="ms",
         panel="timeseries",
-        query=_passive_recall_average_ms("search_ms"),
+        query=_passive_recall_average("search_ms"),
         query_type="logql",
         target_names=["avg search ms"],
         output=["grafana", "inspector"],
         order=4,
     ),
     MetricSpec(
-        name="ava_memory_recall_filter_latency_ms",
-        title="Memory recall filter latency",
+        name="ava_memory_recall_injected_notes",
+        title="Memory recall injected notes",
         description=(
-            "Average successful passive-recall relevance-filter duration in milliseconds "
-            "(5-minute buckets; event_name='passive_recall', category='telemetry')."
+            "Average notes injected per completed passive-recall pass (5-minute "
+            "buckets; event_name='passive_recall', category='telemetry') — how many "
+            "of the searched notes clear the score threshold."
         ),
         event_name="passive_recall",
         category="telemetry",
-        unit="ms",
+        unit="short",
         panel="timeseries",
-        query=_passive_recall_average_ms("filter_ms"),
+        query=_passive_recall_average("injected"),
         query_type="logql",
-        target_names=["avg filter ms"],
+        target_names=["avg injected"],
         output=["grafana", "inspector"],
         order=5,
     ),
     MetricSpec(
-        name="ava_memory_recall_filter_empty_rate",
+        name="ava_memory_recall_empty_rate",
         title="Empty recall ratio",
         description=(
-            "Share of INFO runs where filtering kept 0 notes (body 'N candidate(s) -> 0 "
-            "kept') — recall-quality signal: a high share means retrieval/filtering "
-            "usually judges nothing relevant (event_name='recall_filter', "
+            "Share of completed recall passes that injected 0 notes — recall-quality "
+            "signal: a high share means no searched note clears the score threshold "
+            "(or the threshold is set too high) (event_name='passive_recall', "
             "category='telemetry')."
         ),
-        event_name="recall_filter",
+        event_name="passive_recall",
         category="telemetry",
         unit="percent",
         panel="timeseries",
         query=(
-            f"100 * {
-                event_count(
-                    CATEGORY_MATCH
-                    + ' | level="info" | '
-                    + _RECALL_ATTR['body']
-                    + ' =~ ".*-> 0 kept.*"',
-                    '5m',
-                    matchers='event_name={event_name}',
-                )
-            }"
-            f" / {event_count(CATEGORY_MATCH + ' | level="info"', '5m', matchers='event_name={event_name}')}"
+            f"100 * {event_count(_COMPLETED + ' | ' + _PASSIVE_RECALL_ATTR['injected'] + '="0"', '5m', matchers='event_name={event_name}')}"
+            f" / {event_count(_COMPLETED, '5m', matchers='event_name={event_name}')}"
         ),
         query_type="logql",
         target_names=["empty %"],
@@ -149,15 +136,15 @@ METRICS: tuple[MetricSpec, ...] = (
         order=1,
     ),
     MetricSpec(
-        name="ava_memory_recall_filter_anomaly_rate",
-        title="Recall filter error ratio",
+        name="ava_memory_recall_deadline_skip_rate",
+        title="Recall deadline skip ratio",
         description=(
-            "Share of recall_filter WARNINGs across all runs — when the filter call "
-            "fails (model error / timeout / unparseable reply) the round's recall "
-            "injection is empty; a spiking rate points at the filter model or "
-            "provider (event_name='recall_filter', category='telemetry')."
+            "Share of recall passes that ran out of memory_recall_deadline_seconds and "
+            "skipped injection for that turn — a spiking rate points at a slow search "
+            "endpoint or ranking model (event_name='passive_recall', "
+            "category='telemetry')."
         ),
-        event_name="recall_filter",
+        event_name="passive_recall",
         category="telemetry",
         unit="percent",
         panel="timeseries",
@@ -166,52 +153,49 @@ METRICS: tuple[MetricSpec, ...] = (
             ThresholdStep(color="red", value=25.0),
         ],
         query=(
-            f"100 * {event_count(CATEGORY_MATCH + ' | level="warning"', '5m', matchers='event_name={event_name}')}"
-            f" / {event_count(CATEGORY_MATCH, '5m', matchers='event_name={event_name}')}"
+            f"100 * {event_count(_DEADLINE_SKIP, '5m', matchers='event_name={event_name}')}"
+            f" / ({event_count(_COMPLETED, '5m', matchers='event_name={event_name}')}"
+            f" + {event_count(_DEADLINE_SKIP, '5m', matchers='event_name={event_name}')})"
         ),
         query_type="logql",
-        target_names=["anomaly %"],
+        target_names=["skipped %"],
         output=["grafana"],
         order=2,
     ),
     MetricSpec(
-        name="ava_memory_recall_filter_failures",
-        title="Recall filter failures",
+        name="ava_memory_recall_deadline_skips",
+        title="Recall deadline skips",
         time_basis="window",
         description=(
-            "Total recall_filter WARNINGs in the current window — filter unavailable, "
-            "an unparseable reply, or an unknown model path all leave the round "
-            "without injection (event_name='recall_filter', category='telemetry')."
+            "Total recall passes that ran out of their deadline in the current window "
+            "— each left that turn without recall (event_name='passive_recall', "
+            "category='telemetry')."
         ),
-        event_name="recall_filter",
+        event_name="passive_recall",
         category="telemetry",
         unit="short",
         panel="stat",
-        query=event_count(
-            f'{CATEGORY_MATCH} | level="warning"',
-            "$__range",
-            matchers="event_name={event_name}",
-        ),
+        query=event_count(_DEADLINE_SKIP, "$__range", matchers="event_name={event_name}"),
         query_type="logql",
-        target_names=["failures"],
+        target_names=["skips"],
         output=["grafana"],
         order=3,
     ),
     MetricSpec(
-        name="ava_memory_recall_filter_agent_runs",
-        title="Agent recall filter runs",
+        name="ava_memory_recall_agent_runs",
+        title="Agent recall runs",
         description=(
             "Inspector-only: the same runs query parameterized by agent. The "
             '{{agent_id}} placeholder is rendered by the gateway as agent_id="<n>"; '
             "metrics carrying the placeholder must not also be emitted to Grafana "
             "panels."
         ),
-        event_name="recall_filter",
+        event_name="passive_recall",
         category="telemetry",
         unit="ops",
         panel="timeseries",
         query=event_count(
-            f'{CATEGORY_MATCH} | level="info" | {{{{agent_id}}}}',
+            f"{_COMPLETED} | {{{{agent_id}}}}",
             "$__interval",
             matchers="event_name={event_name}",
         ),

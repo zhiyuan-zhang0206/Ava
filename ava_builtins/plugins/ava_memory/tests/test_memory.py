@@ -7,7 +7,7 @@ Data-plane behaviour unit tests live in `gateway/routers/tests/test_memory_searc
 only tests the SDK ↔ gateway wire and PATH prefix conversion.
 """
 
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -16,36 +16,21 @@ import pytest
 import ava
 from ava.sdk_surface import install
 from ava_builtins.plugins.ava_memory import plugin as memory_plugin
-from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkWrap
+from base.packages.plugins.extensions import ExtensionRegistry
 
-# ── Plugin simulation: wrap search() with the real implementation ───────
-# In the agent process the ava_memory plugin wraps search() at startup.
-# This fixture installs the same wrapper so tests work without the plugin.
+# ── Plugin simulation: install the ava_memory SDK surface ───────────────
 
 
 @pytest.fixture(autouse=True)
-def _wrap_memory_search(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Install the ava_memory SDK surface with the search() wrapper the plugin
-    declares in the agent process, so tests exercise the real search path instead
-    of the RuntimeError stub."""
-    from ava import gateway_client as _client
+def _install_memory_sdk(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Install the ava_memory SDK surface the plugin declares in the agent process."""
     from base.agents.sdk import call_policy
 
     def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
         return call_policy.SamplingPolicy()
 
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-
-    def _wrapper(
-        inner: Callable[..., Any], query: str, k: int = 5, *, timeout: float | None = None
-    ) -> list[tuple[Path, str, list[str]]]:
-        results = _client.memory_search(query, k, timeout=timeout)
-        return [(ava.memory.PATH / r.path, r.description, list(r.tags)) for r in results]
-
-    declared = memory_plugin.contribute().merged(
-        PluginContributions(sdk_wraps=(SdkWrap("memory.search", _wrapper),))
-    )
-    install.install(ExtensionRegistry((("ava_memory", declared),)))
+    install.install(ExtensionRegistry((("ava_memory", memory_plugin.contribute()),)))
     yield
     install.uninstall()
 
@@ -160,20 +145,16 @@ def test_search_prefixes_paths_with_memory_path(monkeypatch: pytest.MonkeyPatch)
         gateway_client,
         "memory_search",
         lambda _q, _k, **_kw: [  # pyright: ignore[reportUnknownArgumentType]
-            MemorySearchResult(path="notes/foo.md", description="desc1"),
-            MemorySearchResult(path="bar.md", description=""),
+            MemorySearchResult("notes/foo.md", "desc1", (), 0.9, "foo passage"),
+            MemorySearchResult("bar.md", "", (), 0.4, "bar passage"),
         ],
     )
     results = ava.memory.search("any")
-    assert results == [
-        (ava.memory.PATH / "notes" / "foo.md", "desc1", []),
-        (ava.memory.PATH / "bar.md", "", []),
+    assert [m.path for m in results] == [
+        ava.memory.PATH / "notes" / "foo.md",
+        ava.memory.PATH / "bar.md",
     ]
-    # all are tuple[Path, str, list[str]]
-    assert all(
-        isinstance(p, Path) and p.is_absolute() and isinstance(d, str) and isinstance(tags, list)
-        for p, d, tags in results
-    )
+    assert all(m.path.is_absolute() for m in results)
 
 
 def test_search_empty_result(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -224,33 +205,11 @@ def test_search_detailed_removed() -> None:
     assert not hasattr(ava.memory, "search_detailed")
 
 
-# -- search returns (path, description, tags) tuples --
+# -- search returns MemoryMatch tuples --
 
 
-def test_search_returns_path_description_and_tags(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """search returns (Path, description, tags) tuples."""
-    from ava import gateway_client
-    from ava.gateway_client import MemorySearchResult
-
-    monkeypatch.setattr(
-        gateway_client,
-        "memory_search",
-        lambda _q, _k, **_kw: [  # pyright: ignore[reportUnknownArgumentType]
-            MemorySearchResult(path="notes/foo.md", description="My note about foo"),
-            MemorySearchResult(path="bar.md", description=""),
-        ],
-    )
-    results = ava.memory.search("any")
-    assert results == [
-        (ava.memory.PATH / "notes" / "foo.md", "My note about foo", []),
-        (ava.memory.PATH / "bar.md", "", []),
-    ]
-
-
-def test_search_returns_tags(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tags flow through from the gateway result as a mutable SDK list."""
+def test_search_returns_named_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each match carries the absolute path, description, tags, score and chunk, in order."""
     from ava import gateway_client
     from ava.gateway_client import MemorySearchResult
 
@@ -259,14 +218,31 @@ def test_search_returns_tags(monkeypatch: pytest.MonkeyPatch) -> None:
         "memory_search",
         lambda _q, _k, **_kw: [  # pyright: ignore[reportUnknownArgumentType]
             MemorySearchResult(
-                path="notes/project.md",
-                description="Project note",
-                tags=("type/project", "x"),
-            )
+                "notes/project.md", "Project note", ("type/project", "x"), 0.82, "the passage"
+            ),
+            MemorySearchResult("bar.md", "", (), 0.3, "other"),
         ],
     )
-    result = ava.memory.search("project")
-    assert result[0][2] == ["type/project", "x"]
+    results = ava.memory.search("project")
+    assert results == [
+        ava.memory.MemoryMatch(
+            ava.memory.PATH / "notes" / "project.md",
+            "Project note",
+            ["type/project", "x"],
+            0.82,
+            "the passage",
+        ),
+        ava.memory.MemoryMatch(ava.memory.PATH / "bar.md", "", [], 0.3, "other"),
+    ]
+    first = results[0]
+    assert (first.path, first.description, first.tags, first.score, first.chunk) == tuple(first)
+    assert isinstance(first.tags, list)
+
+
+def test_memory_match_is_exported_for_help() -> None:
+    """The result type is on the agent surface so `help(ava.memory)` renders its fields."""
+    assert "MemoryMatch" in ava.memory.__all_for_ava__
+    assert ava.memory.MemoryMatch._fields == ("path", "description", "tags", "score", "chunk")
 
 
 def test_search_empty_result_desc(monkeypatch: pytest.MonkeyPatch) -> None:

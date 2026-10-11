@@ -86,7 +86,7 @@ def test_write_read_roundtrip(backend: NumPyBackend) -> None:
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     backend.upsert("/b.md", 2.0, "hb", -ones, kind="body", chunk_idx=0)
     assert backend.all_meta() == {"/a.md": (1.0, "ha", _FP), "/b.md": (2.0, "hb", _FP)}
-    assert backend.search_topk(ones, k=5) == ["/a.md", "/b.md"]
+    assert [hit.path for hit in backend.search_topk(ones, k=5)] == ["/a.md", "/b.md"]
     backend.delete("/a.md")
     assert backend.all_meta() == {"/b.md": (2.0, "hb", _FP)}
 
@@ -101,7 +101,7 @@ def test_upsert_many_roundtrip(backend: NumPyBackend) -> None:
     assert meta["/batch-a.md"] == (1.0, "ha", _FP)
     assert meta["/batch-b.md"] == (2.0, "hb", _FP)
     results = backend.search_topk(_vec(0), k=1000)
-    assert {"/batch-a.md", "/batch-b.md"}.issubset(results)
+    assert {"/batch-a.md", "/batch-b.md"}.issubset(hit.path for hit in results)
     backend.delete("/batch-a.md")
     backend.delete("/batch-b.md")
 
@@ -152,7 +152,12 @@ def test_search_topk_async_matches_sync(backend: NumPyBackend) -> None:
     backend.upsert("/b.md", 2.0, "hb", -ones, kind="body", chunk_idx=0)
     sync = backend.search_topk(ones, k=5)
     async_result = asyncio.run(backend.search_topk_async(ones, 5, timeout=5.0))
-    assert async_result == sync == ["/a.md", "/b.md"]
+    assert async_result == sync
+    assert [(hit.path, hit.kind, hit.chunk_idx) for hit in sync] == [
+        ("/a.md", "body", 0),
+        ("/b.md", "body", 0),
+    ]
+    assert sync[0].score == pytest.approx(1.0)
 
 
 def test_connect_fails_fast_when_service_down(monkeypatch: pytest.MonkeyPatch) -> None:

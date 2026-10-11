@@ -61,8 +61,10 @@ def test_memory_search_posts_authenticated_query_and_renders_table(
             "path": "projects/alpha.md",
             "tags": ["project", "active"],
             "description": "Alpha context",
+            "score": 0.91,
+            "chunk": "Alpha is the active project.",
         },
-        {"path": "notes/empty.md", "tags": [], "description": ""},
+        {"path": "notes/empty.md", "tags": [], "description": "", "score": 0.5, "chunk": ""},
     ]
     seen = _patch_post(
         monkeypatch,
@@ -77,9 +79,9 @@ def test_memory_search_posts_authenticated_query_and_renders_table(
     assert seen["json"] == {"query": "alpha", "k": 7}
     assert seen["headers"] == {"Authorization": "Bearer secret"}
     assert capsys.readouterr().out.splitlines() == [
-        "path               tags             description",
-        "projects/alpha.md  project, active  Alpha context",
-        "notes/empty.md                      ",
+        "score  path               tags             description",
+        "0.91   projects/alpha.md  project, active  Alpha context",
+        "0.50   notes/empty.md                      ",
     ]
 
 
@@ -87,8 +89,8 @@ def test_memory_search_json_emits_results_shape_and_preserves_nulls(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     results: list[dict[str, object]] = [
-        {"path": "relative/note.md", "tags": None, "description": None},
-        {"path": "relative/empty.md", "tags": [], "description": ""},
+        {"path": "relative/note.md", "tags": None, "description": None, "score": 0.8, "chunk": "x"},
+        {"path": "relative/empty.md", "tags": [], "description": "", "score": 0.1, "chunk": "y"},
     ]
     _patch_post(
         monkeypatch,
@@ -107,15 +109,21 @@ def test_memory_search_human_output_renders_null_metadata_as_empty(
         {
             "paths": ["relative/note.md"],
             "results": [
-                {"path": "relative/note.md", "tags": None, "description": None},
+                {
+                    "path": "relative/note.md",
+                    "tags": None,
+                    "description": None,
+                    "score": 0.25,
+                    "chunk": "x",
+                },
             ],
         },
     )
 
     assert _memory.cmd_memory_search("edge cases", limit=5, json_output=False) == 0
     assert capsys.readouterr().out.splitlines() == [
-        "path              tags  description",
-        "relative/note.md        ",
+        "score  path              tags  description",
+        "0.25   relative/note.md        ",
     ]
 
 

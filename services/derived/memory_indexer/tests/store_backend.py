@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from services.derived.memory_indexer.backends.base import KIND_BODY
+from services.derived.memory_indexer.backends.base import KIND_BODY, ChunkHit
 from services.derived.memory_search.store import MemoryStore
 
 
@@ -78,10 +78,10 @@ class StoreBackend:
     def all_meta(self) -> dict[str, tuple[float, str, str]]:
         return self.store.all_meta()
 
-    def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:
+    def search_topk(self, query_vector: np.ndarray, k: int) -> list[ChunkHit]:
         return self.store.search_topk(query_vector, k)
 
     async def search_topk_async(
         self, query_vector: np.ndarray, k: int, *, timeout: float
-    ) -> list[str]:
+    ) -> list[ChunkHit]:
         return self.store.search_topk(query_vector, k)
