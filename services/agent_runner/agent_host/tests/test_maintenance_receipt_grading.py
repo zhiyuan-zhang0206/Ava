@@ -212,7 +212,7 @@ def test_a_failure_outside_the_captured_cohort_is_no_receipt(exc: BaseException)
 
 
 @_FAILURES
-@pytest.mark.parametrize("phase", ["drained", "stopping", "stopped", "starting", "ready"])
+@pytest.mark.parametrize("phase", ["drained", "stopping", "stopped"])
 def test_a_drained_members_failure_after_the_certified_drain_is_no_receipt(
     phase: str, exc: BaseException
 ) -> None:

@@ -54,7 +54,7 @@ local maintenance operation; it stops nothing on this home.
 
 The local maintenance journal is also the gateway's HTTP admission authority.
 Draining or locally drained units keep dependency APIs available to other hosts.
-The stop/start window (`stopping`, `stopped`, `starting`, `ready`) closes business
+The stop window (`stopping`, `stopped`) closes business
 requests until the same journal is atomically resumed. Completion has no posture
 cache expiry delay. Health and control-plane routes remain available even if the
 journal requires repair; an unreadable journal keeps business admission closed.
@@ -232,7 +232,7 @@ does not establish that the owner is absent.
 | --- | --- |
 | `preparing`, `draining`, `drained` | `ava start` abandons the drain and releases the hold; or re-run `ava stop`. |
 | `stopping` | Re-run `ava stop` to verify and finish closure, then `ava start`; or `ava start` directly. |
-| `stopped`, `starting`, `ready` | `ava start` brings services back, verifies readiness and releases the hold. |
+| `stopped` | `ava start` brings services back, verifies readiness and releases the hold. |
 
 An unreadable journal, or a record with no maintenance hold, has no exact
 generation to match, and no command clears it. After confirming no `ava stop`
@@ -243,7 +243,7 @@ A failed stop retains its process inventory and hold. Force remains an explicit
 owned-process escalation, not an inference from a timeout or a way to
 manufacture a drain receipt.
 
-An ordinary `ava start` completes stopped/starting recovery and resumes after
+An ordinary `ava start` completes stopped recovery and resumes after
 full readiness, settling recorded continuation failures as above. A successful
 service probe cannot make an unflushed checkpoint durable; that is why the
 agent continues from the last durable one.

@@ -258,11 +258,10 @@ def test_whitelist_drops_remote_free_text() -> None:
     assert "SECRET-ARGV" not in serialized
 
 
-def test_uncovered_phase_renders_no_command() -> None:
+def test_an_unknown_phase_is_a_structural_surprise() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(phase="ready"), host="wsl")
-    assert result.classification == "orphaned"
-    assert result.command is None
+    with pytest.raises(ValueError, match="unknown maintenance phase"):
+        module.classify_status(_status_payload(phase="starting"), host="wsl")
 
 
 def test_plain_pause_without_maintenance_payload_still_classifies() -> None:
