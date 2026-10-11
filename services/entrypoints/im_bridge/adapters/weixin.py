@@ -522,7 +522,6 @@ class WeixinAdapter(IMAdapter):
         the server-suggested long-poll timeout."""
         ingress, binding = await self._ensure_ingress()
         if binding.state == IngressBindingState.ACTIVE:
-            await ingress.recover_retained(binding)
             await ingress.recover_subscriptions(binding)
         # SQL owns the opaque cursor; a local value cannot move it.
         if sync_buf and sync_buf != binding.cursor:
