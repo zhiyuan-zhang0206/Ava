@@ -4,7 +4,7 @@ from typing import cast
 from uuid import UUID
 
 from ava.gateway_client import transport
-from base.api_contracts.idempotency import PRINCIPAL_SCOPE, validate_idempotency_key
+from base.api_contracts.idempotency import validate_idempotency_key
 from ops.rpc_schemas.launch_retry import RetryLaunchAccepted, RetryLaunchRequest
 
 
@@ -51,7 +51,6 @@ def retry_launch(
         f"/api/keyed/v1/agents/{agent_id}/retry-launch",
         request.model_dump(mode="json"),
         idempotency_key=key,
-        idempotency_scope=PRINCIPAL_SCOPE,
     )
     transport.raise_from_response(response)
     raw: object = response.json()

@@ -10,6 +10,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (
@@ -189,7 +190,7 @@ def test_reconcile_rejects_over_limit_after_timeout(db_conn: psycopg.Connection)
         resp = client.post(
             f"/api/agents/{tid}/messages/reconcile",
             json={"content": content, "source": "user"},
-            headers={"Idempotency-Key": "k1"},
+            headers=keyed_headers("k1"),
         )
     assert resp.status_code == 413
     assert _pending_rows(db_conn, tid) == []

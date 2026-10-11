@@ -7,6 +7,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.api_contracts.idempotency import keyed_headers
 from gateway.app import app
 from gateway.tests.events.test_notices_endpoint import _insert_notice, _seed_agent
 
@@ -72,12 +73,10 @@ def test_creation_replay_preserves_original_result_after_superseding(
     path = f"/api/agents/{agent}/notices"
     with TestClient(app) as client:
         body = {"title": "original"}
-        first = client.post(path, json=body, headers={"Idempotency-Key": "create-1"})
-        later = client.post(path, json={"title": "later"}, headers={"Idempotency-Key": "create-2"})
-        replay = client.post(path, json=body, headers={"Idempotency-Key": "create-1"})
-        conflict = client.post(
-            path, json={"title": "different"}, headers={"Idempotency-Key": "create-1"}
-        )
+        first = client.post(path, json=body, headers=keyed_headers("create-1"))
+        later = client.post(path, json={"title": "later"}, headers=keyed_headers("create-2"))
+        replay = client.post(path, json=body, headers=keyed_headers("create-1"))
+        conflict = client.post(path, json={"title": "different"}, headers=keyed_headers("create-1"))
     assert first.status_code == later.status_code == replay.status_code == 201
     assert first.json() == replay.json()
     assert conflict.status_code == 409
@@ -86,6 +85,21 @@ def test_creation_replay_preserves_original_result_after_superseding(
             "SELECT title, resolution FROM agent_notices WHERE agent_id=%s ORDER BY id", (agent,)
         )
         assert cur.fetchall() == [("original", "superseded"), ("later", None)]
+
+
+def test_creation_key_requires_the_principal_scope(db_conn: psycopg.Connection) -> None:
+    agent = _seed_agent(db_conn)
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/agents/{agent}/notices",
+            json={"title": "unscoped"},
+            headers={"Idempotency-Key": "unscoped-create"},
+        )
+    assert response.status_code == 422
+    assert "Idempotency-Scope" in response.text
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agent_notices WHERE agent_id=%s", (agent,))
+        assert cur.fetchone() == (0,)
 
 
 def test_resolution_recovers_after_committed_wake_failure(
@@ -132,7 +146,7 @@ def test_create_receipt_survives_expiration(
     deadline = datetime.now(UTC) + timedelta(hours=1)
     with TestClient(app) as client:
         body = {"title": "expiring", "expire_at": deadline.isoformat()}
-        first = client.post(path, json=body, headers={"Idempotency-Key": "expires"})
+        first = client.post(path, json=body, headers=keyed_headers("expires"))
 
         # If mutable preconditions run on receipt replay, the expired timestamp
         # would invalidate an already committed operation.
@@ -141,7 +155,7 @@ def test_create_receipt_survives_expiration(
 
         monkeypatch.setattr(notice_receipts, "validate_creation_state", reject_fresh)
         monkeypatch.setattr("gateway.agents.notices.validate_creation_state", reject_fresh)
-        replay = client.post(path, json=body, headers={"Idempotency-Key": "expires"})
+        replay = client.post(path, json=body, headers=keyed_headers("expires"))
     assert first.status_code == replay.status_code == 201
     assert first.json() == replay.json()
 

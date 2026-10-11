@@ -152,8 +152,15 @@ def test_preexisting_mcp_canonical_hash_replays_original_agent(
 def test_scoped_creation_key_binds_the_principal_and_the_operation_path() -> None:
     from starlette.requests import Request
 
-    request = Request({"type": "http", "method": "POST", "path": "/mcp", "headers": []})
-    principal = AuthPrincipal("mcp_client", "42")
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/keyed/v1/agents",
+            "headers": [(b"idempotency-scope", b"principal-v1")],
+        }
+    )
+    principal = AuthPrincipal("cluster", "administrator")
     request.state.auth_principal = principal
     assert scoped_creation_key(request, "prior", operation_path=PATH) == principal_key(
         principal, "POST", PATH, "prior"

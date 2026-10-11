@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.agents.tasks.priority import Priority
+from base.api_contracts.idempotency import keyed_headers
 from gateway.app import app
 from gateway.routers import tasks
 from gateway.routers.tests.test_tasks_router import _make_agent, _make_task
@@ -50,7 +51,7 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
 ) -> None:
     old, middle, current = (_make_agent(db_conn) for _ in range(3))
     tid = _make_task(db_conn, owner=old)
-    headers = {"Idempotency-Key": "lost-response"}
+    headers = keyed_headers("lost-response")
     real_wake = tasks.publish_inbound_wake
 
     def fail_wake(*_args: object) -> None:
@@ -70,7 +71,7 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
             client.patch(
                 f"/api/tasks/{tid}",
                 json={"owner": current},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             ).status_code
             == 200
         )
@@ -106,7 +107,7 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
 
 def test_snapshot_replays_after_task_deletion(db_conn: psycopg.Connection) -> None:
     tid = _make_task(db_conn, owner=_make_agent(db_conn))
-    headers = {"Idempotency-Key": "snapshot"}
+    headers = keyed_headers("snapshot")
     with TestClient(app) as client:
         first = client.patch(f"/api/tasks/{tid}", json={"status": "done"}, headers=headers)
         db_conn.execute("DELETE FROM agent_tasks WHERE id=%s", (tid,))
@@ -118,7 +119,7 @@ def test_snapshot_replays_after_task_deletion(db_conn: psycopg.Connection) -> No
 
 def test_changed_body_conflict_and_omitted_null_distinction(db_conn: psycopg.Connection) -> None:
     tid = _make_task(db_conn, owner=_make_agent(db_conn))
-    headers = {"Idempotency-Key": "body"}
+    headers = keyed_headers("body")
     with TestClient(app) as client:
         assert (
             client.patch(f"/api/tasks/{tid}", json={"priority": "P1"}, headers=headers).status_code
@@ -146,7 +147,7 @@ def test_producer_failure_rolls_back_effect_and_receipt(
         monkeypatch.setattr(tasks, target, fail_after_insert)
         assert (
             client.patch(
-                f"/api/tasks/{tid}", json={"owner": new}, headers={"Idempotency-Key": "rollback"}
+                f"/api/tasks/{tid}", json={"owner": new}, headers=keyed_headers("rollback")
             ).status_code
             == 500
         )
@@ -155,7 +156,12 @@ def test_producer_failure_rolls_back_effect_and_receipt(
 
 
 @pytest.mark.parametrize(
-    "headers", [{"Idempotency-Key": ""}, {"Idempotency-Scope": "principal-v1"}]
+    "headers",
+    [
+        {"Idempotency-Key": ""},
+        {"Idempotency-Scope": "principal-v1"},
+        {"Idempotency-Key": "unscoped"},
+    ],
 )
 def test_invalid_identity_has_no_effect(
     db_conn: psycopg.Connection, headers: dict[str, str]
@@ -181,7 +187,7 @@ def test_distinct_task_paths_and_principals_are_independent(db_conn: psycopg.Con
         for tid in (first, second):
             assert (
                 client.patch(
-                    f"/api/tasks/{tid}", json={"priority": "P1"}, headers={"Idempotency-Key": "raw"}
+                    f"/api/tasks/{tid}", json={"priority": "P1"}, headers=keyed_headers("raw")
                 ).status_code
                 == 200
             )

@@ -15,8 +15,10 @@ from base.agents import GatewayUnavailable
 from base.config import settings
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 
+@pytest.mark.usefixtures("retry_waits")
 async def test_sdk_replays_original_command_after_lost_response_and_owner_change(
     client: TestClient,
     db_conn: psycopg.Connection,
@@ -27,6 +29,7 @@ async def test_sdk_replays_original_command_after_lost_response_and_owner_change
     secret = "sdk-cancel-test-secret"  # noqa: S105 — isolated fixture credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     posts: list[httpx.Request] = []
+    lose = True
 
     def handle(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
@@ -36,7 +39,7 @@ async def test_sdk_replays_original_command_after_lost_response_and_owner_change
             result = client.post(
                 request.url.path, json=json.loads(request.content), headers=dict(request.headers)
             )
-            if len(posts) == 1:
+            if lose:
                 assert result.status_code == 200, result.text
                 raise httpx.ReadTimeout("committed response lost", request=request)
         return httpx.Response(
@@ -55,7 +58,9 @@ async def test_sdk_replays_original_command_after_lost_response_and_owner_change
         assert observed == target
         with pytest.raises(GatewayUnavailable):
             work.cancel(observed, idempotency_key="intent")
-        assert len(posts) == 1
+        lost_attempts = len(posts)
+        assert lost_attempts > 1
+        lose = False
         db_conn.execute(
             "UPDATE agents_meta SET native_work_id=NULL,runtime_owner=%s WHERE id=%s",
             (uuid4(), target.agent_id),

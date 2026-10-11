@@ -19,6 +19,7 @@ from gateway.agents import router as agent_router
 from gateway.agents.tests.creation.test_guarded_creation import PATH, SECRET
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
+from tests.fixtures.retry_waits import retry_waits as retry_waits
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 
@@ -63,6 +64,7 @@ def _older() -> FastAPI:
     return older
 
 
+@pytest.mark.usefixtures("retry_waits")
 def test_sdk_lost_response_downgrade_and_restore_one_birth(
     client: TestClient,
     db_conn: psycopg.Connection,
@@ -78,8 +80,7 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
         calls.append((path, kwargs))
         response = target.post(path, **kwargs)
         if lose:
-            lose = False
-            assert response.status_code == 201, response.text
+            assert response.status_code in (200, 201), response.text
             raise httpx.ReadTimeout("committed response lost")
         return _response(response)
 
@@ -87,7 +88,9 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
     http.post.side_effect = submit
     with pytest.raises(GatewayUnavailable):
         _sdk()
-    assert len(calls) == 1
+    lost_attempts = len(calls)
+    assert lost_attempts > 1
+    lose = False
     row = db_conn.execute("SELECT id FROM agents").fetchone()
     assert row is not None
     original = row[0]
@@ -98,7 +101,8 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
         assert error.value.response.status_code in (404, 405)
     target = client
     assert _sdk() == original
-    assert len(calls) == 3 and calls[0] == calls[1] == calls[2]
+    assert len(calls) == lost_attempts + 2
+    assert all(call == calls[0] for call in calls)
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
     assert db_conn.execute(
         "SELECT count(*) FROM audit_events WHERE event_name='spawn'"

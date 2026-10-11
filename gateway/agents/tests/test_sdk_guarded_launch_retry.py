@@ -12,13 +12,16 @@ from ava.gateway_client import transport
 from base.agents import GatewayUnavailable
 from gateway.agents.tests.test_keyed_launch_retry import birth
 from gateway.agents.tests.test_keyed_launch_retry import client as client
+from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 
+@pytest.mark.usefixtures("retry_waits")
 def test_sdk_observation_lost_response_and_historical_replay(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
     agent_id, prior = birth(client)
     posts: list[httpx.Request] = []
+    lose = True
 
     def handle(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
@@ -28,7 +31,7 @@ def test_sdk_observation_lost_response_and_historical_replay(
             result = client.post(
                 request.url.path, json=json.loads(request.content), headers=dict(request.headers)
             )
-            if len(posts) == 1:
+            if lose:
                 assert result.status_code == 200, result.text
                 raise httpx.ReadTimeout("committed response lost", request=request)
         return httpx.Response(
@@ -47,7 +50,8 @@ def test_sdk_observation_lost_response_and_historical_replay(
                 idempotency_key="intent",
                 expected_prior_attempt_id=observed,
             )
-        assert len(posts) == 1
+        assert len(posts) > 1
+        lose = False
         replacement = agents.get_launch_attempt(agent_id)
         assert replacement != observed
         for _ in range(2):

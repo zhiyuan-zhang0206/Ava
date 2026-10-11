@@ -9,7 +9,7 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartRequest,
 )
 from base.agents.incarnation.native_work_models import NativeCancelAcceptance, NativeWorkTarget
-from base.api_contracts.idempotency import PRINCIPAL_SCOPE, validate_idempotency_key
+from base.api_contracts.idempotency import validate_idempotency_key
 
 __all_for_ava__ = ["cancel", "observe", "restart", "restart_status"]
 
@@ -49,7 +49,6 @@ def cancel(target: NativeWorkTarget, *, idempotency_key: str) -> NativeCancelAcc
         f"/api/keyed/v1/agents/{target.agent_id}/cancel-work",
         target.model_dump(mode="json"),
         idempotency_key=key,
-        idempotency_scope=PRINCIPAL_SCOPE,
     )
     transport.raise_from_response(response)
     if response.status_code != 200:
@@ -84,7 +83,6 @@ def restart(
         f"/api/keyed/v1/agents/{target.agent_id}/restart-work",
         body.model_dump(mode="json"),
         idempotency_key=key,
-        idempotency_scope=PRINCIPAL_SCOPE,
     )
     transport.raise_from_response(response)
     if response.status_code != 200:

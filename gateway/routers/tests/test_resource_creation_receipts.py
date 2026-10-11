@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from psycopg import sql
 
 import base.db
+from base.api_contracts.idempotency import keyed_headers
 from gateway.app import app
 from gateway.routers import presets
 from gateway.routers.receipts import creation as creation_receipts
@@ -35,7 +36,7 @@ def test_lost_response_retry_replays_original_created_resource(
 ) -> None:
     path, body, table = resource
     with TestClient(app) as client:
-        headers = {"Idempotency-Key": "one-create"}
+        headers = keyed_headers("one-create")
         first = client.post(path, json=body, headers=headers)
         second = client.post(path, json=body, headers=headers)
     assert first.status_code == second.status_code == 201
@@ -52,14 +53,14 @@ def test_creation_receipt_ignores_later_rename_delete_and_name_reuse(
 ) -> None:
     path, body, _table = resource
     with TestClient(app) as client:
-        headers = {"Idempotency-Key": "original"}
+        headers = keyed_headers("original")
         first = client.post(path, json=body, headers=headers)
         sid = first.json()["id"]
         if path == "/api/presets":
             assert client.patch(f"{path}/{sid}", json={"name": "renamed"}).status_code == 200
         else:
             assert client.put(f"{path}/{sid}", json={"name": "renamed"}).status_code == 200
-        other = client.post(path, json=body, headers={"Idempotency-Key": "new-intent"})
+        other = client.post(path, json=body, headers=keyed_headers("new-intent"))
         assert other.status_code == 201
         assert other.json()["id"] != sid
         assert client.delete(f"{path}/{sid}").status_code == 200
@@ -74,7 +75,7 @@ def test_same_creation_key_with_changed_valid_body_conflicts(
 ) -> None:
     path, body, _table = resource
     with TestClient(app) as client:
-        headers = {"Idempotency-Key": "immutable"}
+        headers = keyed_headers("immutable")
         assert client.post(path, json=body, headers=headers).status_code == 201
         assert (
             client.post(path, json={**body, "name": "different"}, headers=headers).status_code
@@ -116,7 +117,7 @@ def test_receipt_contains_no_raw_opaque_config_request(db_conn: psycopg.Connecti
                     "label": "worker",
                     "config": {"plugin_secret": value_marker},
                 },
-                headers={"Idempotency-Key": "opaque-create"},
+                headers=keyed_headers("opaque-create"),
             ).status_code
             == 201
         )
@@ -178,6 +179,7 @@ def test_creation_identity_is_bound_to_verified_principal(db_conn: psycopg.Conne
         {"Idempotency-Key": ""},
         {"Idempotency-Scope": "principal-v1"},
         {"Idempotency-Key": "x", "Idempotency-Scope": "unsupported"},
+        {"Idempotency-Key": "unscoped"},
     ],
 )
 def test_invalid_creation_identity_cannot_reserve_resource(

@@ -1,4 +1,4 @@
-"""Server-bound credential identity and opt-in idempotency namespacing.
+"""Server-bound credential identity and principal-scoped idempotency keys.
 
 Caller labels are deliberately absent. A shared bearer authenticates exactly
 one cluster administrator, not separate tools. Browser sessions minted from the
@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import re
 import secrets
 from contextlib import suppress
@@ -22,10 +21,8 @@ from starlette.requests import Request
 
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE as PRINCIPAL_SCOPE
 from base.api_contracts.idempotency import SCOPE_HEADER as SCOPE_HEADER
-from base.api_contracts.idempotency import validate_idempotency_key
+from base.api_contracts.idempotency import stored_key
 from base.cluster.authority.api import AcceptanceCache
-
-_STORAGE_PREFIX = "principal-v1:"
 
 
 @dataclass(frozen=True)
@@ -231,40 +228,40 @@ def current_session_fact(
 def principal_key(principal: AuthPrincipal, method: str, path: str, key: str) -> str:
     """Stable opaque key under actual credential + logical operation identity."""
     try:
-        key = validate_idempotency_key(key)
+        return stored_key(principal.kind, principal.subject, method, path, key)
     except (TypeError, ValueError) as exc:
         raise PrincipalScopeError(str(exc)) from exc
-    material = json.dumps([principal.kind, principal.subject, method.upper(), path, key])
-    return _STORAGE_PREFIX + hashlib.sha256(material.encode()).hexdigest()
 
 
-def request_key(request: Request, key: str, *, method: str, path: str) -> str:
-    """Preserve legacy retries unless the caller explicitly chooses v1.
+def keyed_principal(request: Request, key: str) -> AuthPrincipal:
+    """The verified principal of a keyed request that names `principal-v1` scope.
 
-    The reserved storage prefix cannot be submitted as a raw legacy key: doing
-    so would allow a legacy request to address another principal's stored reply.
+    Every keyed request states its namespace explicitly; a key without
+    `Idempotency-Scope: principal-v1` is rejected rather than stored under a raw
+    caller-chosen name that another caller could address.
     """
     if not key or len(key) > 128:
         raise PrincipalScopeError("idempotency key must contain 1 to 128 characters")
     scope = request.headers.get(SCOPE_HEADER)
-    principal = getattr(request.state, "auth_principal", None)
-    if isinstance(principal, AuthPrincipal) and principal.kind == "mcp_client":
-        if scope not in (None, PRINCIPAL_SCOPE):
-            raise PrincipalScopeError("MCP token keys require principal-v1 scope")
-        return principal_key(principal, method, path, key)
     if scope is None:
-        if key.startswith(_STORAGE_PREFIX):
-            raise PrincipalScopeError("reserved idempotency storage prefix; choose a client key")
-        return key
+        raise PrincipalScopeError(
+            f"Idempotency-Key requires the header '{SCOPE_HEADER}: {PRINCIPAL_SCOPE}'"
+        )
     if scope != PRINCIPAL_SCOPE:
-        raise PrincipalScopeError("unsupported Idempotency-Scope; expected principal-v1")
+        raise PrincipalScopeError(f"unsupported {SCOPE_HEADER}; expected {PRINCIPAL_SCOPE}")
+    principal = getattr(request.state, "auth_principal", None)
     if not isinstance(principal, AuthPrincipal):
         raise PrincipalScopeError("principal-v1 requires a verified credential principal")
-    return principal_key(principal, method, path, key)
+    return principal
+
+
+def request_key(request: Request, key: str, *, method: str, path: str) -> str:
+    """The stored identity of a keyed operation: verified principal, route and caller key."""
+    return principal_key(keyed_principal(request, key), method, path, key)
 
 
 def optional_request_key(request: Request) -> str | None:
-    """Read an optional HTTP operation identity without activating a new scope."""
+    """Read an optional HTTP operation identity; a supplied key must carry its scope."""
     key = request.headers.get("Idempotency-Key")
     if key is None:
         if request.headers.get(SCOPE_HEADER) is not None:

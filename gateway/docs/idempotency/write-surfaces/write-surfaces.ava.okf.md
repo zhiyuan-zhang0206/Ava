@@ -16,8 +16,8 @@ Versioned routes: [[guarded-creation.ava.okf.md]], [[guarded-pages.ava.okf.md]] 
 [[guarded-notices.ava.okf.md]] and [[guarded-uploads.ava.okf.md]].
 
 Preset/schedule receipts are optional; their routes remain `NON_IDEMPOTENT`.
-Keyless calls stay legacy. Ambiguous retry activation awaits negotiation; older
-gateways may ignore keys.
+Keyless calls stay one-shot with no retry promise; a supplied key must carry
+`Idempotency-Scope: principal-v1`.
 Observed lifecycle routes: [[guarded-lifecycle.ava.okf.md]].
 Owners:
 [[gateway/routers/docs/resource-creation.ava.okf.md]] and
