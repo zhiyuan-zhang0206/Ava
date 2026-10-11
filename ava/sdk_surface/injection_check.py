@@ -18,7 +18,6 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide.call import decide
 from base.lm.catalog.decide.types import DecisionError, YesNo, estimate_tokens, question_text
 from base.log import logger
 
@@ -85,6 +84,8 @@ def split_for_model(text: str, max_tokens: int) -> list[str]:
 async def _chunk_probability(
     model: str, chunk: str, *, catalog: ModelCatalog, for_agent_id: int | None
 ) -> float:
+    from base.lm.catalog.decide.call import decide  # deferred: keep import ava off the LM stack
+
     decisions = await decide(
         model,
         chunk,
