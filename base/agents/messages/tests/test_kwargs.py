@@ -54,6 +54,7 @@ def test_note_tag_value_set() -> None:
         "project_skills",
         "preloaded_skills",
         "new_skills",
+        "skill_recall",
         "exec_timeout",
         "timezone",
     }

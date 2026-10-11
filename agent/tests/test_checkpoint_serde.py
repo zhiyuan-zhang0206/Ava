@@ -32,6 +32,7 @@ from agent.state import (
     CompactState,
     ContextReset,
     MemoryState,
+    SkillRecallState,
     checkpoint_msgpack_allowlist,
 )
 
@@ -62,6 +63,7 @@ def _warning_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
         MemoryState(injected_paths={"a.md", "b.md"}),
         ContextReset(resume="claim"),
         CapabilitiesState(indexed={"ava.skills.gmail", "ava.skills.wechat"}),
+        SkillRecallState(prompted={"web-ai:deep-research"}, window=2),
     ],
 )
 def test_allowlist_round_trip_is_silent(state, caplog) -> None:

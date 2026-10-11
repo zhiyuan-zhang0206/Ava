@@ -91,6 +91,7 @@ from agent.state_channels import (
     CompactState,
     ContextReset,
     MemoryState,
+    SkillRecallState,
     _memory_state_merge,
 )
 from base.agents.compaction.models import CompactMarker
@@ -143,6 +144,9 @@ class BaseAgentState(BaseModel):
     """Prompt-injection findings the exec child raised, awaiting delivery: `ava.security` appends
     through `ava.state_update`; the after_exec hook (`agent/hooks/security.py`) turns them into
     SECURITY notes and resets the channel with `Overwrite([])`."""
+    skill_reads: Annotated[list[str], operator.add] = Field(default_factory=list)
+    """Identifiers of the skills whose body an exec child loaded this context window:
+    `ava.skills` appends through `ava.state_update`; the skill-recall hook resets it on a compaction."""
     halted: bool = False
     native_work: NativeWorkTarget | None = None
     native_cancel: NativeCancelMarker | None = None
@@ -193,6 +197,9 @@ class BaseAgentState(BaseModel):
     """What the `# Capabilities` index has surfaced — nested last-value channel
     (see CapabilitiesState)."""
 
+    skill_recall: SkillRecallState = Field(default_factory=SkillRecallState)
+    """Skill-recall bookkeeping — nested last-value channel (see SkillRecallState)."""
+
 
 # ── BaseAgentState field snapshot (for plugin_state_schema field-name dispatch) ──
 
@@ -221,21 +228,18 @@ class PluginStateSchema:
     classes: frozenset[type[BaseModel]]
 
 
-# Core keys a plugin may declare/write: only `messages` (its add_messages reducer defines the
-# merge contract; exec._notes.merge_exec_notes combines a plugin's messages delta with the exec
-# ToolMessage — tool result first, notes after, per the Anthropic-compat adjacency constraint).
-# Every other BaseAgentState field is framework-managed per turn: declaring one is rejected by
-# `plugin_state_schema`, and a direct ava.state_update write to one is rejected by
-# _validate_plugin_state_keys (except `SDK_WRITTEN_BASE_FIELDS`, which the SDK itself writes).
+# Core keys a plugin may declare/write: only `messages` (its add_messages reducer defines the merge
+# contract; exec._notes.merge_exec_notes puts the tool result first and notes after it, per the
+# Anthropic adjacency constraint). Every other BaseAgentState field is framework-managed: declaring
+# one is rejected by `plugin_state_schema`, and writing one through ava.state_update is rejected
+# by _validate_plugin_state_keys (except `SDK_WRITTEN_BASE_FIELDS`, which the SDK itself writes).
 _PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = PLUGIN_WRITABLE_BASE_FIELDS
 
 # BaseAgentState built-in fields. `messages` is the one a plugin may modify (only when it declares
-# it in its own BaseModel with the exact BaseAgentState annotation; plugin_state_schema checks, and
-# PluginStateSchema.base_declared tracks the declared set). A direct write to any other base channel
-# = plugin missing a prefix typo (writing "compact" instead of "ava_myplugin__compact"), which would
-# silent-clobber this turn's ToolMessage / lifecycle signal / compaction state; must blow up.
-# Derived from BaseAgentState.model_fields (via state._BASE_FIELDS) so the guard tracks the base as
-# it grows/shrinks — no hardcoded list to drift (I-8).
+# it with the exact BaseAgentState annotation; `PluginStateSchema.base_declared` tracks the set). A
+# direct write to any other base channel is a missing-prefix typo ("compact" for
+# "ava_myplugin__compact") that would clobber this turn's ToolMessage / lifecycle / compaction
+# state, so it must blow up. Derived from `model_fields` so the guard tracks the base (I-8).
 _BASE_STATE_FIELDS: frozenset[str] = _BASE_FIELDS
 
 
@@ -525,14 +529,10 @@ class PluginStateHandle[T: BaseModel]:
             current = getattr(slot, channel_key)
             merged = self._reducers[field](current, new)
             setattr(slot, channel_key, merged)  # working copy synchronously visible
-            # Accumulate the raw delta into ava.state_update. The previous
-            # raw-overwrite dropped every earlier delta to a reducer field in
-            # one turn: two `update({"seen": {"a"}})` + `update({"seen":
-            # {"b"}})` committed only {"b"}, while read() inside the turn saw
-            # both — the classic silent-loss shape (2026-08-08 audit,
-            # cc-backend-runtime P1). For last-value fields the reducer is
-            # overwrite, so the accumulation collapses to the latest delta
-            # exactly as before (see `_accumulate_delta` for the merge rule).
+            # Accumulate the raw delta into ava.state_update: overwriting it dropped every
+            # earlier delta to a reducer field in one turn (two `update({"seen": ...})` calls
+            # committed only the last while read() saw both). A last-value field's reducer is
+            # overwrite, so it still collapses to the latest delta (see `_accumulate_delta`).
             if channel_key in accumulated:
                 accumulated[channel_key] = _accumulate_delta(
                     accumulated[channel_key], new, self._reducers[field]

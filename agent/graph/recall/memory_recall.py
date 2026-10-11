@@ -27,29 +27,19 @@ import asyncio
 import time
 from collections.abc import Collection
 from datetime import UTC, datetime
-from typing import Any, NamedTuple, cast
+from typing import NamedTuple
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.graph.recall._memory_filter import Candidate, filter_candidates
+from agent.graph.recall.conversation_query import build_conversation_query
 from agent.messages import NoteTag, system_note_message
 from ava import gateway_client
 from base.agents import GatewayUnavailable, IndexerUnavailable
 from base.agents.context import AvaContext
-from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.host.env.agent_slices import AgentSlices
-from base.lm.content import content_blocks
 from base.log import logger
 from base.paths import memory_dir
-
-# How many recent conversation messages form the search query. How many notes are
-# retrieved and how many are injected are two different numbers now
-# (`memory_recall_retrieve_k` / `memory_recall_inject_k`): retrieval goes wide so
-# the filter has candidates to reject, injection stays narrow because notes crowd
-# the context they are meant to inform.
-_QUERY_MESSAGES = 6
-# Bound on the query text so a single huge paste does not become the query.
-_QUERY_CHAR_CAP = 2000
 
 # Agent-visible framing. Observational, no implementation detail (obeys the SDK
 # docstring discipline since the agent reads this text).
@@ -70,49 +60,6 @@ class PassiveRecall(NamedTuple):
 
     note: HumanMessage
     paths: set[str]
-
-
-def _message_text(msg: AnyMessage) -> str:
-    """Best-effort plain text of a message's content (str or multimodal list)."""
-    content: Any = msg.content  # pyright: ignore[reportUnknownMemberType]
-    if isinstance(content, str):
-        return content
-    parts: list[str] = []
-    for block in content_blocks(content):
-        if isinstance(block, str):
-            parts.append(block)
-        elif isinstance(block, dict) and isinstance(
-            text := cast(dict[str, Any], block).get("text"), str
-        ):
-            parts.append(text)
-    return " ".join(parts)
-
-
-def _build_query(messages: Collection[AnyMessage]) -> str:
-    """Concatenate the last few genuine conversation messages into a query.
-
-    Genuine = agent replies (AIMessage) and inbound chat (HumanMessage tagged
-    `ava_msg_type='inbound'`). Framework system-notes (heartbeat, lifecycle
-    markers, and prior recall notes themselves) are excluded so the query
-    reflects the conversation, not our own injections -- otherwise recall would
-    feed on its own output.
-    """
-    picked: list[str] = []
-    for msg in reversed(list(messages)):
-        if isinstance(msg, AIMessage) or (
-            isinstance(msg, HumanMessage)
-            and read_ava_kwargs(msg).get("ava_msg_type") == AvaMsgType.INBOUND
-        ):
-            text = _message_text(msg)
-        else:
-            continue
-        text = text.strip()
-        if text:
-            picked.append(text)
-        if len(picked) >= _QUERY_MESSAGES:
-            break
-    picked.reverse()
-    return "\n".join(picked)[-_QUERY_CHAR_CAP:]
 
 
 async def _search_or_none(
@@ -201,7 +148,7 @@ async def passive_memory_recall(
     """
     if agent.sandbox.eval_isolation or not agent.memory.passive_memory_recall_enabled:
         return None
-    query = _build_query(messages)
+    query = build_conversation_query(messages)
     if not query:
         return None
     retrieve_k = agent.memory.memory_recall_retrieve_k

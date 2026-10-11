@@ -47,6 +47,7 @@ STATIC_CHECKPOINT_MSGPACK_TYPES: frozenset[tuple[str, str]] = frozenset(
         ("agent.state_channels", "ContextReset"),
         ("agent.state_channels", "CapabilitiesState"),
         ("agent.state_channels", "CircuitState"),
+        ("agent.state_channels", "SkillRecallState"),
         # A list-channel element, not a sub-state: `BaseAgentState.security_findings`.
         ("base.agents.messages.security_finding", "SecurityFindingEntry"),
     }

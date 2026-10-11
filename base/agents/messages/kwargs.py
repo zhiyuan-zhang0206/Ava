@@ -108,6 +108,7 @@ class NoteTag(StrEnum):
     PROJECT_SKILLS = "project_skills"
     PRELOADED_SKILLS = "preloaded_skills"
     NEW_SKILLS = "new_skills"
+    SKILL_RECALL = "skill_recall"
     EXEC_TIMEOUT = "exec_timeout"
     TIMEZONE = "timezone"
 

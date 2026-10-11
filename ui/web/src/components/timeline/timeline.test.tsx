@@ -1292,6 +1292,24 @@ describe("ItemView: system_marker → system_note chip", () => {
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });
 
+  it("source='skill_recall' → neutral Note chip", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "system_marker",
+            source: "skill_recall",
+            payload: "[system] These skills look relevant to the current request: web-ai",
+          }),
+        ]}
+      />,
+    );
+    revealCollapsedCards();
+    expect(screen.getByText("Note")).toBeTruthy();
+    expect(screen.getByText(/look relevant to the current request/)).toBeTruthy();
+    expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
+  });
+
   it("source='preloaded_skills' → neutral Note chip", () => {
     render(
       <TimelineView
