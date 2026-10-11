@@ -28,9 +28,14 @@ def test_database_bigserial_client_id_fits_instance_and_wire_limit() -> None:
     assert len(caller.source()) <= 64
 
 
-def test_unknown_kind_is_not_a_caller() -> None:
+@pytest.mark.parametrize("source", ["unknown:", "unknown:legacy", "unknown:legacy:run-1"])
+def test_retired_caller_kind_is_rejected_before_persistence(source: str) -> None:
     with pytest.raises(ValueError):
-        validate_source("unknown:legacy")
+        caller_payload(source, None)
+    with pytest.raises(ValueError):
+        validate_source(source)
+    with pytest.raises(ValueError):
+        wrap_inbound("hello", source, inputs=_ENVELOPE_INPUTS)
 
 
 @pytest.mark.parametrize(
