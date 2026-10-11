@@ -32,6 +32,7 @@ import pytest
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
 _LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
+_CHILD = Path(__file__).with_name("_config_child.py")
 
 
 def _base_env(home: Path) -> dict[str, str]:
@@ -53,12 +54,10 @@ def _base_env(home: Path) -> dict[str, str]:
     return env
 
 
-def _import_settings(
-    env: dict[str, str], code: str = "import base.config"
-) -> subprocess.CompletedProcess[str]:
-    """Run `python -c <code>` against this checkout with `env`."""
+def _import_settings(env: dict[str, str], mode: str = "import") -> subprocess.CompletedProcess[str]:
+    """Run the settings-import child script in `mode` against this checkout with `env`."""
     return subprocess.run(  # noqa: S603 — fixed argv, repo code, no shell
-        [sys.executable, "-c", code],
+        [sys.executable, str(_CHILD), mode],
         cwd=Path(__file__).resolve().parents[3],  # repo root
         env=env,
         capture_output=True,
@@ -75,11 +74,7 @@ def test_lite_settings_build_plants_placeholders(tmp_path: Path) -> None:
     env = _base_env(tmp_path)
     env["AVA_CONFIG_FETCH"] = "skip"
     env["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
-    result = _import_settings(
-        env,
-        "import base.config as c; print(c.settings.data_plane.db_url); "
-        "print(c.settings.data_plane.redis_url)",
-    )
+    result = _import_settings(env, "data_plane_urls")
     assert result.returncode == 0, result.stderr
     lines = result.stdout.strip().splitlines()
     assert lines[0] == PLACEHOLDER_DB_URL
@@ -93,10 +88,7 @@ def test_unenrolled_runner_constructs_locally(tmp_path: Path) -> None:
     gate (AVA_GATEWAY_URL check), not the import."""
     env = _base_env(tmp_path)
     env["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
-    result = _import_settings(
-        env,
-        "import base.config as c; print(c.settings.data_plane.db_url)",
-    )
+    result = _import_settings(env, "db_url")
     assert result.returncode == 0, result.stderr
     assert PLACEHOLDER_DB_URL in result.stdout
 
@@ -105,10 +97,7 @@ def test_bare_checkout_constructs_locally(tmp_path: Path) -> None:
     """No role flags at all (CI / lint / dev tools): local env/.env, no fetch,
     no error."""
     env = _base_env(tmp_path)
-    result = _import_settings(
-        env,
-        "import base.config as c; print(c.settings.data_plane.db_url)",
-    )
+    result = _import_settings(env, "db_url")
     assert result.returncode == 0, result.stderr
     assert PLACEHOLDER_DB_URL in result.stdout
 
@@ -146,10 +135,7 @@ def test_leaked_machine_identity_flags_do_not_flip_config_source(
     env["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
     env["AVA_DB_URL"] = "postgresql://prod@db:5432/ava"
     env["AVA_REDIS_URL"] = "redis://prod:6380/0"
-    result = _import_settings(
-        env,
-        "import base.config as c; print(c.settings.data_plane.db_url)",
-    )
+    result = _import_settings(env, "db_url")
     assert result.returncode == 0, result.stderr
     assert PLACEHOLDER_DB_URL in result.stdout
 
@@ -190,10 +176,7 @@ def test_gateway_unit_never_fetches(tmp_path: Path) -> None:
     )
     env = _base_env(home)
     env["AVA_MACHINE_SERVE_GATEWAY"] = "true"
-    result = _import_settings(
-        env,
-        "import base.config as c; print(c.settings.data_plane.db_url)",
-    )
+    result = _import_settings(env, "db_url")
     assert result.returncode == 0, result.stderr
     assert "postgresql://ava:s@127.0.0.1:5433/ava" in result.stdout
 
@@ -255,11 +238,7 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
         env["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
         env["AVA_GATEWAY_URL"] = f"http://127.0.0.1:{port}"
         env["AVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — the suite's fixture value
-        result = _import_settings(
-            env,
-            "import base.config as c; print(c.settings.data_plane.db_url); "
-            "print(c.settings.data_plane.events_channel)",
-        )
+        result = _import_settings(env, "db_url_events_channel")
         assert result.returncode == 0, result.stderr
         lines = result.stdout.strip().splitlines()
         # The fetched endpoint wins over the stale owner URL.
@@ -341,14 +320,8 @@ def test_runner_daemon_boot_from_session_env_handoff(
         # hands the dict out-of-band; no shell prefix, no handoff file).
         child_env = dict(child)
         child_env.update({"HOME": str(tmp_path)})
-        code = (
-            "import os; import base.config as c; "
-            "print(c.settings.data_plane.db_url); "
-            "print(os.environ['DEEPSEEK_API_KEY']); "
-            "print(os.environ['AVA_HOME'])"
-        )
         result = subprocess.run(  # noqa: S603 — fixed argv, repo code, no shell interpolation
-            [sys.executable, "-c", code],
+            [sys.executable, str(_CHILD), "respawn"],
             cwd=Path(__file__).resolve().parents[3],  # repo root
             env=child_env,
             capture_output=True,
