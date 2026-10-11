@@ -62,22 +62,14 @@ WHERE metadata ->> 'trace_id' = '<lowercase-32-hex>';
 
 ## Retention: what still exists
 
-The checkpoint reaper (`services/upkeep/events_maintenance/checkpoint_reaper.py`)
-trims hard — a terminated or 24h-inactive thread keeps 1 checkpoint, a live
-thread over 20 keeps 5. Assume recent state is readable and older state is
-not, **except** for compaction boundaries.
+Checkpoints are never trimmed automatically (never-delete ruling): every
+checkpoint of a thread is still readable.
 
 ## Reading history across compaction segments
 
 Every compaction stamps the thread's newest checkpoint
 `metadata->>'compact_boundary' = true` (`base/agents/history/checkpoint_cleanup.py:mark_compact_boundary`),
-and the reaper's predicate excludes those rows from every trim:
-
-```sql
-NOT COALESCE((metadata ->> 'compact_boundary')::boolean, false)
-```
-
-So each past compaction segment survives as exactly one full snapshot. To walk
+so each past compaction segment ends at exactly one stamped full snapshot. To walk
 an agent's whole past:
 
 ```sql
@@ -88,8 +80,7 @@ WHERE thread_id = '3048'
 ORDER BY checkpoint_id ASC;   -- oldest segment first
 ```
 
-Then load each boundary's message list in turn. No retention machinery is
-involved — this is a query over what is already kept.
+Then load each boundary's message list in turn.
 
 ## Reading the messages
 

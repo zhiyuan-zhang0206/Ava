@@ -35,7 +35,5 @@ cancellation. The existing loud-failure wrapper reports the failed write.
 
 This is a check-and-commit guarantee, not a foreign key or a guard against every
 later retention operation. The row lock blocks deletion during this transaction;
-it cannot prevent a later explicitly authorized deletion. The retained trim
-implementation is unscheduled and excludes delta ancestry; see
-[[services/docs/gateway_side/events_maintenance/checkpoint-retention.ava.okf.md]].
+it cannot prevent a later explicitly authorized deletion.
 No historical branch is rewritten or repaired by a failed save.
