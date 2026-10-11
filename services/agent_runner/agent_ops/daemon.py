@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 if __name__ == "__main__":
     # Reject unknown argv before imports can load Settings or touch local state.
@@ -60,15 +59,15 @@ from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.transport_encryption import verify_transport_encryption
-from base.config import ConfigBoot, Settings, settings
+from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
-from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
@@ -90,17 +89,8 @@ from ops.rpc_schemas import (
 from services.agent_runner.agent_ops import boot, health, outbox_flusher
 from services.agent_runner.agent_ops import maintenance as maintenance_activity
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
-from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.agent_runner.agent_ops.daemon")
-
-
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("ops")
-
-
-def _pidfile() -> Path:
-    return _endpoint().pidfile
 
 
 # ── Ops request identity and response replay ────────────────────────────────
@@ -121,56 +111,7 @@ _DISPATCH_RETRY_BACKOFF_S = 0.5
 _sleep = asyncio.sleep
 
 
-def _write_pidfile() -> None:
-    if not acquire_pidfile(_pidfile(), "services.agent_runner.agent_ops.daemon"):
-        _log.info("[agent_ops] daemon already running (pidfile=%s), exiting", _pidfile())
-        sys.exit(1)
-
-
-def _remove_pidfile() -> None:
-    remove_pidfile(_pidfile())
-
-
-def _is_running() -> bool:
-    """Whether a daemon is already running (via its pidfile).
-
-    Pid-reuse-safe: a live pid whose argv does not name this daemon's module
-    is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_pidfile(), "services.agent_runner.agent_ops.daemon")
-
-
 ActiveOps = dict[str, tuple[str, float]]
-
-
-# The op arms' own thread pool, instead of asyncio's default executor.
-#
-# `asyncio.run` closes by awaiting `loop.shutdown_default_executor()`, which JOINS
-# every default-executor thread. A wedged op arm — the 2026-08-12 shape — is a
-# thread that never finishes, so SIGTERM unwinds normally, `_main`'s finally runs
-# (health server stopped, pidfile removed, pool closed), and then the interpreter
-# sits in that join. Python 3.12 bounds it at `asyncio.constants.THREAD_JOIN_TIMEOUT`
-# (300 s) and then gives up with `shutdown(wait=False)`, so this is a five-minute
-# stall rather than a permanent one — but the supervisor's graceful window is 15 s,
-# so in practice a wedged daemon stops being something that exits and becomes
-# something that gets force-killed.
-#
-# Owning the pool buys nameable threads and a capacity bound — NOT a free exit.
-# `shutdown(wait=False)` does not release the daemon: `_python_exit` (registered by
-# `threading._register_atexit`) joins every worker still in `_threads_queues` with no
-# bound, `wait=False` does not take a running thread out of that mapping, and 3.9+
-# forces those workers non-daemon. Measured: own pool + wedged worker +
-# `shutdown(wait=False)` + `sys.exit(0)` is still alive minutes later. `_hard_exit`
-# is what actually gets the process out.
-#
-# `max_workers` tracks `ops_concurrency` so the semaphore stays the binding limit;
-# `thread_name_prefix` makes a stuck thread findable in a dump, which the refusal
-# runbook above tells an operator to look for.
-def _op_thread_pool() -> ThreadPoolExecutor:
-    """Create one invocation's executor; workers still start on first submission."""
-    return ThreadPoolExecutor(
-        max_workers=max(1, settings.services.ops_concurrency),
-        thread_name_prefix="ava-ops-arm",
-    )
 
 
 async def _run_arm(
@@ -233,7 +174,7 @@ def _dispatch_sync(
         kind,
         payload,
         pool=pool,
-        db=boot.ops_handles(database=database)[0],
+        db=boot.ops_handles(database=database, authority=authority)[0],
         authority=authority,
         image=image,
         local_machine=local_machine,
@@ -284,7 +225,7 @@ async def _dispatch(
     try:
         match kind:
             case "spawn-launch-v2":
-                db, bus = boot.ops_handles(database=database)
+                db, bus = boot.ops_handles(database=database, authority=authority)
                 spawned = await lifecycle.launch_agent_op(
                     db,
                     bus,
@@ -300,7 +241,7 @@ async def _dispatch(
             case "launch-reconcile-v1":
                 from ops.lifecycle.launch_reconcile import reconcile_launch_op
 
-                db, bus = boot.ops_handles(database=database)
+                db, bus = boot.ops_handles(database=database, authority=authority)
                 result = await reconcile_launch_op(
                     db,
                     bus,
@@ -311,7 +252,7 @@ async def _dispatch(
                 return OpStatus.COMPLETED, result.model_dump(mode="json")
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
-                db, bus = boot.ops_handles(database=database)
+                db, bus = boot.ops_handles(database=database, authority=authority)
                 resp = await lifecycle.lifecycle_op(
                     db,
                     bus,
@@ -620,23 +561,27 @@ async def _main(
     local_machine: MachineIdentity,
     config: ConfigBoot,
 ) -> None:
-    config.ensure_eager()
+    runtime = config.ensure_eager()
     catalog = build_model_catalog()
     authority = ConfigAuthority(
-        runtime=settings,
-        all_domains=settings if settings.profile is None else Settings(profile=None),
+        runtime=runtime,
+        all_domains=runtime if runtime.profile is None else config.complete_read_model(),
         env_path=paths.ava_home() / ".env",
     )
     # Request arms and health snapshots share only this daemon invocation's state.
     active_ops: ActiveOps = {}
     requests: maintenance_activity.RequestTokens = set()
     workers: maintenance_activity.WorkerFutures = set()
-    if _is_running():
-        _log.info("ava-ops pidfile %s indicates another instance is alive — exiting", _pidfile())
+    runtime_dir = paths.run_dir()
+    if boot.is_running(config, runtime=runtime_dir):
+        _log.info(
+            "ava-ops pidfile %s indicates another instance is alive — exiting",
+            boot.pidfile(config, runtime=runtime_dir),
+        )
         sys.exit(1)
-    _write_pidfile()
+    boot.write_pidfile(config, runtime=runtime_dir)
 
-    dispatch_sem = asyncio.Semaphore(settings.services.ops_concurrency)
+    dispatch_sem = asyncio.Semaphore(config.view.services.ops_concurrency)
 
     our_machine = local_machine.name()
 
@@ -645,7 +590,7 @@ async def _main(
     from base.deploy.schema.migrations import assert_schema_current
 
     try:
-        assert_schema_current(settings.data_plane.db_url)
+        assert_schema_current(config.view.data_plane.db_url)
     except Exception as exc:
         _log.error(
             "schema version mismatch on ops-server startup: %s — run `git pull && uv sync && ava start` to catch up",
@@ -653,9 +598,9 @@ async def _main(
         )
         sys.exit(1)
 
-    pool = boot.open_db_pool(database=database)
-    executor = _op_thread_pool()
-    db, bus = boot.ops_handles(database=database)
+    pool = boot.open_db_pool(database=database, authority=authority)
+    executor = boot.op_thread_pool(authority=authority)
+    db, bus = boot.ops_handles(database=database, authority=authority)
     # Redeliver recorded delivery failures whenever the data plane allows
     # (task #3757): a resident loop that outlives every sender process, owned with
     # the server by the TaskGroup below.
@@ -671,7 +616,7 @@ async def _main(
         bind_host = boot.ops_bind_host(acceptance)
         if bind_host != "127.0.0.1":
             verify_transport_encryption(bind_host, authenticated=acceptance is not None)
-        endpoint = _endpoint()
+        endpoint = boot.endpoint(config, runtime=runtime_dir)
         server = await start_health_server(
             "ops",
             endpoint.health_port,
@@ -697,7 +642,7 @@ async def _main(
             extra=lambda: {
                 "maintenance": maintenance_activity.progress(requests=requests, workers=workers),
                 "saturation": health.saturation(
-                    active_ops, max(1, settings.services.ops_concurrency)
+                    active_ops, max(1, config.view.services.ops_concurrency)
                 ),
             },
             auth_digests=acceptance,
@@ -726,19 +671,10 @@ async def _main(
                 )
         finally:
             await stop_health_server(server)
-            _remove_pidfile()
+            boot.remove_pidfile(config, runtime=runtime_dir)
     finally:
         pool.close()
-        _shutdown_op_pool(executor)
-
-
-def _shutdown_op_pool(executor: ThreadPoolExecutor) -> None:
-    """Stop accepting work without joining running arms.
-
-    `wait=False` avoids joining here; the interpreter still joins workers at
-    teardown, which is why the daemon also retains its existing hard exit.
-    """
-    executor.shutdown(wait=False)
+        boot.shutdown_op_pool(executor)
 
 
 def main(*, argv: list[str] | None = None) -> None:
@@ -752,7 +688,7 @@ def main(*, argv: list[str] | None = None) -> None:
     gate = ProcessDbGate(version=version.get, process="ops", exempt=False)
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, local_host=machine.host)
+        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
 
     clients = ClientSet(
         database=database,

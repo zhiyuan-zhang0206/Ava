@@ -9,10 +9,11 @@ pass is not read as a wedge, and ends the process — through the ops server's
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -283,6 +284,47 @@ async def test_an_unreadable_config_ends_the_loop(
         )
 
 
+def _assert_live_saturation(inputs: dict[str, object], config: ConfigBoot) -> None:
+    """The actual health callback rereads this root rather than a startup scalar."""
+    routes = cast(dict[tuple[str, str], functools.partial[object]], inputs["extra_routes"])
+    active = cast(dict[str, tuple[str, float]], routes[("POST", "/ops")].keywords["active_ops"])
+    extra = cast(Callable[[], dict[str, object]], inputs["extra"])
+    initial = config.view.services.ops_concurrency
+    try:
+        active["owned-test"] = ("status", 0.0)
+        config.set_field("ops_concurrency", 2)
+        assert extra()["saturation"] == 0.5
+        config.set_field("ops_concurrency", 4)
+        assert extra()["saturation"] == 0.25
+    finally:
+        active.clear()
+        config.set_field("ops_concurrency", initial)
+
+
+class _PidfileOperations:
+    """Record cleanup while checking each resource operation's explicit owner."""
+
+    def __init__(self, config: ConfigBoot, runtime: Path, events: list[str]) -> None:
+        self.config = config
+        self.runtime = runtime
+        self.events = events
+
+    def assert_owner(self, config: ConfigBoot, runtime: Path) -> None:
+        assert config is self.config
+        assert runtime == self.runtime
+
+    def is_running(self, config: ConfigBoot, *, runtime: Path) -> bool:
+        self.assert_owner(config, runtime)
+        return False
+
+    def write_pidfile(self, config: ConfigBoot, *, runtime: Path) -> None:
+        self.assert_owner(config, runtime)
+
+    def remove_pidfile(self, config: ConfigBoot, *, runtime: Path) -> None:
+        self.assert_owner(config, runtime)
+        self.events.append("pidfile")
+
+
 async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
     monkeypatch: pytest.MonkeyPatch,
     ops_database: Callable[[], Database],
@@ -296,6 +338,7 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
     the unit) and the pool, the health server and the pidfile are released."""
     from base.deploy.schema import migrations
 
+    config = snapshot_process_config()
     events: list[str] = []
     served_cancelled = asyncio.Event()
 
@@ -319,6 +362,7 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
 
     async def start_health(name: str, port: int, **kw: object) -> _Server:
         assert kw["image"] is ops_image
+        _assert_live_saturation(kw, config)
         assert isinstance(kw["liveness"], LivenessGroup)
         assert set(kw["liveness"].snapshot()) == {"delivery-outbox"}  # type: ignore[union-attr]
         return _Server()
@@ -338,17 +382,20 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
         await asyncio.sleep(0.01)
         raise RuntimeError("outbox loop crashed")
 
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: events.append("pidfile"))
+    pidfiles = _PidfileOperations(config, unit_home / "run", events)
+    monkeypatch.setattr(boot, "is_running", pidfiles.is_running)
+    monkeypatch.setattr(boot, "write_pidfile", pidfiles.write_pidfile)
+    monkeypatch.setattr(boot, "remove_pidfile", pidfiles.remove_pidfile)
 
     def schema_current(_url: str) -> None:
         return None
 
     monkeypatch.setattr(migrations, "assert_schema_current", schema_current)
 
-    def open_pool(*, database: Callable[[], Database]) -> _Pool:
+    def open_pool(*, database: Callable[[], Database], authority: ConfigAuthority) -> _Pool:
         assert database is ops_database
+        assert authority.runtime is config.ensure_eager()
+        assert authority.env_path == unit_home / ".env"
         return _Pool()
 
     monkeypatch.setattr(boot, "open_db_pool", open_pool)
@@ -371,13 +418,16 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
     ) -> None:
         assert database is ops_database
         assert machine is machine_identity
-        assert ops_port == ServiceEndpoints.from_settings().of("ops").health_port
+        assert (
+            ops_port
+            == ServiceEndpoints.from_boot(config, runtime=unit_home / "run").of("ops").health_port
+        )
         assert home == unit_home
 
     monkeypatch.setattr(boot, "register_boot", register_boot)
     monkeypatch.setattr(daemon.outbox_flusher, "outbox_loop", crashing_loop)
     assert (
-        ServiceEndpoints.from_settings().of("ops").health_port
+        ServiceEndpoints.from_boot(config, runtime=unit_home / "run").of("ops").health_port
     )  # the port table still names the ops slot
 
     with pytest.raises(ExceptionGroup) as raised:
@@ -385,7 +435,7 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
-            config=snapshot_process_config(),
+            config=config,
         )
 
     assert [str(exc) for exc in raised.value.exceptions] == ["outbox loop crashed"]

@@ -23,6 +23,8 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
 from ops import roster
 from ops.roster.service_spec import ServiceSpec
+from services.agent_runner.agent_ops import boot as ops_boot
+from services.agent_runner.agent_ops import daemon as agent_ops
 from services.agent_runner.page_server import daemon as page_server
 from services.agent_runner.page_server import resources as page_resources
 
@@ -61,8 +63,13 @@ def test_every_standard_daemon_records_the_pidfile_its_probe_reads(
     once sat beside the underscored health name)."""
     for spec in _standard_daemons():
         module = importlib.import_module(spec.cmd.rsplit(" ", 1)[1])
-        # Page-server's resource operations live in their actual public owner.
-        operation = page_resources.pidfile if module is page_server else module._pidfile
+        # Resource operations are called at their actual definition owner.
+        if module is page_server:
+            operation = page_resources.pidfile
+        elif module is agent_ops:
+            operation = ops_boot.pidfile
+        else:
+            operation = module._pidfile
         parameters = inspect.signature(operation).parameters
         if not parameters:
             actual = cast("Callable[[], Path]", operation)()

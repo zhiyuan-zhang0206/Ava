@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
-from services.agent_runner.agent_ops import daemon
+from services.agent_runner.agent_ops import boot
 from tests.fixtures.model_catalog import add_bindings as add_bindings
 from tests.fixtures.model_catalog import add_models as add_models
 from tests.fixtures.model_catalog import model_catalog as model_catalog
@@ -22,8 +23,8 @@ from tests.fixtures.unit.sdk import sdk_metering as sdk_metering
 
 
 @pytest.fixture
-def op_executor() -> Iterator[ThreadPoolExecutor]:
-    executor = daemon._op_thread_pool()
+def op_executor(config_authority: ConfigAuthority) -> Iterator[ThreadPoolExecutor]:
+    executor = boot.op_thread_pool(authority=config_authority)
     try:
         yield executor
     finally:

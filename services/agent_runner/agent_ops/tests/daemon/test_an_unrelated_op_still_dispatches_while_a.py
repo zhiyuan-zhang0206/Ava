@@ -18,7 +18,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops import host_config, inventory
 from ops.cluster import operations as cluster_ops
-from services.agent_runner.agent_ops import daemon
+from services.agent_runner.agent_ops import boot, daemon
 from services.agent_runner.agent_ops.tests.test_daemon import _stub_pool
 from services.agent_runner.agent_ops.tests.test_daemon import (
     ops_pool as ops_pool,
@@ -366,5 +366,5 @@ def test_shutting_the_pool_down_does_not_wait_for_it(
         calls.append(wait)
 
     monkeypatch.setattr(op_executor, "shutdown", shutdown)
-    daemon._shutdown_op_pool(op_executor)
+    boot.shutdown_op_pool(op_executor)
     assert calls == [False]
