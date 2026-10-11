@@ -11,7 +11,7 @@ import { cn } from "@/lib/format/utils";
 
 export function LoginForm() {
   const t = useTranslations("login");
-  const { login } = useAuth();
+  const { login, loginNotice } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -29,6 +29,13 @@ export function LoginForm() {
     else if (result === "network-error") setError(t("connectionFailed"));
     setLoading(false);
   };
+
+  const notice =
+    loginNotice === "ticket-rejected"
+      ? t("ticketRejected")
+      : loginNotice === "ticket-unreachable"
+        ? t("ticketUnreachable")
+        : "";
 
   return (
     <form
@@ -67,9 +74,9 @@ export function LoginForm() {
           className="rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         />
       </div>
-      {error && (
+      {(error || notice) && (
         <p className="text-sm text-destructive" role="alert">
-          {error}
+          {error || notice}
         </p>
       )}
       <button

@@ -21,6 +21,7 @@ vi.mock("../transport/api", async (importOriginal) => {
       checkAuth: vi.fn(),
       login: vi.fn(),
       logout: vi.fn(),
+      redeemLoginTicket: vi.fn(),
     },
   };
 });
@@ -28,6 +29,7 @@ vi.mock("../transport/api", async (importOriginal) => {
 const checkAuth = vi.mocked(api.checkAuth);
 const login = vi.mocked(api.login);
 const logout = vi.mocked(api.logout);
+const redeemLoginTicket = vi.mocked(api.redeemLoginTicket);
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return <AuthProvider>{children}</AuthProvider>;
@@ -37,9 +39,13 @@ beforeEach(() => {
   checkAuth.mockReset();
   login.mockReset();
   logout.mockReset();
+  redeemLoginTicket.mockReset();
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.history.replaceState(null, "", "/");
+});
 
 describe("AuthProvider mount check", () => {
   it("resolves to authenticated when checkAuth says so", async () => {
@@ -59,6 +65,84 @@ describe("AuthProvider mount check", () => {
     checkAuth.mockRejectedValue(new Error("network"));
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
+  });
+});
+
+describe("one-time login link (#ticket=...)", () => {
+  it("strips the fragment before redeeming, then trusts the session check", async () => {
+    window.history.replaceState(null, "", "/?tab=1#ticket=abc.def");
+    let hashWhenRedeemed: string | undefined;
+    redeemLoginTicket.mockImplementation(() => {
+      hashWhenRedeemed = window.location.hash;
+      return Promise.resolve({ ok: true });
+    });
+    checkAuth.mockResolvedValue({ authenticated: true });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("authenticated"));
+
+    expect(redeemLoginTicket).toHaveBeenCalledTimes(1);
+    expect(redeemLoginTicket).toHaveBeenCalledWith("abc.def");
+    expect(hashWhenRedeemed).toBe("");
+    expect(window.location.hash).toBe("");
+    expect(window.location.search).toBe("?tab=1");
+    expect(result.current.loginNotice).toBeNull();
+  });
+
+  it("keeps unrelated fragment parameters", async () => {
+    window.history.replaceState(null, "", "/#section=x&ticket=t1");
+    redeemLoginTicket.mockResolvedValue({ ok: true });
+    checkAuth.mockResolvedValue({ authenticated: true });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("authenticated"));
+
+    expect(window.location.hash).toBe("#section=x");
+    expect(redeemLoginTicket).toHaveBeenCalledWith("t1");
+  });
+
+  it("a spent or expired ticket lands on the login page with a notice", async () => {
+    window.history.replaceState(null, "", "/#ticket=old");
+    redeemLoginTicket.mockRejectedValue(new ApiError(401, "invalid or expired login ticket"));
+    checkAuth.mockResolvedValue({ authenticated: false });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
+
+    expect(result.current.loginNotice).toBe("ticket-rejected");
+    expect(window.location.hash).toBe("");
+  });
+
+  it("a gateway that never answers is reported as unreachable, not rejected", async () => {
+    window.history.replaceState(null, "", "/#ticket=t");
+    redeemLoginTicket.mockRejectedValue(new TypeError("Failed to fetch"));
+    checkAuth.mockResolvedValue({ authenticated: false });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
+
+    expect(result.current.loginNotice).toBe("ticket-unreachable");
+  });
+
+  it("a rejected ticket does not sign out a browser that already has a session", async () => {
+    window.history.replaceState(null, "", "/#ticket=old");
+    redeemLoginTicket.mockRejectedValue(new ApiError(401, "invalid or expired login ticket"));
+    checkAuth.mockResolvedValue({ authenticated: true });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("authenticated"));
+  });
+
+  it("without a ticket nothing is redeemed and the check decides as before", async () => {
+    window.history.replaceState(null, "", "/#other=1");
+    checkAuth.mockResolvedValue({ authenticated: false });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
+
+    expect(redeemLoginTicket).not.toHaveBeenCalled();
+    expect(result.current.loginNotice).toBeNull();
+    expect(window.location.hash).toBe("#other=1");
   });
 });
 
