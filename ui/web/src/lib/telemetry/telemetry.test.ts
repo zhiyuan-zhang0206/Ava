@@ -67,7 +67,7 @@ describe("normalizePage", () => {
   });
   it("keeps nested routes", () => {
     expect(normalizePage("/control/config")).toBe("control/config");
-    expect(normalizePage("/insights/metrics")).toBe("insights/metrics");
+    expect(normalizePage("/insights/ops")).toBe("insights/ops");
   });
   it("collapses agent ids in shell routes", () => {
     expect(normalizePage("/shell/42")).toBe("shell");

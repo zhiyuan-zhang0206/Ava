@@ -1,8 +1,7 @@
 "use client";
 
-// /insights#ops — the full-height Grafana iframe was retired by user ruling
-// 2026-08-23. This section is now one link to the merged Ava Ops dashboard
-// through the gateway's /grafana proxy.
+// /insights#ops — one link to the merged Ava Ops dashboard through the
+// gateway's /grafana proxy.
 
 import { useTranslations } from "next-intl";
 

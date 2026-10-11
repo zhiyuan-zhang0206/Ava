@@ -26,8 +26,8 @@ import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 /** Composer tri-state: disabled (no active agent), idle (ready to send),
  *  busy (agent running — empty composer's button becomes Stop). "busy"
  *  covers the whole running state, not only mid-action, so Stop stays
- *  available between actions (the durable cancel is caught at claim).
- *  Terminated agents are now idle (send_message auto-resurrects them).
+ *  available between actions.
+ *  Terminated agents are idle (send_message auto-resurrects them).
  *  Derived in page.tsx; TS exhaustiveness will flag when a new agent
  *  status needs to be wired in. */
 export type ComposerMode = "disabled" | "idle" | "busy";
