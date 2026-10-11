@@ -85,7 +85,7 @@ server (address read from this table), which calls
 the same response. Runners run **no** local gateway process — an agent's SDK
 reaches the gateway over HTTP via `gateway_api_base()`.
 
-**Spawn-target invariant**: `POST /api/agents` returns **HTTP 400** when the
+**Spawn-target invariant**: `POST /api/keyed/v1/agents` returns **HTTP 400** when the
 resolved `machine` lacks the `agent-runner` capability (`'agent-runner' =
 ANY(role)` is false) — typically a pure gateway node. A single box satisfies it,
 so a local spawn there is allowed. The guard exists to catch "the UI booted an

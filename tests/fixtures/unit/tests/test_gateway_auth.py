@@ -1,0 +1,51 @@
+"""Default credentials for in-process Gateway clients (`tests.fixtures.unit.gateway_auth`)."""
+
+from __future__ import annotations
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from base.config import settings
+from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.unit.gateway_auth import gateway_credentials, without_credentials
+
+
+def test_a_gateway_client_carries_the_cluster_secret_by_default() -> None:
+    from gateway.app import app
+
+    with gateway_test_client(app) as client:
+        assert client.headers["Authorization"] == f"Bearer {settings.data_plane.cluster_secret}"
+        assert client.get("/api/status").status_code == 200
+        assert without_credentials(client).get("/api/status").status_code == 401
+
+
+def test_an_explicit_authorization_header_wins() -> None:
+    from gateway.app import app
+
+    with gateway_test_client(app, headers={"Authorization": "Bearer someone-else"}) as client:
+        assert client.headers["Authorization"] == "Bearer someone-else"
+        assert client.get("/api/status").status_code == 401
+
+
+def test_the_default_follows_the_secret_current_when_the_client_is_built(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from gateway.app import app
+
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-before-build")
+    with gateway_test_client(app) as client:
+        assert client.headers["Authorization"] == "Bearer rotated-before-build"
+        assert client.get("/api/status").status_code == 200
+
+
+def test_clients_of_other_apps_are_untouched() -> None:
+    standin = FastAPI()
+    with TestClient(standin) as client:
+        assert "Authorization" not in client.headers
+
+
+def test_gateway_credentials_is_the_header_of_the_current_secret() -> None:
+    assert gateway_credentials() == {
+        "Authorization": f"Bearer {settings.data_plane.cluster_secret}"
+    }

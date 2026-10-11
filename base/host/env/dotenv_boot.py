@@ -559,7 +559,7 @@ def _is_delivered_generation(file_url: str | None) -> bool:
     return delivered is not None and delivered == _endpoint_key(file_url)
 
 
-def operator_db_delivery(endpoint: str | None, *, api: bool) -> dict[str, str] | str:
+def operator_db_delivery(endpoint: str | None) -> dict[str, str] | str:
     """This operator process's gateway login on its home as environment, or why
     it holds none (`base.cluster.authority.operator_environment`). Nothing for
     a home without a ledger, or over a delivery naming this home's `endpoint`
@@ -572,7 +572,7 @@ def operator_db_delivery(endpoint: str | None, *, api: bool) -> dict[str, str] |
     from base.cluster.authority import AuthorityRefusedError, operator_environment
 
     try:
-        return operator_environment(home, endpoint, launcher=launcher_context(), api=api)
+        return operator_environment(home, endpoint, launcher=launcher_context())
     except AuthorityRefusedError as exc:
         return str(exc)
 
@@ -581,7 +581,7 @@ def _deliver_operator_authority(endpoint: str | None) -> EnvBootResult:
     """Deliver the operator login, returning this boot's authority result."""
     if os.environ.get(_GENERATION_ENV):
         return EnvBootResult()
-    delivery = operator_db_delivery(endpoint, api=bool(os.environ.get("AVA_CLUSTER_SECRET")))
+    delivery = operator_db_delivery(endpoint)
     if isinstance(delivery, str):
         return EnvBootResult(db_authority_refusal=delivery)
     os.environ.update(delivery)
@@ -634,8 +634,7 @@ def deliver_unit_authority() -> EnvBootResult:
         )
     os.environ["AVA_DB_URL"] = capability.dsn
     os.environ[_GENERATION_ENV] = str(capability.generation.number)
-    if capability.api is not None:
-        os.environ[_API_TOKEN_ENV] = capability.api.token
+    os.environ[_API_TOKEN_ENV] = capability.api.token
     return EnvBootResult()
 
 

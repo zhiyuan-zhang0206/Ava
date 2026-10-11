@@ -18,6 +18,7 @@ from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.tests.test_agents_endpoints import _inbound_rows, _returned_id, _terminate_hosted
 from gateway.tests.test_agents_endpoints import withdrawn_model as withdrawn_model
+from tests.fixtures.gateway_config import spawn_via_http
 
 
 class TestSystemNote:
@@ -25,7 +26,7 @@ class TestSystemNote:
         """POST /system-note → kind='system_note' inbound with the task note tag
         (no peer-chat row), delivered to a live agent without resurrection."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": 'Task #1 "t" is now assigned to you.'},
@@ -55,7 +56,7 @@ class TestSystemNote:
     ) -> None:
         """resurrect=True (task assignment) revives a terminated target, like chat."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _terminate_hosted(db_conn, agent_id)
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
@@ -74,7 +75,7 @@ class TestSystemNote:
         """resurrect=False (plain update / reminder notice) never revives a
         terminated owner — the note stays queued (user ruling 2026-08-27)."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _terminate_hosted(db_conn, agent_id)
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
@@ -89,7 +90,7 @@ class TestSystemNote:
     def test_system_note_unknown_tag_rejected_422(self, db_conn: psycopg.Connection) -> None:
         """note_tag outside the closed NoteTag set → 422 (fail loud)."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "note_tag": "not_a_tag"},
@@ -100,7 +101,7 @@ class TestSystemNote:
     def test_system_note_task_id_requires_task_tag(self, db_conn: psycopg.Connection) -> None:
         """Task attribution cannot silently ride an unrelated system-note kind."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "note_tag": "heartbeat", "task_id": 42},
@@ -114,7 +115,7 @@ class TestSystemNote:
     ) -> None:
         """A task note must link to an existing task."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "task_id": 999_999},
@@ -128,8 +129,8 @@ class TestSystemNote:
     ) -> None:
         """A task note cannot charge one agent's task for another agent's turn."""
         with TestClient(app) as client:
-            owner_id = client.post("/api/agents", json={}).json()["id"]
-            recipient_id = client.post("/api/agents", json={}).json()["id"]
+            owner_id = spawn_via_http(client, {}).json()["id"]
+            recipient_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
                     "INSERT INTO agent_tasks (title, description, created_by, owner) "
@@ -242,7 +243,7 @@ class TestSystemNote:
     def test_system_note_illegal_source_rejected_422(self, db_conn: psycopg.Connection) -> None:
         """source not in envelope allowlist → 422."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "source": "ui:web"},
@@ -269,7 +270,7 @@ class TestRestart:
         self, db_conn: psycopg.Connection, initial: dict[str, str], overlay: dict[str, str]
     ) -> None:
         with TestClient(app) as client:
-            spawned = client.post("/api/agents", json={"config": initial})
+            spawned = spawn_via_http(client, {"config": initial})
             assert spawned.status_code == 201, spawned.text
             agent_id = spawned.json()["id"]
             response = client.post(
@@ -289,7 +290,7 @@ class TestRestart:
         self, db_conn: psycopg.Connection
     ) -> None:
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(f"/api/agents/{agent_id}/restart")
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued"}
@@ -300,7 +301,7 @@ class TestRestart:
     ) -> None:
         """The persisted overlay and restart marker payload advance together."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
@@ -336,7 +337,7 @@ class TestRestart:
         model, catalog = withdrawn_model
         monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
                 json={"config_overlay": {"llm_model": model}},
@@ -357,7 +358,7 @@ class TestRestart:
     ) -> None:
         """None and {} do not change persistent config or add a payload sidecar."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
@@ -383,7 +384,7 @@ class TestRestart:
         self, db_conn: psycopg.Connection
     ) -> None:
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
                 json={"config_overlay": {"definitely_not_a_config_field": "x"}},
@@ -394,7 +395,7 @@ class TestRestart:
 
     def test_restart_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)

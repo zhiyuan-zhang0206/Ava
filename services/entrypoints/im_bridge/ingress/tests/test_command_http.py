@@ -143,7 +143,7 @@ async def test_spawn_actual_birth_response_or_loss_is_never_repeated(
         ), result
         assert await native_weixin.adapter._handle_message(payload) == result
     assert len(calls) == len(birth_ids) == 1
-    assert calls[0][0] == "/api/agents"
+    assert calls[0][0] == "/api/keyed/v1/agents"
     assert db_conn.execute(
         "SELECT count(*) FROM agents WHERE id=%s", (birth_ids[0],)
     ).fetchone() == (1,)
@@ -175,4 +175,4 @@ async def test_unqualified_birth_id_is_uncertain_not_coerced_to_acceptance(
         assert result.status == IngressStatus.UNCERTAIN
         assert result.result is None
         assert await native_weixin.adapter._handle_message(payload) == result
-    assert calls == ["/api/agents"]
+    assert calls == ["/api/keyed/v1/agents"]

@@ -520,10 +520,7 @@ def test_cluster_status_reports_this_host(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.parametrize("authorization", [None, "Bearer not-a-client-token"])
-def test_mcp_rejects_missing_or_bad_client_token(
-    monkeypatch: pytest.MonkeyPatch, authorization: str | None
-) -> None:
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", False)
+def test_mcp_rejects_missing_or_bad_client_token(authorization: str | None) -> None:
     headers = {"Accept": _ACCEPT, "Content-Type": "application/json"}
     if authorization is not None:
         headers["Authorization"] = authorization
@@ -540,7 +537,6 @@ def test_mcp_rejects_missing_or_bad_client_token(
 def test_cluster_secret_bearer_is_not_an_mcp_client_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
         resp = client.post(
@@ -558,7 +554,6 @@ def test_cluster_secret_bearer_is_not_an_mcp_client_token(
 def test_client_token_works_when_cluster_auth_is_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
         created = client.post(

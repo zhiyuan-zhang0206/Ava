@@ -480,9 +480,9 @@ def _launch_incident_shape_pooler(
 
     Returns (port, role, secret, pid). Skips the calling test when this host
     cannot run the fixture. Walks the reachable-address code path the incident
-    belongs to: a secret-set cluster binds loopback + the reachable address, so
-    a listener-less pooler reads as degraded (a no-secret cluster short-circuits
-    to the reload path by design). Pins the pooler's home and the address to
+    belongs to: a cluster with a declared reachable address binds loopback + that
+    address, so a listener-less pooler reads as degraded (a loopback host
+    short-circuits to the reload path by design). Pins the pooler's home and the address to
     private, bindable values.
     """
     from tests._containers import _free_port, _wait_port
@@ -506,7 +506,6 @@ def _launch_incident_shape_pooler(
         pg_port=15433,
         listen_port=port,
         db_name="ava_maintenance_test",
-        cluster_secret=secret,
         userlist=f'"{role}" "{secret}"\n'.encode(),
     )
     subprocess.run(
@@ -582,7 +581,7 @@ def test_real_start_retains_pooler_with_held_client(
             os.kill(pid, signal.SIGTERM)
             deadline = time.monotonic() + 5.0
             while time.monotonic() < deadline:
-                if not base_pooler.pgbouncer_public_listener_reachable(port, role, secret):
+                if not base_pooler.pgbouncer_public_listener_reachable(port, role):
                     break
                 time.sleep(0.05)
             else:
@@ -593,7 +592,6 @@ def test_real_start_retains_pooler_with_held_client(
                     pg_port=15433,
                     listen_port=port,
                     db_name="ava_maintenance_test",
-                    cluster_secret=secret,
                     userlist=f'"{role}" "{secret}"\n'.encode(),
                     admin_password=secret,
                 )

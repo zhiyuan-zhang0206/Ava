@@ -12,27 +12,33 @@ the agent idles waiting for inbound. To make it do work, use the web UI
 to send a message to the printed agent_id.
 
 **Gateway must be up first** — the bootstrap also goes through HTTP
-`POST /api/agents`, the same path as the SDK / frontend. Gateway is
+`POST /api/keyed/v1/agents`, the same path as the SDK / frontend. Gateway is
 centralized at the gateway.
 """
 
 from __future__ import annotations
 
 import sys
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
 from base.host.net.http_dial import post as dial_post
 
 
 def main() -> None:
     base = gateway_api_base()  # role-blind: the configured gateway_url (localhost on a dev cluster)
-    # /api/agents is an authenticated route: present the cluster secret as a
-    # Bearer token (empty dict in dev/test where no secret is set). Without it a
-    # multi-host gateway rejects this bootstrap spawn with 401.
-    resp = dial_post(f"{base}/api/agents", json={"spawner": "user"}, headers=gateway_auth_headers())
+    # The keyed spawn route is authenticated: present the machine API token (or the
+    # cluster secret) as a Bearer token; without it the gateway rejects this spawn with 401.
+    headers = {
+        **gateway_auth_headers(),
+        "Idempotency-Key": uuid.uuid4().hex,
+        SCOPE_HEADER: PRINCIPAL_SCOPE,
+    }
+    resp = dial_post(f"{base}/api/keyed/v1/agents", json={"spawner": "user"}, headers=headers)
     resp.raise_for_status()
     agent_id = int(resp.json()["id"])
     print(f"agent_id={agent_id}")

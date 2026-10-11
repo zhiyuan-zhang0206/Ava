@@ -3,7 +3,7 @@ and sees its prompt before the first turn.
 
 Full cycle:
   1. source agent runs one turn (so it has a checkpoint to fork from), idles
-  2. test forks it via POST /api/agents (fork_from=source, prompt=FORK_PROMPT)
+  2. test forks it via POST /api/keyed/v1/agents (fork_from=source, prompt=FORK_PROMPT)
      -> spawn_agent copies the checkpoint + INSERTs a kind='fork' lifecycle
         inbound in the same transaction, then the prompt as a separate
         pre-launch insert; both committed before the forked process launches
@@ -31,6 +31,7 @@ from base.config import settings
 from tests.e2e._db import wait_for_status
 from tests.e2e.fakes.scenarios.fork_identity import FORK_OK, FORK_PROMPT
 from tests.e2e.fixture_environment import E2EEnv
+from tests.fixtures.gateway_config import post_spawn
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.fork_identity:build")
@@ -46,9 +47,9 @@ def test_fork_delivers_identity_marker_and_prompt(e2e_env: E2EEnv) -> None:
     wait_for_status(source_id, AgentStatus.IDLING.value)
 
     # fork the source, carrying a redirect prompt.
-    resp = httpx.post(
-        f"{e2e_env.gateway_url}/api/agents",
-        json={
+    resp = post_spawn(
+        e2e_env.gateway_url,
+        {
             "spawner": "user",
             "fork_from": source_id,
             "prompt": FORK_PROMPT,

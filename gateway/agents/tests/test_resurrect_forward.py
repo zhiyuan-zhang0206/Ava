@@ -24,6 +24,7 @@ from base.db import Database
 from gateway.agents import forward as forward_module
 from gateway.agents import lifecycle as lifecycle_module
 from gateway.app import app
+from tests.fixtures.gateway_config import spawn_via_http
 
 
 @pytest.fixture
@@ -65,7 +66,7 @@ class TestResurrectRouting:
             return {"status": "spawned"}
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
@@ -99,7 +100,7 @@ class TestResurrectRouting:
             return {"status": "spawned"}
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(f"/api/agents/{agent_id}/resurrect")
@@ -120,7 +121,7 @@ class TestResurrectRouting:
             raise MachineNotRegistered("machine 'remote-mac' not found in machines table")
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/resurrect")
@@ -139,7 +140,7 @@ class TestResurrectRouting:
             raise CrossMachineGatewayUnavailable("target unreachable after 3 retries")
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/resurrect")
@@ -169,7 +170,7 @@ def test_local_home_machine_is_forwarded(
         return {"status": "spawned"}
 
     with TestClient(app) as client:
-        agent_id = client.post("/api/agents", json={}).json()["id"]
+        agent_id = spawn_via_http(client, {}).json()["id"]
         _set_agent_machine(db_conn, agent_id, "local-test")
         monkeypatch.setattr(forward_module, "enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
         resp = client.post(f"/api/agents/{agent_id}/resurrect")

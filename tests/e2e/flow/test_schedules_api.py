@@ -163,7 +163,6 @@ def test_rest_runs_and_logs_read_persisted_history_and_transcript(
         assert client.get("/api/schedules/999999999/runs").status_code == 404
 
 
-@pytest.mark.usefixtures("authenticated_gateway")
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.schedules:build")
 def test_draft_launches_a_writer_with_the_request_in_model_input(spawned_agent: int) -> None:
     reset_record()

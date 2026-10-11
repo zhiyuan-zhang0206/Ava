@@ -1,14 +1,16 @@
 """`scripts/entrypoints/agent.py` presents the cluster secret on its bootstrap spawn.
 
-`POST /api/agents` is an authenticated gateway route; the bootstrap-spawn script
-must carry `Authorization: Bearer <cluster secret>` or a multi-host gateway 401s
-it. Load the script by path (it is not a package module) and assert the header.
+The keyed spawn route is authenticated; the bootstrap-spawn script must carry
+`Authorization: Bearer <cluster secret>` or a multi-host gateway 401s it, plus the
+keyed-admission headers. Load the script by path (it is not a package module) and
+assert the headers.
 """
 
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -44,6 +46,9 @@ def test_start_agent_posts_with_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
 
     mod.main()
 
-    assert captured["url"] == "http://gw:8000/api/agents"
+    assert captured["url"] == "http://gw:8000/api/keyed/v1/agents"
     # The Bearer header is what a multi-host gateway requires (PR#100 pattern).
-    assert captured["headers"] == {"Authorization": "Bearer sekret"}
+    headers = cast(dict[str, str], captured["headers"])
+    assert headers["Authorization"] == "Bearer sekret"
+    assert headers["Idempotency-Scope"] == "principal-v1"
+    assert 1 <= len(headers["Idempotency-Key"]) <= 128

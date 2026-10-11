@@ -48,7 +48,6 @@ async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
     assert len(ordinary) == 1
     secret = "sdk-compact-test-secret"  # noqa: S105 -- isolated fixture credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     posts: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:

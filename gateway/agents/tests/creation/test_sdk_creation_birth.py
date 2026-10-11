@@ -31,7 +31,6 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
 ) -> None:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     launches: list[LaunchAgentRequest] = []
 
     async def accept(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:

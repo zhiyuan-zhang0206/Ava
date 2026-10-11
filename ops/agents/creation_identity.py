@@ -36,16 +36,14 @@ def lock_creation(conn: psycopg.Connection, key: str) -> None:
     conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (key,))
 
 
-def find_creation(
-    conn: psycopg.Connection, key: str, request_hash: str, *, immutable_snapshot: bool = False
-) -> CreationReceipt | None:
+def find_creation(conn: psycopg.Connection, key: str, request_hash: str) -> CreationReceipt | None:
     """Read a committed creation; later retries never insert another first prompt."""
-    if immutable_snapshot:
-        return _find_snapshot(conn, key, request_hash)
     row = conn.execute(
-        "SELECT id, creation_request_hash, machine, config_overlay, birth_config, "
-        "last_launch_attempt_id, status='idling' AND last_admission_at IS NULL "
-        "FROM agents_meta WHERE creation_key=%s",
+        "SELECT s.agent_id, s.request_hash, s.machine, s.config_overlay, s.birth_config, "
+        "s.launch_attempt_id, COALESCE(m.last_launch_attempt_id=s.launch_attempt_id "
+        "AND m.machine=s.machine AND m.status='idling' AND m.last_admission_at IS NULL, FALSE) "
+        "FROM agent_creation_snapshots s LEFT JOIN agents_meta m ON m.id=s.agent_id "
+        "WHERE s.creation_key=%s",
         (key,),
     ).fetchone()
     if row is None:
@@ -56,37 +54,15 @@ def find_creation(
 
 
 def recover_birth(
-    conn: psycopg.Connection,
-    key: str | None,
-    request_hash: str | None,
-    *,
-    immutable_snapshot: bool = False,
+    conn: psycopg.Connection, key: str | None, request_hash: str | None
 ) -> CreationReceipt | None:
-    """Lock and recover a keyed birth inside its transaction; legacy births pass through."""
+    """Lock and recover a keyed birth inside its transaction; an unkeyed birth passes through."""
     if key is None and request_hash is None:
         return None
     if key is None or request_hash is None:
         raise ValueError("creation key and request hash must be supplied together")
     lock_creation(conn, key)
-    return find_creation(conn, key, request_hash, immutable_snapshot=immutable_snapshot)
-
-
-def _find_snapshot(conn: psycopg.Connection, key: str, request_hash: str) -> CreationReceipt | None:
-    row = conn.execute(
-        "SELECT s.agent_id, s.request_hash, s.machine, s.config_overlay, s.birth_config, "
-        "s.launch_attempt_id, COALESCE(m.last_launch_attempt_id=s.launch_attempt_id "
-        "AND m.machine=s.machine AND m.status='idling' AND m.last_admission_at IS NULL, FALSE) "
-        "FROM agent_creation_snapshots s LEFT JOIN agents_meta m ON m.id=s.agent_id "
-        "WHERE s.creation_key=%s",
-        (key,),
-    ).fetchone()
-    if row is None:
-        if conn.execute("SELECT 1 FROM agents_meta WHERE creation_key=%s", (key,)).fetchone():
-            raise CreationConflictError("creation snapshot is unavailable for this key")
-        return None
-    if row[1] != request_hash:
-        raise CreationConflictError("creation key already identifies a different request")
-    return CreationReceipt(row[0], row[2], row[3], row[4], row[5], row[6])
+    return find_creation(conn, key, request_hash)
 
 
 def record_creation_snapshot(

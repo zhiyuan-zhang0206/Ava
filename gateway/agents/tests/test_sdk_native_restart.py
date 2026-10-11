@@ -32,7 +32,6 @@ async def test_sdk_recovers_original_restart_after_lost_response_and_source_clea
     _incarnation, target = await managed_work(db_conn, aops_pool)
     secret = "sdk-restart-test-secret"  # noqa: S105 -- isolated fixture credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     calls: list[str] = []
 
     async def forward(

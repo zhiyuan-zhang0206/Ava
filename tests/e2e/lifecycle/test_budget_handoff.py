@@ -28,6 +28,7 @@ from tests.components.base.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record, scratch_root
+from tests.fixtures.gateway_config import post_spawn
 from tests.fixtures.model_catalog import model_catalog as model_catalog
 
 _OBSERVER = (
@@ -69,7 +70,6 @@ def _terminate(agent_id: int) -> None:
     wait_for_status(agent_id, "terminated")
 
 
-@pytest.mark.usefixtures("authenticated_gateway")
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.budget_handoff:build")
 @pytest.mark.parametrize("role", ["goal supervisor", "dynamic workflow orchestrator"])
 def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
@@ -129,13 +129,8 @@ def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
         first = json.loads(report_path.read_text().splitlines()[0])
         assert {a["agent_id"] for a in first["agents"]} == {owner, child}
         assert first["totals"]["recorded_cost_usd"] < usd_limit
-        fork = httpx.post(
-            f"{GATEWAY_URL}/api/agents",
-            json={
-                "spawner": f"agent:{owner}",
-                "fork_from": child,
-            },
-            timeout=90,
+        fork = post_spawn(
+            GATEWAY_URL, {"spawner": f"agent:{owner}", "fork_from": child}, timeout=90
         )
         fork.raise_for_status()
         peers.append(int(fork.json()["id"]))
