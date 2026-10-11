@@ -596,6 +596,14 @@ private func captureCallback<T>(_ start: (@escaping (T?, Error?) -> Void) -> Voi
     throw OpError.bad("window capture timed out")
 }
 
+/// The shareable window with this window-server ID, only when it belongs to `pid`.
+private func ownedWindow(in content: SCShareableContent, id: Int, pid: Int) throws -> SCWindow {
+    guard let window = content.windows.first(where: {
+        Int($0.windowID) == id && Int($0.owningApplication?.processID ?? 0) == pid
+    }) else { throw OpError.bad("window target is stale or does not belong to the requested PID") }
+    return window
+}
+
 @available(macOS 14.0, *)
 private func capturedWindow(_ req: [String: Any]) throws -> [String: Any] {
     let pid = try inputInteger(req, "pid", lower: 1, upper: Int(Int32.max))
@@ -605,9 +613,7 @@ private func capturedWindow(_ req: [String: Any]) throws -> [String: Any] {
     let content: SCShareableContent = try captureCallback { completion in
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: false, completionHandler: completion)
     }
-    guard let window = content.windows.first(where: {
-        Int($0.windowID) == id && Int($0.owningApplication?.processID ?? 0) == pid
-    }) else { throw OpError.bad("window target is stale or does not belong to the requested PID") }
+    let window = try ownedWindow(in: content, id: id, pid: pid)
     let filter = SCContentFilter(desktopIndependentWindow: window)
     let rect = filter.contentRect
     let scale = Double(filter.pointPixelScale)
@@ -1216,6 +1222,14 @@ private func axFrame(_ position: AnyObject?, _ size: AnyObject?) -> (CGPoint, CG
     return (pos, dim)
 }
 
+/// The accessibility frame of a window element (logical points, top-left origin).
+private func axWindowFrame(_ window: AXUIElement) -> CGRect? {
+    guard let values = axBatch(window, [kAXPositionAttribute, kAXSizeAttribute]),
+          let (position, size) = axFrame(values[0], values[1])
+    else { return nil }
+    return CGRect(origin: position, size: size)
+}
+
 private func axActionNames(_ element: AXUIElement) -> [String] {
     var names: CFArray?
     guard AXUIElementCopyActionNames(element, &names) == .success, let list = names as? [String]
@@ -1527,6 +1541,7 @@ func axAct(_ req: [String: Any]) throws -> [String: Any] {
     guard let values = axBatch(entry.element, axTreeAttributes) else { return stale }
     let role = axString(values[0])
     guard axSignature(role: role, values: values) == entry.sig else { return stale }
+    holdIndicator(axWindowFrame: axWindowFrame(entry.window), pid: Int(app.processIdentifier))
 
     var status: AXError
     switch action {
@@ -2148,6 +2163,293 @@ final class RootKeeper {
 
 private let rootKeeper = RootKeeper()
 
+// MARK: - Capture indicator
+
+/// How long one input keeps the badge; also the longest it outlives a helper that stops serving.
+let indicatorHoldSeconds = 10.0
+
+/// Reject any request field outside `allowed` (`id` and `method` are the envelope).
+func rejectUnknownFields(_ req: [String: Any], allowed: Set<String>) throws {
+    let unknown = Set(req.keys).subtracting(allowed.union(["id", "method"]))
+    if let field = unknown.sorted().first { throw OpError.bad("unknown field: \(field)") }
+}
+
+func logIndicator(_ message: String) {
+    FileHandle.standardError.write(Data("AvaPermissionsHelper: capture indicator \(message)\n".utf8))
+}
+
+/// A window the next input lands on, by window-server ID and owning process.
+struct IndicatorWindow: Equatable {
+    let pid: Int
+    let windowID: Int
+}
+
+private struct OnScreenWindow {
+    let pid: Int
+    let id: Int
+    let layer: Int
+    let bounds: CGRect
+}
+
+/// On-screen windows, frontmost first (the order `CGWindowListCopyWindowInfo` returns), without
+/// the desktop. Rows that lack an owner, an ID or usable bounds are skipped.
+private func onScreenWindows() -> [OnScreenWindow] {
+    let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+    guard let rows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return [] }
+    return rows.compactMap { row in
+        guard let layer = row[kCGWindowLayer as String] as? Int,
+              let pid = row[kCGWindowOwnerPID as String] as? Int,
+              let id = row[kCGWindowNumber as String] as? Int,
+              let rawBounds = row[kCGWindowBounds as String] as? [String: Any],
+              let bounds = CGRect(dictionaryRepresentation: rawBounds as CFDictionary),
+              bounds.width > 0, bounds.height > 0
+        else { return nil }
+        return OnScreenWindow(pid: pid, id: id, layer: layer, bounds: bounds)
+    }
+}
+
+/// The window a pointer event at `point` (CG global coordinates) lands on: the frontmost window
+/// containing it, and only when that is a normal (layer 0) window. A menu, popup or system UI on
+/// top takes the click, so nothing is marked rather than the window behind it.
+func indicatorWindow(atPoint point: CGPoint) -> IndicatorWindow? {
+    guard let top = onScreenWindows().first(where: { $0.bounds.contains(point) }), top.layer == 0
+    else { return nil }
+    return IndicatorWindow(pid: top.pid, windowID: top.id)
+}
+
+/// The frontmost normal on-screen window of `pid`, where its keystrokes land.
+func indicatorWindow(frontmostPid pid: Int) -> IndicatorWindow? {
+    guard let top = onScreenWindows().first(where: { $0.pid == pid && $0.layer == 0 }) else { return nil }
+    return IndicatorWindow(pid: top.pid, windowID: top.id)
+}
+
+/// The normal on-screen window of `pid` whose bounds equal an accessibility window frame (both are
+/// logical points with a top-left origin, so they agree to rounding). Not exactly one match
+/// means the window cannot be established, and nothing is marked.
+func indicatorWindow(axFrame frame: CGRect, pid: Int) -> IndicatorWindow? {
+    let tolerance = 1.0
+    let matches = onScreenWindows().filter {
+        $0.pid == pid && $0.layer == 0
+            && abs($0.bounds.minX - frame.minX) <= tolerance && abs($0.bounds.minY - frame.minY) <= tolerance
+            && abs($0.bounds.width - frame.width) <= tolerance && abs($0.bounds.height - frame.height) <= tolerance
+    }
+    guard matches.count == 1 else { return nil }
+    return IndicatorWindow(pid: matches[0].pid, windowID: matches[0].id)
+}
+
+/// The window the input request `method` is about to land on, or nil when that is not
+/// established. `focus_app` produces no input, and `ax_act` resolves its window from the element
+/// inside `axAct`, so neither is decided here.
+func indicatorWindow(forInput method: String, _ req: [String: Any]) -> IndicatorWindow? {
+    func point(_ xKey: String, _ yKey: String) -> CGPoint? {
+        guard let x = try? inputNumber(req, xKey), let y = try? inputNumber(req, yKey) else { return nil }
+        return CGPoint(x: x, y: y)
+    }
+    switch method {
+    case "click", "move", "scroll":
+        return point("x", "y").flatMap { indicatorWindow(atPoint: $0) }
+    case "drag":
+        return point("start_x", "start_y").flatMap { indicatorWindow(atPoint: $0) }
+    case "type", "key":
+        refreshAppKit()
+        return NSWorkspace.shared.frontmostApplication
+            .flatMap { indicatorWindow(frontmostPid: Int($0.processIdentifier)) }
+    default:
+        return nil
+    }
+}
+
+/// Receives the indicator stream's frames and discards them: the stream exists only so macOS
+/// draws its "this window is being captured" badge on the window being operated.
+final class IndicatorSink: NSObject, SCStreamOutput, SCStreamDelegate {
+    /// Runs on the frame queue when the system ends the stream (window closed, grant revoked).
+    var onSystemStop: ((SCStream, Error) -> Void)?
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {}
+    func stream(_ stream: SCStream, didStopWithError error: Error) { onSystemStop?(stream, error) }
+}
+
+/// At most one 64x64, 1 fps stream of the window an input just landed on, kept alive by a lease.
+///
+/// `hold` runs on the socket thread in front of an input, so it never waits on ScreenCaptureKit:
+/// it records the lease and the window query and stream start run on `queue` through their
+/// completion handlers. A lease carries a generation. Whatever finishes later (the window
+/// query, the start) acts only while its generation is still the current lease, and a start that
+/// finishes for a replaced, stopped or expired lease stops its stream at once. Every read or
+/// write of `lease` is under `lock`, which is held only for that bookkeeping.
+final class CaptureIndicator {
+    private struct Lease {
+        let pid: Int
+        let windowID: Int
+        let generation: Int
+        let timer: DispatchSourceTimer
+        var deadline: Date
+        /// nil while the start is still in flight.
+        var running: (stream: SCStream, sink: IndicatorSink)?
+    }
+
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "ava.capture-indicator")
+    private var lease: Lease?
+    private var generation = 0
+
+    /// Keep an indicator on `window` for `seconds` more. The same window only extends the
+    /// expiry (never shortens it); another window stops the old stream first. A failure to show
+    /// the badge is one stderr line: it never fails or delays the input.
+    func hold(_ window: IndicatorWindow, seconds: Double) {
+        guard CGPreflightScreenCaptureAccess() else {
+            logIndicator("not shown: Screen Recording grant missing")
+            return
+        }
+        lock.lock(); defer { lock.unlock() }
+        let deadline = Date(timeIntervalSinceNow: seconds)
+        if var current = lease, current.pid == window.pid, current.windowID == window.windowID {
+            if deadline > current.deadline {
+                current.deadline = deadline
+                current.timer.schedule(deadline: .now() + seconds)
+                lease = current
+            }
+            return
+        }
+        _ = stopLocked()
+        generation += 1
+        let ticket = generation
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.setEventHandler { [weak self] in self?.expire(ticket) }
+        timer.schedule(deadline: .now() + seconds)
+        timer.resume()
+        lease = Lease(pid: window.pid, windowID: window.windowID, generation: ticket,
+                      timer: timer, deadline: deadline, running: nil)
+        queue.async { [weak self] in self?.begin(window, ticket) }
+    }
+
+    /// Stop the stream now, or cancel a start still in flight. True when there was a lease.
+    func stop() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return stopLocked()
+    }
+
+    private func isCurrent(_ ticket: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return lease?.generation == ticket
+    }
+
+    /// Drop the lease for `ticket` (a failed start) and say why. A newer lease is untouched.
+    private func abandon(_ ticket: Int, _ reason: String) {
+        lock.lock()
+        if let current = lease, current.generation == ticket {
+            current.timer.cancel()
+            lease = nil
+        }
+        lock.unlock()
+        logIndicator("not shown: \(reason)")
+    }
+
+    private func begin(_ window: IndicatorWindow, _ ticket: Int) {
+        SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: false) { [weak self] content, error in
+            guard let self = self, self.isCurrent(ticket) else { return }
+            guard let content = content else {
+                self.abandon(ticket, "window list unavailable: \(error?.localizedDescription ?? "no content")")
+                return
+            }
+            let target: SCWindow
+            do { target = try ownedWindow(in: content, id: window.windowID, pid: window.pid) }
+            catch { self.abandon(ticket, "\(error)"); return }
+            // A bare command-line process has no WindowServer connection until something asks for one;
+            // the serve loop already has it, and this keeps the stream start independent of that.
+            _ = CGMainDisplayID()
+            let configuration = SCStreamConfiguration()
+            configuration.width = 64
+            configuration.height = 64
+            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+            configuration.showsCursor = false
+            let sink = IndicatorSink()
+            let stream = SCStream(filter: SCContentFilter(desktopIndependentWindow: target),
+                                  configuration: configuration, delegate: sink)
+            sink.onSystemStop = { [weak self] stopped, error in self?.systemStopped(stopped, error) }
+            do { try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: self.queue) }
+            catch { self.abandon(ticket, "stream output failed: \(error.localizedDescription)"); return }
+            stream.startCapture { [weak self] error in
+                self?.started(ticket, stream, sink, error)
+            }
+        }
+    }
+
+    private func started(_ ticket: Int, _ stream: SCStream, _ sink: IndicatorSink, _ error: Error?) {
+        if let error = error {
+            abandon(ticket, "stream did not start: \(error.localizedDescription)")
+            return
+        }
+        lock.lock(); defer { lock.unlock() }
+        guard var current = lease, current.generation == ticket else {
+            // Replaced, stopped or expired while starting: the late stream must not stay up.
+            stopStream(stream)
+            return
+        }
+        current.running = (stream, sink)
+        lease = current
+    }
+
+    private func stopStream(_ stream: SCStream) {
+        stream.stopCapture { error in
+            if let error = error { logIndicator("stream did not stop cleanly: \(error.localizedDescription)") }
+        }
+    }
+
+    private func stopLocked() -> Bool {
+        guard let current = lease else { return false }
+        lease = nil
+        current.timer.cancel()
+        if let running = current.running { stopStream(running.stream) }
+        return true
+    }
+
+    /// Timer handler. A fire left over from before an extension is ignored: only the current
+    /// lease, past its current deadline, is stopped.
+    private func expire(_ ticket: Int) {
+        lock.lock(); defer { lock.unlock() }
+        guard let current = lease, current.generation == ticket, Date() >= current.deadline else { return }
+        _ = stopLocked()
+    }
+
+    private func systemStopped(_ stream: SCStream, _ error: Error) {
+        lock.lock(); defer { lock.unlock() }
+        guard let current = lease, current.running?.stream === stream else { return }
+        lease = nil
+        current.timer.cancel()
+        logIndicator("stream ended by the system: \(error.localizedDescription)")
+    }
+}
+
+private let captureIndicator = CaptureIndicator()
+
+/// Mark the window `method`'s input is about to land on. Called after the fail-safe check and
+/// before the input is posted; it returns without waiting for the badge.
+func holdIndicatorForInput(_ method: String, _ req: [String: Any]) {
+    if let window = indicatorWindow(forInput: method, req) {
+        captureIndicator.hold(window, seconds: indicatorHoldSeconds)
+    }
+}
+
+/// Mark the window an accessibility element action is about to act in, found by its frame.
+func holdIndicator(axWindowFrame frame: CGRect?, pid: Int) {
+    if let frame = frame, let window = indicatorWindow(axFrame: frame, pid: pid) {
+        captureIndicator.hold(window, seconds: indicatorHoldSeconds)
+    }
+}
+
+/// `indicator_stop`: stop the stream now; a no-op when none is running.
+func indicatorStop(_ req: [String: Any]) throws -> [String: Any] {
+    try rejectUnknownFields(req, allowed: [])
+    return ["stopped": stopCaptureIndicator()]
+}
+
+/// Stop the stream if one runs. Also the fail-safe's hook: the badge must disappear when the
+/// user stops Ava, before the refusal is reported.
+@discardableResult
+func stopCaptureIndicator() -> Bool {
+    return captureIndicator.stop()
+}
+
 // MARK: - Dispatch
 
 
@@ -2158,6 +2460,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
     let cornerFailsafeMethods: Set<String> = [
         "click", "drag", "move", "focus_app", "type", "key", "scroll", "ax_act",
     ]
+    let indicatorInputMethods: Set<String> = ["click", "drag", "move", "scroll", "type", "key"]
     let axGatedMethods: Set<String> = ["click", "drag", "move", "focus_app", "type", "key", "scroll", "ax_window_info", "ax_tree", "ax_act"]
     if axGatedMethods.contains(method) && !axTrustedOrPrompt() {
         return ["id": id as Any, "ok": false, "error": axGrantError]
@@ -2165,11 +2468,14 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
     do {
         // Observation stays available; only methods that change the desktop are stoppable.
         if cornerFailsafeMethods.contains(method) { try cornerFailsafe() }
+        // The window this input lands on gets the system capture badge. After the fail-safe so a
+        // stopped action shows nothing, before the input and without waiting for the badge.
+        if indicatorInputMethods.contains(method) { holdIndicatorForInput(method, req) }
         let result: Any
         switch method {
         case "ping":
             result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true,
-                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "ax_target_v1": true, "native_input_v1": true, "corner_failsafe_v1": true,
+                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "ax_target_v1": true, "native_input_v1": true, "corner_failsafe_v1": true, "capture_indicator_v1": true,
                       "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
         case "file_list": result = try fileList(req)
@@ -2189,6 +2495,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         case "ax_window_info": result = try axWindowInfo(req)
         case "ax_tree": result = try axTree(req)
         case "ax_act": result = try axAct(req)
+        case "indicator_stop": result = try indicatorStop(req)
         case "window_info": result = try windowInfo(req)
         case "session_info": result = sessionInfo()
         case "screen_size": result = try screenSize(req)
@@ -2217,6 +2524,8 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         }
         return ["id": id as Any, "ok": true, "result": result]
     } catch is UserAbort {
+        // The user stopped Ava: the capture badge goes before the refusal is reported.
+        stopCaptureIndicator()
         return ["id": id as Any, "ok": false, "error": userAbortMessage, "error_code": "user_abort"]
     } catch let OpError.bad(msg) {
         return ["id": id as Any, "ok": false, "error": msg]

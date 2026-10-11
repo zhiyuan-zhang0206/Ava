@@ -43,6 +43,13 @@ class Keeper {
     func requestStop() throws -> [String: Any] { [:] }
 }
 let rootKeeper = Keeper()
+var abortStops = 0
+/// Each badge request: the method, and how many events had been posted by then.
+var holdCalls: [(method: String, postedBefore: Int)] = []
+func holdIndicatorForInput(_ method: String, _ req: [String: Any]) {
+    holdCalls.append((method, posted.count))
+}
+@discardableResult func stopCaptureIndicator() -> Bool { abortStops += 1; return true }
 func requestHelperShutdown(runDir: String) throws -> [String: Any] { [:] }
 """
     for name in [
@@ -63,6 +70,7 @@ func requestHelperShutdown(runDir: String) throws -> [String: Any] { [:] }
         "sessionList",
         "sessionHas",
         "signalSession",
+        "indicatorStop",
     ]:
         stubs += (
             f"func {name}(_ req: [String: Any]) throws -> [String: Any] "
@@ -222,14 +230,18 @@ catch OpError.bad(let message) { precondition(message.contains("corner fail-safe
 cursorReadFails = false
 
 // Dispatch: every desktop-changing method is refused in the corner with no side effect.
-reset(); cursorDefault = CGPoint(x: 0, y: 0)
+reset(); cursorDefault = CGPoint(x: 0, y: 0); abortStops = 0; holdCalls = []
 for method in ["click", "move", "scroll", "key", "type", "drag", "focus_app", "ax_act"] {
+    let stopsBefore = abortStops
     let response = dispatch(["id": 1, "method": method, "x": 1, "y": 2, "dy": 3, "code": 0])
+    precondition(abortStops == stopsBefore + 1, "\(method) abort left the capture indicator running")
     precondition(response["ok"] as? Bool == false)
     precondition(response["error_code"] as? String == "user_abort")
     precondition((response["error"] as? String)?.contains("top-left corner") == true)
     precondition(posted.isEmpty && created == 0 && stubCalls == 0)
 }
+// A stopped action shows no badge: the fail-safe runs before the hold.
+precondition(holdCalls.isEmpty)
 // Observation stays available while the pointer is parked.
 for method in ["cursor_position", "screen_size", "ax_tree", "ax_window_info", "list_apps",
                "list_windows", "window_info", "session_info", "frontmost_app", "ping",
@@ -241,6 +253,16 @@ for method in ["cursor_position", "screen_size", "ax_tree", "ax_window_info", "l
     precondition(method == "cursor_position" || method == "ping" || stubCalls == before + 1)
 }
 precondition(posted.isEmpty)
+// The indicator commands are display-only: not stoppable, not Accessibility-gated.
+abortStops = 0; trusted = false
+let callsBeforeStop = stubCalls
+let stopResponse = dispatch(["id": 1, "method": "indicator_stop"])
+precondition(stopResponse["ok"] as? Bool == true && stopResponse["error_code"] == nil)
+precondition(stubCalls == callsBeforeStop + 1 && abortStops == 0)
+// indicator_hold is not a wire method: the helper decides which window to mark itself.
+precondition(dispatch(["id": 1, "method": "indicator_hold", "pid": 1, "window_id": 2, "seconds": 3])["ok"] as? Bool == false)
+precondition(holdCalls.isEmpty)
+trusted = true
 // Leaving the corner lifts the refusal; nothing refused earlier is replayed.
 cursorDefault = CGPoint(x: 300, y: 300)
 precondition(dispatch(["id": 1, "method": "click", "x": 1, "y": 2])["ok"] as? Bool == true)
@@ -253,6 +275,30 @@ precondition((unreadable["error"] as? String)?.contains("corner fail-safe") == t
 precondition(posted.isEmpty && created == 0)
 let ping = dispatch(["id": 1, "method": "ping"])["result"] as! [String: Any]
 precondition(ping["corner_failsafe_v1"] as? Bool == true)
+precondition(ping["capture_indicator_v1"] as? Bool == true)
+
+// Out of the corner, each input method asks for its badge once, before any event is posted.
+// Nothing else does: focus_app produces no input, ax_act decides inside its own body, and
+// observation changes nothing.
+reset(); cursorDefault = CGPoint(x: 300, y: 300); holdCalls = []
+for method in ["click", "drag", "move", "scroll", "type", "key"] {
+    let before = holdCalls.count
+    posted = []
+    _ = dispatch(["id": 1, "method": method, "x": 1, "y": 2, "dy": 3, "code": 0])
+    precondition(holdCalls.count == before + 1 && holdCalls.last!.method == method, "\(method) badge")
+    precondition(holdCalls.last!.postedBefore == 0, "\(method) badge came after input")
+}
+holdCalls = []
+for method in ["focus_app", "ax_act", "ax_tree", "cursor_position", "list_windows", "screencapture_window",
+               "indicator_stop", "ping"] {
+    _ = dispatch(["id": 1, "method": method, "x": 1, "y": 2, "dy": 3, "code": 0])
+}
+precondition(holdCalls.isEmpty)
+// Without the Accessibility grant nothing is posted, so nothing is marked.
+trusted = false
+_ = dispatch(["id": 1, "method": "click", "x": 1, "y": 2])
+trusted = true
+precondition(holdCalls.isEmpty)
 
 // A long press stopped mid-hold: the button is released where the pointer is parked
 // (never back at the click point, which would complete the click), and nothing else posts.
@@ -282,6 +328,15 @@ do { _ = try key(["code": 0, "modifiers": ["ctrl"], "duration_ms": 100]); fatalE
 catch is UserAbort { }
 precondition(posted.map { $0.type } == [.flagsChanged, .keyDown, .keyUp, .flagsChanged])
 precondition(Thread.waits.count == 2 && posted.last!.flags.isEmpty)
+// A mid-action stop reaches the dispatch reply path too: the stream is stopped once, before it.
+reset(); abortStops = 0; cursorDefault = CGPoint(x: 300, y: 300)
+cursorScript = [CGPoint(x: 300, y: 300), CGPoint(x: 300, y: 300), CGPoint(x: 0, y: 0)]
+let midAction = dispatch(["id": 1, "method": "click", "x": 40, "y": 50, "duration_ms": 100])
+precondition(midAction["error_code"] as? String == "user_abort" && abortStops == 1)
+// An ordinary failure is not a stop: the indicator keeps running.
+reset(); abortStops = 0; cursorDefault = CGPoint(x: 300, y: 300)
+precondition(dispatch(["id": 1, "method": "click", "x": "bad", "y": 2])["ok"] as? Bool == false)
+precondition(abortStops == 0)
 print("native input contract passed")
 """
     program = tmp_path / "input.swift"

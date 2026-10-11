@@ -96,6 +96,16 @@ from .task_sessions import TaskSessionTracker
 _LINE_LIMIT = 64 * 1024 * 1024
 
 
+def _hide_badge() -> None:
+    """End the capture badge when the screen is handed over. The helper shows it, per input, on
+    the window the input lands on, and ends it on its own; this only makes it prompt. It is
+    display-only, so a failure is logged and never fails the release."""
+    try:
+        helper.indicator_stop()
+    except (PermissionsHelperError, OSError) as e:
+        logger.warning(f"[computer-mcp] capture indicator not stopped, its lease will expire: {e}")
+
+
 def _audit_coords(tool: str, args: dict[str, Any], result: dict[str, Any] | None) -> str | None:
     """The compact "where / what" string of a computer_action audit row."""
     if tool in {"click", "move"} and "x" in args:
@@ -471,6 +481,8 @@ class ComputerMcpDaemon:
                 # Operator kick: no agent identity, so no audit row — log it.
                 logger.info(f"[computer-mcp] operator forced release of agent {released}")
             self._emit_action(agent_id, "release_control", args, outcome, error)
+            if released is not None:
+                _hide_badge()
             if released is None:
                 return {"id": req_id, "ok": False, "error": "not the screen holder"}
             return {

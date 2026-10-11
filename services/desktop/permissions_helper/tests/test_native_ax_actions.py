@@ -98,6 +98,9 @@ var elementWindowReads = 0
 private var axElementTable: [Int: AXEntry] = [:]
 private var axNextElementID = 100
 func axFrameworkHint(_ app: NSRunningApplication) -> String { "" }
+/// Each capture-badge request: the pid, and how many mutations had run by then.
+var axHolds: [(pid: Int, mutationsBefore: Int)] = []
+func holdIndicator(axWindowFrame frame: CGRect?, pid: Int) { axHolds.append((pid, mutations.count)) }
 func axEnableChromiumAccessibility(_ app: AXUIElement, pid: pid_t) -> String {
     preconditionFailure("the native test does not enable Chromium")
 }
@@ -161,7 +164,7 @@ func reset() {
     windows = [windowRef]; elementWindow = windowRef
     offered = []; canSetRange = true; pidValue = 9001
     mutationStatus = .success; mutations = []; selectedRange = nil
-    batchReads = 0; elementWindowReads = 0
+    batchReads = 0; elementWindowReads = 0; axHolds = []
     freshValues = ["AXTextField" as NSString, "AXSearchField" as NSString,
                    "Editor" as NSString, NSNull(), "text" as NSString,
                    "field-id" as NSString, NSNull(), NSNull(), NSNull(), NSNull(),
@@ -181,6 +184,7 @@ func request(_ action: String, _ extra: [String: Any] = [:]) -> [String: Any] {
 func stale(_ action: String, _ extra: [String: Any] = [:]) throws {
     let result = try axAct(request(action, extra))
     precondition(mutations.isEmpty, "stale target was mutated")
+    precondition(axHolds.isEmpty, "stale target was marked")
     precondition(result["stale"] as? Bool == true && result["completed"] as? Bool == false)
 }
 func refused(_ action: String, _ extra: [String: Any] = [:], containing: String) {
@@ -207,6 +211,8 @@ precondition(selectedByPID.processIdentifier == 9001)
 reset(); offered = ["AXPress"]
 let pinned = try axAct(request("press"))
 precondition(pinned["completed"] as? Bool == true && mutations == ["action:AXPress"])
+// The badge is requested for the pinned process, after the stale checks and before the action.
+precondition(axHolds.count == 1 && axHolds[0].pid == 9001 && axHolds[0].mutationsBefore == 0)
 NSWorkspace.shared.runningApplications = [originalApp, sameNameApp]
 reset(); offered = ["AXPress"]
 _ = try axAct(request("press"))
