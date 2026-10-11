@@ -3,13 +3,12 @@ current repo-helper list (a retired helper's name must not linger)."""
 
 from __future__ import annotations
 
-import importlib
 import textwrap
 from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.async_no_sync_blocking")
+from scripts.lint import async_no_sync_blocking as _lint
 
 
 @pytest.fixture()

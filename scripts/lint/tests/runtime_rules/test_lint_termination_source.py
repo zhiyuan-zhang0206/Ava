@@ -9,12 +9,11 @@ the reads and non-terminated writes that must NOT be flagged.
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.termination_source")
+from scripts.lint import termination_source as _lint
 
 _SOURCES = frozenset({"user", "exit", "reaper", "launch-confirm", "integrity"})
 

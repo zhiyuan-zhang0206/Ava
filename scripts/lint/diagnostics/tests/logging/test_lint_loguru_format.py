@@ -18,12 +18,11 @@ calls (the traceback would be lost) and left alone on stdlib ones (task #4979).
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.diagnostics.loguru_format")
+from scripts.lint.diagnostics import loguru_format as _lint
 
 
 def _lines(src: str) -> list[int]:

@@ -3,32 +3,17 @@
 from __future__ import annotations
 
 import contextlib
-import importlib.util
 import json
 import types
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 from zoneinfo import ZoneInfo
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "pull_requests" / "pr_flow_export.py"
+from scripts.ci.pull_requests import pr_flow_export as pr_flow
 
-
-def _load_script():
-    spec = importlib.util.spec_from_file_location("pr_flow_export", _SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    import sys
-
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-pr_flow = _load_script()
 _TZ = ZoneInfo("Asia/Shanghai")
 
 
@@ -139,7 +124,7 @@ def test_collect_records_reuses_cache_only_when_updated_at_is_unchanged() -> Non
     moved = _meta(7, updated="2026-09-12T09:00:00Z")
     fetched: list[int] = []
 
-    def fetch(_repo: str, number: int, _stats: object) -> list[object]:
+    def fetch(_repo: str, number: int, _stats: object) -> list[dict[str, Any]]:
         fetched.append(number)
         return []
 
@@ -165,7 +150,7 @@ def test_collect_records_falls_back_to_cache_then_partial_on_fetch_failure() -> 
         }
     }
 
-    def boom(_repo, _number, _stats):
+    def boom(_repo: str, _number: int, _stats: object) -> NoReturn:
         raise pr_flow.PrFlowError("gh down")
 
     stats = pr_flow.RunStats()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
+import ast
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -10,20 +10,7 @@ from typing import Any
 import pytest
 
 from scripts.model_registry import plugin_price_sync
-
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPT = _REPO_ROOT / "scripts" / "model_registry" / "update_model_pricing.py"
-
-
-def _load_script():
-    spec = importlib.util.spec_from_file_location("update_model_pricing", _SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-pricing_updater = _load_script()
+from scripts.model_registry import update_model_pricing as pricing_updater
 
 _DEEPSEEK_TABLE = """
 <html><main>
@@ -292,7 +279,7 @@ def test_plugin_sync_rewrites_drift_and_is_idempotent(
 
     first = pricing_updater.sync_plugin_rates(archive_path, repo_root)
     rewritten = provider_path.read_text(encoding="utf-8")
-    compile(rewritten, str(provider_path), "exec")
+    ast.parse(rewritten, str(provider_path))
 
     assert first.drifted_models == ("fixture-model",)
     assert first.changed_files == (provider_path,)

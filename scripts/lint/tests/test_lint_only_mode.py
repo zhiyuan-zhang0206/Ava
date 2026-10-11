@@ -12,7 +12,6 @@ three things hold, and each lint is held to all of them below:
 
 from __future__ import annotations
 
-import importlib
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -23,7 +22,25 @@ from types import ModuleType
 import pytest
 
 from base.host.proc import run_bounded
-from scripts.lint import code_structure
+from scripts.content_lint import lint_no_cjk, lint_no_tailnet, lint_quiesced_loops
+from scripts.lint import (
+    async_no_sync_blocking,
+    clock_lattice,
+    code_structure,
+    fixture_scope,
+    no_os_environ,
+    no_script_sibling_imports,
+    pool_keepalives,
+    termination_source,
+    turn_scoped_config,
+)
+from scripts.lint.diagnostics import (
+    logger_add_diagnose,
+    loguru_format,
+    no_emoji,
+    time_bomb,
+)
+from scripts.lint.plugins import no_plugin_wrap
 from scripts.structure import lint_common
 
 # A path every lint's tooling-edit check treats as "the lint itself changed".
@@ -86,7 +103,7 @@ def test_restrict_keeps_only_the_changed_files(tmp_path: Path) -> None:
 
 @dataclass
 class Case:
-    module: str
+    module: ModuleType
     bad_path: str
     bad_source: str
     clean_path: str = ""
@@ -105,26 +122,26 @@ _CJK = chr(0x4E2D)
 _TAILNET_IP = ".".join(["100", "64", "1", "2"])  # spelled in pieces: the lint scans this file too
 
 CASES = [
-    Case("scripts.lint.diagnostics.no_emoji", "base/x.py", f"x = '{_EMOJI}'\n"),
+    Case(no_emoji, "base/x.py", f"x = '{_EMOJI}'\n"),
     Case(
-        "scripts.lint.diagnostics.logger_add_diagnose",
+        logger_add_diagnose,
         "base/x.py",
         "from loguru import logger\nlogger.add('a.log')\n",
     ),
     Case(
-        "scripts.lint.diagnostics.loguru_format",
+        loguru_format,
         "base/x.py",
         "from loguru import logger\nlogger.warning('x %s', 1)\n",
     ),
     Case(
-        "scripts.lint.termination_source",
+        termination_source,
         "base/x.py",
         "cur.execute(\"UPDATE agents_meta SET status = 'terminated' WHERE id = %s\", (a,))\n",
         patches={"_termination_source_values": lambda: frozenset({"launch-confirm"})},
     ),
-    Case("scripts.lint.no_os_environ", "base/x.py", "import os\nx = os.environ['A']\n"),
+    Case(no_os_environ, "base/x.py", "import os\nx = os.environ['A']\n"),
     Case(
-        "scripts.lint.turn_scoped_config",
+        turn_scoped_config,
         "agent/x.py",
         "from base.config import settings\nx = settings.agent.fixture_field\n",
         # The lint asks the real config registry which fields are per-agent; a field of its
@@ -132,54 +149,54 @@ CASES = [
         patches={"base.config.per_agent_field_names": lambda: {"fixture_field"}},
     ),
     Case(
-        "scripts.lint.clock_lattice",
+        clock_lattice,
         "ops/x.py",
         "_SOME_REAP_GRACE_S = 100.0\n",
         patches={"_stale_allowlist_entries": list},
     ),
     Case(
-        "scripts.lint.plugins.no_plugin_wrap",
+        no_plugin_wrap,
         "ava_builtins/plugins/demo/plugin.py",
         "ava.files.read = my_read\n",
     ),
     Case(
-        "scripts.lint.pool_keepalives",
+        pool_keepalives,
         "scripts/x.py",
         "pool = ConnectionPool(url, min_size=1, max_size=2, open=True)\n",
     ),
     Case(
-        "scripts.lint.fixture_scope",
+        fixture_scope,
         "tests/sub/conftest.py",
         '@pytest.fixture(scope="session")\ndef _unset():\n    os.environ.pop("AVA_HOME", None)\n    yield\n',
         extra={"pyproject.toml": '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'},
     ),
     Case(
-        "scripts.lint.no_script_sibling_imports",
+        no_script_sibling_imports,
         "tools/runner.py",
         "from helper import VALUE\n\n\ndef main() -> int:\n    return 0\n\n\n"
         'if __name__ == "__main__":\n    main()\n',
         extra={"tools/helper.py": "VALUE = 1\n"},
     ),
     Case(
-        "scripts.lint.async_no_sync_blocking",
+        async_no_sync_blocking,
         "gateway/x.py",
         "import time\n\n\nasync def f():\n    time.sleep(1)\n",
         patches={"_stale_repo_helpers": list},
     ),
     Case(
-        "scripts.lint.diagnostics.time_bomb",
+        time_bomb,
         "tests/test_a.py",
         "def test_x():\n    f(since='2026-09-06')\n",
         explicit_root=True,
     ),
     Case(
-        "scripts.content_lint.lint_quiesced_loops",
+        lint_quiesced_loops,
         "services/x.py",
         "import asyncio\n\n\nasync def f():\n    while True:\n        await asyncio.sleep(1)\n",
     ),
-    Case("scripts.content_lint.lint_no_cjk", "docs/a.md", f"{_CJK}\n", explicit_root=True),
+    Case(lint_no_cjk, "docs/a.md", f"{_CJK}\n", explicit_root=True),
     Case(
-        "scripts.content_lint.lint_no_tailnet",
+        lint_no_tailnet,
         "docs/a.md",
         f"see {_TAILNET_IP}\n",
         explicit_root=True,
@@ -216,11 +233,11 @@ def _bind_legacy_root(lint: ModuleType, root: Path, monkeypatch: pytest.MonkeyPa
         )
 
 
-@pytest.mark.parametrize("case", CASES, ids=lambda case: case.module.rsplit(".", 1)[-1])
+@pytest.mark.parametrize("case", CASES, ids=lambda case: case.module.__name__.rsplit(".", 1)[-1])
 def test_only_judges_exactly_the_changed_files(
     case: Case, fake_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lint = importlib.import_module(case.module)
+    lint = case.module
     if case.explicit_root:
         subprocess.run(["git", "init", "-q"], cwd=fake_repo, check=True)
     else:
