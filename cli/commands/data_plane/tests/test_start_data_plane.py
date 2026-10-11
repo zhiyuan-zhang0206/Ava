@@ -287,7 +287,6 @@ def test_storage_refuses_missing_credentials_before_effects(
         _ci.ensure_cluster_storage(
             pg_port=5433,
             redis_port=6380,
-            cluster_secret=secret,
             redis_user="ava",
             **credentials,
             retained_children=retained_children,

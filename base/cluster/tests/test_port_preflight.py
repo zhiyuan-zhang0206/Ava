@@ -284,33 +284,28 @@ def test_bind_addrs_adds_nothing_for_a_loopback_reachable_host(
     monkeypatch: pytest.MonkeyPatch, host: str
 ) -> None:
     """A single box names itself by any loopback alias; none of them is a second address
-    to bind, so a secret-bearing cluster still binds loopback alone."""
+    to bind, so it binds loopback alone — whatever its cluster secret (every cluster
+    has one)."""
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: host)
-    assert port_preflight.bind_addrs("s3cret") == ["127.0.0.1"]
+    assert port_preflight.bind_addrs() == ["127.0.0.1"]
+    assert port_preflight.serves_off_box() is False
 
 
-def test_bind_addrs_loopback_only_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A no-secret cluster binds loopback alone, whatever the reachable address —
-    an unauthenticated data plane must never be LAN-reachable."""
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
-    assert port_preflight.bind_addrs("") == ["127.0.0.1"]
-
-
-def test_bind_addrs_includes_reachable_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With a secret, the reachable address joins loopback as today (auth makes
-    the non-loopback bind safe)."""
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
-    assert port_preflight.bind_addrs("s3cret") == ["127.0.0.1", "10.0.0.5"]
-
-
-def test_bind_addrs_follows_passed_secret_not_ambient_settings(
+def test_bind_addrs_includes_the_declared_reachable_address(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The bring-up passes the cluster's OWN secret (install: the decided one;
-    start: the authority-passed .env value). An ambient settings value inherited
-    from a sibling cluster (a prod-sourced shell running an install) must not
-    widen a no-secret cluster's bind to the LAN."""
-    # Ambient settings carry a foreign secret — the leak Task #1113 reproduces.
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "foreign-sibling-secret")
+    """A declared private-network address (`AVA_MACHINE_HOST`) joins loopback: the
+    posture a secret-bearing cluster has always had when its operator declared one."""
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
-    assert port_preflight.bind_addrs("") == ["127.0.0.1"]
+    assert port_preflight.bind_addrs() == ["127.0.0.1", "10.0.0.5"]
+    assert port_preflight.serves_off_box() is True
+
+
+def test_bind_addrs_ignores_the_ambient_cluster_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reach follows the declared address alone: neither a present nor an inherited
+    foreign secret opens the LAN of a box that declares none."""
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "foreign-sibling-secret")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "localhost")
+    assert port_preflight.bind_addrs() == ["127.0.0.1"]

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster.auth import ClusterSecretMissingError
 from base.config import settings
 from base.db import Database
 from gateway.cluster import server as _server
@@ -88,3 +89,72 @@ def test_gateway_start_raises_the_min_code_version_after_schema_and_logging(
     assert steps.count("raise") == raised
     if raised:
         assert steps == ["schema", "logging", "raise"]
+
+
+def _stub_process_entry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, gateway: bool
+) -> list[str]:
+    """Stub everything `main()` does besides choosing its secret check and bind host."""
+    steps: list[str] = []
+
+    def _ignore(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(settings.services, "gateway_pidfile", tmp_path / "gateway.pid")
+
+    def _schema(_url: str) -> None:
+        steps.append("schema")
+
+    def _serve(kwargs: dict[str, object]) -> None:
+        steps.append(f"serve:{kwargs['host']}")
+
+    monkeypatch.setattr(_server, "assert_schema_current", _schema)
+    monkeypatch.setattr(_server, "raise_fd_limit", _ignore)
+    monkeypatch.setattr(_server, "init_gateway_process", _ignore)
+    monkeypatch.setattr(_server, "raise_min_code_version", _ignore)
+    monkeypatch.setattr(_server, "is_gateway", lambda: gateway)
+    monkeypatch.setattr(_server, "verify_transport_encryption", _ignore)
+    monkeypatch.setattr(_server.faulthandler, "register", _ignore)
+    monkeypatch.setattr(_server, "serve", _serve)
+    return steps
+
+
+def test_a_gateway_without_a_cluster_secret_refuses_to_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The API always authenticates: no secret, no gateway. The refusal comes first,
+    before the database is touched or a pidfile written."""
+    steps = _stub_process_entry(monkeypatch, tmp_path, gateway=True)
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
+
+    with pytest.raises(ClusterSecretMissingError, match="AVA_CLUSTER_SECRET"):
+        _server.main()
+
+    assert steps == []
+    assert not (tmp_path / "gateway.pid").exists()
+
+
+@pytest.mark.parametrize(
+    ("reachable", "gateway", "bind"),
+    [
+        ("localhost", True, "127.0.0.1"),  # the single-box default: loopback, secret or not
+        ("10.0.0.5", True, ""),  # a declared private-network address: all interfaces
+        ("10.0.0.5", False, "127.0.0.1"),  # a runner's local gateway never faces the LAN
+    ],
+)
+def test_gateway_bind_follows_the_declared_reachable_address_not_the_secret(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reachable: str,
+    gateway: bool,
+    bind: str,
+) -> None:
+    """The secret is always set; reach is `AVA_MACHINE_HOST`'s. A secret-bearing gateway
+    with a non-loopback address binds exactly as it always has (all interfaces)."""
+    steps = _stub_process_entry(monkeypatch, tmp_path, gateway=gateway)
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: reachable)
+
+    _server.main()
+
+    assert steps[-1] == f"serve:{bind}"

@@ -171,7 +171,6 @@ def test_start_does_not_reload_a_recycled_pid(home: Path, monkeypatch: pytest.Mo
             pg_port=15433,
             listen_port=16433,
             db_name="ava_scratch",
-            cluster_secret="",
             userlist=b"",
             admin_password="unused-admin-credential",  # noqa: S106 — never presented
         )

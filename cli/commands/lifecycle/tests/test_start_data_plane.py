@@ -46,7 +46,6 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
         {
             "pg_port": 23011,
             "redis_port": 23012,
-            "cluster_secret": "bearer",
             "redis_admin_password": "redis-admin",
             "redis_password": "redis-runtime",
             "redis_user": "ava",

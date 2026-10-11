@@ -21,6 +21,7 @@ from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import daemon_acceptance
+from base.cluster.port_preflight import serves_off_box
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -66,26 +67,25 @@ def _register_boot() -> None:
     _log.info("registered this unit as up at %s", url)
 
 
-def _ops_bind_host(acceptance: frozenset[str] | None) -> str:
-    """The ops server's bind address — 0.0.0.0 when /ops is authenticated
-    (`acceptance` is not None), loopback when it is not.
+def _ops_bind_host() -> str:
+    """The ops server's bind address — 0.0.0.0 when this host declares a reachable
+    address other machines dial (`port_preflight.serves_off_box`), loopback otherwise.
 
-    Authenticated, the gateway dials /ops over the network and every POST must
-    carry a machine API token (reachability is not trust; a single box's
-    gateway self-dials its own /ops the same authenticated way over loopback).
-    An open cluster has no credential to present and nothing remote to serve
-    (its data plane and gateway are loopback-only too), so /ops binds 127.0.0.1
-    then — an unauthenticated control surface must never be LAN-reachable.
-    /healthz (watchdog) is served on the same port and stays reachable via
-    localhost (unauthenticated — it leaks no secret).
+    /ops is always authenticated: every POST must carry a machine API token
+    (reachability is not trust; a single box's gateway self-dials its own /ops the
+    same authenticated way over loopback). A box that declares no private-network
+    address (`AVA_MACHINE_HOST` unset: single box) has no remote gateway to serve,
+    so /ops binds 127.0.0.1, like its data plane and gateway. /healthz (watchdog) is
+    served on the same port and stays reachable via localhost (unauthenticated —
+    it leaks no secret).
     """
-    if acceptance is not None:
+    if serves_off_box():
         return "0.0.0.0"  # noqa: S104 — inbound ops port; authenticated, the gateway is the trust boundary
     return "127.0.0.1"
 
 
-def _ops_acceptance() -> frozenset[str] | None:
-    """SHA-256 digests of the bearers /ops accepts, or None for the open posture: the
+def _ops_acceptance() -> frozenset[str]:
+    """SHA-256 digests of the bearers /ops accepts: the
     daemon acceptance of `base.cluster.machine.daemon_acceptance` (the gateway dials /ops with its
     gateway-class machine API token, a runner-class process of the unit with its runner token)."""
     return daemon_acceptance()
