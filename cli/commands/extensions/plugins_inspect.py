@@ -50,8 +50,8 @@ def cmd_plugins_inspect(name: str | None) -> int:
     installed plugin registered on this machine.
 
     No name: the surface reference and one line per plugin. With a name: that
-    plugin's full contribution list and, when it ships an `ava-plugin.json`, its
-    declared-vs-registered diff. A query, not a lifecycle verb: nothing is
+    plugin's full contribution list and its `ava-plugin.json` declared-vs-registered
+    diff. A query, not a lifecycle verb: nothing is
     installed or removed, and drift is reported rather than enforced (that gate
     is plugin-spec-v2 S3). Reading registrations does load the plugins, with the
     side effects `build_catalog` names.
@@ -160,14 +160,11 @@ def _print_plugin_detail(view: PluginView) -> None:
     )
     if view.description:
         print(_wrapped("description", view.description))
-    if view.manifest is None:
-        print(_wrapped("manifest", "none — no ava-plugin.json, so nothing to diff against"))
-    else:
-        m = view.manifest
-        print(
-            f"  {_cell('manifest', _LABEL)}{m.name} {m.version}  "
-            f"engines.ava={m.engines.get('ava', '?')}"
-        )
+    m = view.manifest
+    print(
+        f"  {_cell('manifest', _LABEL)}{m.name} {m.version}  "
+        f"engines.ava={m.engines.get('ava', '?')}"
+    )
 
     print()
     if not view.enabled:
@@ -200,9 +197,6 @@ def _print_diff(view: PluginView) -> None:
     deliberately NOT drift."""
     print()
     print("declared vs registered")
-    if view.manifest is None:
-        print("  (no manifest — a plugin without ava-plugin.json declares nothing)")
-        return
     for entry in declared_vs_registered(view):
         print(f"  {_cell(entry.status, 25)}{entry.surface}/{entry.identifier}")
 

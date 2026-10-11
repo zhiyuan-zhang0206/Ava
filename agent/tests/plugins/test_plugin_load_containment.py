@@ -18,6 +18,7 @@ These lock the contract that came out of it (user ruling 2026-09-11):
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -60,10 +61,29 @@ def _restore_plugin_modules() -> Iterator[None]:
     sys.modules.update(before)
 
 
-def _write_plugin(root: Path, name: str, body: str, extra: dict[str, str] | None = None) -> None:
+def _write_plugin(
+    root: Path,
+    name: str,
+    body: str,
+    extra: dict[str, str] | None = None,
+    *,
+    contributions: dict[str, object] | None = None,
+) -> None:
+    """A plugin on disk with the `ava-plugin.json` every plugin ships (declaring `contributions`)."""
     plugin_dir = root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body)
+    (plugin_dir / "ava-plugin.json").write_text(
+        json.dumps(
+            {
+                "apiVersion": 2,
+                "name": name,
+                "version": "1.0.0",
+                "engines": {"ava": ">=0.1.0"},
+                "contributions": contributions or {},
+            }
+        )
+    )
     for filename, content in (extra or {}).items():
         (plugin_dir / filename).write_text(content)
 
@@ -186,6 +206,7 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
                 "def contribute():\n    return PluginContributions(config=Config)\n"
             )
         },
+        contributions={"config": {"schema": "default_config.py"}},
     )
     write_local({"plugins": {"faced": {"enabled": True}}})
 

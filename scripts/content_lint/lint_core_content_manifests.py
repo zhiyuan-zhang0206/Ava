@@ -7,21 +7,20 @@ it declares are checked against the *derived* host version (the commit date of
 the checkout it runs on, design §5.5 v3). CI is where that stays honest.
 
 Hard checks (exit 1):
-1. every core-content manifest validates (the same validator the install and
+1. every builtin plugin (a tracked `ava_builtins/plugins/<name>/plugin.py`)
+   ships a tracked `ava-plugin.json` beside it;
+2. every core-content manifest validates (the same validator the install and
    refresh paths use);
-2. `engines.ava` (when declared) admits this checkout's derived host version —
+3. `engines.ava` (when declared) admits this checkout's derived host version —
    a range that excludes the repo's own current version would refuse the very
    content that ships it;
-3. `requires_commit` (when declared) is an ancestor of this checkout's HEAD —
+4. `requires_commit` (when declared) is an ancestor of this checkout's HEAD —
    a typo'd or future SHA is red.
 
 Audit (report-only, exit 0): every OTHER tracked manifest in the tree is
-reported with its ranges judged against the derived host version AND the
-legacy pyproject version, so the derived-version switch in the shared install
-gate (`cli/commands/extensions/_manifest_gate.py`) is auditable per PR: an old-style
-min-only range keeps passing, and a legacy fixture that would be refused is
-visible in the log instead of surfacing as a surprise later. `--audit-dir`
-extends the audit to machine-local manifests (evidence runs; not used by CI).
+reported with its ranges judged against the derived host version.
+`--audit-dir` extends the audit to machine-local manifests (evidence runs; not
+used by CI).
 
 Run: python3 scripts/content_lint/lint_core_content_manifests.py [--audit-dir DIR ...] (an
 `--audit-dir` that does not exist is an error (stderr + exit 1) rather than a
@@ -47,17 +46,18 @@ from base.packages.plugins import manifest as pm
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 _CORE_ROOT = "ava_builtins"
+_PLUGINS_ROOT = "ava_builtins/plugins"
 
 
-def _tracked_manifests(rel_dir: str | None = None) -> list[Path]:
-    """Tracked `ava-plugin.json` files (optionally under `rel_dir`).
+def _tracked(pattern: str, rel_dir: str | None = None) -> list[Path]:
+    """Tracked files matching the `git ls-files` `pattern` (optionally under `rel_dir`).
 
     Tracked-only via `git ls-files`: an untracked scratch manifest must not
     redden the gate, and a fresh checkout has no build artifacts to skip.
     """
     try:
         result = run_bounded(  # git + fixed args, no user input
-            ["git", "-C", str(_REPO_ROOT), "ls-files", "-z", "*ava-plugin.json"],
+            ["git", "-C", str(_REPO_ROOT), "ls-files", "-z", pattern],
             capture_output=True,
             text=True,
             timeout=60,
@@ -76,6 +76,11 @@ def _tracked_manifests(rel_dir: str | None = None) -> list[Path]:
     return out
 
 
+def _tracked_manifests(rel_dir: str | None = None) -> list[Path]:
+    """Tracked `ava-plugin.json` files (optionally under `rel_dir`)."""
+    return _tracked("*ava-plugin.json", rel_dir)
+
+
 def _ranges_verdict(manifest: pm.PluginManifest, host: str) -> str:
     """PASS/FAIL for one manifest's declared gates against `host`."""
     problems = pm.check_host_engine(manifest, host)
@@ -84,7 +89,7 @@ def _ranges_verdict(manifest: pm.PluginManifest, host: str) -> str:
     return "PASS"
 
 
-def _audit_one(path: Path, derived: str, legacy: str | None) -> None:
+def _audit_one(path: Path, derived: str) -> None:
     try:
         rel = path.relative_to(_REPO_ROOT)
     except ValueError:  # --audit-dir: a machine-local path outside the repo
@@ -94,15 +99,10 @@ def _audit_one(path: Path, derived: str, legacy: str | None) -> None:
     except pm.ManifestError as e:
         print(f"  audit {rel}: invalid manifest — {e}")
         return
-    if manifest is None:
-        return
-    derived_verdict = _ranges_verdict(manifest, derived)
-    legacy_verdict = _ranges_verdict(manifest, legacy) if legacy else "n/a"
     engines = manifest.engines or {}
     print(
         f"  audit {rel}: engines={engines or '-'} requires_commit="
-        f"{manifest.requires_commit or '-'} | derived {derived}: {derived_verdict}"
-        f" | legacy {legacy or '-'}: {legacy_verdict}"
+        f"{manifest.requires_commit or '-'} | derived {derived}: {_ranges_verdict(manifest, derived)}"
     )
 
 
@@ -126,9 +126,24 @@ def _parse_audit_dirs(argv: list[str]) -> tuple[list[Path], int | None]:
     return audit_dirs, None
 
 
+def _missing_plugin_manifests() -> int:
+    """Report each tracked builtin plugin without a tracked manifest; the count."""
+    root = _REPO_ROOT / _PLUGINS_ROOT
+    manifests = {p.parent for p in _tracked_manifests(_PLUGINS_ROOT)}
+    missing = 0
+    for plugin_py in _tracked("*plugin.py", _PLUGINS_ROOT):
+        plugin_dir = plugin_py.parent
+        if plugin_py.name != "plugin.py" or plugin_dir.parent != root:
+            continue
+        if plugin_dir not in manifests:
+            print(f"{plugin_dir.relative_to(_REPO_ROOT)}: builtin plugin ships no ava-plugin.json")
+            missing += 1
+    return missing
+
+
 def _core_errors(derived: str) -> int:
     """Check every tracked core manifest against the derived host version; the error count."""
-    errors = 0
+    errors = _missing_plugin_manifests()
     for path in _tracked_manifests(_CORE_ROOT):
         rel = path.relative_to(_REPO_ROOT)
         try:
@@ -136,8 +151,6 @@ def _core_errors(derived: str) -> int:
         except pm.ManifestError as e:
             print(f"{rel}: invalid manifest — {e}")
             errors += 1
-            continue
-        if manifest is None:
             continue
         for problem in pm.check_host_engine(manifest, derived):
             print(f"{rel}: {problem} (host version is the derived {derived})")
@@ -159,10 +172,6 @@ def main(argv: list[str] | None = None) -> int:
     except host_version.HostVersionError as e:
         print(f"cannot determine the repo's derived host version: {e}", file=sys.stderr)
         return 1
-    try:
-        legacy: str | None = pm.host_version_from_repo(_REPO_ROOT)
-    except pm.ManifestError:
-        legacy = None
 
     errors = _core_errors(derived)
 
@@ -173,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     if audit:
         print(f"audit: {len(audit)} non-core manifest(s) against derived {derived}:")
         for path in audit:
-            _audit_one(path, derived, legacy)
+            _audit_one(path, derived)
 
     if errors:
         print(f"\n{errors} core-content manifest error(s).", file=sys.stderr)

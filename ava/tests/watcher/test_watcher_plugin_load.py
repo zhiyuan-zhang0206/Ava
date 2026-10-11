@@ -39,6 +39,17 @@ def _write_isolated_home(home: Path) -> None:
         "    probe = SimpleNamespace(ok=lambda: 'yes', __doc__='probe plugin')\n"
         "    return PluginContributions(sdk_namespaces=(SdkNamespace('probe', probe),))\n"
     )
+    (plug / "ava-plugin.json").write_text(
+        json.dumps(
+            {
+                "apiVersion": 2,
+                "name": "probe_plugin",
+                "version": "1.0.0",
+                "engines": {"ava": ">=0.1.0"},
+                "contributions": {"sdkNamespaces": ["probe"]},
+            }
+        )
+    )
     builtins = [
         p.name
         for p in paths.repo_plugins_dir().iterdir()

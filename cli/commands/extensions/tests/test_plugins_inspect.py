@@ -43,7 +43,7 @@ def _view(
         directory=Path("/repo/ava_builtins/plugins") / name,
         description=f"{name} does things",
         contributions=contributions,
-        manifest=manifest,
+        manifest=manifest if manifest is not None else _manifest(),
     )
 
 
@@ -108,7 +108,8 @@ def test_detail_lists_every_registered_fact(
     assert "registered contributions (2)" in out
     assert "hooks                before_llm                demo.plugin._DemoHook" in out
     assert "state                demo__counter             DemoState.counter: int" in out
-    assert "(no manifest — a plugin without ava-plugin.json declares nothing)" in out
+    assert "declared 1.0.0  engines.ava=>=0.1.0" in out
+    assert "  registered-not-declared  hooks/before_llm" in out
     # The catalog reports what registered; it points at where "how often did it
     # actually fire" lives rather than pretending to know (issue #40).
     assert "plugin_activation" in out

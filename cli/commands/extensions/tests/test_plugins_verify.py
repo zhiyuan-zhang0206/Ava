@@ -7,6 +7,7 @@ the update looked healthy, because the loader skips a broken plugin instead of f
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -43,6 +44,16 @@ def _plugin(name: str, plugin_py: str, **siblings: str) -> None:
     directory = paths.plugins_dir() / name
     directory.mkdir()
     (directory / "plugin.py").write_text(plugin_py)
+    (directory / "ava-plugin.json").write_text(
+        json.dumps(
+            {
+                "apiVersion": 2,
+                "name": name,
+                "version": "1.0.0",
+                "engines": {"ava": ">=0.1.0"},
+            }
+        )
+    )
     for filename, content in siblings.items():
         (directory / filename).write_text(content)
 
@@ -79,6 +90,19 @@ def test_a_plugin_using_a_deleted_framework_api_is_red_and_the_rest_still_count(
         "RED plugin=old_hooks ImportError: cannot import name 'register_after_exec'"
     )
     assert "old_hooks/plugin.py:1" in red
+
+
+def test_a_plugin_without_a_manifest_is_red(capsys: pytest.CaptureFixture[str]) -> None:
+    _plugin("good", "LOADED = True\n")
+    _plugin("bare", "LOADED = True\n")
+    (paths.plugins_dir() / "bare" / "ava-plugin.json").unlink()
+    _enable("good", "bare")
+
+    assert cmd_plugins_verify() == 1
+
+    out = capsys.readouterr().out
+    assert "RESULT enabled=2 failed=1 rc=1" in out
+    assert "RED plugin=bare ManifestError" in out
 
 
 def test_a_broken_runtime_face_is_red_too(capsys: pytest.CaptureFixture[str]) -> None:
