@@ -7,14 +7,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
+_CHILD = Path(__file__).with_name("_service_read_lite_child.py")
 
-def _probe(code: str, home: Path, *, profile: str | None = None) -> dict[str, Any]:
+
+def _probe(scenario: str, home: Path, *args: str, profile: str | None = None) -> dict[str, Any]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env["AVA_HOME"] = str(home)
     if profile is not None:
         env["AVA_PROCESS_PROFILE"] = profile
-    proc = subprocess.run(  # noqa: S603 — this interpreter runs the fixed import probe
-        [sys.executable, "-B", "-c", code],
+    proc = subprocess.run(  # noqa: S603 — this interpreter runs the fixed child script
+        [sys.executable, "-B", str(_CHILD), scenario, *args],
         cwd=Path(__file__).resolve().parents[3],
         env=env,
         capture_output=True,
@@ -34,14 +36,7 @@ def test_explicit_config_authority_import_stays_lite(tmp_path: Path) -> None:
         "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/test\n"
         "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
     )
-    code = (
-        "import json, sys, base.config as c\n"
-        "import base.config.service_read\n"
-        "print(json.dumps({'boot': c._boot_state(),\n"
-        " 'pydantic_settings': 'pydantic_settings' in sys.modules,\n"
-        " 'config_modules': sorted(m for m in sys.modules if m.startswith('base.config'))}))\n"
-    )
-    result = _probe(code, home)
+    result = _probe("import_stays_lite", home)
     assert result["boot"]["mode"] == "lite"
     assert result["boot"]["upgrades"] == 0
     assert result["pydantic_settings"] is False
@@ -65,27 +60,7 @@ def test_sdk_root_complete_read_keeps_first_use_environment_and_fixed_file(tmp_p
         "AVA_TRACE_ENABLED=false\n"
     )
     (later_home / ".env").write_text("AVA_TRACE_ENABLED=true\n")
-    code = (
-        "import json, os, base.config as c, ava\n"
-        "os.environ['AVA_WEB_JINA_BASE_URL'] = 'https://early.invalid/'\n"
-        "boot = c.ConfigBoot()\n"
-        "boot.boot()\n"
-        "ava.ensure_plugins_loaded(surface=True, config=boot)\n"
-        "from ava.sdk_surface.install import installed\n"
-        "owner = installed().authority\n"
-        "assert owner.runtime is boot.view\n"
-        "assert not owner.runtime.has_domain('web')\n"
-        "before = boot.boot_state()\n"
-        "os.environ['AVA_WEB_JINA_BASE_URL'] = 'https://first-use.invalid/'\n"
-        f"os.environ['AVA_HOME'] = {str(later_home)!r}\n"
-        "first = owner.service_field_value('web_jina_reader_base')\n"
-        "os.environ['AVA_WEB_JINA_BASE_URL'] = 'https://after-read.invalid/'\n"
-        "second = owner.service_field_value('web_jina_reader_base')\n"
-        "aliases = owner.read_env_aliases()\n"
-        "print(json.dumps({'before': before, 'first': first, 'second': second,\n"
-        " 'path': str(owner.env_path), 'trace': aliases['AVA_TRACE_ENABLED']}))\n"
-    )
-    result = _probe(code, home, profile="runner")
+    result = _probe("root_complete_read", home, str(later_home), profile="runner")
     assert result["before"]["mode"] == "lite"
     assert result["before"]["upgrades"] == 0
     assert result["first"] == "https://first-use.invalid/"

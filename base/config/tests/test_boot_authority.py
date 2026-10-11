@@ -12,6 +12,8 @@ from typing import Any
 
 import pytest
 
+_CHILD = Path(__file__).with_name("_boot_authority_child.py")
+
 
 @pytest.mark.parametrize("mode", ["lite", "eager", "skip"])
 def test_boot_authority_result_reaches_the_database_handle(
@@ -37,27 +39,8 @@ def test_boot_authority_result_reaches_the_database_handle(
         env["AVA_CONFIG_BOOT"] = "eager"
     if mode == "skip":
         env["AVA_CONFIG_FETCH"] = "skip"
-    code = (
-        "import base.config as c\n"
-        "from base.db import Database\n"
-        "from base.db.connections import NoDatabaseAuthorityError\n"
-        "from base.db.code_version_gate import ProcessDbGate\n"
-        "from base.native_process.code_version import CodeVersion\n"
-        "from base.native_process.loaded_commit import LoadedCommit\n"
-        "image = LoadedCommit.capture()\n"
-        "gate = ProcessDbGate(process='boot-authority-test', version=CodeVersion(image).get)\n"
-        "db = Database.from_settings(gate=gate)\n"
-        "assert c.settings.env_boot.db_authority_refusal is not None\n"
-        "assert 'env_boot' not in c.settings.model_dump()\n"
-        "try:\n"
-        "    db.connect()\n"
-        "except NoDatabaseAuthorityError as exc:\n"
-        "    print('REFUSED', str(exc))\n"
-        "else:\n"
-        "    raise AssertionError('refused boot reached the database')\n"
-    )
     proc = subprocess.run(  # noqa: S603 — this test owns its isolated home and argv
-        [sys.executable, "-B", "-c", code],
+        [sys.executable, "-B", str(_CHILD)],
         check=False,
         cwd=Path(__file__).resolve().parents[3],
         env=env,

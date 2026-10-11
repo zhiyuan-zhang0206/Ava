@@ -13,26 +13,16 @@ import pytest
 
 from base.daemon.http_transport import start_daemon_http
 
+CHILD = Path(__file__).with_name("_transport_import_child.py")
+
 
 def test_transport_import_cannot_fetch_gateway_configuration() -> None:
     root = Path(__file__).resolve().parents[3]
-    result = subprocess.run(  # noqa: S603 — fixed interpreter and repository-owned probe only
+    result = subprocess.run(  # noqa: S603 — fixed interpreter and repository-owned child script only
         [
             sys.executable,
             "-I",
-            "-c",
-            """import sys
-import importlib.abc
-sys.path.insert(0, sys.argv[1])
-class Deny(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, *args):
-        if fullname.startswith(('base.config', 'base.host.env.bootstrap', 'plugins',
-                                'services.agent_runner.agent_ops.daemon')):
-            raise AssertionError(fullname)
-sys.meta_path.insert(0, Deny())
-import base.daemon.http_transport
-print('TRANSPORT_ONLY')
-""",
+            str(CHILD),
             str(root),
         ],
         check=True,
