@@ -8,6 +8,13 @@ and the matching GitHub Releases.
 ## [Unreleased]
 
 ### Changed
+- An external agent (Claude Code, Codex, an MCP client) can message an Ava agent
+  through `ava agents send --source ...`, the SDK or MCP `send_message` in two
+  ways: `user` delivers as the user, and `external_agent:<subject>[:<instance>]`
+  delivers as a message from that declared agent (shown with its name in the
+  agent's context and in the web timeline). The runtime-protocol negotiation
+  that refused every declared external agent is gone; MCP `send_message` takes
+  `as_external_agent` in place of `caller_protocol`.
 - Alert noise from the 2026-10-02/03 triage is downgraded to what each cause
   earns: private-storage convergence skips are one summary WARNING per tree
   (per-node DEBUG, `node_modules` no longer descended — the 18,516-line/24h

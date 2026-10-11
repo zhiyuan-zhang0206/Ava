@@ -51,6 +51,7 @@
   "legendSource": "来源",
   "sourceAll": "全部来源",
   "sourceFromAgent": "来自 agent {id} 的入站",
+  "sourceFromExternalAgent": "来自外部 agent {name} 的入站",
   "readoutIdle": "悬停在块或节点上查看详情。",
   "readoutNoSource": "无来源",
   "readoutUnit": "{kind} · {count} 条消息 · 读取于 {time} · {source} · {preview}",

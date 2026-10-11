@@ -4,36 +4,23 @@ import json
 
 import pytest
 
-from base.agents.messages.external_caller import (
-    explicit_caller_source,
-    external_caller,
-    launch_caller_assignment,
-)
+from base.agents.messages.external_caller import external_caller, launch_caller_assignment
 
 
 def test_absence_stays_absent_not_human(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AVA_CALLER_IDENTITY", raising=False)
     assert external_caller() is None
-    assert explicit_caller_source() is None
 
 
-def test_explicit_profile_projects_honest_source(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_explicit_profile_is_read_as_the_external_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(
         "AVA_CALLER_IDENTITY",
         json.dumps({"kind": "external_agent", "subject": "codex", "instance": "run-42"}),
     )
     monkeypatch.setenv("AVA_AGENT_ID", "405")
-    assert explicit_caller_source() == "external_agent:codex:run-42"
-
-
-@pytest.mark.parametrize("source", ["user", "agent:405", "system", "external_agent:claude_code"])
-def test_profile_cannot_be_overridden_with_other_identity(
-    monkeypatch: pytest.MonkeyPatch,
-    source: str,
-) -> None:
-    monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
-    with pytest.raises(ValueError, match="conflicts"):
-        explicit_caller_source(source)
+    caller = external_caller()
+    assert caller is not None
+    assert caller.source() == "external_agent:codex:run-42"
 
 
 @pytest.mark.parametrize(
@@ -52,7 +39,7 @@ def test_invalid_profile_fails_without_fallback(
 ) -> None:
     monkeypatch.setenv("AVA_CALLER_IDENTITY", profile)
     with pytest.raises(ValueError):
-        explicit_caller_source("user")
+        external_caller()
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude_code"])

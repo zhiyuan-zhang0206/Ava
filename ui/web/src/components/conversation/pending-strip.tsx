@@ -15,6 +15,7 @@ import { assetUrl } from "@/lib/transport/api";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import type { PendingInbound } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
+import { externalAgentName } from "@/lib/format/inbound-source";
 
 // Map the inbound `source` tag to a short human label. Tags:
 // user / ui:page:<name> / agent:N / schedule:N[:expired] / system / self.
@@ -23,6 +24,7 @@ function sourceLabel(source: string | null): string {
   // user typing, or a callback from an agent-rendered page — both are "User".
   if (source === "user" || source.startsWith("ui:page:")) return "User";
   if (source.startsWith("agent:")) return `Agent #${source.slice("agent:".length)}`;
+  if (source.startsWith("external_agent:")) return `External agent ${externalAgentName(source)}`;
   if (source.startsWith("schedule:")) return "scheduled";
   return source;
 }

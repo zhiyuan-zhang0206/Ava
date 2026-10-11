@@ -162,13 +162,16 @@ def test_bucket_ignores_image_base64_in_multimodal_inbound() -> None:
 
 def test_inbound_split_by_source() -> None:
     """Inbound messages are bucketed by their envelope `ava_source`: a peer agent
-    (`agent:N`) -> agent_messages; machine/framework wakeups & notices
+    (`agent:N`) or a declared external agent (`external_agent:S`) -> agent_messages; machine/framework wakeups & notices
     (`watcher:` / `shell:` / `schedule:` / `system[:*]`) -> automation; a human
     turn (`user` / `ui:page:*`) and a legacy inbound with no source -> user_input."""
     msgs = [
         inbound_message(content="human", source="user", inbound_id=1, body_start=0),
         inbound_message(content="page", source="ui:page:dash", inbound_id=2, body_start=0),
         inbound_message(content="peer", source="agent:7", inbound_id=3, body_start=0),
+        inbound_message(
+            content="outside", source="external_agent:claude_code", inbound_id=9, body_start=0
+        ),
         inbound_message(content="wake", source="watcher:2", inbound_id=4, body_start=0),
         inbound_message(content="shell done", source="shell:9", inbound_id=5, body_start=0),
         inbound_message(content="sched", source="schedule:4", inbound_id=6, body_start=0),
@@ -179,7 +182,7 @@ def test_inbound_split_by_source() -> None:
     ]
     buckets = bucket_messages(msgs, _records(msgs))
     assert len(buckets["user_input"]) == 3
-    assert len(buckets["agent_messages"]) == 1
+    assert len(buckets["agent_messages"]) == 2
     assert len(buckets["automation"]) == 5
 
 

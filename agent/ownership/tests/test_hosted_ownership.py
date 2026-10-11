@@ -42,14 +42,6 @@ def _agent(conn: psycopg.Connection) -> int:
     return agent_id
 
 
-def _version(conn: psycopg.Connection, agent_id: int) -> int:
-    row = conn.execute(
-        "SELECT runtime_protocol_version FROM agents_meta WHERE id = %s", (agent_id,)
-    ).fetchone()
-    assert row is not None
-    return int(row[0])
-
-
 async def test_hosted_incarnation_survives_idle_and_next_turn(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -61,11 +53,7 @@ async def test_hosted_incarnation_survives_idle_and_next_turn(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert first is not None
-    # A legacy admission (no current publication) advertises protocol zero,
-    # and settling neither invents nor clears an advertisement (task #4122).
-    assert _version(db_conn, agent_id) == 0
     assert await settle_hosted_runtime(aops_pool, first, bus=event_bus, resources=None)
-    assert _version(db_conn, agent_id) == 0
     second = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
@@ -202,8 +190,7 @@ async def test_admission_does_not_lock_deployment_state(
     database: Database,
 ) -> None:
     """A concurrently held row lock on the deployment singleton does not stall a
-    hosted birth: admission reads and locks nothing but the agent's own row, and
-    advertises protocol zero."""
+    hosted birth: admission reads and locks nothing but the agent's own row."""
     agent_id, owner = _agent(db_conn), uuid4()
     try:
         db_conn.execute("SELECT id FROM deployment_state WHERE id = 1 FOR UPDATE")
@@ -214,29 +201,8 @@ async def test_admission_does_not_lock_deployment_state(
             10,
         )
         assert admitted is not None
-        assert _version(db_conn, agent_id) == 0
     finally:
         db_conn.rollback()
-
-
-async def test_settle_retains_a_granted_advertisement(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    """An ordinary settle keeps a protocol advertisement already granted (task #4122)."""
-    agent_id, owner = _agent(db_conn), uuid4()
-    admitted = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
-    )
-    assert admitted is not None
-    db_conn.execute(
-        "UPDATE agents_meta SET runtime_protocol_version = 1 WHERE id = %s", (agent_id,)
-    )
-    db_conn.commit()
-    assert await settle_hosted_runtime(aops_pool, admitted, bus=event_bus, resources=None)
-    assert _version(db_conn, agent_id) == 1
 
 
 async def test_owner_beat_renews_idle_but_not_other_owner(
@@ -260,9 +226,8 @@ async def test_owner_beat_renews_idle_but_not_other_owner(
     db_conn.commit()
     await renew_hosted_owner(aops_pool, "host-test", owner)
     assert db_conn.execute(
-        "SELECT lease_expires_at > now(), runtime_protocol_version FROM agents_meta WHERE id = %s",
-        (agent_id,),
-    ).fetchone() == (True, 0)
+        "SELECT lease_expires_at > now() FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone() == (True,)
 
 
 # ── corpse marker: stamp / settle / reap / renew ─────────────────────────────

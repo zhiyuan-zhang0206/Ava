@@ -36,7 +36,7 @@ def test_envelopes_are_lazy_isolated_and_live() -> None:
     assert reads[-3:] == ["flag0", "flag1", "clock1"]
 
 
-def test_system_and_caller_headers_do_not_read_policy_or_clock() -> None:
+def test_system_header_does_not_read_policy_or_clock() -> None:
     def unused() -> bool:
         raise AssertionError("early envelope returns do not read policy")
 
@@ -45,7 +45,24 @@ def test_system_and_caller_headers_do_not_read_policy_or_clock() -> None:
 
     inputs = EnvelopeReadInputs(no_clock, unused)
     assert inbound_head("system:update", inputs=inputs) == "[system] "
-    assert inbound_head("external_agent:codex:run-42", inputs=inputs).startswith("External agent")
+
+
+def test_external_agent_header_names_the_sender_and_follows_the_timestamp_policy() -> None:
+    instant = datetime(2026, 10, 4, 12, tzinfo=UTC)
+    clock = Clock(ClockConfig("UTC", "UTC", False), now=lambda: instant)
+    stamped = EnvelopeReadInputs(lambda: clock, lambda: True)
+    bare = EnvelopeReadInputs(lambda: clock, lambda: False)
+    source = "external_agent:codex:run-42"
+    assert inbound_head(source, inputs=stamped, created_at=instant) == (
+        "External agent (codex / run-42; asserted provenance) [2026-10-04 12:00:00]:\n\n"
+    )
+    assert (
+        inbound_head(source, inputs=bare)
+        == "External agent (codex / run-42; asserted provenance):\n\n"
+    )
+    assert inbound_head("external_agent:claude_code", inputs=bare) == (
+        "External agent (claude_code; asserted provenance):\n\n"
+    )
 
 
 def test_unknown_source_reads_policy_at_original_validation_point() -> None:
