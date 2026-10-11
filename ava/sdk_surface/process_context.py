@@ -174,6 +174,11 @@ def context_from_description(
     )
 
 
+def has_launched_identity() -> bool:
+    """Inspect the launched identity channel without constructing a context."""
+    return "AVA_AGENT_ID" in os.environ  # env-ok: launched script identity channel
+
+
 def launched_context(*, config: ConfigBoot | None = None) -> AvaContext | None:
     """Construct a launched script's context from its explicit environment channel.
 

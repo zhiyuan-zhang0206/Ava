@@ -297,7 +297,7 @@ def ensure_plugins_loaded(
     clock_factory: Callable[[], Clock] | None = None,
     producer: Callable[[], Any] | None = None,
     machine: _MachineIdentity | None = None,
-    _from_import: bool = False,
+    context: AvaContext | None = None,
 ) -> None:
     """Idempotently load plugin namespaces (`ava.tasks` etc.) into *this* process.
 
@@ -327,37 +327,70 @@ def ensure_plugins_loaded(
     retrying the load. The loader's earlier per-module import containment is a
     separate boundary in `agent.extensions`.
 
-    An explicit composition root supplies its configuration, clock and optional
-    machine owner. If no producer is supplied, the installation retains its own
+    A supplied context binds before loading and receives the installed catalog.
+    A launched process with no context first constructs one from the same boot
+    owner used for its installation. Startup identity inspection does not invoke
+    the ambient context getter. An explicit composition root supplies its
+    configuration, clock and optional machine owner. If no producer is supplied, the installation retains its own
     cold clients with those inputs until process exit; it never borrows an
     attachment's shorter-lived clients. Bound SDK calls use their own context's
     producer instead.
     """
-    if _from_import:
-        _initialize_launched_process()
-        return
+    if context is not None:
+        bind_context(context)
+    else:
+        context = _bound_process_context()
     from .sdk_surface import install as _sdk_install
     from .sdk_surface import sdk_disable
 
     _sdk_install.raise_load_failure()
     installation = _sdk_install.installed()
     if installation is not None and (surface or installation.faces):
+        _bind_installed_catalog(context)
         return
     if _sdk_install.load_attempted():
         return  # An actual re-entrant miss while a load is in flight.
-    import importlib
-
+    if installation is None and config is None and context is None and _is_launched_process():
+        context, config = _prepare_launched_context()
+    if context is not None:
+        clock_factory = clock_factory or context.clock_factory
+        machine = machine if machine is not None else context.machine
     if installation is None:
         # Operator errors in AVA_SDK_DISABLE are fatal, before plugin admission.
         sdk_disable.apply_entries(sdk_disable.env_entries())
     _sdk_install.mark_load_attempt()
+    _load_plugin_stages(
+        upgrade_faces=installation is not None,
+        surface=surface,
+        config=config,
+        clock_factory=clock_factory,
+        machine=machine,
+        producer=producer,
+    )
+    _bind_installed_catalog(context)
+
+
+def _load_plugin_stages(
+    *,
+    upgrade_faces: bool,
+    surface: bool,
+    config: ConfigBoot | None,
+    clock_factory: Callable[[], Clock] | None,
+    machine: _MachineIdentity | None,
+    producer: Callable[[], Any] | None,
+) -> None:
+    """Run the existing installation stage and retain its original load failure."""
+    import importlib
+
+    from .sdk_surface import install as _sdk_install
+
     try:
         loader = importlib.import_module("agent.extensions")
         if getattr(loader.__spec__, "_initializing", False):
             # Python returned the module during its own import: no load ran yet.
             _sdk_install.clear_load_attempt()
             return
-        if installation is not None:
+        if upgrade_faces:
             loader.load_agent_faces()
             _sdk_install.mark_faces_loaded()
         else:
@@ -409,14 +442,20 @@ def initialize_context(
     context-client cleanup and prior-context restoration. Installation producers
     keep their separate lifetime. Shared hosts cannot bind an ambient context.
     """
-    bind_context(context)
     ensure_plugins_loaded(
+        context=context,
         surface=surface,
         config=config,
         clock_factory=clock_factory or context.clock_factory,
         machine=context.machine,
         producer=producer,
     )
+
+
+def _bind_installed_catalog(context: AvaContext | None) -> None:
+    """Complete a bound context only after its installation is actually ready."""
+    if context is None:
+        return
     from .sdk_surface import install as _sdk_install
     from .sdk_surface import settings as _settings
 
@@ -427,30 +466,33 @@ def initialize_context(
             bind_context(_replace(context, catalog=catalog))
 
 
-def _initialize_launched_process() -> None:
-    """Complete a launched script's context and surface before import returns."""
-    bound = globals().get(_CONTEXT_KEY)
-    if bound is not None:
-        from .sdk_surface import agent_identity
-
-        if not agent_identity.is_launched_child():
-            return
-        from .sdk_surface import install as _sdk_install
-
-        _sdk_install.raise_load_failure()
-        if _sdk_install.installed() is not None:
-            return
-        initialize_context(bound)
-        return
-    # The existing process-context owner validates the launched identity channel.
+def _prepare_launched_context() -> tuple[AvaContext, ConfigBoot]:
+    """Capture one boot owner and publish its cold launched context."""
     config = ConfigBoot()
     context = process_context.launched_context(config=config)
     if context is None:
-        return
+        raise RuntimeError("launched process identity disappeared during SDK initialization")
     import atexit
 
     atexit.register(context.clients.close)
-    initialize_context(context, config=config)
+    bind_context(context)
+    return context, config
+
+
+def _bound_process_context() -> AvaContext | None:
+    """Inspect the existing entry without turning host posture into a context."""
+    return None if is_host_process() else globals().get(_CONTEXT_KEY)
+
+
+def _is_launched_process() -> bool:
+    """Inspect startup identity without triggering the ambient context getter."""
+    if is_host_process():
+        return False
+    bound = _bound_process_context()
+    if bound is not None:
+        identity = bound.identity
+        return identity is not None and identity.agent_id is not None and not identity.owns_loop
+    return process_context.has_launched_identity()
 
 
 def _maybe_load_plugins_for_missing(name: str) -> bool:
@@ -619,5 +661,6 @@ _init_complete = True
 if (
     getattr(getattr(_sys.modules.get("__main__"), "__spec__", None), "name", None)
     != "agent.execution.child"
+    and _is_launched_process()
 ):
-    ensure_plugins_loaded(_from_import=True)
+    ensure_plugins_loaded()

@@ -82,7 +82,22 @@ import ava
 from ava.sdk_surface import install
 assert getattr(ava, "context", None) is None
 assert install.installed() is None
+from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
+manual = AvaContext(clients=ClientSet())
+ava.bind_context(manual)
+importlib.reload(ava)
+assert ava.context is manual
+assert install.installed() is None
+ava.unbind_context()
 ava.bind_host_process()
+from types import SimpleNamespace
+installed = install.installed
+install.installed = lambda: SimpleNamespace(faces=True)
+ava.ensure_plugins_loaded()
+assert ava.is_host_process()
+assert getattr(ava, "context", None) is None
+install.installed = installed
 error = ValueError("retained explicit load failure")
 install.mark_load_failed(error)
 importlib.reload(ava)
