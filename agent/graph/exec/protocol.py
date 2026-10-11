@@ -381,8 +381,7 @@ def _write_json(path: Path, envelope: dict[str, Any]) -> None:
     fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     tmp = Path(raw_tmp)
     try:
-        if os.name != "nt":
-            os.fchmod(fd, 0o600)
+        os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()

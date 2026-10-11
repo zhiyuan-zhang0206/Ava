@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import platform
 from pathlib import Path
 
 import pytest
@@ -408,8 +407,6 @@ def test_collector_self_metrics_are_scraped_for_queue_and_drop_visibility(
 def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Every split role's config carries the telemetry bearer (never the secret) and a gateway's
     the Redis admin password; the file is 0600 from creation, not chmod-ed after."""
-    if platform.system() == "Windows":
-        pytest.skip("POSIX file modes only")
     (tmp_path / "otel-collector").mkdir(parents=True)
     (tmp_path / "otel-collector/otelcol-contrib").write_bytes(b"bin")
     (tmp_path / "otel-collector/version").write_text(

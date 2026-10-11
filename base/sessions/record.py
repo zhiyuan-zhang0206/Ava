@@ -3,7 +3,7 @@
 `base.sessions.posixproc` persists a launched background session as JSON under
 `$AVA_HOME/run/sessions/<name>.json`.
 
-On Linux, WSL2 may step `/proc/stat`'s `btime`, which makes psutil's epoch
+On Linux, a wall-clock step may move `/proc/stat`'s `btime`, which makes psutil's epoch
 `create_time()` drift for a still-live pid. `starttime` records `/proc/<pid>/stat`
 field 22 instead: clock ticks since boot are monotonic and therefore the stable
 process identity when available; `create_time` is the identity where

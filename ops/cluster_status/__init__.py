@@ -236,10 +236,9 @@ def capture_shell(
     Resolves `session_id` against this host's live shell sessions for the agent
     (`agent_shell_sessions`), reconstructs the full session name (carrying the
     optional `-<name>` suffix), and captures the last `lines` lines through the
-    shell session backend (the pty-sessions service on POSIX; the native supervisor on
-    Windows — the backend's exact-match capture pins it to that one session,
-    never a prefix neighbour `shell-3` vs `shell-30`, or its `-watcher`). Returns
-    (full_name, captured_lines, created_at, uptime_seconds) — lines newline-split
+    shell session backend (the pty-sessions service — its exact-match capture
+    pins it to that one session, never a prefix neighbour `shell-3` vs
+    `shell-30`, or its `-watcher`). Returns (full_name, captured_lines, created_at, uptime_seconds) — lines newline-split
     with the trailing newline stripped; created_at / uptime_seconds come from the
     resolved session record (the launch epoch + probe-time uptime).
 

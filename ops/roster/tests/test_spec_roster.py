@@ -254,39 +254,8 @@ def test_otel_collector_runs_on_pure_runner(
     assert "otel-collector" in start
 
 
-def test_browser_mcp_gated_out_without_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A host with display + Chrome + npx but no AF_UNIX (a Windows agent-runner)
-    keeps `browser` in the start roster and drops `browser-mcp` WITH a reason.
-
-    Before the split gate both services shared `browser_incapability()`, so
-    browser-mcp was unconditionally in a Windows runner's roster, failed every
-    launch, and `ava status` showed no skip annotation to say why."""
-    monkeypatch.setattr("base.host.system.probes.unix_sockets_available", lambda: False)
-    monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
-    annotated = _agent_runner_annotated(monkeypatch)
-    assert annotated["browser"] is None
-    assert annotated["browser-mcp"] is not None
-    assert "AF_UNIX" in annotated["browser-mcp"]
-    start = {s.session for s in spec.services_for_capabilities(frozenset({"agent-runner"}))}
-    assert "browser" in start
-    assert "browser-mcp" not in start
-
-
-def test_browser_mcp_ungated_with_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """On a capable POSIX host both services start — the AF_UNIX prong is the
-    only thing the two gates differ by."""
-    monkeypatch.setattr("base.host.system.probes.unix_sockets_available", lambda: True)
-    monkeypatch.setattr("base.host.system.probes.browser_incapability", lambda: None)
-    monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
-    annotated = _agent_runner_annotated(monkeypatch)
-    assert annotated["browser"] is None
-    assert annotated["browser-mcp"] is None
-
-
 def test_browser_mcp_gated_out_when_browser_is(monkeypatch: pytest.MonkeyPatch) -> None:
-    """browser-mcp's gate is a SUPERSET: an incapable browser host also drops
-    browser-mcp, with the browser reason (not the AF_UNIX one)."""
-    monkeypatch.setattr("base.host.system.probes.unix_sockets_available", lambda: True)
+    """An incapable browser host also drops browser-mcp, with the browser reason."""
     monkeypatch.setattr(
         "base.host.system.probes.browser_incapability", lambda: "no display (headless)"
     )
@@ -294,31 +263,6 @@ def test_browser_mcp_gated_out_when_browser_is(monkeypatch: pytest.MonkeyPatch) 
     annotated = _agent_runner_annotated(monkeypatch)
     assert annotated["browser"] == "no display (headless)"
     assert annotated["browser-mcp"] == "no display (headless)"
-
-
-def test_mcp_daemon_gated_out_without_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """mcp-daemon's transport is a Unix socket, so a host without AF_UNIX (a
-    Windows agent-runner) must not have it in the start roster — otherwise the
-    daemon fails every launch AND the watchdog judges it dead every 60s and
-    logs a restart failure (the pre-fix win runner: 1,257 ERROR/24h)."""
-    monkeypatch.setattr("ops.spec.unix_sockets_available", lambda: False)
-    monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
-    annotated = _agent_runner_annotated(monkeypatch)
-    assert annotated["mcp-daemon"] is not None
-    assert "AF_UNIX" in annotated["mcp-daemon"]
-    start = {s.session for s in spec.services_for_capabilities(frozenset({"agent-runner"}))}
-    assert "mcp-daemon" not in start
-
-
-def test_mcp_daemon_ungated_with_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """On a capable POSIX host mcp-daemon stays in the start roster — the
-    AF_UNIX prong is the only thing its gate checks."""
-    monkeypatch.setattr("ops.spec.unix_sockets_available", lambda: True)
-    monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
-    annotated = _agent_runner_annotated(monkeypatch)
-    assert annotated["mcp-daemon"] is None
-    start = {s.session for s in spec.services_for_capabilities(frozenset({"agent-runner"}))}
-    assert "mcp-daemon" in start
 
 
 # ─── the identity contract, stated on the roster ─────────────────────────

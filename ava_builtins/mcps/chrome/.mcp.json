@@ -7,8 +7,7 @@
         "services.desktop.browser.mcp_wrapper"
       ],
       "requires": {
-        "display": true,
-        "unix_socket": true
+        "display": true
       },
       "description": "drive a logged-in Chrome browser: navigate pages, take snapshots and screenshots, click elements, fill forms, run JavaScript, read console logs",
       "shared": "browser"

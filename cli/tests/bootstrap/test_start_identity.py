@@ -105,7 +105,7 @@ def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
     with pytest.raises(OSError, match="power loss"):
         identity.prepare_identity(inputs)
     minted = passphrase.pinned(inputs.home)
-    assert minted is not None and minted != passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE
+    assert minted is not None and minted != passphrase.derive("")
     assert passphrase.pin_path(inputs.home).stat().st_mode & 0o777 == 0o600
     monkeypatch.setattr(identity, "upsert_env", upsert)
     identity.resume_claim(inputs.home)

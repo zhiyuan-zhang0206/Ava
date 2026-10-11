@@ -18,7 +18,6 @@ from uuid import UUID
 import pytest
 
 from ava.shell.coding_tools import _common, codex
-from base.native_process.os_platform import is_windows
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 from tests.fixtures.pin_agent import pin_agent
@@ -145,7 +144,6 @@ def test_supervisor_bootstrap_restores_owner_identity(tmp_path: Path) -> None:
     assert argv[-2] == "-c" and "['watch']" in argv[-1]
 
 
-@pytest.mark.skipif(is_windows(), reason="PTY sessions require POSIX")
 def test_codex_supervisor_uses_projected_session_environment(
     pty_service: PtyServiceProcess, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
