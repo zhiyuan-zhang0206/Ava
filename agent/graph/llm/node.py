@@ -31,9 +31,8 @@ race, chunk assembly + final-message validation, and the error taxonomy
 live in the sibling modules ``_stream.py`` /
 ``_cancel.py`` / ``_chunk.py`` (all in this ``llm/`` package) plus the parent
 package's ``llm_errors.py``; this module keeps the node entry + turn dispatch
-(``llm_node``, ``_llm_node_impl``). ``_cancel`` imports ``LlmGoto`` from here,
-so ``_race_stream_vs_cancel`` is imported lazily inside ``_llm_node_impl``
-rather than at module top (keeps the import graph acyclic). The immutable base
+(``llm_node``, ``_llm_node_impl``). The goto type both this module and ``_cancel``
+use lives in ``goto.py``. The immutable base
 system prompt + lazy SDK overview capture live in the parent package's
 ``_base_prompt.py``, imported lazily by ``system_prompt.build_system_prompt``.
 """
@@ -78,13 +77,11 @@ from base.lm.catalog import ModelCatalog
 from base.lm.content import content_blocks
 from base.log import logger
 
+from ._cancel import race_stream_vs_cancel
 from ._chunk import _assemble_final_message
 from ._retry import RETRY_REMAINING_ATTR, Attempt, retry_wait
 from ._stream import _stream_llm
-
-# llm_node normal → BEFORE_EXEC; cancel / no-tool-call halt → AFTER_EXEC
-# (halted=True makes after_exec route back to claim). Type narrow catches illegal goto.
-LlmGoto = Literal["before_exec", "after_exec", "init_context", "claim"]
+from .goto import LlmGoto
 
 
 def _log_llm_retry_duration(
@@ -539,13 +536,7 @@ async def _llm_node_impl(
     # usage_metadata; `message_chunk_to_message` converts to AIMessage.
     chunks: list[AIMessageChunk] = []
 
-    # Lazy import: `_cancel` imports `LlmGoto` from this module at its top
-    # level, so a top-level `from ._cancel import ...` here would be a
-    # circular import (Task #1004 split). sys.modules serves it after the
-    # first turn — no per-turn cost.
-    from ._cancel import _race_stream_vs_cancel
-
-    cancelled_cmd = await _race_stream_vs_cancel(
+    cancelled_cmd = await race_stream_vs_cancel(
         ctx,
         agent_id,
         _stream_llm(

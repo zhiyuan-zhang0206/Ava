@@ -9,7 +9,8 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
-from agent.impersonation import flush_checkpoint, settle_checkpoint
+from agent.impersonation import settle_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted_completion import (
     completed_hosted_lifecycle_kind,
     pending_hosted_lifecycle_id,

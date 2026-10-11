@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage
 from psycopg_pool import AsyncConnectionPool
 
-from agent.impersonation import flush_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from agent.state import ContextReset
 from base.agents.compaction.models import CompactHeldError
 from base.db.code_version_gate import ProcessDbGate

@@ -1,7 +1,8 @@
 """Durable native checkpoint receipts for automatic session endings."""
 
 import asyncio
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 from langchain_core.messages import HumanMessage
 
@@ -22,6 +23,14 @@ _IMPERSONATION_EXPLANATION = (
     "and a path to the session record. Review the handoff and continue any "
     "unfinished requests."
 )
+
+
+async def flush_checkpoint(checkpointer: object, agent_id: int) -> None:
+    """Flush the optional buffered saver without probing dynamic attributes."""
+    attributes = getattr(checkpointer, "__dict__", {})
+    if "_ava_nstep_flush" in attributes:
+        flush = cast(Callable[[str], Awaitable[None]], attributes["_ava_nstep_flush"])
+        await flush(str(agent_id))
 
 
 def _make_note(content: str, *, notes: HandoffNotes) -> HumanMessage:
@@ -68,8 +77,6 @@ def start_marker(session: dict[str, Any], *, notes: HandoffNotes) -> HumanMessag
 
 async def ensure_start_marker(graph: Any, session: dict[str, Any], *, notes: HandoffNotes) -> None:
     """Repair a crash between accepting the request and saving its timeline anchor."""
-    from agent.impersonation import flush_checkpoint
-
     config = {"configurable": {"thread_id": str(session["agent_id"])}}
     snapshot = await graph.aget_state(config)
     update = start_update(
@@ -172,8 +179,6 @@ async def deliver_handoff(
     ``reason`` is the death cause of a supervisor-aborted session (task #3998);
     when present, the note names it right after the session-end sentence.
     """
-    from agent.impersonation import flush_checkpoint
-
     # Keep the truthful pending record while the durable native handoff proceeds.
     summary, path = await asyncio.to_thread(_save_document, db, session, incarnation)
     config = {"configurable": {"thread_id": str(incarnation.agent_id)}}

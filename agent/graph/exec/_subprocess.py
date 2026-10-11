@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
-import os
 import signal
 import subprocess
 import sys
@@ -28,43 +26,31 @@ from typing import Any
 from base.agents.context import AvaContext
 from base.db import Database
 from base.deploy.release import editable_install
-from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.turn_identity import HostedTurnResources
 from base.paths import exec_run_dir
 
 from . import _process
+from ._child_boundary import build_child_env, read_result_envelope, result_from_payload
 from ._output_pipe import ExecOutputPipe
+from ._owned_run import managed_target, run_owned
 from ._result import (
     ExecChildError,
-    _construct_exec_result,
     _ExecCrashed,
     _ExecResult,
-    lifecycle_exception_from_name,
 )
-from ._stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
+from ._stream import ExecOutputChunkPublisher, StreamingTextIO
 from .protocol import (
     ResultPayload,
     make_request_path,
     make_result_path,
-    read_result,
     write_request,
 )
 
 # Same cadence as the old worker-thread poll loop: near-free, and cancel /
 # timeout response latency stays <= 50ms + signal delivery.
 _POLL_INTERVAL_S = 0.05
-
-
-def _cwd_is_inside_checkout(cwd: Path, checkout_root: Path) -> bool:
-    """Whether an exec child cwd may inherit its interpreter's virtualenv."""
-
-    return (
-        cwd.is_relative_to(checkout_root)
-        and not cwd.is_relative_to(checkout_root / ".worktrees")
-        and not cwd.is_relative_to(checkout_root / ".claude" / "worktrees")
-    )
 
 
 def _default_editable_guard() -> tuple[str, ...]:
@@ -105,44 +91,6 @@ def _editable_guard_failure(
     )
 
 
-def _build_child_env(
-    agent_id: int | None,
-    request_path: Path,
-    result_path: Path,
-    *,
-    config_overlay: dict[str, object] | None = None,
-    birth_config: dict[str, object] | None = None,
-) -> dict[str, str]:
-    """The child's environment: the parent's own (settings already materialized
-    by dotenv_boot), plus the identity the session env allowlist deliberately
-    drops (Task #856) and the two envelope paths. Only explicit per-agent maps
-    are exported; ambient parent carriers are removed so an unbound child
-    cannot inherit another agent's pins (JSON in env, never argv).
-
-    A child spawned outside its interpreter checkout drops ``VIRTUAL_ENV`` so
-    a bare uv command cannot target a different checkout's editable install.
-    Children running inside their own checkout preserve their venv identity.
-    """
-    env = os.environ.copy()
-    env.pop(AGENT_CONFIG_OVERLAY_ENV, None)
-    env.pop(AGENT_BIRTH_CONFIG_ENV, None)
-    source_root = editable_install.current_interpreter_source_root()
-    if source_root is not None and not _cwd_is_inside_checkout(
-        Path.cwd().resolve(), source_root.resolve()
-    ):
-        env.pop("VIRTUAL_ENV", None)
-    if agent_id is not None:
-        env["AVA_AGENT_ID"] = str(agent_id)
-    env["AVA_PROCESS_PROFILE"] = "agent"
-    env["AVA_EXEC_REQUEST_FILE"] = str(request_path)
-    env["AVA_EXEC_RESULT_FILE"] = str(result_path)
-    if config_overlay:
-        env[AGENT_CONFIG_OVERLAY_ENV] = json.dumps(config_overlay, sort_keys=True)
-    if birth_config:
-        env[AGENT_BIRTH_CONFIG_ENV] = json.dumps(birth_config, sort_keys=True)
-    return env
-
-
 class _ExecNeverStartedError(OSError):
     """Popen refused before returning a child; preallocated resources closed."""
 
@@ -157,7 +105,7 @@ def _spawn(
 ) -> tuple[subprocess.Popen[bytes], ExecProcessDomain]:
     """Spawn one child. POSIX raw subprocesses stay in its process group;
     persistent ``ava.shell.sessions`` are backend-hosted and outside it."""
-    env = _build_child_env(
+    env = build_child_env(
         agent_id,
         request_path,
         result_path,
@@ -394,8 +342,6 @@ async def _run_in_subprocess(
     guard_failure = _editable_guard_failure(editable_guard)
     if guard_failure is not None:
         return guard_failure, None
-    from ._owned_run import managed_target, run_owned
-
     target = await asyncio.to_thread(
         managed_target,
         db,
@@ -528,9 +474,9 @@ async def _run_legacy_subprocess(
         )
         resources_settled = True
 
-        payload, envelope_error = _read_result_envelope(result_path, proc.returncode)
+        payload, envelope_error = read_result_envelope(result_path, proc.returncode)
         return (
-            _result_from_payload(
+            result_from_payload(
                 stream.getvalue(),
                 payload,
                 cancelled=cancelled,
@@ -596,117 +542,4 @@ async def _run_legacy_subprocess(
         )
 
 
-def _read_result_envelope(
-    result_path: Path, returncode: int | None
-) -> tuple[ResultPayload | None, str | None]:
-    """Read the child's result envelope; returns (payload, error).
-
-    `payload` None + `error` None when the envelope is missing (SIGKILL /
-    watchdog / the agent's own os._exit — the caller classifies from its own
-    flags). A malformed envelope (version drift / unknown kind / oversized) is
-    a protocol violation; it comes back as an `error` string so the caller
-    surfaces it as a crash outcome instead of guessing "done"."""
-    if not result_path.exists():
-        if returncode == 124:
-            # Watchdog hard-exit (timeout(1) convention) — the parent sent no
-            # signal (it was unreachable). Surface as a crash unless the
-            # parent's own timeout flag confirms the deadline outcome.
-            return (
-                ResultPayload(
-                    kind="timed_out",
-                    exc_type="TimeoutError",
-                    exc_msg="exec child watchdog fired — the parent never signalled it",
-                ),
-                None,
-            )
-        return None, None
-    try:
-        return read_result(result_path), None
-    except BaseException as exc:
-        return None, f"exec result envelope could not be decoded: {exc}"
-
-
-def _child_exception(
-    payload: ResultPayload | None, envelope_error: str | None
-) -> BaseException | None:
-    """The exception the child's outcome stands for, or None for a clean exit."""
-    if envelope_error is not None:
-        return ExecChildError("exec_result_envelope_invalid", envelope_error, None)
-    if payload is not None and payload.kind == "lifecycle" and payload.lifecycle_type:
-        exc = lifecycle_exception_from_name(payload.lifecycle_type)
-        if exc is None:
-            exc = ExecChildError(
-                "unknown_lifecycle_class",
-                "child reported unknown lifecycle class " + repr(payload.lifecycle_type),
-                None,
-            )
-        return exc
-    if payload is not None and payload.exc_type:
-        # Crash, or a signal exception the agent raised itself
-        # (KeyboardInterrupt / TimeoutError written by its own code): if the
-        # parent's flags confirm the signal, the construction priority below
-        # still wins (cancel/timeout outrank a crash exc).
-        return ExecChildError(payload.exc_type, payload.exc_msg or "", payload.full_traceback)
-    if payload is None:
-        return ExecChildError(
-            "exec_subprocess_aborted",
-            "the exec child exited without writing a result envelope "
-            "(SIGKILLed, watchdog, or the agent's own os._exit)",
-            None,
-        )
-    return None
-
-
-def _result_from_payload(
-    output: str,
-    payload: ResultPayload | None,
-    *,
-    cancelled: bool,
-    timed_out: bool,
-    envelope_error: str | None = None,
-    stream_cap: StreamCap | None = None,
-    memory_guard_notice: str | None = None,
-) -> _ExecResult:
-    """Map the child's outcome onto the `_ExecResult` sum type.
-
-    The parent's cancel/timeout flags stay authoritative (same construction
-    priority as the old thread loop); the child's kind is advisory except for
-    lifecycle — the envelope carries the `LifecycleExit` class name, which the
-    parent reconstructs for the dispatcher's isinstance match. A missing
-    envelope with a non-zero exit (agent called os._exit) becomes a crash with
-    an explanatory error; when the host memory guard killed the child, that
-    error and the agent-visible output state the guard's reason instead.
-    """
-    if memory_guard_notice is not None and payload is None:
-        output = f"{output}\n{memory_guard_notice}\n" if output else f"{memory_guard_notice}\n"
-        exc: BaseException | None = ExecChildError(
-            "exec_memory_guard_killed", memory_guard_notice, None
-        )
-    else:
-        exc = _child_exception(payload, envelope_error)
-    result = _construct_exec_result(
-        output,
-        exc,
-        cancelled=cancelled,
-        timed_out=timed_out,
-        stream_cap=stream_cap,
-        code_reached=(payload.code_reached if payload is not None else None),
-    )
-    if (
-        isinstance(result, _ExecCrashed)
-        and payload is not None
-        and payload.full_traceback is not None
-    ):
-        # The child formatted the full (unfiltered) traceback — the dispatcher
-        # logs it instead of formatting the placeholder exception locally.
-        result = _ExecCrashed(
-            output=result.output,
-            exc=result.exc,
-            full_traceback=payload.full_traceback,
-            code_reached=result.code_reached,
-            stream_cap=result.stream_cap,
-        )
-    return result
-
-
-__all__ = ["_build_child_env", "_run_in_subprocess"]
+__all__ = ["_run_in_subprocess"]

@@ -781,15 +781,6 @@ def checkpoint_msgpack_allowlist(
     return frozenset(entries)
 
 
-def process_state_classes() -> frozenset[type[BaseModel]]:
-    """The plugin state classes the `agent_runtime` faces loaded into this process declare, for a
-    serializer without its own registry (exec IPC or an external attachment).
-    Read loaded faces; none before they load."""
-    from agent.extensions.registry import loaded_state_classes
-
-    return loaded_state_classes()
-
-
 def build_checkpoint_serde(
     plugin_state_classes: Iterable[type[BaseModel]] = (),
 ) -> JsonPlusSerializer:

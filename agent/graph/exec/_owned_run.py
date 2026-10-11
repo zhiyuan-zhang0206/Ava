@@ -43,6 +43,7 @@ from base.native_process.exec_kill_notice import read_notice
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import exec_run_dir
 
+from ._child_boundary import build_child_env, read_result_envelope, result_from_payload
 from ._output_pipe import ExecOutputPipe
 from ._result import _ExecCrashed, _ExecResult
 from ._stream import ExecOutputChunkPublisher, StreamingTextIO
@@ -289,11 +290,9 @@ class _OwnedRun:
         self, config_overlay: dict[str, object] | None, birth_config: dict[str, object] | None
     ) -> tuple[subprocess.Popen[bytes], ResourceProcess]:
         """Spawn the isolated owner; returns it with its launcher identity."""
-        from ._subprocess import _build_child_env
-
         if self.proc is not None:
             raise RuntimeError("managed exec owner has already launched")
-        env = _build_child_env(
+        env = build_child_env(
             self.agent_id,
             self.request,
             self.result,
@@ -359,8 +358,6 @@ class _OwnedRun:
         self, proc: subprocess.Popen[bytes]
     ) -> tuple[_ExecResult, ResultPayload | None]:
         """The exact close receipt and the result envelope of an owner that exited."""
-        from ._subprocess import _read_result_envelope, _result_from_payload
-
         reader = self.reader
         if self.ready is None or proc.returncode != 0 or reader is None:
             if reader is not None:
@@ -370,8 +367,8 @@ class _OwnedRun:
         self.settled = True
         if self.chunk_publisher is not None:
             self.chunk_publisher.publish(self.stream.take_pending())
-        payload, error = _read_result_envelope(self.result, receipt.root_exit_code)
-        return _result_from_payload(
+        payload, error = read_result_envelope(self.result, receipt.root_exit_code)
+        return result_from_payload(
             self.stream.getvalue(),
             payload,
             cancelled=self.cancelled,

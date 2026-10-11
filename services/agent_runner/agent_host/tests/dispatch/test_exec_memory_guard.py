@@ -13,8 +13,9 @@ import psutil
 import pytest
 from loguru import logger
 
+from agent.graph.exec._child_boundary import result_from_payload
 from agent.graph.exec._result import _ExecCrashed, _ExecDone
-from agent.graph.exec._subprocess import _result_from_payload, _run_in_subprocess
+from agent.graph.exec._subprocess import _run_in_subprocess
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.memory_pressure import PressureLevel
@@ -157,7 +158,7 @@ def test_the_notice_is_consumed_by_the_run_that_reads_it(tmp_path: Path) -> None
 
 
 def test_a_guard_killed_run_reports_the_reason_not_a_missing_envelope() -> None:
-    result = _result_from_payload(
+    result = result_from_payload(
         "partial output\n",
         None,
         cancelled=False,
@@ -172,7 +173,7 @@ def test_a_guard_killed_run_reports_the_reason_not_a_missing_envelope() -> None:
 
 
 def test_without_a_notice_a_missing_envelope_keeps_its_generic_error() -> None:
-    result = _result_from_payload("", None, cancelled=False, timed_out=False)
+    result = result_from_payload("", None, cancelled=False, timed_out=False)
     assert isinstance(result, _ExecCrashed)
     assert "without writing a result envelope" in str(result.exc)
 

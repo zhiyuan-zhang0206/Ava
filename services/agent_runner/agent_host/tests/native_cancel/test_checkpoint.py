@@ -9,7 +9,7 @@ import pytest
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from agent.impersonation import flush_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from agent.state import checkpoint_msgpack_allowlist
 from base.agents.incarnation.native_work_models import (
     NativeCancelMarker,

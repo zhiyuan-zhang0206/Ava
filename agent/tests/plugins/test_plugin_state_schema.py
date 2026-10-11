@@ -15,6 +15,7 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 import agent.state as agent_state
+from agent.extensions.registry import loaded_state_classes
 from agent.state import (
     BaseAgentState,
     PluginStateHandle,
@@ -149,9 +150,9 @@ def test_building_the_state_class_binds_nothing_into_the_module() -> None:
 def test_a_registryless_process_allows_the_state_classes_of_its_loaded_faces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert _Private not in agent_state.process_state_classes()
+    assert _Private not in loaded_state_classes()
     face = types.ModuleType("plugins.demo.agent_runtime")
     face.contribute = lambda: PluginContributions(state=(_Private,))  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "plugins.demo.agent_runtime", face)
 
-    assert _Private in agent_state.process_state_classes()
+    assert _Private in loaded_state_classes()
