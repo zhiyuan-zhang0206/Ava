@@ -233,8 +233,9 @@ def _connect_with_retry(port: int, *, timeout_s: float = 15.0) -> http.client.HT
     pytest.fail(f"gateway child never accepted a connection on 127.0.0.1:{port}: {last_error}")
 
 
-# The child's entry names this module literally, so test selection can read the import.
-_CHILD_ENTRY = "from gateway.tests.bootstrap.test_server_shutdown import _run_child; _run_child()"
+# The child's entry script imports this module's `_run_child` statically, so test
+# selection can read the import.
+_CHILD_ENTRY = Path(__file__).with_name("child_gateway_scenarios.py")
 
 
 def _spawn_child(tmp_path: Path, *, drain_seconds: float) -> _Child:
@@ -257,7 +258,7 @@ def _spawn_child(tmp_path: Path, *, drain_seconds: float) -> _Child:
     env[_PORT_ENV] = str(port)
     log_file = log_path.open("wb")
     proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter + in-repo entry, no shell
-        [sys.executable, "-c", _CHILD_ENTRY],
+        [sys.executable, str(_CHILD_ENTRY), "server_shutdown"],
         cwd=_REPO_ROOT,
         env=env,
         stdout=log_file,
