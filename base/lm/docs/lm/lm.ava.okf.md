@@ -60,6 +60,10 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - [[base/lm/docs/provider-plugins.ava.okf.md]] — plugin binding and `key_env`
   delivery contract.
 
+### decision models — [[base/lm/docs/decision-models.ava.okf.md]]
+- Typed questions answered with probability distributions (`decide()`); a catalog table
+  parallel to, and disjoint from, the chat models.
+
 ### compatibility layers — [[base/lm/compat/docs/compat.ava.okf.md]]
 
 ## Notes

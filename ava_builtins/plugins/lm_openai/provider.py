@@ -13,9 +13,14 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
+from ava_builtins.plugins.lm_openai.decision import DecisionsBinding
 from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     BuildContext,
+    DecisionBinding,
+    DecisionBuildContext,
+    DecisionModelSpec,
+    DecisionProviderContribution,
     InferenceSpeed,
     PricePeriod,
     PriceRates,
@@ -451,9 +456,45 @@ PROVIDER = ProviderContribution(
 )
 
 
+def build_decision(ctx: DecisionBuildContext) -> DecisionBinding:
+    """The Decisions API client; fails at once when ``OPENAI_API_KEY`` is missing."""
+    return DecisionsBinding(ctx, require_key("OPENAI_API_KEY"))
+
+
+# Decision ids are separate from chat ids: the same wire model (gpt-6-luna) is priced
+# differently here (input only), so usage pricing and chat dispatch need distinct ids.
+DECISION_PROVIDER = DecisionProviderContribution(
+    prefix="gpt-",
+    display_name="OpenAI",
+    key_env="OPENAI_API_KEY",
+    build=build_decision,
+    models={
+        # Text and images; ``decide()`` sends text only. The Decisions guide documents no
+        # context window; the 272K input ceiling is the chat model's base price tier, kept
+        # so a call never crosses into the long-context multiplier the guide mentions.
+        "gpt-6-luna-decisions": DecisionModelSpec(
+            context_window=272_000, media_types=frozenset({"image"})
+        ),
+    },
+    pricing={
+        # $0.10 per million input tokens; output, cache reads and cache writes are not charged,
+        # so cached input is priced like any input.
+        "gpt-6-luna-decisions": PriceRates(
+            cache_miss=0.10,
+            cache_hit=0.10,
+            output=0.0,
+            source_url="https://developers.openai.com/api/docs/guides/decisions",
+            source_checked_at="2026-10-11",
+            vendor="openai",
+        ),
+    },
+)
+
+
 def contribute() -> PluginContributions:
-    """Standard and independently priced Fast inference services."""
+    """Standard and independently priced Fast inference services, and the Decisions API."""
     return PluginContributions(
+        decision_providers=(DECISION_PROVIDER,),
         providers=(
             with_fast_variants(
                 PROVIDER,
@@ -690,5 +731,5 @@ def contribute() -> PluginContributions:
                     ),
                 },
             ),
-        )
+        ),
     )

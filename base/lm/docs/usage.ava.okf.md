@@ -16,7 +16,7 @@ tags:
 ## Usage emitters
 
 - `log_usage_from_message()` is the accounting path for completed LangChain messages; it records the `llm_usage` event, usage-time price snapshot (or `unpriced=1`), and its matching billing span.
-- `log_usage_fields()` serves non-LangChain providers such as the Gemini embedding REST adapter. `for_agent_id` explicitly attributes a daemon-generated event to its target agent.
+- `log_usage_fields()` serves non-LangChain providers such as the Gemini embedding REST adapter and `decide()` (decision models, `tok_out=0`; see [[base/lm/docs/decision-models.ava.okf.md]]). `for_agent_id` explicitly attributes a daemon-generated event to its target agent; `source` labels the shared caller.
 - `usage_kind` distinguishes agent, chat, batch, and embedding consumption. `source` is an optional payload field for shared text callers (`web.fetch`, `understand`, and `understand.media`) and is kept distinct from the transport provenance column.
 - `log_usage_from_message(..., stamp_message=True)` (the main-conversation `log_llm_usage`) also writes the event's figures to `msg.additional_kwargs["ava_usage"]`: one `quote`, one dict, two destinations.
 - Gemini calls use ordinary implicit-cache accounting; `cache_read` is the provider-reported cached input.

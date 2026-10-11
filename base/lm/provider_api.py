@@ -52,6 +52,43 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 
+from base.lm.catalog.decide.http import post_json as post_json
+from base.lm.catalog.decide.types import (
+    FALSE as FALSE,
+)
+from base.lm.catalog.decide.types import (
+    TRUE as TRUE,
+)
+from base.lm.catalog.decide.types import (
+    Choice as Choice,
+)
+from base.lm.catalog.decide.types import (
+    Decision as Decision,
+)
+from base.lm.catalog.decide.types import (
+    DecisionBinding as DecisionBinding,
+)
+from base.lm.catalog.decide.types import (
+    DecisionModelSpec as DecisionModelSpec,
+)
+from base.lm.catalog.decide.types import (
+    DecisionRequestError as DecisionRequestError,
+)
+from base.lm.catalog.decide.types import (
+    DecisionResponseError as DecisionResponseError,
+)
+from base.lm.catalog.decide.types import (
+    DecisionResult as DecisionResult,
+)
+from base.lm.catalog.decide.types import (
+    Question as Question,
+)
+from base.lm.catalog.decide.types import (
+    Score as Score,
+)
+from base.lm.catalog.decide.types import (
+    YesNo as YesNo,
+)
 from base.lm.catalog.provider_contract import (
     PROVIDER_API_VERSION as PROVIDER_API_VERSION,
 )
@@ -60,6 +97,12 @@ from base.lm.catalog.provider_contract import (
 )
 from base.lm.catalog.provider_contract import (
     BuildContext as BuildContext,
+)
+from base.lm.catalog.provider_contract import (
+    DecisionBuildContext as DecisionBuildContext,
+)
+from base.lm.catalog.provider_contract import (
+    DecisionProviderContribution as DecisionProviderContribution,
 )
 from base.lm.catalog.provider_contract import (
     InferenceSpeed as InferenceSpeed,

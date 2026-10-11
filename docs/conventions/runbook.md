@@ -665,6 +665,7 @@ whether a restart is required — see
 | `MOONSHOT_API_KEY` | platform.moonshot.cn -> API keys |
 | `MIMO_API_KEY` | this provider's own developer console |
 | `DASHSCOPE_API_KEY` | bailian.console.aliyun.com -> API-KEY |
+| `TYPESAFE_API_KEY` | TypeSafe console -> API keys (Jev decision models) |
 | `BRAVE_API_KEY` | api-dashboard.search.brave.com |
 | `JINA_API_KEY` | jina.ai -> API keys |
 | `WANDB_API_KEY` | wandb.ai -> Settings -> API keys |

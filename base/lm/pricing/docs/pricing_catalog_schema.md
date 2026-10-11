@@ -28,7 +28,7 @@ implementation for this cross-line schema.
 
 | Field | Type | Contract |
 |---|---|---|
-| `vendor` | string | Required from catalog schema v2. Lowercase company name from the registered vocabulary shared with the billing-event schema: `openai`, `deepseek`, `google`, `anthropic`, `xiaomi`, `moonshot`, `zhipu`, `alibaba`. A new vendor registers in the billing-event schema before appearing here. |
+| `vendor` | string | Required from catalog schema v2. Lowercase company name from the registered vocabulary shared with the billing-event schema: `openai`, `deepseek`, `google`, `anthropic`, `xiaomi`, `moonshot`, `zhipu`, `alibaba`, `typesafe`. A new vendor registers in the billing-event schema before appearing here. |
 | `source_url` | string | HTTPS official pricing source. |
 | `source_checked_at` | ISO date | Date the source was checked. |
 | `effective_time_note` | optional string | Legacy note when a provider does not publish an exact effective time. |

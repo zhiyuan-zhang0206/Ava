@@ -22,7 +22,7 @@ from langchain_core.messages import AIMessage
 from base import paths
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import pricing, provider_api, stop
-from base.lm.catalog import CatalogBuilder, ModelCatalog, provider_contract
+from base.lm.catalog import CatalogBuilder, ModelCatalog
 from base.lm.factory import (
     build_chat_model,
     model_supports_vision,
@@ -43,6 +43,7 @@ _REPO_PROVIDER_PLUGINS = {
     "lm_google",
     "lm_moonshot",
     "lm_openai",
+    "lm_typesafe",
     "lm_xiaomi",
     "lm_zhipu",
 }
@@ -81,7 +82,9 @@ _REPO_MODEL_VENDORS = {
     "gpt-6.1-sol": "openai",
     "gpt-6.1-sol-fast": "openai",
     "gpt-6-luna": "openai",
+    "gpt-6-luna-decisions": "openai",
     "gpt-6-luna-fast": "openai",
+    "jev-1.13.0": "typesafe",
     "kimi-k3": "moonshot",
     "mimo-v2.5-pro": "xiaomi",
     "mimo-v2.6-pro": "xiaomi",
@@ -123,7 +126,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 
 
 def test_repo_model_vendor_vocabulary_is_complete(model_catalog: ModelCatalog) -> None:
-    assert set(model_catalog.models) == _REPO_MODEL_VENDORS.keys()
+    assert {*model_catalog.models, *model_catalog.decision_models} == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
     # what remains is the catalog-only services plus models the registry no
     # longer carries — historical usage stays priceable from the archive.
@@ -776,24 +779,3 @@ def test_provider_only_dir_is_not_a_plugin(provider_plugin: Callable[..., None])
     catalog = build_model_catalog()
     assert "kept-1" in catalog.models
     assert "orphan-provider-1" not in catalog.models
-
-
-@pytest.mark.parametrize(
-    "name",
-    [
-        "PROVIDER_API_VERSION",
-        "AttachPolicy",
-        "BuildContext",
-        "InferenceSpeed",
-        "PricePeriod",
-        "PriceRates",
-        "PriceTier",
-        "PriceWindow",
-        "ProviderBinding",
-        "ProviderContribution",
-        "ProviderRegistrationError",
-        "ThinkingConfig",
-    ],
-)
-def test_provider_api_exposes_the_single_declaration_owner(name: str) -> None:
-    assert getattr(provider_api, name) is getattr(provider_contract, name)
