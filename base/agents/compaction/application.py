@@ -9,7 +9,7 @@ from base.agents.compaction.execution import (
     settle,
 )
 from base.agents.compaction.models import CompactHeldError, CompactOutcome
-from base.agents.history.checkpoint_cleanup import stamp_compact_checkpoint
+from base.agents.history.compact_boundary import stamp_compact_checkpoint
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 

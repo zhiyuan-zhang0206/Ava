@@ -1588,7 +1588,7 @@
     "/api/agents/{agent_id}/traces/{trace_id}/messages": {
       "get": {
         "summary": "Get Trace Checkpoint Messages",
-        "description": "Full turn content for one OTel trace, resolved on demand from checkpoints.\n\nTrace v2 content-retrieval path: spans carry metadata only (task #792), so\nclicking an LM span needs this endpoint to bring back the turn's complete\nmessages — system prompt included (the checkpoint's `messages` channel is\nthe whole conversation, not a window).\n\n`pruned` semantics: the checkpoint link is written by the agent after each\nturn (`checkpoints.metadata.trace_id`), and checkpoint_cleanup keeps only\nthe latest K checkpoints per thread, so an old trace resolves to nothing —\nthe response is pruned=true with an empty list and the caller renders the\n\"trimmed\" state. A trace id with no matching checkpoint is the same shape (the\nlink itself may predate the feature or the turn committed no checkpoint).\n\n404: agent_id does not exist. 503: checkpoint store read failed.",
+        "description": "Full turn content for one OTel trace, resolved on demand from checkpoints.\n\nTrace v2 content-retrieval path: spans carry metadata only (task #792), so\nclicking an LM span needs this endpoint to bring back the turn's complete\nmessages — system prompt included (the checkpoint's `messages` channel is\nthe whole conversation, not a window).\n\n`pruned` semantics: the checkpoint link is written by the agent after each\nturn (`checkpoints.metadata.trace_id`). Checkpoints are never deleted, so\na trace id that resolves to nothing means no checkpoint carries it (the\nlink itself may predate the feature or the turn committed no checkpoint);\nthe response is then pruned=true with an empty list, which the caller\nrenders as absent content rather than an error.\n\n404: agent_id does not exist. 503: checkpoint store read failed.",
         "operationId": "get_trace_checkpoint_messages_api_agents__agent_id__traces__trace_id__messages_get",
         "parameters": [
           {
@@ -9018,38 +9018,6 @@
         "title": "AgentObservation",
         "description": "Machine reachability is not proof of runtime ownership.\n\nThis compatibility slice has no generation/owner binding. A fresh lease\nalone, or a PID, must not invent one. UI uses absolute deadlines."
       },
-      "AgentRestartRow": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "restarts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Restarts"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "label",
-          "restarts"
-        ],
-        "title": "AgentRestartRow",
-        "description": "One agent's restart count within the window."
-      },
       "AgentRoster": {
         "properties": {
           "agents": {
@@ -9345,7 +9313,7 @@
           "exec_failed"
         ],
         "title": "AgentStats",
-        "description": "Observed turn + exec counters within the selected window.\n\n`turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns\nexcluded); duration fields are null when no duration evidence survives.\nThe metadata declares retained historical histogram precision.\n`exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome\n(exec_failed / exec(timeout) / exec_cancelled; the prefix regex also\ncounts legacy exec_thread_stuck rows for historical continuity)."
+        "description": "Observed turn + exec counters within the selected window.\n\n`turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns\nexcluded); duration fields are null when no duration evidence survives.\nThe metadata declares retained historical histogram precision.\n`exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome\n(exec_failed / exec_timeout / exec_cancelled)."
       },
       "AgentStatus": {
         "type": "string",
@@ -16064,11 +16032,6 @@
             "type": "integer",
             "title": "Bucket"
           },
-          "agent_restarts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Agent Restarts"
-          },
           "service_starts": {
             "type": "integer",
             "minimum": 0.0,
@@ -16078,11 +16041,10 @@
         "type": "object",
         "required": [
           "bucket",
-          "agent_restarts",
           "service_starts"
         ],
         "title": "RestartBucket",
-        "description": "One bucket's process-restart counts: agent processes (agent_restarted)\nand gateway-side services (service_started)."
+        "description": "One bucket's service start count (service_started)."
       },
       "RestartReport": {
         "properties": {
@@ -16100,13 +16062,6 @@
             "type": "array",
             "title": "Services"
           },
-          "agents": {
-            "items": {
-              "$ref": "#/components/schemas/AgentRestartRow"
-            },
-            "type": "array",
-            "title": "Agents"
-          },
           "totals": {
             "$ref": "#/components/schemas/RestartTotals"
           }
@@ -16115,7 +16070,6 @@
         "required": [
           "series",
           "services",
-          "agents",
           "totals"
         ],
         "title": "RestartReport"
@@ -16130,11 +16084,6 @@
       },
       "RestartTotals": {
         "properties": {
-          "agent_restarts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Agent Restarts"
-          },
           "service_starts": {
             "type": "integer",
             "minimum": 0.0,
@@ -16143,7 +16092,6 @@
         },
         "type": "object",
         "required": [
-          "agent_restarts",
           "service_starts"
         ],
         "title": "RestartTotals"
@@ -19350,7 +19298,7 @@
           "messages"
         ],
         "title": "TraceCheckpointMessagesResponse",
-        "description": "GET /api/agents/{id}/traces/{trace_id}/messages response — the full\nmessage list (incl. the system prompt) of the turn that produced one OTel\ntrace, resolved on demand from the checkpoints table.\n\nSpans are metadata-only (trace v2): this endpoint is how content comes\nback. `pruned` distinguishes the two absence shapes:\n- pruned=true, checkpoint_id=None — the trace's checkpoint was dropped by\n  compact/checkpoint trim (retention is the latest K checkpoints), so the\n  content is gone; the span metadata in the mirror still exists. The\n  frontend renders this as \"trimmed\" rather than an error.\n- pruned=false — the checkpoint exists; messages is its `messages` channel\n  (the full conversation at that point, system prompt included).\n\n`messages[i]` is one LangChain BaseMessage `model_dump()` — the same raw\nshape as GET /api/agents/{id}/messages."
+        "description": "GET /api/agents/{id}/traces/{trace_id}/messages response — the full\nmessage list (incl. the system prompt) of the turn that produced one OTel\ntrace, resolved on demand from the checkpoints table.\n\nSpans are metadata-only (trace v2): this endpoint is how content comes\nback. `pruned` distinguishes the two absence shapes:\n- pruned=true, checkpoint_id=None — no checkpoint carries this trace id\n  (the link predates the feature, or the turn committed no checkpoint), so\n  there is no content to return; the span metadata in the mirror still\n  exists. Checkpoints are never deleted. Callers render this as absent\n  content rather than an error.\n- pruned=false — the checkpoint exists; messages is its `messages` channel\n  (the full conversation at that point, system prompt included).\n\n`messages[i]` is one LangChain BaseMessage `model_dump()` — the same raw\nshape as GET /api/agents/{id}/messages."
       },
       "UiContributionsResponse": {
         "properties": {

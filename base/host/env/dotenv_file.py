@@ -230,8 +230,8 @@ def remove_env(
     """Remove the named keys from a unit's .env, preserving unrelated lines.
 
     The counterpart of `upsert_env` for keys that must LEAVE the surface (e.g.
-    the retired AVA_PGBOUNCER_PORT) — an idempotent line filter, snapshotting
-    first like every other .env write. A missing key is a no-op; a missing file
+    a key whose declaration was removed) — an idempotent line filter,
+    snapshotting first like every other .env write. A missing key is a no-op; a missing file
     stays missing."""
     if not path.exists():
         return

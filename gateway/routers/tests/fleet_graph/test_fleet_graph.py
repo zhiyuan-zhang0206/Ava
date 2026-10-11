@@ -43,7 +43,7 @@ def _seed_agent(
         new_id = row[0]
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, born_spawner, status) VALUES (%s, %s, %s, %s)",
-            (new_id, spawner, born_spawner, status),
+            (new_id, spawner, spawner if born_spawner is None else born_spawner, status),
         )
     db_conn.commit()
     return new_id

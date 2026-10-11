@@ -311,7 +311,7 @@ def installed_plugin_dirs() -> dict[str, Path]:
     ServiceSpecs into `build_services()`. The roster is a machine/cluster concern
     and must not depend on the agent-plugin-registration plane; a plugin gates its
     own service via an explicit settings field in `ServiceSpec.gate` (e.g.
-    task-maintenance's `AVA_TASK_MAINTENANCE_ENABLED`).
+    task-maintenance's Fleet `task_maintenance_enabled`).
     """
     return discover_plugins()
 

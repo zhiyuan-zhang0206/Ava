@@ -19,10 +19,9 @@ again (new starts_at) starts a fresh instance. ``fingerprint`` is the
 Alertmanager-standard fnv-1a hash over sorted labels; the ingest computes it
 when a payload omits it, using the exact Alertmanager algorithm so a
 computed hash and a Grafana-sent hash agree for the same label set. The IM
-fan-out goes through the local im_bridge daemon's health-port ``/send`` RPC,
-gated by the transition logic in ``upsert_alert`` — every severity pushes,
-and an open instance pushes again when its severity increases, unless the rule
-explicitly labels the alert ``notify_im="false"``.
+fan-out is gated by the transition logic in ``upsert_alert`` — every severity
+pushes, and an open instance pushes again when its severity increases, unless
+the rule explicitly labels the alert ``notify_im="false"``.
 """
 
 from __future__ import annotations
@@ -32,13 +31,11 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from urllib.parse import urlsplit
 
-import httpx
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from base.clock import Clock
-from base.cluster.machine import GatewayApiTokenMissing, gateway_auth_headers
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoints
 from base.telemetry.alerts.copy import (
@@ -331,58 +328,11 @@ def upsert_alert(
     return (fp, starts_at), did_insert, should_notify, row
 
 
-def stamp_notified(conn: psycopg.Connection, keys: list[AlertKey]) -> None:
-    """Record notified_at on the instances a successful IM send covered."""
-
-    if not keys:
-        return
-    with conn.cursor() as cur:
-        for fp, starts_at in keys:
-            cur.execute(
-                "UPDATE alerts SET notified_at = now()"
-                " WHERE fingerprint = %s AND starts_at = %s AND notified_at IS NULL",
-                (fp, starts_at),
-            )
-
-
 def im_bridge_rpc_url() -> str:
     """Resolve the existing notification daemon endpoint at its composition owner."""
     return (settings.services.im_bridge_health_url or "").rstrip("/") or (
         f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('im_bridge').health_port}"
     )
-
-
-def notify_im(text: str) -> bool:
-    """POST one message to the local im_bridge daemon's ``/send`` RPC.
-
-    The daemon fans the message out to every loaded IM adapter's owner chat
-    (Telegram / WeChat / Feishu) — the only sanctioned IM surface. Failures
-    are logged and swallowed — the ingest must not fail because the IM side
-    is down; notified_at simply stays NULL and the firing gate retries on
-    the next re-send.
-
-    Delivery semantics: best-effort, never silent — a lost response is
-    indistinguishable from a lost message, so the daemon's single per-channel
-    retry (task #4252) or a later firing-gate re-send can duplicate an alert
-    that in fact landed; every failure is still visible (log + False).
-    """
-
-    if not settings.alerts.im_notify_enabled:
-        return False
-    base = im_bridge_rpc_url()
-    try:
-        resp = httpx.post(
-            f"{base}/send",
-            json={"text": text, "type": "alert"},
-            headers=gateway_auth_headers(),
-            timeout=10.0,
-        )
-        if resp.status_code == 200:
-            return True
-        _log.warning("alerts: im_bridge /send returned HTTP %s", resp.status_code)
-    except (httpx.HTTPError, GatewayApiTokenMissing):
-        _log.warning("alerts: im_bridge /send failed", exc_info=True)
-    return False
 
 
 def format_local(ts: datetime | None) -> str:

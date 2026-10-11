@@ -921,11 +921,11 @@ export interface paths {
          *     the whole conversation, not a window).
          *
          *     `pruned` semantics: the checkpoint link is written by the agent after each
-         *     turn (`checkpoints.metadata.trace_id`), and checkpoint_cleanup keeps only
-         *     the latest K checkpoints per thread, so an old trace resolves to nothing —
-         *     the response is pruned=true with an empty list and the caller renders the
-         *     "trimmed" state. A trace id with no matching checkpoint is the same shape (the
-         *     link itself may predate the feature or the turn committed no checkpoint).
+         *     turn (`checkpoints.metadata.trace_id`). Checkpoints are never deleted, so
+         *     a trace id that resolves to nothing means no checkpoint carries it (the
+         *     link itself may predate the feature or the turn committed no checkpoint);
+         *     the response is then pruned=true with an empty list, which the caller
+         *     renders as absent content rather than an error.
          *
          *     404: agent_id does not exist. 503: checkpoint store read failed.
          */
@@ -4435,18 +4435,6 @@ export interface components {
             runtime_owner: "unknown";
         };
         /**
-         * AgentRestartRow
-         * @description One agent's restart count within the window.
-         */
-        AgentRestartRow: {
-            /** Agent Id */
-            agent_id: number;
-            /** Label */
-            label: string | null;
-            /** Restarts */
-            restarts: number;
-        };
-        /**
          * AgentRoster
          * @description A coherent live tree. Ancestors carry links, never historical agent details.
          */
@@ -4521,8 +4509,7 @@ export interface components {
          *     excluded); duration fields are null when no duration evidence survives.
          *     The metadata declares retained historical histogram precision.
          *     `exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome
-         *     (exec_failed / exec(timeout) / exec_cancelled; the prefix regex also
-         *     counts legacy exec_thread_stuck rows for historical continuity).
+         *     (exec_failed / exec_timeout / exec_cancelled).
          */
         AgentStats: {
             /** Turn Total */
@@ -7711,14 +7698,11 @@ export interface components {
         };
         /**
          * RestartBucket
-         * @description One bucket's process-restart counts: agent processes (agent_restarted)
-         *     and gateway-side services (service_started).
+         * @description One bucket's service start count (service_started).
          */
         RestartBucket: {
             /** Bucket */
             bucket: number;
-            /** Agent Restarts */
-            agent_restarts: number;
             /** Service Starts */
             service_starts: number;
         };
@@ -7728,8 +7712,6 @@ export interface components {
             series: components["schemas"]["RestartBucket"][];
             /** Services */
             services: components["schemas"]["ServiceRestartRow"][];
-            /** Agents */
-            agents: components["schemas"]["AgentRestartRow"][];
             totals: components["schemas"]["RestartTotals"];
         };
         /**
@@ -7739,8 +7721,6 @@ export interface components {
         RestartResult: "enqueued" | "already_terminated";
         /** RestartTotals */
         RestartTotals: {
-            /** Agent Restarts */
-            agent_restarts: number;
             /** Service Starts */
             service_starts: number;
         };
@@ -9264,10 +9244,11 @@ export interface components {
          *
          *     Spans are metadata-only (trace v2): this endpoint is how content comes
          *     back. `pruned` distinguishes the two absence shapes:
-         *     - pruned=true, checkpoint_id=None — the trace's checkpoint was dropped by
-         *       compact/checkpoint trim (retention is the latest K checkpoints), so the
-         *       content is gone; the span metadata in the mirror still exists. The
-         *       frontend renders this as "trimmed" rather than an error.
+         *     - pruned=true, checkpoint_id=None — no checkpoint carries this trace id
+         *       (the link predates the feature, or the turn committed no checkpoint), so
+         *       there is no content to return; the span metadata in the mirror still
+         *       exists. Checkpoints are never deleted. Callers render this as absent
+         *       content rather than an error.
          *     - pruned=false — the checkpoint exists; messages is its `messages` channel
          *       (the full conversation at that point, system prompt included).
          *

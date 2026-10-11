@@ -50,8 +50,7 @@ Core owns only the extension and normalization mechanisms:
 - `registry.py`, `factory.py`, `effort.py`, and `stop.py` assemble plugin data
   into provider-agnostic views and behavior using the supplied catalog.
   They do not retain a module-wide provider image.
-- `pricing.py` selects plugin runtime prices or catalog-only archive prices and
-  preserves the retired-model ledger.
+- `pricing.py` selects plugin runtime prices or catalog-only archive prices.
 
 The repository ships this default enabled set:
 
@@ -144,8 +143,7 @@ registers a chat-model price, `pricing.py` removes the overlapping archive row
 from its in-memory runtime catalog view and uses the plugin's complete lattice.
 Both declarations pass through the same parser and selection code; the archive
 remains available for independent equivalence tests and bot reconciliation.
-`pricing_catalog.json` is retained only as an empty placeholder (`"models": {}`)
-that runtime never loads; `load_archive` reads `pricing_catalog_archive.json`.
+`load_archive` reads `pricing_catalog_archive.json`.
 Runtime never scrapes a pricing page.
 
 Future effective boundaries stay explicit in both the archive and generated
