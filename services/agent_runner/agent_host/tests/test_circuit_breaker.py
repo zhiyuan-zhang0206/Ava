@@ -172,6 +172,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details(
 
 
 async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancestor(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -276,6 +277,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
 
 
 async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancestor(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -377,6 +379,7 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker(
 
 @pytest.mark.parametrize("reason", ["billing", "context_overflow"])
 async def test_heartbeat_while_breaker_open_parks(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -415,6 +418,7 @@ async def test_heartbeat_while_breaker_open_parks(
     [("chat", "heartbeat"), ("heartbeat", "chat")],
 )
 async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
+    redis_url: str,
     first_kind: str,
     second_kind: str,
     db_conn: psycopg.Connection,
@@ -457,6 +461,7 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
 
 @pytest.mark.parametrize("reason", ["billing", "context_overflow"])
 async def test_claim_parks_idle_while_breaker_open(
+    redis_url: str,
     aops_pool: AsyncConnectionPool,
     *,
     model_catalog: ModelCatalog,
@@ -491,6 +496,7 @@ async def test_claim_parks_idle_while_breaker_open(
 
 
 async def test_claim_does_not_park_while_breaker_closed(
+    redis_url: str,
     aops_pool: AsyncConnectionPool,
     *,
     model_catalog: ModelCatalog,
@@ -520,6 +526,7 @@ async def test_claim_does_not_park_while_breaker_closed(
 
 
 async def test_heartbeat_normal_when_breaker_closed(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,

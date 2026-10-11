@@ -134,7 +134,7 @@ def test_cluster_credential_names_the_verifying_credential(gateway: Path) -> Non
 
 
 def test_gateway_api_admits_the_active_generation_and_the_human_secret(
-    gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
 ) -> None:
     before = _tokens(gateway).api
     with gateway_test_client(config_app(), machine=machine_identity) as client:
@@ -149,7 +149,10 @@ def test_gateway_api_admits_the_active_generation_and_the_human_secret(
 
 
 def test_a_blank_human_secret_admits_only_the_active_generation(
-    gateway: Path, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    gateway: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     tokens = _tokens(gateway).api
@@ -178,7 +181,7 @@ def _login(client: TestClient, password: str) -> int:
 
 
 def test_login_admits_the_active_runner_token_for_the_managed_browser(
-    gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
 ) -> None:
     tokens = _tokens(gateway).api
     with gateway_test_client(config_app(), machine=machine_identity) as client:
@@ -190,7 +193,7 @@ def test_login_admits_the_active_runner_token_for_the_managed_browser(
 
 
 def test_only_the_human_secret_issues_a_login_ticket(
-    gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
 ) -> None:
     """A write generation's tokens, and a managed-browser session one of them
     minted, cannot issue a browser login ticket: the ticket would open a session
@@ -219,6 +222,7 @@ def _cookie_authenticates(client: TestClient, cookie: str) -> tuple[int, bool]:
 
 
 def test_a_human_minted_session_dies_with_the_rotated_secret(
+    gateway_data_plane: None,
     gateway: Path,
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
@@ -234,7 +238,7 @@ def test_a_human_minted_session_dies_with_the_rotated_secret(
 
 
 def test_a_session_cookie_names_its_credential_only_through_a_keyed_mac(
-    gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
 ) -> None:
     """The cookie travels to the browser, so the mint in it must not let its
     holder brute-force the human secret offline: it is an HMAC under the
@@ -259,7 +263,7 @@ def test_a_session_cookie_names_its_credential_only_through_a_keyed_mac(
 
 
 def test_a_session_records_which_credential_minted_it(
-    gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
 ) -> None:
     """Inbound provenance tells a machine-minted browser session from a human one."""
     runner = _tokens(gateway).api.runner
@@ -279,7 +283,7 @@ def test_a_session_records_which_credential_minted_it(
 
 
 def test_the_sessions_list_shows_only_sessions_that_authenticate(
-    gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
 ) -> None:
     """`/api/auth/sessions` lists what the session check would still admit: an id
     without a mint (the pre-mint format) never appears."""
@@ -350,7 +354,7 @@ def test_a_machine_token_cannot_open_the_mcp_endpoint(
 
 
 def test_only_a_human_credential_manages_mcp_clients(
-    gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
 ) -> None:
     """An MCP client token lives in `mcp_clients`, bound to no write generation.
     A generation-bound admission (either machine token, or a session a runner
@@ -674,7 +678,7 @@ def test_changed_ledger_refusal_is_not_hidden_by_warm_acceptance(gateway: Path) 
 
 
 def test_gateway_lifespans_own_independent_machine_acceptance_caches(
-    gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
 ) -> None:
     from gateway.app import app
 

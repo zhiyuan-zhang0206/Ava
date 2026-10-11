@@ -569,6 +569,7 @@ async def test_model_completion_and_cancel_same_tick_discards_result() -> None:
 
 @pytest.mark.parametrize("marker", ["compact_summary", "compact_request"])
 async def test_compaction_returns_through_claim_then_generates_before_compacting_again(  # noqa: PLR0915 -- one checkpoint/cancel/resume transition proof.
+    redis_url: str,
     hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,

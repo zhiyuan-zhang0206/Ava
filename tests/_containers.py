@@ -32,8 +32,6 @@ from pathlib import Path
 import psycopg
 import redis
 
-from base.cluster.dataplane.pg_tools import throwaway_postgres
-
 _SCHEMA_SQL = Path(__file__).resolve().parent.parent / "db" / "schema.sql"
 
 # tmpfs base for the throwaway redis data dir: /dev/shm on Linux (RAM), else the
@@ -67,7 +65,7 @@ def _wait_port(port: int, timeout: float = 30.0, host: str = "127.0.0.1") -> Non
 
 
 @contextmanager
-def postgres(*, machine_name: Callable[[], str]) -> Generator[str]:
+def postgres(*, machine_name: Callable[[], str], watch_stalls: bool = True) -> Generator[str]:
     """A throwaway Postgres cluster with db/schema.sql + checkpoint tables + all
     pending migrations applied, ready for the test suite. Yields a psycopg
     connection URL.
@@ -80,9 +78,10 @@ def postgres(*, machine_name: Callable[[], str]) -> Generator[str]:
     migration, and its port never binds. Applying migrations at provisioning time
     keeps every future migration covered without special-casing any one of them.
     """
+    from base.cluster.dataplane.pg_tools import throwaway_postgres
     from base.deploy.schema.migrations import apply_pending_migrations
 
-    with throwaway_postgres(schema_sql=_SCHEMA_SQL.read_text()) as url:
+    with throwaway_postgres(schema_sql=_SCHEMA_SQL.read_text(), watch_stalls=watch_stalls) as url:
         # Non-autocommit conn: apply_pending_migrations manages its own
         # per-migration transactions + advisory lock.
         with psycopg.connect(url) as conn:

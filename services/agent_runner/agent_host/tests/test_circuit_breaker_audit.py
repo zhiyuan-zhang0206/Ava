@@ -39,6 +39,7 @@ def _overflow() -> FatalProviderError:
 
 
 async def test_the_breaker_open_event_is_recorded_in_audit_events(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -82,6 +83,7 @@ async def test_the_breaker_open_event_is_recorded_in_audit_events(
 
 
 async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_breaker(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,

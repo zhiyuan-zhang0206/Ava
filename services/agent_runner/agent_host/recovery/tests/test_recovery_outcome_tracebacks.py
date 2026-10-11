@@ -74,6 +74,7 @@ def _sole_record(loguru_records: list[dict[str, Any]], fragment: str) -> dict[st
 
 
 async def test_streak_write_failure_keeps_its_traceback(
+    redis_url: str,
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,
@@ -108,6 +109,7 @@ async def test_streak_write_failure_keeps_its_traceback(
 
 
 async def test_halt_suppression_failure_keeps_its_traceback(
+    redis_url: str,
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,
@@ -150,6 +152,7 @@ async def test_halt_suppression_failure_keeps_its_traceback(
 
 
 async def test_ancestor_report_failure_keeps_its_traceback(
+    redis_url: str,
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,

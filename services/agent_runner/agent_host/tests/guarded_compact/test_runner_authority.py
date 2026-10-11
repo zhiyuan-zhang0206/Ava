@@ -20,6 +20,7 @@ from tests.fixtures.model_catalog import AddBindings
 
 
 async def test_real_runner_login_closes_compact_without_admission_or_metadata_insert_authority(
+    redis_url: str,
     db_conn: psycopg.Connection,
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

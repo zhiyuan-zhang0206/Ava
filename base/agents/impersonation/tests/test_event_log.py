@@ -57,6 +57,7 @@ def owner(
 
 @pytest.fixture
 def lease(
+    redis_url: str,
     owner: RuntimeIncarnation,
     *,
     config_authority: ConfigAuthority,

@@ -24,6 +24,7 @@ from tests.fixtures.model_catalog import AddBindings
 
 @pytest.mark.parametrize("corruption", ["old_source", "reset_tail"])
 async def test_actual_cold_materialization_gap_never_acknowledges_marker_alone(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

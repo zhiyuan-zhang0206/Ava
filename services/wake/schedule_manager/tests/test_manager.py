@@ -54,7 +54,7 @@ class _FakeBackend:
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool[psycopg.Connection]]:
+def pool(db_url: str) -> Iterator[ConnectionPool[psycopg.Connection]]:
     p: ConnectionPool[psycopg.Connection] = ConnectionPool(
         settings.data_plane.db_url, min_size=1, max_size=2, open=True
     )

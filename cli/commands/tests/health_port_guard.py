@@ -4,11 +4,11 @@ from typing import Any, cast
 
 import pytest
 
+__all__ = ["guard_health_port_gate"]
 
-@pytest.fixture(autouse=True)
-def _guard_health_port_gate(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
+
+@pytest.fixture
+def guard_health_port_gate(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Autouse safety net: `ava start`'s pre-bind health-port gate finds nothing.
 
     The gate dials this unit's daemon `/healthz` ports before launching (issue

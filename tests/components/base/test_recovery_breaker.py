@@ -31,6 +31,7 @@ def test_clear_literal_matches_the_halt_threshold() -> None:
 
 
 async def test_record_increments_and_halt_suppresses_until_human(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -71,6 +72,7 @@ async def test_record_increments_and_halt_suppresses_until_human(
 
 
 async def test_halt_replaces_another_reasons_window(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,

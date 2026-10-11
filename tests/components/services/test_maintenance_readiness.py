@@ -58,7 +58,9 @@ def held(
 
 
 @pytest.mark.usefixtures("held")
-def test_gateway_health_probes_database_during_hold_and_business_stays_closed() -> None:
+def test_gateway_health_probes_database_during_hold_and_business_stays_closed(
+    gateway_data_plane: None,
+) -> None:
     with TestClient(app) as client:
         health = client.get("/api/health")
         assert health.status_code == 200
@@ -72,6 +74,7 @@ def test_gateway_health_probes_database_during_hold_and_business_stays_closed() 
 @pytest.mark.usefixtures("held")
 def test_held_gateway_health_still_reports_database_failure(
     monkeypatch: pytest.MonkeyPatch,
+    gateway_data_plane: None,
 ) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr(
@@ -88,6 +91,7 @@ def test_held_gateway_health_still_reports_database_failure(
 
 
 def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
+    gateway_data_plane: None,
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
@@ -121,7 +125,9 @@ def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
 
 
 @pytest.mark.usefixtures("held")
-def test_held_health_exemption_preserves_authentication(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_held_health_exemption_preserves_authentication(
+    monkeypatch: pytest.MonkeyPatch, gateway_data_plane: None
+) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", uuid4().hex)
     with TestClient(app) as client:
         # Health is already public; control-plane classification must not make
@@ -141,7 +147,7 @@ def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
 
 @pytest.mark.usefixtures("held")
 def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
-    monkeypatch: pytest.MonkeyPatch, served_gateway_home: Any
+    monkeypatch: pytest.MonkeyPatch, served_gateway_home: Any, gateway_data_plane: None
 ) -> None:
     """Bootstrap is control-plane: a runner started under a hold and its processes'
     config resolution read it before any hold is released. The exemption keeps
@@ -165,7 +171,10 @@ def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
 
 @pytest.mark.usefixtures("held")
 def test_a_runners_first_join_reaches_a_held_gateway(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, served_gateway_home: Any
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    served_gateway_home: Any,
+    gateway_data_plane: None,
 ) -> None:
     """A runner's init joins (`join_gateway`) with the bundle the gateway issued
     while the gateway's own hold still stands, over the gateway's real

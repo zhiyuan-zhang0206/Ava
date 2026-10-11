@@ -111,6 +111,7 @@ def _token_and_session(conn: psycopg.Connection, agent_id: int, name: str) -> tu
 
 
 def test_open_row_creates_persistent_page_session_and_persists_token(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -152,6 +153,7 @@ def test_open_row_creates_persistent_page_session_and_persists_token(
 
 
 def test_new_row_session_created_before_slow_housekeeping(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -202,6 +204,7 @@ def test_new_row_session_created_before_slow_housekeeping(
 
 
 def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -257,6 +260,7 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
 
 
 def test_healthy_page_is_not_resent(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -296,6 +300,7 @@ def test_healthy_page_is_not_resent(
 
 
 def test_crashed_server_is_relaunched_in_same_session(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -341,6 +346,7 @@ def test_crashed_server_is_relaunched_in_same_session(
 
 
 def test_wedged_session_relaunch_failure_kills_and_recreates_the_session(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -390,6 +396,7 @@ def test_wedged_session_relaunch_failure_kills_and_recreates_the_session(
 
 
 def test_stale_server_in_its_page_session_replaces_that_session(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -432,6 +439,7 @@ def test_stale_server_in_its_page_session_replaces_that_session(
 
 
 def test_foreign_port_occupant_is_left_alone_and_backed_off(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -474,6 +482,7 @@ def test_foreign_port_occupant_is_left_alone_and_backed_off(
 
 
 def test_closed_row_kills_its_page_session(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -503,6 +512,7 @@ def test_closed_row_kills_its_page_session(
 
 
 def test_stale_snapshot_never_creates_session_for_closed_row(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -549,6 +559,7 @@ def test_stale_snapshot_never_creates_session_for_closed_row(
 
 
 def test_stale_snapshot_skips_row_re_registered_mid_pass(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -595,6 +606,7 @@ def test_stale_snapshot_skips_row_re_registered_mid_pass(
 
 
 def test_session_rolled_back_when_row_expires_during_create(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -639,6 +651,7 @@ def test_session_rolled_back_when_row_expires_during_create(
 
 
 def test_session_created_for_row_closed_during_create_is_rolled_back(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -679,6 +692,7 @@ def test_session_created_for_row_closed_during_create_is_rolled_back(
 
 
 def test_terminated_agent_keeps_daemon_page_session(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -715,6 +729,7 @@ def test_terminated_agent_keeps_daemon_page_session(
 
 
 def test_daemon_restart_kills_the_persisted_session_of_a_closed_row(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,

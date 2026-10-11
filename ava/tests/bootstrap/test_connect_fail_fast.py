@@ -44,7 +44,7 @@ _HANG_WINDOW_S = 8.0
 
 
 @pytest.fixture
-def silent_peer_url() -> Generator[str]:
+def silent_peer_url(postgres_access: None) -> Generator[str]:
     """A `postgresql://` URL for a TCP peer that accepts and then never speaks.
 
     The kernel completes the handshake from the listen backlog, so libpq gets a
@@ -77,7 +77,7 @@ def silent_peer_url() -> Generator[str]:
             conn.close()
 
 
-def test_a_bare_connect_hangs_on_a_silent_peer(silent_peer_url: str) -> None:
+def test_a_bare_connect_hangs_on_a_silent_peer(silent_peer_url: str, postgres_access: None) -> None:
     """The control. Without `connect_timeout` libpq is still waiting after
     `_HANG_WINDOW_S` — the fixture is a black hole, not a refusal, so every
     "finished inside the window" assertion below is a real fail-fast measurement.
@@ -134,7 +134,7 @@ def _assert_fails_fast(attempt: Callable[[], object]) -> None:
     )
 
 
-def test_resilience_kwargs_bound_the_connect(silent_peer_url: str) -> None:
+def test_resilience_kwargs_bound_the_connect(silent_peer_url: str, postgres_access: None) -> None:
     """`PG_KEEPALIVE_KWARGS` itself is what converts the hang into an error —
     the property every call site below inherits by passing that one constant."""
     _assert_fails_fast(lambda: psycopg.connect(silent_peer_url, **PG_KEEPALIVE_KWARGS))

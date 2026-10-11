@@ -79,7 +79,7 @@ def _stop_redis(proc: subprocess.Popen[bytes]) -> None:
 
 
 @pytest.fixture
-def bounceable_redis(tmp_path: Path) -> Iterator[tuple[str, Path, int]]:
+def bounceable_redis(tmp_path: Path, redis_access: None) -> Iterator[tuple[str, Path, int]]:
     """A throwaway redis process the test can kill + restart on a fixed port.
     Yields (url, datadir, port); the datadir/port let the test bring it back at
     the same URL. Torn down on exit."""

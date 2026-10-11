@@ -21,7 +21,7 @@ from base.config import settings
 
 
 @pytest.fixture
-def foreground_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+def foreground_root(monkeypatch: pytest.MonkeyPatch, postgres_access: None) -> Iterator[Path]:
     """Use short socket paths and restrict every sweep to this test's instances."""
     with tempfile.TemporaryDirectory(prefix="ava-fg-", dir="/tmp") as directory:
         root = Path(directory)

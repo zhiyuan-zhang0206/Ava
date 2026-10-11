@@ -64,6 +64,7 @@ from tests.fixtures.units import spawn_agent
 
 
 async def test_claim_resurrect_kind_appends_marker_and_continues(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -101,6 +102,7 @@ async def test_claim_resurrect_kind_appends_marker_and_continues(
 
 
 async def test_claim_resurrect_batch_appends_only_latest_marker(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -144,6 +146,7 @@ async def test_claim_resurrect_batch_appends_only_latest_marker(
 
 
 async def test_unowned_resurrect_notification_cannot_cancel_pending_terminate(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -211,6 +214,7 @@ async def test_claim_resurrect_then_terminate_still_dies(
 
 
 async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -261,6 +265,7 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
 
 
 async def test_claim_fork_kind_appends_identity_marker_and_continues(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -323,6 +328,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
 
 
 async def test_claim_fork_strips_inherited_source_notes(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,

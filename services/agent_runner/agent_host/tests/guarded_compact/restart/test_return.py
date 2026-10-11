@@ -25,6 +25,7 @@ from tests.fixtures.model_catalog import AddBindings
 @pytest.mark.parametrize("lost", ["none", "before_apply", "after_apply", "after_observe_cleanup"])
 @pytest.mark.parametrize("mode", ["success", "failure", "cancel_first", "restart_first"])
 async def test_original_compact_restart_without_second_ordinary_work(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

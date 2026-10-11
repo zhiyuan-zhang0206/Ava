@@ -117,7 +117,7 @@ def test_explicit_list_narrows_the_index(
 
 
 def test_wildcard_groups_descendants_under_real_entry_skills(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    db_url: str, fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     _write_skill(fake_skills_dir, "work-flow", "work-flow", "Choose how to work")

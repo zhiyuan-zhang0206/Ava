@@ -110,7 +110,7 @@ def read(
 
 
 def test_a_chat_message_goes_from_its_source_to_the_agent_it_was_written_to(
-    db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     # agent_id is the recipient, target_agent_id repeats the sender.
     inbound_id = message(db_conn, receiver=receiver, sender=405, content="do   the\nthing")
@@ -121,7 +121,7 @@ def test_a_chat_message_goes_from_its_source_to_the_agent_it_was_written_to(
 
 
 def test_only_chat_messages_are_links_a_task_assignment_is_not(
-    db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     chat = message(db_conn, receiver=receiver, sender=405, hours_ago=3)
     message(db_conn, receiver=receiver, sender=405, kind="system_note", hours_ago=2)
@@ -171,7 +171,7 @@ def test_every_kind_reads_the_sender_from_source(
 
 
 def test_an_event_with_one_end_in_the_asked_agents_is_returned(
-    db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     message(db_conn, receiver=receiver, sender=405)
     assert [(e.sender, e.receiver) for e in read(405, database_gate=database_gate)] == [
@@ -206,7 +206,7 @@ def test_an_event_the_user_did_to_an_agent_has_no_sender(
 
 
 def test_a_notice_is_an_agent_posting_to_the_user(
-    db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     db_conn.execute(
         "INSERT INTO agent_notices (local_id, agent_id, title, priority, require_response, expire_at) "
@@ -229,6 +229,7 @@ def test_an_unknown_source_prefix_fails_instead_of_being_skipped(
 
 
 def test_a_window_longer_than_a_page_is_read_completely(
+    redis_url: str,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     receiver: int,
@@ -249,7 +250,7 @@ def _content(*, database_gate: ProcessDbGate, **params: int):
 
 
 def test_the_full_text_of_a_message_is_served_uncut(
-    db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     long = "line one\n\n" + "x" * 5000
     inbound_id = message(db_conn, receiver=receiver, sender=405, content=long)
@@ -258,7 +259,7 @@ def test_the_full_text_of_a_message_is_served_uncut(
 
 
 def test_only_a_chat_message_is_served(
-    db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     note = message(db_conn, receiver=receiver, sender=405, kind="system_note")
     with pytest.raises(HTTPException) as gone:
@@ -267,7 +268,7 @@ def test_only_a_chat_message_is_served(
 
 
 def test_a_notice_is_served_with_title_and_text(
-    db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     row = db_conn.execute(
         "INSERT INTO agent_notices (local_id, agent_id, title, content, priority, require_response, expire_at) "

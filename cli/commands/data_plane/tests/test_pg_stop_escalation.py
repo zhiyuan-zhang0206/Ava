@@ -105,6 +105,7 @@ def _assert_escalation_event(
 
 
 def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
+    postgres_access: None,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],

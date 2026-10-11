@@ -400,6 +400,7 @@ async def _run_terminating_turn(
 
 @pytest.mark.parametrize("requested", [True, False])
 async def test_hosted_terminate_kills_requested_shell_sessions_after_commit(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -428,6 +429,7 @@ async def test_hosted_terminate_kills_requested_shell_sessions_after_commit(
 
 
 async def test_hosted_self_terminate_honors_a_queued_kill_request(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -457,6 +459,7 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
 
 
 async def test_hosted_failed_kill_still_applies_the_termination(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,

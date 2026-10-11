@@ -3,9 +3,8 @@
 Loaded first by the repo-root `conftest.py`, and it has to stay first: everything
 here runs at IMPORT time, before any project module exists. It redirects
 `AVA_HOME` to a per-session tmpfs home, pins every cluster-scope value to a test
-sentinel, scrubs the operator's ambient environment, builds the Settings
-singleton, and then pins the session-wide runtime state on it (agent id, machine
-files, service ports, fd limit). `_assert_env_precedes_project_imports` fails the
+sentinel, scrubs the operator's ambient environment, and pins service ports and the fd
+limit without constructing Settings. Consumer fixtures own configuration boot. `_assert_env_precedes_project_imports` fails the
 run when a project module was imported earlier, i.e. when a plugin that imports
 project code was listed ahead of this one in the root `conftest.py`.
 
@@ -36,7 +35,7 @@ from pathlib import Path
 # and importing it pops the host's AVA_LGTM_* variables before Settings exists.
 import pytest
 
-import tests._test_env_file  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side effect is the point
+import tests._test_env_file
 
 # ═══ THIS BLOCK MUST STAY ABOVE EVERY PROJECT IMPORT ═══════════════════════════
 #
@@ -440,105 +439,25 @@ def _assert_env_precedes_project_imports() -> None:
 
 _assert_env_precedes_project_imports()
 
-# base.config reads AVA_DB_URL + AVA_HOME at import — must come after the
-# env block above, which is what the assertion just enforced.
-from base.config import ConfigBoot, set_field, settings
-from base.daemon.health import _HEALTH_PORT_OVERRIDES
-from base.host.env.port_table import FIXED_PORTS
-from tests.fixtures.configuration import snapshot_process_config
+# The declared session file and parent environment agree before a late config
+# boot. Use the existing dotenv parser; no config model is needed to deliver it.
+from dotenv import dotenv_values
 
-# The host-scope isolation pins (env block above) must have taken effect before
-# Settings construction: the native LGTM render reads the Tempo URLs at use
-# time, `self_machine_host()` prefers the env var, and the render writes the
-# Grafana credential into its output — the login-shell .env leak class would
-# otherwise put the operator's real host address and credentials into the
-# suite. Assert both the environment and the constructed settings, so a later
-# edit that weakens a pin (e.g. `setdefault`) fails loudly on every box, even
-# where CI cannot see the leak (a clean CI env has no ambient value to
-# override, so the LGTM test alone would stay green).
-assert os.environ.get("AVA_TELEMETRY_TEMPO_QUERY_URL") == "http://127.0.0.1:3200"
-assert os.environ.get("AVA_TELEMETRY_TEMPO_ENDPOINT") == "http://127.0.0.1:14318"
-assert os.environ.get("AVA_TELEMETRY_OTLP_PORT") == "4318"
-assert "AVA_TELEMETRY_OTLP_ENDPOINT" not in os.environ
-assert os.environ.get("AVA_MACHINE_HOST") == "localhost"
-assert os.environ.get("GRAFANA_ADMIN_PASSWORD") == ""
-assert settings.observability.telemetry_tempo_query_url == "http://127.0.0.1:3200"
-assert settings.observability.telemetry_tempo_endpoint == "http://127.0.0.1:14318"
-assert settings.observability.telemetry_otlp_port == 4318
-assert settings.observability.telemetry_otlp_endpoint == "http://127.0.0.1:4318"
-assert settings.general.machine_host == "localhost"
-assert settings.general.machine_name == f"test-{_SESSION_SUFFIX}"
-assert settings.alerts.grafana_admin_password is None or (
-    settings.alerts.grafana_admin_password.get_secret_value() == ""
+os.environ.update(
+    {
+        key: value
+        for key, value in dotenv_values(_TEST_AVA_HOME / ".env").items()
+        if value is not None
+    }
 )
+
+# These owners are settings-free: isolate ports before a subject chooses to boot config.
+from base.host.env.port_table import FIXED_PORTS
+from base.host.env.registry import health_port_env_aliases
 from base.native_process.os_platform import raise_fd_limit
 
-# `_SESSION_SUFFIX` (PID + microsecond suffix, zero cross-process collision) and
-# the tmpfs `_TEST_AVA_HOME` it names are defined in the env block at the top of
-# this file — AVA_HOME has to be in the environment before the first project
-# import, so the home cannot be created down here. Reused below for Redis channel
-# isolation and machine_name, so concurrent sessions (dev agents + CI + manual
-# runs) never share channels or home dirs.
-assert settings.data_plane.events_channel == _TEST_EVENTS_CHANNEL
-# A dev operator's .env may carry exec_timeout_seconds (≠ the field default),
-# which the module-load settings reads. The timeout-marker tests
-# (agent/graph/exec/tests/test_cancel.py) assert against the documented default, so pin it
-# back — local must match CI, whose fresh .env has no such value (60s).
-settings.sandbox.exec_timeout_seconds = 60.0
-os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
-# Remove AVA_AGENT_ID propagated from the agent process — any test that
-# temporarily unbinds the context would re-derive one from this env var with
-# owns_loop=False, corrupting subsequent tests.
 os.environ.pop("AVA_AGENT_ID", None)
-
-# `_TEST_AVA_HOME` is created and exported as AVA_HOME in the env block at the
-# top of this file — the one source of the home; it is removed in
-# `pytest_sessionfinish`.
-# multi-machine setup: spawn_agent / claim_agent_row read machine_name(); the test home's
-# `.env` (written in the block above) declares the session machine's name and its
-# agent-runner flag, so Settings resolves both with nothing else to plant.
-# machine capabilities default to agent-runner-only: gateway lifespan +
-# post_agents preflight both read it, tests default to agent-runner path so that
-# launch_agent_op locally launches the process; gateway-only tests monkeypatch
-# override themselves. serve_agent_runner=true, serve_gateway left unset (=off).
-# Pin both settings bools to the session default as well. Before the home was redirected
-# ahead of the `settings` import, a module-loaded `settings` captured the host operator's
-# AVA_MACHINE_SERVE_* out of their real ~/.ava/.env; with the redirect there is no host
-# `.env` on the path to capture, so this is belt-and-braces — kept because the default a
-# test inherits should be stated here rather than left to whatever the environment happens
-# not to contain.
-settings.general.machine_serve_agent_runner = True
-settings.general.machine_serve_gateway = None
-
-# machine_role defaults to agent-runner; gateway_api_base() reads gateway_url,
-# which is pinned in the env block at the top of this file (it has to precede the
-# Settings construction that `import ava` triggers). Tests never open a real TCP
-# connection to it — `.invalid` is reserved by RFC 2606 and cannot resolve.
-
-# ── Service ports: the session gets its own, never a prod default ──
-#
-# Redirecting AVA_HOME is not enough. Every service port falls back to a FIXED
-# default when nothing overrides it — the fixed port table
-# (base/host/env/port_table.py: gateway 8000, frontend 3000, every
-# daemon's health port) — and those are the ports the operator's prod cluster on
-# this same box is already bound to. So a test that starts a daemon binds prod's
-# port, and a test that runs a healthcheck probes (or respawns!) prod's service.
-#
-# That is not hypothetical: on 2026-07-24 a pytest-leaked daemon took prod's
-# health port and answered its /healthz for 98 minutes, so prod's watchdog saw
-# green and never revived the real daemon — the whole cluster's `restarting`
-# agents froze. `pg`/`redis` were already isolated this way (tests/_containers.py
-# binds :0); these were the ports that were not.
-#
-# Every port a test binds or dials comes from the kernel or from the private range
-# above 21000, and the whole table sits below it (base/cluster/tests/test_fixed_ports.py),
-# so no test port can equal a table port. `base/cluster/tests/test_fixed_ports.py` also
-# fails when a port-bearing setting in this session still holds its table value.
-#
-# Pinned in the settings singleton (in-process readers, which have already
-# constructed Settings by now) AND in os.environ (any subprocess a test spawns).
-# Kernel-assigned, so concurrent xdist workers — one import of this module each —
-# never collide either.
+os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
 
 
 def distinct_free_ports(count: int) -> list[int]:
@@ -558,46 +477,30 @@ def distinct_free_ports(count: int) -> list[int]:
 
 
 def _pin_setting(field: str, value: object) -> None:
-    """Force a settings field for this session, in the singleton and in the env
-    under pydantic's `AVA_<FIELD>` name (subprocesses read the latter)."""
-    set_field(field, value)
-    os.environ[f"AVA_{field.upper()}"] = str(value)
+    """Deliver a session pin before Settings construction, including child boots."""
+    key = f"AVA_{field.upper()}"
+    os.environ[key] = str(value)
+    tests._test_env_file.rewrite_line(_TEST_AVA_HOME / ".env", key, str(value))
 
 
-# Every daemon that registers a health port — read off the same map the endpoint table
-# consults, so a newly registered daemon is isolated the moment it is added there
-# rather than silently inheriting its prod default.
-#
-# One allocation hands out every port below, so no two of them (and none of the
-# session's table slots) can be the same number: separate `bind(0)` calls release
-# each port at once and the kernel may return it again.
-_HEALTH_PORT_FIELDS = tuple(_HEALTH_PORT_OVERRIDES.values())
+_HEALTH_PORT_FIELDS = tuple(
+    alias.removeprefix("AVA_").lower() for alias in health_port_env_aliases().values()
+)
 _ports = iter(distinct_free_ports(len(_HEALTH_PORT_FIELDS) + 7 + len(FIXED_PORTS)))
 for _health_port_field in _HEALTH_PORT_FIELDS:
     _pin_setting(_health_port_field, next(_ports))
-
 _pin_setting("gateway_health_url", f"http://127.0.0.1:{next(_ports)}/api/health")
 _pin_setting("frontend_healthcheck_url", f"http://127.0.0.1:{next(_ports)}")
-# The rest of the settings that default to a table port. The permissions helper
-# port is pinned in the singleton only: its env key is popped above on purpose,
-# and a set key would read as a helper spawn context in every child.
 _pin_setting("gateway_port", next(_ports))
 _pin_setting("browser_cdp_port", next(_ports))
 _pin_setting("grafana_port", next(_ports))
-_pin_setting("memory_search_port", next(_ports))
-_pin_setting("memory_search_uri", f"http://127.0.0.1:{settings.services.memory_search_port}")
-_permissions_helper_port = next(_ports)
-set_field("permissions_helper_port", _permissions_helper_port)
-
-# The ports every test home born in this session records (`guards.py`): one
-# kernel-assigned port per slot of the fixed table.
+_memory_search_port = next(_ports)
+_pin_setting("memory_search_port", _memory_search_port)
+_pin_setting("memory_search_uri", f"http://127.0.0.1:{_memory_search_port}")
+# The helper's env key signifies a helper child. Its config pin is applied by
+# the owner fixture, not exported into every descendant as a spawn context.
+permissions_helper_port = next(_ports)
 _SESSION_PORTS: dict[str, int] = dict(zip(FIXED_PORTS, _ports, strict=True))
-
-
-# Belt-and-suspenders on the OS-jobs switch already in `os.environ` at the top of
-# this file: an operator's real `~/.ava/.env` is loaded by `base.host.env.dotenv_boot`
-# before Settings constructs, so pin the singleton rather than trust that the env
-# value is what survived. (`_pin_setting` rewrites the env var too, harmlessly.)
 _pin_setting("os_jobs_enabled", False)
 
 # ── fd budget for detached session children ──
@@ -622,12 +525,8 @@ raise_fd_limit(65536)
 # values means the check covers whatever keys the leaking fixture touches, including
 # ones nobody listed.
 #
-# `AVA_DB_URL` / `AVA_REDIS_URL` legitimately differ from this snapshot from the
-# first test onward — `_provisioned_db` / `_provisioned_redis` below replace the
-# import-time sentinel with the session's real throwaway instances. That is the one
-# sanctioned divergence, and it is sanctioned because those fixtures live in a plugin
-# loaded from the repo-root conftest.py, where session scope and the blast radius are
-# the same thing.
+# Resource fixtures deliver real URLs only within the requesting function's
+# window and restore the sentinels before the leak guard compares this baseline.
 _PRISTINE_ENV: dict[str, str] = dict(os.environ)
 
 
@@ -652,16 +551,11 @@ def session_ports() -> dict[str, int]:
     return dict(_SESSION_PORTS)
 
 
-_PROCESS_CONFIG_KEY = pytest.StashKey[ConfigBoot]()
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    """Prepare the process configuration before collection and bare function homes."""
-    owner = snapshot_process_config()
-    config.stash[_PROCESS_CONFIG_KEY] = owner
-
-
 @pytest.fixture(scope="session")
-def process_config(pytestconfig: pytest.Config) -> ConfigBoot:
-    """The prepared configuration shared by native provisioning and local SDK owners."""
-    return pytestconfig.stash[_PROCESS_CONFIG_KEY]
+def process_config():
+    """Prepare configuration only for a consumer, before its function-scoped home."""
+    from base.config import set_field
+    from tests.fixtures.configuration import snapshot_process_config
+
+    set_field("permissions_helper_port", permissions_helper_port)
+    return snapshot_process_config()

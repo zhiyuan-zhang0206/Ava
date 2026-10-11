@@ -22,6 +22,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 async def test_native_redis_diagnostic_uses_authenticated_ping_without_acl_or_config_writes(
     monkeypatch: pytest.MonkeyPatch,
+    redis_access: None,
 ) -> None:
     with (
         redis_server() as url,
@@ -41,7 +42,9 @@ async def test_native_redis_diagnostic_uses_authenticated_ping_without_acl_or_co
         assert client.config_get("*") == configuration  # pyright: ignore[reportUnknownMemberType] — redis command stubs
 
 
-async def test_absent_native_redis_diagnostic_is_down(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_absent_native_redis_diagnostic_is_down(
+    redis_access: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     port = _free_port()
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{port}/0")
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")

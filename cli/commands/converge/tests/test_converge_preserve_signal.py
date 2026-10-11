@@ -80,7 +80,11 @@ def test_extensions_kept_local_edits_report_converge_file_preserved(
 ) -> None:
     """A kept local extension edit is reported next to its stderr warning."""
     emitted = _capture_emit(monkeypatch)
-    monkeypatch.setattr(db, "pool", _PoolStub)
+
+    def fake_pool(_database: db.Database) -> _PoolStub:
+        return _PoolStub()
+
+    monkeypatch.setattr(db.Database, "pool", fake_pool)
     monkeypatch.setattr(paths, "skills_dir", lambda: tmp_path / "skills")
 
     def kept_edit(_conn: object, *, dest_root: Path) -> SimpleNamespace:

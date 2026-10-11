@@ -54,7 +54,7 @@ def event_pipeline(
 
 
 @pytest.fixture
-def pool():
+def pool(db_url: str):
     p = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
     try:
         yield p
@@ -172,6 +172,7 @@ def healthy_host_verdict(db_conn: psycopg.Connection, *, machine_identity: Machi
 class TestSelectStalePending:
     def test_returns_only_chat_pending_older_than_threshold(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         *,
@@ -207,6 +208,7 @@ class TestSelectStalePending:
 
     def test_claimed_or_done_rows_never_stale(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         *,
@@ -230,6 +232,7 @@ class TestSelectStalePending:
 
     def test_empty_when_nothing_stale(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         *,
@@ -250,6 +253,7 @@ class TestSelectStalePending:
 
     def test_running_owner_queues_are_not_stalls(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         *,
@@ -278,6 +282,7 @@ class TestSelectStalePending:
 class TestScanOnce:
     def test_alerts_each_stale_row_once_while_pending(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         *,
@@ -306,6 +311,7 @@ class TestScanOnce:
 
     def test_row_that_leaves_pending_forgets_alert(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         *,
@@ -340,6 +346,7 @@ class TestScanOnce:
     @pytest.mark.usefixtures("event_pipeline")
     def test_alert_writes_unified_event(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         *,

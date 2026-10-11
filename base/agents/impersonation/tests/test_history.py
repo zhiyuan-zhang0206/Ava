@@ -159,6 +159,7 @@ def test_numbers_are_agent_scoped_and_permanent(
 
 
 def test_concurrent_requests_cannot_share_control(
+    redis_url: str,
     owner: RuntimeIncarnation,
     *,
     config_authority: ConfigAuthority,

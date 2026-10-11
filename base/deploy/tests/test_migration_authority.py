@@ -40,7 +40,7 @@ _SYN = "29991231T235959_synthetic-authority"
 
 
 @pytest.fixture(autouse=True)
-def _clean_units_and_synthetic() -> Iterator[None]:
+def _clean_units_and_synthetic(db_conn: None) -> Iterator[None]:
     """Own machine_units + the synthetic migration's row/table for each test,
     and put back the applied names this module's applying tests squash away.
 

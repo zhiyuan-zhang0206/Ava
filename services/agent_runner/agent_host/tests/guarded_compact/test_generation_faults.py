@@ -19,6 +19,7 @@ from tests.fixtures.model_catalog import AddBindings
 
 @pytest.mark.parametrize("failure", ["operational", "pool", "provider", "short"])
 async def test_generation_unknown_or_short_never_repeats_and_next_chat_runs(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

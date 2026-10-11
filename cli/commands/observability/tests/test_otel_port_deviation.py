@@ -20,6 +20,7 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 
 @pytest.mark.parametrize("station_port", [4318, 4325])
 def test_remote_station_advertisement_drives_render_and_probe(
+    db_url: str,
     monkeypatch: pytest.MonkeyPatch,
     station_port: int,
     operator_database: Callable[[], Any],
@@ -59,7 +60,7 @@ def test_remote_station_advertisement_drives_render_and_probe(
 
 
 def test_unregistered_station_uses_remote_port_projection(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+    db_url: str, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     monkeypatch.setattr(settings.observability, "telemetry_otlp_port", 4319)
     monkeypatch.setattr(settings.observability, "observability_otlp_port", 4325)

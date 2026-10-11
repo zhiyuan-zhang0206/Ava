@@ -88,6 +88,7 @@ def _set_agent_status(db: psycopg.Connection, agent_id: int, status: str) -> Non
 
 @pytest.fixture
 async def running_agent(
+    redis_url: str,
     aops_pool: AsyncConnectionPool,
     database: Database,
     *,

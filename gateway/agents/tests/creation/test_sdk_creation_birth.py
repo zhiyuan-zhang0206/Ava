@@ -28,6 +28,7 @@ from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_sp
 @pytest.mark.usefixtures("retry_waits")
 @pytest.mark.parametrize("rotate", [False, True])
 def test_same_sdk_intent_after_lost_response_and_gateway_restart(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     set_machine_identity: Any,

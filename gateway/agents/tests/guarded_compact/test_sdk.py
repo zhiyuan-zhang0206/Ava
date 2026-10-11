@@ -25,6 +25,7 @@ from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 @pytest.mark.usefixtures("retry_waits")
 async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

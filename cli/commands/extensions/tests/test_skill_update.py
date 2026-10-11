@@ -240,6 +240,7 @@ def test_upgrade_skips_unupdatable(unit_home: Path, capsys) -> None:
 
 
 def test_upgrade_refetches_from_source(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -260,6 +261,7 @@ def test_upgrade_refetches_from_source(
 
 
 def test_upgrade_local_source_is_copied_never_moved(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -291,6 +293,7 @@ def test_upgrade_local_source_is_copied_never_moved(
 
 
 def test_upgrade_replaces_a_local_edit(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     capsys,

@@ -48,11 +48,8 @@ def test_the_real_e2e_conftest_is_flagged_if_the_package_init_is_deleted() -> No
 
 
 def test_setup_env_keys_matches_the_real_fixtures_body() -> None:
-    # Ties the primitive to the file it guards: the twelve keys the real body
-    # assigns (it was thirteen until the hibernation chain deletion dropped
-    # AVA_HIBERNATE_ENABLED — Task #1976 phase 2 — twelve until the
-    # always-authenticated data plane retired AVA_RUNNER_DB_PASSWORD, and eleven
-    # until the direct-process stack started with an empty AVA_CLUSTER_SECRET).
+    # Ties the primitive to the fourteen explicit environment assignments,
+    # including the URLs delivered by this native stack's resource fixtures.
     # The count is what keeps the `literal == declared` assertion below from passing
     # vacuously (both empty), so it tracks the fixture body — update it when the body
     # gains or drops an assignment, do not relax it.
@@ -60,7 +57,7 @@ def test_setup_env_keys_matches_the_real_fixtures_body() -> None:
         _E2E_CONFTEST.read_text(encoding="utf-8"), "_e2e_process_env"
     )
     assert dynamic == frozenset()
-    assert len(literal) == 12
+    assert len(literal) == 14
     tree = ast.parse(_E2E_CONFTEST.read_text(encoding="utf-8"))
     declared = {
         e.value

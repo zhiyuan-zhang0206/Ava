@@ -162,14 +162,14 @@ class StallWatchdog(threading.Thread):
         super().__init__(name=f"pg-stall-watchdog-{port}", daemon=True)
         self._admin_url = admin_url
         self._port = port
-        self._stop = threading.Event()
+        self._stop_requested = threading.Event()
         self.evidence_path: str | None = None
 
     def run(self) -> None:
         import psycopg
 
         failures = 0
-        while not self._stop.wait(_PROBE_INTERVAL_S):
+        while not self._stop_requested.wait(_PROBE_INTERVAL_S):
             try:
                 with (
                     psycopg.connect(self._admin_url, connect_timeout=_PROBE_TIMEOUT_S) as conn,
@@ -179,6 +179,8 @@ class StallWatchdog(threading.Thread):
                     cur.fetchone()
                 failures = 0
             except Exception as e:
+                if self._stop_requested.is_set():
+                    return
                 failures += 1
                 logger.warning(
                     f"throwaway PG probe {failures}/{_PROBE_CONSECUTIVE_FAILURES} failed "
@@ -190,7 +192,7 @@ class StallWatchdog(threading.Thread):
                     return
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_requested.set()
 
 
 @contextmanager
@@ -204,6 +206,12 @@ def stall_guard(admin_url: str, port: int) -> Generator[None, None, None]:
         yield
     finally:
         watchdog.stop()
+        watchdog.join(timeout=2 * _PROBE_TIMEOUT_S + 1)
+        if watchdog.is_alive():
+            raise RuntimeError(
+                f"throwaway PG watchdog for port {port} did not stop; "
+                "database probe or stall evidence capture is still in flight"
+            )
         if watchdog.evidence_path is not None:
             logger.error(
                 f"throwaway PG (port {port}) stalled and was killed for fail-fast; "

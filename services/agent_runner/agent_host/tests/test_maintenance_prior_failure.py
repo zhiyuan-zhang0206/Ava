@@ -211,6 +211,7 @@ async def _run_turn_whose_tail_flush_hits_a_database_outage(
 
 
 async def test_prior_tail_flush_outage_blocks_automatic_maintenance_retry(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,

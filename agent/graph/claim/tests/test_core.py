@@ -102,6 +102,7 @@ class TestLifecycleExceptions:
 class TestTerminate:
     def test_terminate_inserts_terminate_inbound_to_self(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -129,6 +130,7 @@ class TestTerminate:
 class TestRestart:
     def test_restart_inserts_restart_inbound_to_self(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -155,6 +157,7 @@ class TestRestart:
 
     def test_restart_with_config_inserts_payload(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -195,6 +198,7 @@ class TestRestart:
 
     def test_restart_with_config_merges_into_overlay_column(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -254,6 +258,7 @@ class TestRestart:
 
     def test_restart_with_invalid_config_raises_and_no_inbound(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -287,6 +292,7 @@ class TestRestart:
 
     def test_restart_with_unknown_model_raises_without_persisting(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -336,6 +342,7 @@ class TestRestart:
 
     def test_restart_settles_withdrawn_model_to_registered_fallback(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         add_models: AddModels,
         monkeypatch: pytest.MonkeyPatch,
@@ -412,6 +419,7 @@ class TestPauseHeartbeat:
     @pytest.mark.usefixtures("event_pipeline")
     def test_pause_heartbeat_sets_window_records_trail_and_emits_event(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -478,6 +486,7 @@ class TestPauseHeartbeat:
     @pytest.mark.parametrize("bad", [0, -1, settings.agent.heartbeat_pause_max_seconds + 1])
     def test_pause_heartbeat_rejects_out_of_range(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         bad: float,
@@ -520,6 +529,7 @@ class TestPauseHeartbeat:
 
     def test_pause_heartbeat_lower_cluster_default(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         *,
         model_catalog: ModelCatalog,
@@ -557,6 +567,8 @@ class TestPauseHeartbeat:
     def test_pause_heartbeat_per_agent_override_wins(
         self,
         *,
+        db_url: str,
+        redis_url: str,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,

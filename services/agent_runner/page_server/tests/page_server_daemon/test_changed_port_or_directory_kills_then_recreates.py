@@ -40,6 +40,7 @@ from tests.fixtures.units import spawn_agent
 
 
 def test_changed_port_or_directory_kills_then_recreates_the_page_session(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -80,6 +81,7 @@ def test_changed_port_or_directory_kills_then_recreates_the_page_session(
 
 
 def test_daemon_restart_adopts_a_healthy_live_page_session(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -120,6 +122,7 @@ def test_daemon_restart_adopts_a_healthy_live_page_session(
 
 
 def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -168,6 +171,7 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
 
 
 def test_failed_session_creation_uses_spawn_backoff(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
@@ -198,6 +202,7 @@ def test_failed_session_creation_uses_spawn_backoff(
 
 
 def test_missing_serve_dir_uses_the_existing_degradation_ladder(
+    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,

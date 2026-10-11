@@ -14,6 +14,7 @@ from base.telemetry import process_name
 
 
 def test_gate_is_lazy_and_shared_by_native_builders(
+    db_url: str,
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
     database_version: code_version.CodeVersion,

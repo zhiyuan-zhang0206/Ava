@@ -26,6 +26,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_checkpoint_clock_skew_scans_settled_history(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -65,6 +66,7 @@ async def test_checkpoint_clock_skew_scans_settled_history(
 
 
 async def test_historical_clock_skew_cannot_hide_a_fresh_commit(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -108,6 +110,7 @@ async def test_historical_clock_skew_cannot_hide_a_fresh_commit(
 
 
 async def test_incomplete_full_write_scan_preserves_claimed_row(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: Any,

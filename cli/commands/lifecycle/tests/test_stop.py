@@ -439,6 +439,7 @@ def test_repeated_stop_needs_no_live_database_or_host(
 
 
 def test_two_stop_start_cycles_reuse_identity_not_old_operation(
+    db_url: str,
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],

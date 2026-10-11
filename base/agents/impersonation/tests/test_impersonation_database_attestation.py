@@ -84,6 +84,7 @@ def _active(
 
 
 def test_generation_crossing_is_refused(
+    redis_url: str,
     db_conn: Any,
     monkeypatch: pytest.MonkeyPatch,
     database: Database,

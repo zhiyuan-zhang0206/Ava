@@ -25,7 +25,7 @@ def _db(database_gate: ProcessDbGate) -> Database:
 
 
 @pytest.fixture(autouse=True)
-def _truncate_machines() -> None:
+def _truncate_machines(db_conn: None) -> None:
     """Truncate both tables per test — leftover register_self/recompute across tests would pollute subsequent assertions."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("TRUNCATE machines")

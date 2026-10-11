@@ -25,6 +25,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_replaced_incarnation_writes_nothing(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -68,6 +69,7 @@ async def test_replaced_incarnation_writes_nothing(
 
 
 async def test_settlement_pass_swallows_a_replaced_incarnation(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],

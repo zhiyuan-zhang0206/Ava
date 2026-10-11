@@ -31,6 +31,7 @@ def accept_cancel(client: TestClient, accepted: AcceptedHost) -> dict[str, Any]:
 
 @pytest.mark.parametrize("stage", ["permit", "flush", "ack_lost"])
 async def test_late_cancel_closes_after_compact_and_replay_cannot_overwrite(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

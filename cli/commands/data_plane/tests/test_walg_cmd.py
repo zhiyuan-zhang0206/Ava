@@ -229,7 +229,10 @@ def _dial(pg: PgInstance, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    postgres_access: None,
 ) -> None:
     """The retained-postmaster case: archiving was configured after Postgres launched."""
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
@@ -245,7 +248,10 @@ def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
 
 
 def test_a_postgres_launched_with_the_arguments_is_not_flagged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    postgres_access: None,
 ) -> None:
     make_sandbox(tmp_path, monkeypatch)
     with archiving_postgres() as pg:

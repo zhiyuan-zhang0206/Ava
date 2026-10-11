@@ -49,6 +49,7 @@ _real_reap_cluster_chrome = _stop_commands._reap_cluster_chrome
 
 
 def test_cmd_restart_succeeds_non_interactively(
+    db_url: str,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
@@ -246,6 +247,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
 
 
 def test_cmd_restart_short_circuits_on_stop_failure(
+    db_url: str,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],

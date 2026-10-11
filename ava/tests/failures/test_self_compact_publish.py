@@ -36,6 +36,7 @@ class _BoomSyncClient:
 
 
 def test_compact_survives_publish_failure(
+    redis_url: str,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -75,6 +76,7 @@ def test_compact_survives_publish_failure(
 
 
 def test_compact_records_its_audit_fact_with_the_summary_inbound(
+    redis_url: str,
     db_conn: psycopg.Connection,
     *,
     model_catalog: ModelCatalog,
@@ -102,6 +104,7 @@ def test_compact_records_its_audit_fact_with_the_summary_inbound(
 
 
 def test_compact_whose_audit_fact_cannot_be_recorded_commits_no_summary(
+    redis_url: str,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,

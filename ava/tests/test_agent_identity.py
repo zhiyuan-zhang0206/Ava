@@ -162,7 +162,7 @@ def test_lifecycle_default_source_requires_identity_before_http(
 
 @pytest.mark.parametrize("action", ["compact", "restart", "terminate"])
 def test_lifecycle_self_actions_refuse_from_launched_script(
-    action: str, monkeypatch: pytest.MonkeyPatch
+    db_url: str, action: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pin_agent(1, owns_loop=False)
 

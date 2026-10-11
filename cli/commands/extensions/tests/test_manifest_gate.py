@@ -285,6 +285,7 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
 
 
 def test_skill_install_valid_manifest_proceeds(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],

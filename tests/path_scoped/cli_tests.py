@@ -20,6 +20,7 @@ from base.config import ConfigBoot
 from base.deploy.lifecycle import service_selection as ds
 from base.paths import ava_home
 from base.telemetry import EventPipeline
+from cli.commands.tests.health_port_guard import guard_health_port_gate as guard_health_port_gate
 from cli.database import (
     OperatorDatabaseFactory,
     OperatorEventPipeline,
@@ -29,6 +30,16 @@ from cli.database import (
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
+
+
+@pytest.fixture(autouse=True)
+def _cli_orchestration_guards(
+    guard_health_port_gate: None,
+    _guard_service_readiness: None,
+    _test_homes_get_their_own_ports: None,
+    permissions_helper_native_io: None,
+) -> None:
+    """Protect the same CLI effects as the package-local CLI test owner."""
 
 
 @pytest.fixture

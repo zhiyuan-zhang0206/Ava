@@ -288,6 +288,7 @@ async def _read_resp_command(reader: asyncio.StreamReader) -> list[bytes]:
 
 
 async def test_timed_out_redis_connection_is_released_before_next_heartbeat(
+    redis_url: str,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
