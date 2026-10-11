@@ -16,7 +16,6 @@ reads.
 from __future__ import annotations
 
 import ast
-import importlib
 import os
 import re
 import subprocess
@@ -221,7 +220,7 @@ def test_agent_identity_holds_no_process_global_slot() -> None:
     """The identity is the bound context's, restored through its context variable. A slot added
     to the module would leak again, unnamed: the module annotates each process-global slot it
     holds, and it holds none."""
-    assert importlib.import_module("ava.sdk_surface.agent_identity").__annotations__ == {}
+    assert agent_identity.__annotations__ == {}
 
 
 def test_native_admission_does_not_rebind_the_sdk_identity() -> None:

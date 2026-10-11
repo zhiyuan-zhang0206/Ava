@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -10,21 +9,9 @@ from typing import Any
 
 import pytest
 
+from scripts.model_registry import update_model_pricing as pricing_updater
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-_SCRIPT = _REPO_ROOT / "scripts" / "model_registry" / "update_model_pricing.py"
-
-
-def _load_script():
-    spec = importlib.util.spec_from_file_location("update_model_pricing", _SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-pricing_updater = _load_script()
 
 
 _DEEPSEEK_TABLE = """

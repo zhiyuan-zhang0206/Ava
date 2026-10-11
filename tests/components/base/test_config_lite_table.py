@@ -9,7 +9,6 @@ registry, and they pin the index's outside-the-package location.
 
 from __future__ import annotations
 
-import importlib
 import json
 import operator
 import subprocess
@@ -132,7 +131,8 @@ def test_index_and_reader_live_outside_the_config_package() -> None:
     """Negative assertion: neither the reader nor the data file may move inside
     `base/config/` — `base/host/env/registry` imports them before the package can
     initialize (a package submodule import would re-enter the boot)."""
-    table_module = importlib.import_module("base.host.env.config_lite_table")
+    from base.host.env import config_lite_table as table_module
+
     module_file = table_module.__file__
     assert module_file is not None
     assert Path(module_file).resolve() == _READER

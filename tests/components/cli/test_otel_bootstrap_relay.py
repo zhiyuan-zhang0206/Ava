@@ -1,6 +1,5 @@
 """Gateway bootstrap publishes relay routing independently of local listeners."""
 
-import importlib
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -53,7 +52,8 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     owner.set_field("machine_host", "10.0.0.10")
     owner.set_field("db_url", config.settings.data_plane.db_url)
     owner.set_field("telemetry_otlp_port", gateway_port)
-    gateway_app = importlib.import_module("gateway.app")
+    from gateway import app as gateway_app
+
     monkeypatch.setattr(gateway_app, "ConfigBoot", lambda: owner)
     with TestClient(app) as client:
         assert without_credentials(client).get("/api/bootstrap").status_code == 401

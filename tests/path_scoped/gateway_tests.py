@@ -22,7 +22,6 @@ over the same attribute, which runs after these autouse fixtures and wins.
 
 from __future__ import annotations
 
-import importlib
 from typing import Any, cast
 
 import pytest
@@ -58,7 +57,7 @@ def gateway_config_owner(
     process bootstrap operation, so restore that delivery before running SDK
     clients and install the test's existing settings pins through the public API.
     """
-    gateway_app = importlib.import_module("gateway.app")
+    from gateway import app as gateway_app
 
     def build_process(
         *, config: ConfigBoot, image: LoadedCommit, machine: MachineIdentity

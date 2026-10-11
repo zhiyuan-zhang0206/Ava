@@ -197,8 +197,8 @@ def test_log_sink_import_of_base_db_stays_deferred() -> None:
     modules long ago, so an in-process import would pass either way. The
     subprocess imports `base.db` first, the direction that breaks.
     """
-    proc = subprocess.run(
-        [sys.executable, "-c", "import base.db; import base.log"],
+    proc = subprocess.run(  # noqa: S603 — fixed interpreter and child script
+        [sys.executable, str(Path(__file__).with_name("child_import_base_db_first.py"))],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
