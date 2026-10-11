@@ -36,10 +36,8 @@ Data provenance (verified against the live prod stream, 2026-08-04):
 - turn_end ~41.4k rows/7d: attributes ok ('true'/'false') + duration_seconds;
   ok=true 166.7k / ok=false 4.9k all-time (~97%).
 - exec 36.5k ok / 1235 exec_failed / 1 exec_node_timeout per 7d;
-  failure event names emitted as exec_failed / exec(timeout) /
-  exec(cancelled) / exec_node_timeout (legacy parenthesized spellings
-  coexist in the stream — both counted; exec_thread_stuck stopped being
-  emitted when the thread backend was removed, PR3).
+  failure event names emitted as exec_failed / exec_timeout /
+  exec_cancelled / exec_node_timeout.
 - syntax_fix 9.8k rows/7d, category=telemetry (final caliber, 2026-08-05,
   tracker #762 — pre-caliber rows were backfilled by the accompanying migration);
   attributes.fixes is a comma list,
@@ -48,7 +46,7 @@ Data provenance (verified against the live prod stream, 2026-08-04):
   escape_inner_quotes, fstring_expr, nested_triple_quote, backslash_trailing.
 - sdk_call 58.7k rows/7d: attributes.fn ("shell.run" style), category=telemetry.
 - halt 3.9k rows/7d: attributes.body = 'no tool_call (idle)' /
-  'system_halt (compact)' / 'lifecycle AgentTermination' / 'lifecycle AgentRestart'.
+  'system_halt (compact)' / 'lifecycle AgentTermination'.
 - spawn (audit) 404 rows/7d: the events.source column carries the spawner
   ('agent:N' dominant, plus 'user' / 'cron').
 - delivery_stalled 10.4k rows/7d, category=telemetry (the delivery watchdog
@@ -355,9 +353,8 @@ def core_metrics() -> list[MetricSpec]:
             description=(
                 "Exec outcome breakdown per minute (5-minute buckets / 5): ok = "
                 "event_name='exec'; failures split by event_name (exec_failed / "
-                "exec(timeout) / exec(cancelled) / exec_node_timeout, legacy "
-                "parenthesized spellings counted in; unknown exec* events fall "
-                "into other). event_name='exec', category='telemetry'."
+                "exec_timeout / exec_cancelled / exec_node_timeout; unknown exec* "
+                "events fall into other). event_name='exec', category='telemetry'."
             ),
             event_name="exec",
             category="telemetry",
@@ -369,17 +366,17 @@ def core_metrics() -> list[MetricSpec]:
                 event_count(
                     "category={category}",
                     "5m",
-                    matchers='event_name=~"exec_failed|exec[(]failed[)]"',
+                    matchers='event_name="exec_failed"',
                 ),
                 event_count(
                     "category={category}",
                     "5m",
-                    matchers='event_name=~"exec_timeout|exec[(]timeout[)]"',
+                    matchers='event_name="exec_timeout"',
                 ),
                 event_count(
                     "category={category}",
                     "5m",
-                    matchers='event_name=~"exec_cancelled|exec[(]cancelled[)]"',
+                    matchers='event_name="exec_cancelled"',
                 ),
                 event_count("category={category}", "5m", matchers='event_name="exec_node_timeout"'),
                 # other: every exec* event outside the known spellings. Stream
@@ -396,9 +393,8 @@ def core_metrics() -> list[MetricSpec]:
                     "5m",
                     matchers=(
                         'event_name=~"exec.*", '
-                        'event_name!~"exec|exec_envelope|exec_failed|exec[(]failed[)]|exec_timeout|'
-                        "exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|"
-                        'exec_node_timeout"'
+                        'event_name!~"exec|exec_envelope|exec_failed|exec_timeout|'
+                        'exec_cancelled|exec_node_timeout"'
                     ),
                 ),
             ],

@@ -2,7 +2,7 @@
 
 Grafana Alerting rules for the Ava event system, provisioned as code. Since
 the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
-R1-R3, R5-R7, R13, R17, and R19 query **Loki** (every event is one OTLP log
+R1-R2, R5-R7, R13, R17, and R19 query **Loki** (every event is one OTLP log
 line under `{service_name="unknown_service"}`, body = the full event JSON, so
 `| json` flattens each line to labels), while R4, the gateway-metrics silence
 rule, and the root-health round freshness rule query **Prometheus** (the
@@ -40,8 +40,9 @@ Grafana does not delete a file-provisioned rule that disappears from
 removed here must also be listed in `delete-rules.yml` (a `deleteRules:`
 tombstone): file provisioning deletes the UID on the next alerting reload or
 restart, and entries are idempotent, so tombstones stay after the rule is
-gone. First use: R23 (`ava-ops-pitr-storage-growth`, retired 2026-10-02,
-removed from the station 2026-10-05).
+gone. Tombstoned so far: R23 (`ava-ops-pitr-storage-growth`, retired
+2026-10-02, removed from the station 2026-10-05) and R3
+(`ava-ops-agent-restart-spike`, which counted an event nothing emits).
 
 ## Where these run (LGTM stack)
 
@@ -68,7 +69,6 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 |-----|-------|--------|-----------|-------|----------|
 | `ava-ops-warning-error-spike` | `ava-ops` | WARNING+ERROR+CRITICAL spike | 5m count > 3× prior-15m rate AND ≥ 30 (Loki) | 5m | error |
 | `ava-ops-sse-drop-backlog` | `ava-ops` | sse_drop + event_log_drop backlog | SUM(payload.n) in 10m > 100 (Loki unwrap) | 5m | warning |
-| `ava-ops-agent-restart-spike` | `ava-ops` | agent_restarted spike | count in 15m > 30 (Loki) | 5m | warning |
 | `ava-ops-llm-latency-p95` | `ava-ops` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
 | `ava-ops-delivery-stalled-backlog` | `ava-ops` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki) | 5m | warning |
 | `ava-ops-events-freshness` | `ava-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
@@ -209,7 +209,7 @@ a new provider is covered by adding its string there, with no edit to
 
 ### Migration notes (Postgres → LGTM, 2026-08-12)
 
-- **R1/R2/R3/R5/R7** — same semantics, Loki `count_over_time` /
+- **R1/R2/R5/R7** — same semantics, Loki `count_over_time` /
   `sum_over_time` + `| json` filters. R2 unwraps `attributes_n` (SUM of the
   real per-row drop counts, the same contract the Ops panel reads); R5's
   freshness discriminator is the numeric comparison
