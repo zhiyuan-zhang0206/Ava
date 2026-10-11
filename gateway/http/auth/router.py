@@ -25,7 +25,6 @@ from base.cluster.auth import (
 from base.cluster.authority.api import AcceptanceCache
 from base.cluster.rate_limit import LoginRateLimiter
 from base.config import settings
-from gateway.http.auth.cors import session_cookie_secure
 from gateway.http.auth.request_principal import (
     SessionKeys,
     current_session_fact,
@@ -42,6 +41,7 @@ from gateway.http.auth.session_store import (
     session_mint,
     ticket_mint,
 )
+from gateway.http.middleware.cors import session_cookie_secure
 from gateway.http.middleware.error_envelope import error_response
 
 router = APIRouter()

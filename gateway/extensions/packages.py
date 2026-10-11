@@ -22,8 +22,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from gateway.agents.creation import guarded_draft_key
-from gateway.agents.router import create_and_launch_agent
+from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()

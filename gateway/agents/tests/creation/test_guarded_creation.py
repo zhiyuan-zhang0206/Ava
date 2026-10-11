@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from gateway.agents import router as agent_router
+from gateway.agents import creation as agent_creation
 from gateway.agents.creation import scoped_creation_key
 from gateway.app import app
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
@@ -40,7 +40,7 @@ def client(
     async def accept(db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         return SpawnedAgent(id=body.agent_id)
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", accept)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
     with gateway_test_client(
         app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
     ) as value:

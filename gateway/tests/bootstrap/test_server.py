@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -13,6 +15,11 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.cluster import server as _server
 from tests.fixtures.configuration import snapshot_process_config
+
+
+def _app() -> Any:
+    """The ASGI app `serve` is handed; these tests stub `serve`, so only its `state` is touched."""
+    return SimpleNamespace(state=SimpleNamespace())
 
 
 def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
@@ -37,7 +44,7 @@ def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
     monkeypatch.setattr(_server, "serve", _record_serve)
 
     with caplog.at_level(logging.WARNING, logger="gateway.cluster.server"):
-        _server.main()
+        _server.main(app=_app())
 
     assert captured["workers"] == 1
     assert "rate limit" in caplog.text
@@ -92,7 +99,7 @@ def test_gateway_start_raises_the_min_code_version_after_schema_and_logging(
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _ignore)
 
-    _server.main()
+    _server.main(app=_app())
 
     assert steps.count("raise") == raised
     if raised:
@@ -137,7 +144,7 @@ def test_a_gateway_without_a_cluster_secret_refuses_to_start(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
 
     with pytest.raises(ClusterSecretMissingError, match="AVA_CLUSTER_SECRET"):
-        _server.main()
+        _server.main(app=_app())
 
     assert steps == []
     assert not (tmp_path / "gateway.pid").exists()
@@ -164,6 +171,6 @@ def test_gateway_bind_follows_the_declared_reachable_address_not_the_secret(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
     monkeypatch.setattr(settings.general, "machine_host", reachable)
 
-    _server.main()
+    _server.main(app=_app())
 
     assert steps[-1] == f"serve:{bind}"

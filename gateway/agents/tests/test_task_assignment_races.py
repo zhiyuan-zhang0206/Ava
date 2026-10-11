@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from base.agents.tasks import creation
 from base.db import Database
-from gateway.agents import router as agent_router
+from gateway.agents import creation as agent_creation
 from gateway.agents.task_assignment import router as assignments
 from gateway.agents.tests.test_task_assignments import HEADERS, PATH
 from gateway.agents.tests.test_task_assignments import body as body
@@ -34,13 +34,13 @@ def test_fresh_simultaneous_intents_produce_one_pair(
 ) -> None:
     before = _counts(db_conn)
     boundary = Barrier(3)
-    real = agent_router._spawn_preflight_blocking
+    real = agent_creation.spawn_preflight_blocking
 
     def preflight(*args: Any, **kwargs: Any):
         boundary.wait(timeout=10)
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(agent_router, "_spawn_preflight_blocking", preflight)
+    monkeypatch.setattr(agent_creation, "spawn_preflight_blocking", preflight)
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = [executor.submit(client.post, PATH, json=body, headers=HEADERS) for _ in range(3)]
         responses = [future.result(timeout=20) for future in futures]
@@ -85,17 +85,17 @@ def test_exception_after_each_real_writer_rolls_back_all_effects(
 def test_preflight_failure_returns_winner_committed_during_its_window(
     client: TestClient, body: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real = agent_router._spawn_preflight_blocking
+    real = agent_creation.spawn_preflight_blocking
     winner: list[dict[str, Any]] = []
 
     def loses(*args: Any, **kwargs: Any):
-        monkeypatch.setattr(agent_router, "_spawn_preflight_blocking", real)
+        monkeypatch.setattr(agent_creation, "spawn_preflight_blocking", real)
         accepted = client.post(PATH, json=body, headers=HEADERS)
         assert accepted.status_code == 201, accepted.text
         winner.append(accepted.json())
         raise ValueError("preset vanished after concurrent acceptance")
 
-    monkeypatch.setattr(agent_router, "_spawn_preflight_blocking", loses)
+    monkeypatch.setattr(agent_creation, "spawn_preflight_blocking", loses)
     replay = client.post(PATH, json=body, headers=HEADERS)
     assert replay.status_code == 201, replay.text
     assert replay.json()["task"] == winner[0]["task"]
@@ -105,18 +105,18 @@ def test_preflight_failure_returns_winner_committed_during_its_window(
 def test_second_lookup_replays_winner_after_successful_preflight_window(
     client: TestClient, body: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real = agent_router._spawn_preflight_blocking
+    real = agent_creation.spawn_preflight_blocking
     winner: list[dict[str, Any]] = []
 
     def loses(*args: Any, **kwargs: Any):
         prepared = real(*args, **kwargs)
-        monkeypatch.setattr(agent_router, "_spawn_preflight_blocking", real)
+        monkeypatch.setattr(agent_creation, "spawn_preflight_blocking", real)
         accepted = client.post(PATH, json=body, headers=HEADERS)
         assert accepted.status_code == 201, accepted.text
         winner.append(accepted.json())
         return prepared
 
-    monkeypatch.setattr(agent_router, "_spawn_preflight_blocking", loses)
+    monkeypatch.setattr(agent_creation, "spawn_preflight_blocking", loses)
     replay = client.post(PATH, json=body, headers=HEADERS)
     assert replay.status_code == 201, replay.text
     assert replay.json()["task"] == winner[0]["task"]

@@ -22,8 +22,7 @@ from base.agents.observation.evidence import AvailabilityReason
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from gateway.agents import forward
-from gateway.agents import router as app_module
+from gateway.agents import creation, forward
 from gateway.app import app
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
@@ -62,8 +61,8 @@ class TestRouting:
             if failure == "exception":
                 raise RuntimeError("receipt read unavailable")
 
-        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
-        monkeypatch.setattr(app_module.snapshot_module, "select_one", _unreadable)
+        monkeypatch.setattr(creation, "forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(creation.snapshot_module, "select_one", _unreadable)
         with TestClient(app) as client:
             resp = spawn_via_http(client, {"machine": "local-test"})
         assert resp.status_code == 201, resp.text
@@ -91,7 +90,7 @@ class TestRouting:
             captured["body"] = body
             return SpawnedAgent(id=body.agent_id)
 
-        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(creation, "forward_spawn_to_remote", _capture_forward)
         db_conn.execute(
             "INSERT INTO machine_probe (machine_name,online,agent_host_online) "
             "VALUES ('local-test',TRUE,FALSE)"
@@ -120,7 +119,7 @@ class TestRouting:
             captured["body"] = body
             return SpawnedAgent(id=body.agent_id)
 
-        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(creation, "forward_spawn_to_remote", _capture_forward)
         with TestClient(app) as client:
             resp = spawn_via_http(client, {})
         assert resp.status_code == 201
@@ -148,7 +147,7 @@ class TestRouting:
             forwarded.append(target)
             return SpawnedAgent(id=0)
 
-        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _should_not_forward)
+        monkeypatch.setattr(creation, "forward_spawn_to_remote", _should_not_forward)
         with TestClient(app) as client:
             resp = spawn_via_http(client, {})
         assert resp.status_code == 400
@@ -181,7 +180,7 @@ class TestRouting:
             forwarded.append(target)
             return SpawnedAgent(id=0)
 
-        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _should_not_forward)
+        monkeypatch.setattr(creation, "forward_spawn_to_remote", _should_not_forward)
         with TestClient(app) as client:
             resp = spawn_via_http(client, {"machine": "paused-box"})
         assert resp.status_code == 409
@@ -203,7 +202,7 @@ class TestRouting:
             captured["body"] = body
             return SpawnedAgent(id=body.agent_id)
 
-        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(creation, "forward_spawn_to_remote", _capture_forward)
         # The pre-dispatch capability check resolves the target's role; stub it as
         # a runner so the forward proceeds (the lookup itself is exercised by the
         # 404 / no-capability tests).
@@ -243,7 +242,7 @@ class TestRouting:
             captured["target"] = target
             return SpawnedAgent(id=body.agent_id)
 
-        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(creation, "forward_spawn_to_remote", _capture_forward)
         monkeypatch.setattr(
             "base.cluster.machines.lookup_role",
             lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
@@ -281,7 +280,7 @@ class TestRouting:
                 AvailabilityReason.LAUNCH_UNREACHABLE, "target unreachable after 3 retries"
             )
 
-        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _forward_raises)
+        monkeypatch.setattr(creation, "forward_spawn_to_remote", _forward_raises)
         monkeypatch.setattr(
             "base.cluster.machines.lookup_role",
             lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
@@ -300,7 +299,7 @@ class TestRouting:
         async def _wrong_id(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
             return SpawnedAgent(id=body.agent_id + 1)
 
-        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _wrong_id)
+        monkeypatch.setattr(creation, "forward_spawn_to_remote", _wrong_id)
         with TestClient(app) as client:
             response = spawn_via_http(client, {})
         assert response.status_code == 502

@@ -42,7 +42,7 @@ def test_failed_plain_launch_persists_prompt_and_advertises_guarded_recovery(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
     from base.agents.observation.evidence import AvailabilityReason
-    from gateway.agents import router as route
+    from gateway.agents import creation
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
@@ -52,7 +52,7 @@ def test_failed_plain_launch_persists_prompt_and_advertises_guarded_recovery(
         attempts.append(body)
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
-    monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
+    monkeypatch.setattr(creation, "forward_spawn_to_remote", _fail)
     with TestClient(app) as client:
         failed = spawn_via_http(client, {"prompt": "Do the task", "prompt_source": "user"})
         assert failed.status_code == 502
@@ -66,7 +66,7 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
     from base.agents.observation.evidence import AvailabilityReason
-    from gateway.agents import router as route
+    from gateway.agents import creation
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
@@ -75,10 +75,10 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
 
     async def _fail(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         # Birth has committed; only the ensuing launch-state transaction fails.
-        monkeypatch.setattr(route, "write_transaction", _write_outage)
+        monkeypatch.setattr(creation, "write_transaction", _write_outage)
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
-    monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
+    monkeypatch.setattr(creation, "forward_spawn_to_remote", _fail)
     with TestClient(app) as client:
         failed = spawn_via_http(client, {"prompt": "Keep me", "prompt_source": "user"})
         assert failed.status_code == 502
@@ -92,7 +92,7 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
     from base.agents.observation.evidence import AvailabilityReason
-    from gateway.agents import router as route
+    from gateway.agents import creation
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
@@ -109,7 +109,7 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
         async def _fail(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
             raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
-        monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
+        monkeypatch.setattr(creation, "forward_spawn_to_remote", _fail)
         failed = spawn_via_http(
             client, {"fork_from": source, "prompt": "Continue here", "prompt_source": "user"}
         )
@@ -125,7 +125,7 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
     from base.agents.observation.evidence import AvailabilityReason
-    from gateway.agents import router as route
+    from gateway.agents import creation
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
@@ -139,7 +139,7 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
         db_conn.commit()
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "response lost")
 
-    monkeypatch.setattr(route, "forward_spawn_to_remote", _admit_then_fail)
+    monkeypatch.setattr(creation, "forward_spawn_to_remote", _admit_then_fail)
     with TestClient(app) as client:
         response = spawn_via_http(client, {"prompt": "Stay", "prompt_source": "user"})
     assert response.status_code == 201

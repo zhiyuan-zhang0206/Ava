@@ -13,7 +13,7 @@ from ava.gateway_client import transport
 from base.agents import GatewayUnavailable
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from gateway.agents import router as agent_router
+from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, SECRET
 from gateway.agents.tests.creation.test_sdk_strong_creation import _response, _sdk
 from gateway.app import app
@@ -50,7 +50,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     async def reconcile(*args: object, **kwargs: object) -> dict[str, object]:
         return {}
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", accept)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
     monkeypatch.setattr("ops.cluster.rpc.dispatch_to_machine", reconcile)
     http = MagicMock()
     lose = True
