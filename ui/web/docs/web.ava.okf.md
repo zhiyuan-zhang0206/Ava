@@ -55,7 +55,7 @@ response, which is the public browser boundary.
 
 ## Native shell (explicitly non-core)
 
-`ui/app/` is a thin Tauri 2 wrapper for macOS, Windows, and Android. It loads
+`ui/app/` is a thin Tauri 2 wrapper for macOS and Android. It loads
 this frontend from the gate and adds only platform behavior (window/tray,
 desktop auto-login/updater, Android onboarding/residency/notifications). The web
 console remains the universal body and the shell remains non-core. Node:

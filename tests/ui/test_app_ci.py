@@ -13,7 +13,7 @@ def _workflow() -> str:
 def test_desktop_matrix_compiles_on_every_supported_host_platform() -> None:
     text = _workflow()
     assert "macos-14" in text
-    assert "windows-2022" in text
+    assert "ubuntu-24.04" in text
 
 
 def test_android_job_builds_an_apk_after_applying_the_overlay() -> None:

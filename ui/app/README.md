@@ -2,7 +2,7 @@
 
 `ui/app` is the thin Tauri 2 app around Ava's remotely served web console. It
 does not bundle `ui/web`; the main webview loads the configured gate URL. One
-Rust application targets macOS, Windows, and Android.
+Rust application targets macOS and Android.
 
 ## Local desktop development
 
@@ -36,12 +36,10 @@ path.
 ## Icons
 
 The app ships without branding icons (task #3286). `bundle.icon` is empty by
-design, so a macOS bundle takes the system default icon and the installers fall
-back to their stock icons. The two files kept under `icons/` are blank
-placeholders the toolchain requires, not artwork: `icon.png` is what
-`tauri-codegen` embeds as the default window icon, and `icon.ico` is what
-`tauri-build` compiles into the Windows executable resource. Deleting either
-one breaks the build without changing anything else.
+design, so a macOS bundle takes the system default icon. The one file kept
+under `icons/` is a blank placeholder the toolchain requires, not artwork:
+`icon.png` is what `tauri-codegen` embeds as the default window icon. Deleting
+it breaks the build without changing anything else.
 
 ## Android
 
@@ -119,7 +117,7 @@ cd ../../..
 ```
 
 Tags matching `app-v<major>.<minor>.<patch>` drive
-`.github/workflows/release-app.yml`. macOS/Windows updater assets are listed
-in `latest.json` only when their Tauri signatures exist. Tag builds fail unless
-updater and OS signing credentials are present; manual dispatch keeps
+`.github/workflows/release-app.yml`. The macOS updater asset is listed
+in `latest.json` only when its Tauri signature exists. Tag builds fail unless
+updater and Apple signing credentials are present; manual dispatch keeps
 the explicit unsigned validation path without publishing a GitHub Release.
