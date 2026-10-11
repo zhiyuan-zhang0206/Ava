@@ -83,6 +83,7 @@ from ava.gateway_client.transport import (
 )
 from base.agents import GatewayUnavailable as GatewayUnavailable
 from base.agents.context import AvaContext
+from base.api_contracts.memory_search import MemorySearchPurpose
 from base.log import logger
 
 
@@ -112,7 +113,12 @@ class MemorySearchResult(NamedTuple):
 
 
 def memory_search(
-    query: str, k: int, *, timeout: float | None = None, context: AvaContext | None = None
+    query: str,
+    k: int,
+    *,
+    purpose: MemorySearchPurpose,
+    timeout: float | None = None,
+    context: AvaContext | None = None,
 ) -> list[MemorySearchResult]:
     """POST /api/memory/search → list of `MemorySearchResult`, most relevant first.
 
@@ -129,6 +135,10 @@ def memory_search(
     congested gate) surfaces as `IndexerUnavailable` without stacking
     attempts behind it.
 
+    `purpose` says why the query was issued ("recall": passive recall, the query is the recent
+    conversation; "search": an agent's own search), which selects the relevance question the
+    gateway's ranking model answers.
+
     `timeout` overrides the per-attempt HTTP timeout (seconds). The default
     is the gateway's own search deadline plus a 3s margin (18s at default
     settings): keep it above `AVA_MEMORY_SEARCH_DEADLINE_SECONDS`, or the
@@ -139,7 +149,7 @@ def memory_search(
 
     resp = post(
         "/api/memory/search",
-        {"query": query, "k": k},
+        {"query": query, "k": k, "purpose": purpose},
         timeout=httpx.Timeout(timeout) if timeout is not None else _memory_search_timeout(context),
         max_retries=_MEMORY_SEARCH_MAX_RETRIES,
         context=context,

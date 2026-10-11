@@ -114,7 +114,7 @@ def cmd_memory_search(query: str, *, limit: int, json_output: bool) -> int:
     url = f"{gateway_api_base()}/api/memory/search"
     resp = dial_post(
         url,
-        json={"query": query, "k": limit},
+        json={"query": query, "k": limit, "purpose": "search"},
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(),
     )

@@ -76,7 +76,7 @@ def test_memory_search_posts_authenticated_query_and_renders_table(
 
     assert _memory.cmd_memory_search("alpha", limit=7, json_output=False) == 0
     assert seen["url"] == "http://gw:8000/api/memory/search"
-    assert seen["json"] == {"query": "alpha", "k": 7}
+    assert seen["json"] == {"query": "alpha", "k": 7, "purpose": "search"}
     assert seen["headers"] == {"Authorization": "Bearer secret"}
     assert capsys.readouterr().out.splitlines() == [
         "score  path               tags             description",

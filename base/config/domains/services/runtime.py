@@ -315,10 +315,12 @@ class _ServiceRuntimeSettings(EnvSettings):
         alias="AVA_MEMORY_RERANK_MODEL",
         description=(
             "Decision model that ranks memory search results. After vector search, the "
-            "gateway asks it one yes/no question per retrieved chunk ('is this excerpt "
-            "relevant to the query?') and orders results by the probability of yes. "
-            "A decision model only answers questions, so no text is generated. If it "
-            "fails, the search fails; there is no fallback to vector order."
+            "gateway makes one decision request per retrieved chunk ('is this note "
+            "worth reading for the query?') and orders results by the probability of "
+            "yes. A decision model only answers questions, so no text is generated. If "
+            "it fails, the search fails; there is no fallback to vector order. The "
+            "passive-recall score threshold is calibrated for the default model; "
+            "changing it means recalibrating memory_recall_inject_threshold."
         ),
         json_schema_extra={
             "restart_required": "gateway",
@@ -336,9 +338,9 @@ class _ServiceRuntimeSettings(EnvSettings):
         alias="AVA_MEMORY_RERANK_CANDIDATES",
         description=(
             "How many notes vector search hands to the decision model per memory search "
-            "(each represented by its best-matching chunk). More candidates raise recall "
-            "of the ranking and its cost; a search asking for more results than this "
-            "ranks that many instead."
+            "(each represented by its best-matching chunk), one decision request each. "
+            "More candidates raise the ranking's recall, its cost and its latency; a "
+            "search asking for more results than this ranks that many instead."
         ),
         json_schema_extra={
             "restart_required": "gateway",

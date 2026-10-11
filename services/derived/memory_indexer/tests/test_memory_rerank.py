@@ -6,12 +6,14 @@ The decision model is replaced by fakes at the two seams `rerank.py` confines it
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
 from base.agents import IndexerUnavailable
+from base.api_contracts.memory_search import MemorySearchPurpose
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import (
     FALSE,
@@ -19,8 +21,6 @@ from base.lm.catalog.decide.types import (
     Decision,
     DecisionRequestError,
     YesNo,
-    estimate_tokens,
-    question_text,
 )
 from base.lm.plugin_providers import build_model_catalog
 from services.derived.memory_indexer import rerank
@@ -58,44 +58,48 @@ def _hit(root: Path, rel: str, kind: str = KIND_BODY, idx: int = 0) -> ChunkHit:
 
 
 class _FakeJudge:
-    """Stands in for the decision call: probability by a rule over the question text."""
+    """Stands in for the decision call: probability by a marker in the state, default 0.
 
-    def __init__(self, rule: Mapping[str, float], default: float = 0.0) -> None:
-        self.rule = rule
+    Records every call and the most requests that were in flight at once."""
+
+    def __init__(self, rule: Mapping[str, float] | None = None, default: float = 0.0) -> None:
+        self.rule = dict(rule or {})
         self.default = default
-        self.calls: list[tuple[str, str, dict[str, YesNo]]] = []
+        self.calls: list[tuple[str, str, YesNo]] = []
+        self.in_flight = 0
+        self.max_in_flight = 0
 
     async def __call__(
-        self, model: str, query: str, questions: Mapping[str, YesNo], *, catalog: ModelCatalog
-    ) -> dict[str, float]:
+        self, model: str, state: str, question: YesNo, *, catalog: ModelCatalog
+    ) -> float:
         del catalog
-        self.calls.append((model, query, dict(questions)))
-        return {
-            key: next(
-                (p for marker, p in self.rule.items() if marker in question.question),
-                self.default,
-            )
-            for key, question in questions.items()
-        }
+        self.calls.append((model, state, question))
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            return next((p for marker, p in self.rule.items() if marker in state), self.default)
+        finally:
+            self.in_flight -= 1
 
 
-def _roomy_limits(_model: str, _catalog: ModelCatalog) -> rerank.DecisionLimits:
-    return rerank.DecisionLimits(32_000, 64_000)
-
-
-def _install(
-    monkeypatch: pytest.MonkeyPatch,
-    judge: _FakeJudge,
-    *,
-    context: int = 32_000,
-    request: int = 64_000,
-) -> None:
+def _install(monkeypatch: pytest.MonkeyPatch, judge: _FakeJudge) -> None:
     monkeypatch.setattr(rerank, "ask_relevance", judge)
 
-    def limits(_model: str, _catalog: ModelCatalog) -> rerank.DecisionLimits:
-        return rerank.DecisionLimits(context, request)
 
-    monkeypatch.setattr(rerank, "decision_limits", limits)
+async def _rank(
+    tmp_path: Path,
+    catalog: ModelCatalog,
+    hits: list[ChunkHit],
+    *,
+    query: str = "q",
+    purpose: MemorySearchPurpose = "recall",
+    k: int = 5,
+) -> list[rerank.RankedChunk]:
+    return await rerank.rerank(
+        query, hits, purpose=purpose, model="m", catalog=catalog, k=k, memory_root=tmp_path
+    )
 
 
 # ── chunk_text ──
@@ -133,14 +137,12 @@ async def test_rerank_orders_by_probability_and_returns_the_scored_chunk(
     judge = _FakeJudge({"Lunch menu": 0.2, "restarting the gateway": 0.9})
     _install(monkeypatch, judge)
 
-    ranked = await rerank.rerank(
-        "how do I restart the gateway",
+    ranked = await _rank(
+        tmp_path,
+        catalog,
         # vector order puts the irrelevant note first
         [_hit(tmp_path, "other.md"), _hit(tmp_path, "ops/runbook.md")],
-        model="jev-test",
-        catalog=catalog,
-        k=5,
-        memory_root=tmp_path,
+        query="how do I restart the gateway",
     )
 
     assert [item.path for item in ranked] == ["ops/runbook.md", "other.md"]
@@ -149,8 +151,6 @@ async def test_rerank_orders_by_probability_and_returns_the_scored_chunk(
     assert top.description == "Gateway deploy runbook"
     assert top.tags == ["type/reference", "ops"]
     assert "restarting the gateway" in top.chunk
-    # the query is the state; the model id is passed through
-    assert judge.calls[0][:2] == ("jev-test", "how do I restart the gateway")
 
 
 async def test_rerank_truncates_to_k_and_keeps_vector_order_on_ties(
@@ -160,40 +160,99 @@ async def test_rerank_truncates_to_k_and_keeps_vector_order_on_ties(
         _write(tmp_path, f"{name}.md", f"---\ntype: Memory\n---\n\nbody {name}")
     _install(monkeypatch, _FakeJudge({"body c": 0.9}, default=0.4))
 
-    ranked = await rerank.rerank(
-        "q",
-        [_hit(tmp_path, "a.md"), _hit(tmp_path, "b.md"), _hit(tmp_path, "c.md")],
-        model="m",
-        catalog=catalog,
-        k=2,
-        memory_root=tmp_path,
-    )
+    ranked = await _rank(tmp_path, catalog, [_hit(tmp_path, f"{n}.md") for n in "abc"], k=2)
     assert [item.path for item in ranked] == ["c.md", "a.md"]
 
 
-async def test_question_names_the_note_and_carries_the_chunk_text(
+async def test_each_candidate_is_its_own_request_with_its_own_state(
     tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write(tmp_path, "ops/runbook.md", _NOTE)
-    judge = _FakeJudge({})
+    _write(tmp_path, "b.md", "---\ntype: Memory\n---\n\nbody b")
+    judge = _FakeJudge()
     _install(monkeypatch, judge)
 
-    await rerank.rerank(
-        "q",
-        [_hit(tmp_path, "ops/runbook.md"), _hit(tmp_path, "ops/runbook.md", KIND_DESC)],
-        model="m",
-        catalog=catalog,
-        k=5,
-        memory_root=tmp_path,
+    await _rank(
+        tmp_path,
+        catalog,
+        [_hit(tmp_path, "ops/runbook.md"), _hit(tmp_path, "b.md")],
+        query="the query",
     )
 
-    questions = list(judge.calls[0][2].values())
-    assert len(questions) == 2
-    for question in questions:
-        assert "ops/runbook.md" in question.question
-        assert "Gateway deploy runbook" in question.question
-    assert "restarting the gateway" in questions[0].question
-    assert questions[1].question.rstrip().endswith("Gateway deploy runbook")
+    assert len(judge.calls) == 2
+    by_path = {
+        ("ops/runbook.md" if "ops/runbook.md" in s else "b.md"): s for _, s, _ in judge.calls
+    }
+    runbook, other = by_path["ops/runbook.md"], by_path["b.md"]
+    # the query comes first, then exactly one candidate note: path, description, excerpt
+    assert runbook.index("the query") < runbook.index("path: ops/runbook.md")
+    assert "b.md" not in runbook and "ops/runbook.md" not in other
+    assert "description: Gateway deploy runbook" in runbook
+    assert "description: (none)" in other
+    assert "restarting the gateway" in runbook.split("excerpt:\n", 1)[1]
+    assert {model for model, _, _ in judge.calls} == {"m"}
+
+
+async def test_description_row_hit_is_shown_as_its_excerpt(
+    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, "ops/runbook.md", _NOTE)
+    judge = _FakeJudge()
+    _install(monkeypatch, judge)
+
+    await _rank(tmp_path, catalog, [_hit(tmp_path, "ops/runbook.md", KIND_DESC)])
+
+    assert judge.calls[0][1].endswith("excerpt:\nGateway deploy runbook")
+
+
+def test_excerpt_is_capped_in_the_state() -> None:
+    candidate = rerank._Candidate("n.md", "z" * 5000, "d", [])
+    state = rerank._pair_state("q", candidate, "search")
+    assert state.count("z") == 1800
+
+
+async def test_purpose_selects_the_state_lead_in_and_the_question(
+    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, "a.md", "---\ntype: Memory\n---\n\nbody a")
+    seen: dict[str, tuple[str, YesNo]] = {}
+    for purpose in ("recall", "search"):
+        judge = _FakeJudge()
+        _install(monkeypatch, judge)
+        await _rank(tmp_path, catalog, [_hit(tmp_path, "a.md")], query="Q!", purpose=purpose)
+        _, state, question = judge.calls[0]
+        seen[purpose] = (state, question)
+
+    (recall_state, recall_q), (search_state, search_q) = seen["recall"], seen["search"]
+    assert recall_state.splitlines()[0] != search_state.splitlines()[0]
+    assert "Q!" in recall_state and "Q!" in search_state
+    assert recall_q != search_q
+    for question in (recall_q, search_q):
+        assert question.question and question.true_if and question.false_if
+
+
+async def test_stale_hits_are_skipped(
+    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deleted file, an unreadable file and a chunk the file no longer has are dropped."""
+    _write(tmp_path, "live.md", "---\ntype: Memory\n---\n\nlive body")
+    _write(tmp_path, "short.md", "---\ntype: Memory\n---\n\nshort body")
+    (tmp_path / "binary.md").write_bytes(b"\xff\xfe\x00bad")
+    judge = _FakeJudge({}, default=0.5)
+    _install(monkeypatch, judge)
+
+    ranked = await _rank(
+        tmp_path,
+        catalog,
+        [
+            _hit(tmp_path, "gone.md"),
+            _hit(tmp_path, "binary.md"),
+            _hit(tmp_path, "short.md", KIND_BODY, 7),
+            _hit(tmp_path, "live.md"),
+        ],
+    )
+    assert [item.path for item in ranked] == ["live.md"]
+    assert len(judge.calls) == 1
 
 
 def test_description_and_tags_survive_malformed_frontmatter(tmp_path: Path) -> None:
@@ -214,135 +273,82 @@ def test_description_and_tags_survive_malformed_frontmatter(tmp_path: Path) -> N
     assert (plain.description, plain.tags, plain.chunk) == ("", [], "# Just a heading")
 
 
-async def test_stale_hits_are_skipped(
-    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A deleted file, an unreadable file and a chunk the file no longer has are dropped."""
-    _write(tmp_path, "live.md", "---\ntype: Memory\n---\n\nlive body")
-    _write(tmp_path, "short.md", "---\ntype: Memory\n---\n\nshort body")
-    (tmp_path / "binary.md").write_bytes(b"\xff\xfe\x00bad")
-    judge = _FakeJudge({}, default=0.5)
-    _install(monkeypatch, judge)
-
-    ranked = await rerank.rerank(
-        "q",
-        [
-            _hit(tmp_path, "gone.md"),
-            _hit(tmp_path, "binary.md"),
-            _hit(tmp_path, "short.md", KIND_BODY, 7),
-            _hit(tmp_path, "live.md"),
-        ],
-        model="m",
-        catalog=catalog,
-        k=5,
-        memory_root=tmp_path,
-    )
-    assert [item.path for item in ranked] == ["live.md"]
-    assert len(judge.calls[0][2]) == 1
-
-
 async def test_no_candidates_asks_no_question(
     tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    judge = _FakeJudge({})
+    judge = _FakeJudge()
     _install(monkeypatch, judge)
-    assert await rerank.rerank("q", [], model="m", catalog=catalog, k=5, memory_root=tmp_path) == []
+    assert await _rank(tmp_path, catalog, []) == []
     assert judge.calls == []
 
 
-# ── batching ──
+# ── concurrency ──
 
 
-async def test_questions_are_batched_to_fit_the_request_limit(
+async def test_requests_run_concurrently_up_to_the_cap(
     tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    count = rerank._MAX_CONCURRENT_DECISIONS * 2 + 3
     hits: list[ChunkHit] = []
-    for i in range(6):
-        _write(tmp_path, f"n{i}.md", f"---\ntype: Memory\n---\n\nbody {i} " + "word " * 100)
+    for i in range(count):
+        _write(tmp_path, f"n{i}.md", f"---\ntype: Memory\n---\n\nbody {i}")
         hits.append(_hit(tmp_path, f"n{i}.md"))
-    judge = _FakeJudge({f"body {i}": i / 10 for i in range(6)})
-    query = "a query"
-    one_question = estimate_tokens(
-        question_text(rerank._question_of(rerank._load_candidates(hits[:1], tmp_path)[0]))
-    )
-    # room for the query plus two questions per request
-    limit = estimate_tokens(query) + 2 * one_question + 5
-    _install(monkeypatch, judge, context=limit, request=limit)
+    judge = _FakeJudge()
+    _install(monkeypatch, judge)
 
-    ranked = await rerank.rerank(query, hits, model="m", catalog=catalog, k=6, memory_root=tmp_path)
+    ranked = await _rank(tmp_path, catalog, hits, k=count)
 
-    assert [len(call[2]) for call in judge.calls] == [2, 2, 2]
-    for _model, _query, batch in judge.calls:
-        used = estimate_tokens(query) + sum(
-            estimate_tokens(question_text(q)) for q in batch.values()
-        )
-        assert used <= limit
-    # every candidate is scored once and the ranking spans the batches
-    assert [item.path for item in ranked] == [f"n{i}.md" for i in (5, 4, 3, 2, 1, 0)]
-
-
-async def test_one_oversized_question_gets_its_own_request(
-    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The decision call, not the batcher, rejects what cannot fit alone: nothing is shortened."""
-    for name in ("a", "b"):
-        _write(tmp_path, f"{name}.md", f"---\ntype: Memory\n---\n\nbody {name}")
-    judge = _FakeJudge({})
-    _install(monkeypatch, judge, context=1, request=1)
-
-    await rerank.rerank(
-        "q",
-        [_hit(tmp_path, "a.md"), _hit(tmp_path, "b.md")],
-        model="m",
-        catalog=catalog,
-        k=5,
-        memory_root=tmp_path,
-    )
-    assert [len(call[2]) for call in judge.calls] == [1, 1]
+    assert len(judge.calls) == count
+    assert len(ranked) == count
+    assert 1 < judge.max_in_flight <= rerank._MAX_CONCURRENT_DECISIONS
 
 
 # ── failure ──
 
 
-async def test_a_failed_batch_fails_the_search_with_the_cause(
+async def test_a_failed_request_fails_the_search_with_the_cause(
     tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _write(tmp_path, "a.md", "---\ntype: Memory\n---\n\nbody")
+    for name in ("a", "b", "c"):
+        _write(tmp_path, f"{name}.md", f"---\ntype: Memory\n---\n\nbody {name}")
 
     async def failing(*_args: object, **_kwargs: object) -> object:
         raise DecisionRequestError("jev returned 503")
 
     monkeypatch.setattr(rerank, "decide", failing)
-    monkeypatch.setattr(rerank, "decision_limits", _roomy_limits)
     with pytest.raises(IndexerUnavailable, match=r"memory rerank failed \(m\).*jev returned 503"):
-        await rerank.rerank(
-            "q", [_hit(tmp_path, "a.md")], model="m", catalog=catalog, k=5, memory_root=tmp_path
-        )
+        await _rank(tmp_path, catalog, [_hit(tmp_path, f"{n}.md") for n in "abc"])
 
 
 async def test_ask_relevance_reads_the_true_probability_and_clamps(
     catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen: dict[str, object] = {}
+    answers = iter(
+        [
+            Decision(top=TRUE, probabilities={TRUE: 1.0000000005, FALSE: 0.0}),
+            Decision(top=FALSE, probabilities={TRUE: 0.3, FALSE: 0.7}),
+        ]
+    )
 
     async def fake_decide(
         model: str, state: str, questions: Mapping[str, YesNo], **kwargs: object
     ) -> dict[str, Decision]:
-        seen.update(model=model, state=state, usage_kind=kwargs["usage_kind"])
-        return {
-            "0": Decision(top=TRUE, probabilities={TRUE: 1.0000000005, FALSE: 0.0}),
-            "1": Decision(top=FALSE, probabilities={TRUE: 0.3, FALSE: 0.7}),
-        }
+        seen.update(model=model, state=state, usage_kind=kwargs["usage_kind"], ids=set(questions))
+        return {next(iter(questions)): next(answers)}
 
     monkeypatch.setattr(rerank, "decide", fake_decide)
     question = YesNo("q?", "yes", "no")
-    result = await rerank.ask_relevance(
-        "m", "the query", {"0": question, "1": question}, catalog=catalog
-    )
-    assert result == {"0": 1.0, "1": 0.3}
-    assert seen == {"model": "m", "state": "the query", "usage_kind": rerank.USAGE_KIND}
+    assert await rerank.ask_relevance("m", "the state", question, catalog=catalog) == 1.0
+    assert await rerank.ask_relevance("m", "the state", question, catalog=catalog) == 0.3
+    assert seen["model"] == "m"
+    assert seen["state"] == "the state"
+    assert seen["usage_kind"] == rerank.USAGE_KIND
+    assert len(seen["ids"]) == 1  # pyright: ignore[reportArgumentType]
 
 
-def test_unknown_decision_model_is_a_clear_error(catalog: ModelCatalog) -> None:
-    with pytest.raises(IndexerUnavailable, match="not a known decision model"):
-        rerank.decision_limits("gpt-not-a-decision-model", catalog)
+async def test_unknown_decision_model_is_a_clear_error(catalog: ModelCatalog) -> None:
+    with pytest.raises(IndexerUnavailable, match=r"memory rerank failed.*not-a-decision-model"):
+        await rerank.ask_relevance(
+            "not-a-decision-model", "state", YesNo("q?", "yes", "no"), catalog=catalog
+        )

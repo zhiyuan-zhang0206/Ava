@@ -51,24 +51,17 @@ class _Judge:
 
     def __init__(self) -> None:
         self.rules: dict[str, float] = {}
-        self.calls: list[tuple[str, str, int]] = []
+        self.calls: list[tuple[str, str, Any]] = []
         self.failure: Exception | None = None
 
     async def __call__(
-        self, model: str, query: str, questions: Any, *, catalog: ModelCatalog
-    ) -> dict[str, float]:
+        self, model: str, state: str, question: Any, *, catalog: ModelCatalog
+    ) -> float:
         del catalog
-        self.calls.append((model, query, len(questions)))
+        self.calls.append((model, state, question))
         if self.failure is not None:
             raise self.failure
-        return {
-            key: next((p for marker, p in self.rules.items() if marker in q.question), 0.5)
-            for key, q in questions.items()
-        }
-
-
-def _roomy_limits(_model: str, _catalog: ModelCatalog) -> rerank.DecisionLimits:
-    return rerank.DecisionLimits(32_000, 64_000)
+        return next((p for marker, p in self.rules.items() if marker in state), 0.5)
 
 
 @pytest.fixture(autouse=True)
@@ -76,7 +69,6 @@ def judge(monkeypatch: pytest.MonkeyPatch) -> _Judge:
     """Replace the decision call; the search endpoint is tested against its contract."""
     fake = _Judge()
     monkeypatch.setattr(rerank, "ask_relevance", fake)
-    monkeypatch.setattr(rerank, "decision_limits", _roomy_limits)
     return fake
 
 
@@ -160,7 +152,9 @@ class TestPrimaryPath:
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "test", "k": 5})
+            resp = client.post(
+                "/api/memory/search", json={"query": "test", "k": 5, "purpose": "search"}
+            )
         assert resp.status_code == 200
         # must be relative paths relative to memory_root — must not contain tmp_path prefix
         body = resp.json()
@@ -227,7 +221,9 @@ title: No Description
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "test", "k": 3})
+            resp = client.post(
+                "/api/memory/search", json={"query": "test", "k": 3, "purpose": "search"}
+            )
         assert resp.status_code == 200
         body = resp.json()
         results = body["results"]
@@ -256,7 +252,9 @@ title: No Description
         _patch_provider(monkeypatch, _BoomProvider)
 
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "x", "k": 5})
+            resp = client.post(
+                "/api/memory/search", json={"query": "x", "k": 5, "purpose": "search"}
+            )
         assert resp.status_code == 503
         body = resp.json()
         assert body["reason"] == "indexer_unavailable"
@@ -274,7 +272,7 @@ title: No Description
 
         _patch_provider(monkeypatch, BrokenProvider)
         with TestClient(app) as client, pytest.raises(FileNotFoundError) as caught:
-            client.post("/api/memory/search", json={"query": "x", "k": 5})
+            client.post("/api/memory/search", json={"query": "x", "k": 5, "purpose": "search"})
         assert caught.value is failure
 
     def test_primary_backend_failure_raises_indexer_unavailable(
@@ -297,7 +295,9 @@ title: No Description
         monkeypatch.setattr(_factory, "get_backend", _BoomBackend)
 
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "x", "k": 5})
+            resp = client.post(
+                "/api/memory/search", json={"query": "x", "k": 5, "purpose": "search"}
+            )
         assert resp.status_code == 503
         assert resp.json()["reason"] == "indexer_unavailable"
 
@@ -344,7 +344,9 @@ class TestRerank:
         judge.rules = {"passage a": 0.1, "passage b": 0.6, "passage c": 0.95}
 
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "what about c", "k": 2})
+            resp = client.post(
+                "/api/memory/search", json={"query": "what about c", "k": 2, "purpose": "search"}
+            )
 
         assert resp.status_code == 200
         results = resp.json()["results"]
@@ -352,8 +354,26 @@ class TestRerank:
         assert results[0]["description"] == "about c"
         assert results[0]["tags"] == ["type/reference"]
         assert results[0]["chunk"] == "passage c"
-        model, query, asked = judge.calls[0]
-        assert (model, query, asked) == (settings.services.memory_rerank_model, "what about c", 3)
+        # one decision request per candidate, on the configured model, about the query
+        assert len(judge.calls) == 3
+        assert {model for model, _, _ in judge.calls} == {settings.services.memory_rerank_model}
+        assert all("what about c" in state for _, state, _ in judge.calls)
+
+    def test_purpose_selects_the_relevance_question(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: _Judge
+    ) -> None:
+        self._pool(monkeypatch, tmp_path)
+        self._backend(monkeypatch, [_hit(tmp_path / "a.md")])
+        questions = {}
+        for purpose in ("recall", "search"):
+            judge.calls.clear()
+            with TestClient(app) as client:
+                resp = client.post(
+                    "/api/memory/search", json={"query": "q", "k": 1, "purpose": purpose}
+                )
+            assert resp.status_code == 200
+            questions[purpose] = judge.calls[0][2]
+        assert questions["recall"] != questions["search"]
 
     def test_backend_is_asked_for_the_configured_candidate_count(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -363,10 +383,10 @@ class TestRerank:
         monkeypatch.setattr(settings.services, "memory_rerank_candidates", 40)
 
         with TestClient(app) as client:
-            assert client.post("/api/memory/search", json={"query": "q", "k": 5}).json() == {
-                "results": []
-            }
-            client.post("/api/memory/search", json={"query": "q", "k": 60})
+            assert client.post(
+                "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
+            ).json() == {"results": []}
+            client.post("/api/memory/search", json={"query": "q", "k": 60, "purpose": "search"})
         # at least k notes are always retrieved, even above the candidate count
         assert [k for k, _timeout in asked] == [40, 60]
 
@@ -379,9 +399,11 @@ class TestRerank:
             [_hit(tmp_path / "gone.md"), _hit(tmp_path / "a.md", idx=9), _hit(tmp_path / "b.md")],
         )
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "q", "k": 5})
+            resp = client.post(
+                "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
+            )
         assert [r["path"] for r in resp.json()["results"]] == ["b.md"]
-        assert judge.calls[0][2] == 1
+        assert len(judge.calls) == 1
 
     def test_decision_failure_is_a_clear_503_not_vector_order(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: _Judge
@@ -393,7 +415,9 @@ class TestRerank:
         judge.failure = IndexerUnavailable("memory rerank failed (jev): upstream 503")
 
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "q", "k": 5})
+            resp = client.post(
+                "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
+            )
 
         assert resp.status_code == 503
         body = resp.json()
@@ -407,20 +431,36 @@ class TestRequestValidation:
 
     def test_empty_query_rejected(self) -> None:
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "", "k": 5})
+            resp = client.post(
+                "/api/memory/search", json={"query": "", "k": 5, "purpose": "search"}
+            )
+        assert resp.status_code == 422
+
+    @pytest.mark.parametrize(
+        "body", [{"query": "x", "k": 5}, {"query": "x", "k": 5, "purpose": "audit"}]
+    )
+    def test_missing_or_unknown_purpose_rejected(self, body: dict[str, Any]) -> None:
+        with TestClient(app) as client:
+            resp = client.post("/api/memory/search", json=body)
         assert resp.status_code == 422
 
     def test_blank_query_rejected(self) -> None:
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "  \n ", "k": 5})
+            resp = client.post(
+                "/api/memory/search", json={"query": "  \n ", "k": 5, "purpose": "search"}
+            )
         assert resp.status_code == 422
 
     def test_k_out_of_range_rejected(self) -> None:
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "x", "k": 0})
+            resp = client.post(
+                "/api/memory/search", json={"query": "x", "k": 0, "purpose": "search"}
+            )
         assert resp.status_code == 422
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "x", "k": 101})
+            resp = client.post(
+                "/api/memory/search", json={"query": "x", "k": 101, "purpose": "search"}
+            )
         assert resp.status_code == 422
 
 
@@ -487,7 +527,7 @@ def _asgi_client() -> httpx.AsyncClient:
 
 
 async def _search(client: httpx.AsyncClient) -> httpx.Response:
-    return await client.post("/api/memory/search", json={"query": "x", "k": 1})
+    return await client.post("/api/memory/search", json={"query": "x", "k": 1, "purpose": "search"})
 
 
 async def _assert_semaphore_locked(sem: asyncio.Semaphore, timeout_s: float = 5.0) -> None:
@@ -530,7 +570,9 @@ async def test_query_usage_failure_propagates_without_network_replay(
     )
     request = Request({"type": "http", "app": SimpleNamespace(state=state)})
     with pytest.raises(error_type) as caught:
-        await memory.post_memory_search(request, MemorySearchRequest(query="hello", k=1))
+        await memory.post_memory_search(
+            request, MemorySearchRequest(query="hello", k=1, purpose="search")
+        )
     assert caught.value is failure
     assert seen == [model_catalog]
     assert seen[0] is model_catalog

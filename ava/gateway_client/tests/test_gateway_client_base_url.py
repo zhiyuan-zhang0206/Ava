@@ -194,7 +194,7 @@ def test_explicit_host_context_routes_calls_without_a_local_sdk_binding() -> Non
         httpx.Client(base_url="http://host.test", transport=httpx.MockTransport(answer)) as client,
         context.clients.using_gateway(client),
     ):
-        assert memory_search("query", 3, context=context) == []
+        assert memory_search("query", 3, purpose="search", context=context) == []
         assert get_born_chain(44, context=context) == []
         assert _agent_jitter_seconds(context) == 0.22
     assert seen == [
