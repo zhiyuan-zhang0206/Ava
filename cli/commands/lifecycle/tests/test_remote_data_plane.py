@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from base.agents.context.clients import DatabaseFactory
 from cli.commands.data_plane import bringup as dp
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.lifecycle import start as start_mod
@@ -48,7 +49,12 @@ def test_start_remote_skips_local_instance_and_probes(
         return 0
 
     monkeypatch.setattr(ci, "ensure_cluster_storage", _no_local_instance)
-    monkeypatch.setattr(dp, "remote_pg_reachable", lambda: (True, "postgres (10.9.8.7:5432)"))
+
+    def _remote_postgres(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
+        assert database_factory is operator_database
+        return (True, "postgres (10.9.8.7:5432)")
+
+    monkeypatch.setattr(dp, "remote_pg_reachable", _remote_postgres)
     monkeypatch.setattr(dp, "remote_redis_reachable", lambda: (True, "redis (10.9.8.7:6380)"))
 
     rc = start_mod._ensure_gateway_data_plane(database_factory=operator_database)
@@ -71,10 +77,15 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
         raise AssertionError("local bring-up must not run against a remote data plane")
 
     monkeypatch.setattr(ci, "ensure_cluster_storage", _no_local_instance)
+
+    def _remote_postgres(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
+        assert database_factory is operator_database
+        return (False, "postgres (10.9.8.7:5432) connect failed: connection refused")
+
     monkeypatch.setattr(
         dp,
         "remote_pg_reachable",
-        lambda: (False, "postgres (10.9.8.7:5432) connect failed: connection refused"),
+        _remote_postgres,
     )
 
     rc = start_mod._ensure_gateway_data_plane(database_factory=operator_database)

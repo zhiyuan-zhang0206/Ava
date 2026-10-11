@@ -96,5 +96,10 @@ if __name__ == "__main__":
     ensure_agent_status_members(
         S, {"IDLING", "RUNNING", "TERMINATED"}, schedule_name="dev-ci-metrics"
     )
-    with schedule_entry(globals().get("AVA_SCHEDULE_INPUTS")) as inputs:
+    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    if entry_inputs is None:
+        from base.log import prepare_process_logging
+
+        prepare_process_logging()
+    with schedule_entry(entry_inputs) as inputs:
         _main_loop(inputs=inputs)

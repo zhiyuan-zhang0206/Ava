@@ -76,7 +76,6 @@ def alerts(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
 @pytest.mark.parametrize("intent", ["disabled", "maintenance"])
 def test_expected_low_population_does_not_rollback_or_promote(
     probe: Probe,
-    operator_database: DatabaseFactory,
     probe_home: Path,
     rollbacks: list[list[str]],
     alerts: list[dict[str, object]],
@@ -158,10 +157,16 @@ def test_disabled_host_does_not_explain_gateway_code_failure(
     rollbacks: list[list[str]],
     alerts: list[dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: DatabaseFactory,
 ) -> None:
     _select_excluded({"agent-host"})
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
+
+    def _plane_abnormal(*, database_factory: DatabaseFactory) -> bool:
+        assert database_factory is operator_database
+        return False
+
+    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", _plane_abnormal)
 
     assert probe() == 1
     assert rollbacks == []

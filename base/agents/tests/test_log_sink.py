@@ -27,7 +27,7 @@ from loguru import logger as _global_logger
 from base import telemetry
 from base.config import settings
 from base.db import Database
-from base.log import _postgres_sink, add_postgres_sink
+from base.log.process import _postgres_sink, add_postgres_sink
 from base.telemetry.delivery.receipts import DrainStatus
 
 

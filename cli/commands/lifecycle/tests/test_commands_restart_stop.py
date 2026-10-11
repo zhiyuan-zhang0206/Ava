@@ -18,6 +18,7 @@ import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
 import cli.commands.probe as _probe_commands
+from base.agents.context.clients import DatabaseFactory
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
@@ -146,7 +147,12 @@ def test_cmd_restart_succeeds_non_interactively(
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_stop_commands, "_do_stop", MagicMock(return_value=0))
-    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_migrations_apply", list[str])
+
+    def _apply_migrations(*, database_factory: DatabaseFactory) -> list[str]:
+        assert database_factory is operator_database
+        return []
+
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_migrations_apply", _apply_migrations)
     monkeypatch.setattr(
         _start_readiness_preflight_commands,
         "preflight_start_readiness",
@@ -333,7 +339,11 @@ def test_cmd_restart_aborts_when_preflight_fails(
         "_cmd_start_body",
         lambda _operation, _database_factory, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
+
+    def _release_pause(*, database_factory: DatabaseFactory) -> None:
+        assert database_factory is operator_database
+
+    monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", _release_pause)
 
     rc = _stop_commands.cmd_restart(
         retained_children=[], database_factory=operator_database, producer=operator_pipeline
@@ -371,7 +381,11 @@ def test_cmd_restart_aborts_when_start_readiness_fails(
         "_cmd_start_body",
         lambda _operation, _database_factory, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
+
+    def _release_pause(*, database_factory: DatabaseFactory) -> None:
+        assert database_factory is operator_database
+
+    monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", _release_pause)
 
     rc = _stop_commands.cmd_restart(
         retained_children=[], database_factory=operator_database, producer=operator_pipeline

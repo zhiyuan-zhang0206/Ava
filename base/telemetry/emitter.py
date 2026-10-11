@@ -255,7 +255,7 @@ _jsonl_failures = 0
 
 # Loguru extra key marking the emitter's own diagnostics. Records carrying it
 # are filtered OUT of the emitter adapter's sink (see
-# `base.log.add_postgres_sink`) so they reach stderr / JSONL file sinks only
+# `base.log.process.add_postgres_sink`) so they reach stderr / JSONL file sinks only
 # and never re-enter this pipeline — a mirror-down process would otherwise loop
 # failure → warning → emit → failure forever.
 _NO_EMITTER = "_no_emitter"

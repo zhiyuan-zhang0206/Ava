@@ -34,6 +34,9 @@ from services.wake.delivery_watchdog.tests.test_delivery_watchdog import (
     terminated_agent,
 )
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog import (
+    event_pipeline as event_pipeline,
+)
+from services.wake.delivery_watchdog.tests.test_delivery_watchdog import (
     healthy_host_verdict as healthy_host_verdict,
 )
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog import (
@@ -239,6 +242,7 @@ class TestDispatchBackoffAndPoison:
             row = cur.fetchone()
         assert row == ("claimed", 0, None)
 
+    @pytest.mark.usefixtures("event_pipeline")
     def test_dispatch_cap_poisons_once_and_emits_event(
         self,
         db_conn: psycopg.Connection,

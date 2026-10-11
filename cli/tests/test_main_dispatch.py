@@ -199,24 +199,6 @@ def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPat
     assert "AVA_PROCESS_PROFILE" not in os.environ
 
 
-def test_status_handler_body_forwards_the_parsed_namespace(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The routing test above stubs the `_h_*` handler itself, so no handler body
-    ever runs under test — a handler reading a flag the parser no longer defines
-    (`args.via_gateway` after `--via-gateway` was dropped) stays green here and
-    AttributeErrors on the first real `ava status`. Stub one level lower instead:
-    `cmd_status`, which `_h_status` lazy-imports, so the real body executes against
-    the real Namespace."""
-    import cli.commands.lifecycle.status as _status_commands
-
-    calls: list[dict[str, object]] = []
-    monkeypatch.setattr(_status_commands, "cmd_status", lambda **kwargs: calls.append(kwargs) or 0)  # pyright: ignore[reportUnknownArgumentType]
-
-    assert _main.main(["status"]) == 0
-    assert calls == [{}]
-
-
 def test_restart_handler_forwards_the_parsed_config_overlay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

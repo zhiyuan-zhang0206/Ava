@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Iterator
 
 import psycopg
 import pytest
@@ -26,6 +27,17 @@ from services.wake.heartbeat.daemon import (
 from services.wake.heartbeat.tests.heartbeat_support import _THRESHOLD_S, _make_idle
 from services.wake.heartbeat.tests.heartbeat_support import pool as pool
 from tests.fixtures.units import spawn_agent
+
+
+@pytest.fixture
+def event_pipeline(database: Database) -> Iterator[telemetry.EventPipeline]:
+    """Own the process writer used by the service operation and mirror barrier."""
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+    try:
+        telemetry.init_telemetry(process="test-wake-service", pipeline=pipeline)
+        yield pipeline
+    finally:
+        pipeline.stop(timeout=2)
 
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
@@ -58,6 +70,7 @@ def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
 
 
 class TestSendHeartbeatCheckin:
+    @pytest.mark.usefixtures("event_pipeline")
     def test_inserts_heartbeat_inbound_and_event(
         self,
         pool: ConnectionPool,

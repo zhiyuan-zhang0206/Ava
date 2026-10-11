@@ -631,7 +631,12 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
         (
             "telemetry",
             "lgtm_dashboard_render_failed",
-            {"level": "warning", "source": "converge", "attributes": {"error": "render exploded"}},
+            {
+                "producer": operator_pipeline,
+                "level": "warning",
+                "source": "converge",
+                "attributes": {"error": "render exploded"},
+            },
         )
     ]
     err = capsys.readouterr().err

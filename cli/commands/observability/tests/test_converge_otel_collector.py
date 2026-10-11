@@ -667,17 +667,18 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
         producer=operator_pipeline,
     )
 
-    installed: list[tuple[object, object, object]] = []
+    installed: list[tuple[object, ...]] = []
     monkeypatch.setattr(
         oc,
         "ensure_otel_collector",
-        lambda *args: installed.append(args),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *args, database_factory: installed.append((*args, database_factory)),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     oc.ensure_otel_collector_step(ctx)
 
     assert len(installed) == 1
     assert installed[0][1] == home
+    assert installed[0][3] is operator_database
 
 
 def test_collector_preparation_never_controls_a_running_service_tree(

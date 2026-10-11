@@ -35,7 +35,7 @@ from schedules.catchup import cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import schedule_entry
-from base.log import init_gateway_process
+from base.log.process import init_gateway_process
 
 
 CRON = "0 5 * * *"
@@ -168,5 +168,10 @@ if __name__ == "__main__":
         {"IDLING", "RUNNING", "TERMINATED"},
         schedule_name="c9-daily-report",
     )
-    with schedule_entry(globals().get("AVA_SCHEDULE_INPUTS")) as inputs:
+    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    if entry_inputs is None:
+        from base.log import prepare_process_logging
+
+        prepare_process_logging()
+    with schedule_entry(entry_inputs) as inputs:
         _main_loop(inputs=inputs)

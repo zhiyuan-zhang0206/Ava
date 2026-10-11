@@ -1,4 +1,4 @@
-"""`base.log.init_*` init functions idempotent protection.
+"""`base.log.process.init_*` init functions idempotent protection.
 
 Bug origin: `logger.add()` not idempotent, adds sink each time → same path multiple handlers → fd accumulation. Watchdog daemon runs 6 healthcheck.main() every 60s, each calls ``init_gateway_process()`` → ~1000 fds per hour then OSError errno 24.
 
@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-import base.log as slog
+import base.log.process as slog
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import logs_dir
 from base.telemetry.delivery.pipeline import EventPipeline
@@ -235,7 +235,7 @@ from base.host.env import bootstrap
 def unreachable(*_args, **_kwargs):
     raise httpx.ConnectError("connection refused")
 bootstrap.fetch_bootstrap_config = unreachable
-import base.log
+import base.log.process
 assert "base.config" not in sys.modules
 if sys.argv[2] == "init_cli_process":
     pipelines = []
@@ -245,7 +245,7 @@ if sys.argv[2] == "init_cli_process":
         pipelines.append(pipeline)
         return pipeline
     try:
-        base.log.init_cli_process(name="probe", producer=producer, machine_reader=lambda: "probe-host")
+        base.log.process.init_cli_process(name="probe", producer=producer, machine_reader=lambda: "probe-host")
     finally:
         for pipeline in pipelines:
             pipeline.stop(timeout=1)
@@ -259,7 +259,7 @@ else:
         pipelines.append(pipeline)
         return pipeline
     try:
-        base.log.init_gateway_process(name="probe", producer=producer, machine_reader=lambda: "probe-host", image=LoadedCommit(Path(sys.argv[1]), None))
+        base.log.process.init_gateway_process(name="probe", producer=producer, machine_reader=lambda: "probe-host", image=LoadedCommit(Path(sys.argv[1]), None))
     finally:
         for pipeline in pipelines:
             pipeline.stop(timeout=1)

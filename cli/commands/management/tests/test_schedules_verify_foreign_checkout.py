@@ -23,13 +23,24 @@ _ENDPOINT = "postgresql://ava@127.0.0.1:6433/ava"
 
 # The two python checks of `fleet_update._PRE_VERIFY`, without the shell around them.
 _READ_TABLE = (
-    "import json, sys; from cli.commands.management.schedules_verify import "
-    "_read_schedule_rows as rows; json.dump(rows(), open(sys.argv[1], 'w'))"
+    "import json, sys; from cli.database import operator_database_factory; "
+    "from cli.commands.management.schedules_verify import _read_schedule_rows as rows; "
+    "database = operator_database_factory(); "
+    "json.dump(rows(database_factory=database), open(sys.argv[1], 'w'))"
 )
-_CHECK_ROWS = (
-    "import sys; from cli.commands.management.schedules_verify import "
-    "cmd_schedules_verify as v; sys.exit(v(notify=False, rows_file=sys.argv[1]))"
-)
+_CHECK_ROWS = """import sys
+from cli.database import operator_database_factory, operator_event_pipeline
+from cli.commands.management.schedules_verify import cmd_schedules_verify
+
+database = operator_database_factory()
+producer = operator_event_pipeline(database)
+try:
+    sys.exit(cmd_schedules_verify(
+        notify=False, rows_file=sys.argv[1], database_factory=database, producer=producer
+    ))
+finally:
+    producer.close()
+"""
 
 
 @pytest.fixture

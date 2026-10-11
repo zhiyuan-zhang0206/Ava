@@ -11,6 +11,7 @@ not swallowed by `except Exception`; the difference is what kind is written to t
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import replace
 
 import psycopg
@@ -18,13 +19,26 @@ import pytest
 
 import ava
 from ava.sdk_surface.install import Installation
+from base import telemetry
 from base.config import set_field, settings
 from base.config.service_read import ConfigAuthority
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.model_catalog import AddModels
 from tests.fixtures.pin_agent import pin_agent
 from tests.fixtures.units import spawn_agent
+
+
+@pytest.fixture
+def event_pipeline(database: Database) -> Iterator[telemetry.EventPipeline]:
+    """Own the process writer used by the operation and its mirror barrier."""
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+    try:
+        telemetry.init_telemetry(process="test-sdk-operation", pipeline=pipeline)
+        yield pipeline
+    finally:
+        pipeline.stop(timeout=2)
 
 
 def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple]:
@@ -360,6 +374,7 @@ class TestPauseHeartbeat:
             raising=False,
         )
 
+    @pytest.mark.usefixtures("event_pipeline")
     def test_pause_heartbeat_sets_window_records_trail_and_emits_event(
         self,
         db_conn: psycopg.Connection,
@@ -377,8 +392,6 @@ class TestPauseHeartbeat:
             )
         )  # self identity
         ava.self.pause_heartbeat(1800)
-        from base import telemetry
-
         telemetry.sync()  # the event lands via the unified emitter's drain
         db_conn.rollback()  # fresh snapshot — the emitter wrote on its own connection
         with db_conn.cursor() as cur:

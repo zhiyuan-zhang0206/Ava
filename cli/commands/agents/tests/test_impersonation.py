@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from base.agents import impersonation as control
+from base.agents.context.clients import DatabaseFactory
 from base.agents.impersonation import sessions as sessions
 from cli.commands.agents import impersonation as cli
 from cli.parsers import build_parser
@@ -505,7 +506,9 @@ def test_send_requires_session_agent_target_and_content() -> None:
 
 
 def test_send_delivers_as_the_borrowed_agent(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: DatabaseFactory,
 ) -> None:
     seen: list[tuple[int, str, str, int | None]] = []
 
@@ -522,6 +525,7 @@ def test_send_delivers_as_the_borrowed_agent(
     monkeypatch.setattr(control, "require_active", require_active)
     monkeypatch.setattr("cli.commands.agents.control.send_agent_message", deliver)
     args = _args("send", "0", "--agent", "405", "--to", "42", "--content", "hi")
+    args.database_factory = operator_database
     assert args.func(args) == 0
     assert seen == [(42, "hi", "agent:405", 405)]
     assert json.loads(capsys.readouterr().out) == {

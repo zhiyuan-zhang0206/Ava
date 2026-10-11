@@ -33,7 +33,7 @@ from base.cluster.machines import machine_name
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import schedule_entry
-from base.log import init_gateway_process
+from base.log.process import init_gateway_process
 from base.host.env.dotenv_boot import resolve_ava_home
 from base.paths import ava_home
 from base.daemon.schedules.watcher import next_fire
@@ -319,4 +319,9 @@ if __name__ == "__main__":
         {"IDLING", "RUNNING", "TERMINATED"},
         schedule_name="debt-sweep-daily",
     )
-    main(inputs=globals().get("AVA_SCHEDULE_INPUTS"))
+    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    if entry_inputs is None:
+        from base.log import prepare_process_logging
+
+        prepare_process_logging()
+    main(inputs=entry_inputs)

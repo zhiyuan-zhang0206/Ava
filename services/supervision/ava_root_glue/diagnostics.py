@@ -208,7 +208,8 @@ class RootHealthRounds:
             raise RuntimeError("root health rounds already started")
         if self._tasks is None:
             raise RuntimeError("root health rounds require the participant task group")
-        from base.log import init_gateway_process, logger
+        from base.log import logger
+        from base.log.process import init_gateway_process
 
         try:
             init_gateway_process(

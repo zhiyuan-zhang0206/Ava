@@ -706,8 +706,11 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
     dispatch_sem = asyncio.Semaphore(1)
     dispatch_pool: ConnectionPool = pool
 
-    def _degraded_status(_db: Database, probe_pool: object) -> ClusterStatus:
+    def _degraded_status(
+        _db: Database, probe_pool: object, *, image: LoadedCommit
+    ) -> ClusterStatus:
         assert probe_pool is pool
+        assert image is ops_image
         return ClusterStatus(
             machine_name="win",
             serve_gateway=False,

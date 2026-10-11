@@ -13,6 +13,7 @@ starts the normal idle clock, so after the window expires the agent still waits
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 
 import psycopg
 import pytest
@@ -21,6 +22,7 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.daemon import (
@@ -32,6 +34,17 @@ from tests.fixtures.units import spawn_agent
 
 # Explicit threshold so the assertions do not ride on the configured default.
 _THRESHOLD_S = 300.0
+
+
+@pytest.fixture
+def event_pipeline(database: Database) -> Iterator[telemetry.EventPipeline]:
+    """Own the process writer used by the service operation and mirror barrier."""
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+    try:
+        telemetry.init_telemetry(process="test-wake-service", pipeline=pipeline)
+        yield pipeline
+    finally:
+        pipeline.stop(timeout=2)
 
 
 @pytest.fixture
@@ -203,6 +216,7 @@ class TestNudgeBackoffB7:
         self._set_level(db_conn, aid, 2)
         assert aid not in _selected(pool)
 
+    @pytest.mark.usefixtures("event_pipeline")
     def test_reconcile_raises_level_after_n_consecutive_noops(
         self,
         pool: ConnectionPool,
@@ -353,6 +367,7 @@ class TestNudgeBackoffB7:
             assert row is not None
             assert row[0] == max_level
 
+    @pytest.mark.usefixtures("event_pipeline")
     def test_sweep_resets_level_on_real_inbound(
         self,
         pool: ConnectionPool,
@@ -394,6 +409,7 @@ class TestNudgeBackoffB7:
         assert ev["attributes"]["previous_level"] == 2
         assert ev["attributes"]["reason"] == "real_inbound"
 
+    @pytest.mark.usefixtures("event_pipeline")
     def test_sweep_leaves_level_without_engagement(
         self,
         pool: ConnectionPool,

@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
+from base.agents.context.clients import DatabaseFactory
 from base.config import settings
 from base.db.tests.fakes import patch_database
 from cli.commands.cluster import _provider_guard
@@ -185,7 +186,7 @@ def test_blocked_agents_at_threshold_reports_a_stable_message(
     monkeypatch.setattr(settings.alerts, "provider_guard_blocked_agents_min", 3)
     counts = iter([3, 7])
 
-    def _count(_window_hours: float) -> int | None:
+    def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
         return next(counts)
 
     monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
@@ -207,7 +208,7 @@ def test_blocked_agents_below_threshold_is_silent(
 ) -> None:
     monkeypatch.setattr(settings.alerts, "provider_guard_blocked_agents_min", 3)
 
-    def _count(_window_hours: float) -> int | None:
+    def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
         return 2
 
     monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
@@ -222,7 +223,7 @@ def test_blocked_agents_unreadable_table_is_fail_open(
     operator_database: Callable[[], Any],
 ) -> None:
 
-    def _count(_window_hours: float) -> int | None:
+    def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
         return None
 
     monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
@@ -236,7 +237,7 @@ def test_blocked_agents_disabled_skips_before_the_query(
 ) -> None:
     monkeypatch.setattr(settings.alerts, "provider_guard_blocked_agents_enabled", False)
 
-    def _count(_window_hours: float) -> int | None:
+    def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
         raise AssertionError("a disabled check must not query")
 
     monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
@@ -309,7 +310,7 @@ def test_provider_guard_failure_reports_balance_before_blocked(
     def _balance() -> str:
         return "balance detail"
 
-    def _blocked() -> str:
+    def _blocked(*, database_factory: DatabaseFactory) -> str:
         return "blocked detail"
 
     monkeypatch.setattr(_provider_guard, "_balance_failure", _balance)
@@ -336,7 +337,7 @@ def test_run_provider_guard_reports_the_failing_check(
     """A failure is handed to the probe's report seam with its check name; a pass reports nothing."""
     reported: list[tuple[str, str]] = []
 
-    def _failing() -> tuple[str, str]:
+    def _failing(*, database_factory: DatabaseFactory) -> tuple[str, str]:
         return "provider_balance", "FAIL: provider balance \u2014 low"
 
     monkeypatch.setattr(_provider_guard, "provider_guard_failure", _failing)
@@ -348,7 +349,7 @@ def test_run_provider_guard_reports_the_failing_check(
     )
     assert reported == [("provider_balance", "FAIL: provider balance \u2014 low")]
 
-    def _passing() -> None:
+    def _passing(*, database_factory: DatabaseFactory) -> None:
         return None
 
     monkeypatch.setattr(_provider_guard, "provider_guard_failure", _passing)

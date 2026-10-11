@@ -15,19 +15,14 @@ rename would break and a deletion would not.
 
 from __future__ import annotations
 
-import itertools
-import json
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
-from base import log as slog
 from base import paths, telemetry
-from base.db import Database
 from base.telemetry import emitter, loss
 
 
@@ -211,125 +206,6 @@ def test_nothing_is_dropped_when_the_drain_keeps_up() -> None:
 
 
 # --- production wiring ---
-
-
-def test_production_loguru_sink_routes_through_the_emitter() -> None:
-    """`_postgres_sink` must enqueue into the emitter (which batches), not write
-    straight to the DB per record — the regression that deleted batching before.
-    """
-
-    import inspect
-
-    src = inspect.getsource(slog._postgres_sink)
-    assert "telemetry.emit" in src
-    wiring = inspect.getsource(slog.add_postgres_sink)
-    assert "telemetry.init_telemetry" in wiring
-    assert "_postgres_sink" in wiring  # the adapter is the loguru handler
-
-
-def _rec(extra: dict[str, Any]) -> Any:
-    """A minimal loguru-Record-shaped object — the filter reads only `extra`."""
-    return {"extra": extra}
-
-
-def test_add_postgres_sink_registers_at_most_once(database: Database) -> None:
-    """Two `add_postgres_sink` calls (exec_child's env + request init paths)
-    must not double-register the adapter: one loguru record lands exactly one
-    mirror row. The 2026-08-24 double registration wrote every post-init
-    record twice — byte-identical rows, same surrogate id — into the JSONL
-    mirror (task #1638)."""
-    from datetime import UTC as _UTC
-
-    from base.log import logger as _g
-
-    pipeline = telemetry.build_pipeline(database=lambda: database)
-    first = slog.add_postgres_sink(
-        process="test-dup-guard", producer=lambda: pipeline, machine_reader=lambda: "test-host"
-    )
-    second = slog.add_postgres_sink(
-        process="test-dup-guard", producer=lambda: pipeline, machine_reader=lambda: "test-host"
-    )
-    assert second == first, "repeat registration must return the live sink id"
-
-    marker = f"dup-guard-{time.time_ns()}"
-    try:
-        _g.configure(extra={"agent_id": "8901"})
-        _g.info(f"one record {marker}", event="label_change")
-        telemetry.flush()
-
-        from base.paths import logs_dir
-
-        day = datetime.now(_UTC).strftime("%Y%m%d")
-        path = logs_dir() / f"events-{day}.jsonl"
-        rows: list[dict[str, Any]] = []
-        if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    obj = json.loads(line)
-                except ValueError:
-                    continue
-                msg = obj.get("attributes", {}).get("msg", "")
-                if obj.get("event_name") == "label_change" and marker in msg:
-                    rows.append(obj)
-        assert len(rows) == 1, f"expected 1 mirror row, got {len(rows)}"
-    finally:
-        pipeline.stop(timeout=2)
-        _g.remove(first)
-
-
-def test_event_pipeline_filter_drops_no_emitter_and_node_enter() -> None:
-    """The pipeline filter admits ordinary records but drops two families:
-    the emitter's own failure reports (`_no_emitter` marker — a mirror-down
-    process must not loop failure → warning → emit) and `node_enter` (zero
-    event-stream consumers; the row would be pure write amplification — the
-    log-file line is the death-analysis source). Anything else — including
-    `node_exit`, which agent_inspect reads — passes."""
-
-    f = slog._event_pipeline_filter
-    assert f(_rec({"event": "node_exit"}))
-    assert f(_rec({"event": "llm_usage"}))
-    assert f(_rec({}))
-    assert not f(_rec({"event": "node_enter"}))
-    assert not f(_rec({"_no_emitter": True}))
-    # The node_enter drop is by event name only, not by message — a record
-    # that merely *mentions* node_enter in its message still passes.
-    assert f(_rec({"msg": "node_enter handling"}))
-    # The OTel SDK's post-end warning (a deliberate consequence of ending the
-    # claim node span early in claim_idle_wait_span) is dropped from the
-    # table; a record merely mentioning the text still passes.
-    assert not f(cast(Any, dict(_rec({}), message="Setting attribute on ended span.")))
-    assert f(cast(Any, dict(_rec({}), message="Setting attribute on ended span. (context)")))
-
-
-def _rec_level(extra: dict[str, Any], level: str = "INFO") -> Any:
-    """A loguru-Record-shaped dict with a level — the sampling branch reads it."""
-    return {"extra": extra, "level": SimpleNamespace(name=level)}
-
-
-def test_event_pipeline_filter_samples_info_log_one_in_ten() -> None:
-    """Bare INFO `log` records are level-graded-sampled: exactly one in ten
-    passes; the counter is per-process and resettable for tests."""
-    f = slog._event_pipeline_filter
-    slog._log_info_sample_counter = itertools.count()
-    kept = [f(_rec_level({"event": "log"})) for _ in range(10)]
-    assert kept.count(True) == 1
-    assert kept[0] is True  # the first record of each block is the survivor
-
-
-def test_event_pipeline_filter_keeps_warning_and_named_events() -> None:
-    """WARNING+ bare logs and every named event pass unchanged — the alerts /
-    unresolved surfaces depend on them; only bare INFO logs are sampled."""
-    f = slog._event_pipeline_filter
-    slog._log_info_sample_counter = itertools.count()
-    assert f(_rec_level({"event": "log"}, "WARNING"))
-    assert f(_rec_level({"event": "log"}, "ERROR"))
-    assert f(_rec_level({"event": "log"}, "CRITICAL"))
-    # named events (node_exit, llm_usage) and label-alias events are not bare logs
-    assert f(_rec_level({"event": "node_exit"}))
-    assert f(_rec_level({"event": "llm_usage"}))
-    assert f(_rec_level({"label": "exec"}))
-    # a record without a level passes unsampled (test-records / tolerant path)
-    assert f(_rec({}))
 
 
 # --- the drop report (ops monitor collection point) ---

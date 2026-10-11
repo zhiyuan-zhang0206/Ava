@@ -6,12 +6,14 @@ triggers, and caller fences. Host wake publication follows committed state.
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any
 
 import psycopg
 import pytest
 
 import base.db
+from base import telemetry
 from base.agents import ForkCheckpointNotFound
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -27,6 +29,17 @@ from ops.agents.tests.test_agents_internals import (
     _insert_checkpoint,
     _spawn_agent,
 )
+
+
+@pytest.fixture
+def fork_events(database_gate: ProcessDbGate) -> Generator[telemetry.EventPipeline]:
+    """Retain the actual writer only for fork event delivery contracts."""
+    pipeline = telemetry.build_pipeline(database=lambda: Database.from_settings(gate=database_gate))
+    try:
+        telemetry.init_telemetry(process="fork-tests", pipeline=pipeline)
+        yield pipeline
+    finally:
+        assert pipeline.stop(timeout=2).status is telemetry.DrainStatus.COMPLETED
 
 
 class TestSpawnFork:
@@ -547,6 +560,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        fork_events: telemetry.EventPipeline,
     ) -> None:
         """User ruling 2026-08-28 (task #1879): the fork event's
         target_agent_id is the fork SOURCE (the lineage parent), never the
@@ -556,7 +570,6 @@ class TestSpawnFork:
         import json
         from datetime import UTC, datetime
 
-        from base import telemetry
         from base.paths import logs_dir
 
         source = _spawn_agent(
@@ -580,7 +593,7 @@ class TestSpawnFork:
             database_gate=database_gate,
         )
 
-        telemetry.sync()
+        assert fork_events.sync(timeout=2).status is telemetry.DrainStatus.COMPLETED
         day = datetime.now(UTC).strftime("%Y%m%d")
         path = logs_dir() / f"events-{day}.jsonl"
         fork_rows: list[dict[str, Any]] = []
@@ -612,6 +625,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        fork_events: telemetry.EventPipeline,
     ) -> None:
         """A plain spawn keeps the old direction: target_agent_id = the
         spawner (its lineage parent), and the spawner column records it
@@ -619,7 +633,6 @@ class TestSpawnFork:
         import json
         from datetime import UTC, datetime
 
-        from base import telemetry
         from base.paths import logs_dir
 
         parent = _spawn_agent(
@@ -634,7 +647,7 @@ class TestSpawnFork:
             database_gate=database_gate,
         )
 
-        telemetry.sync()
+        assert fork_events.sync(timeout=2).status is telemetry.DrainStatus.COMPLETED
         day = datetime.now(UTC).strftime("%Y%m%d")
         path = logs_dir() / f"events-{day}.jsonl"
         spawn_rows: list[dict[str, Any]] = []
@@ -667,6 +680,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        fork_events: telemetry.EventPipeline,
     ) -> None:
         """The unified inbound writer's kind='fork' mapping (currently
         reached by no caller; the fork inbound is inserted with raw SQL in
@@ -676,7 +690,6 @@ class TestSpawnFork:
         import json
         from datetime import UTC, datetime
 
-        from base import telemetry
         from base.paths import logs_dir
 
         source = _spawn_agent(
@@ -699,7 +712,7 @@ class TestSpawnFork:
             database=database,
         )
 
-        telemetry.sync()
+        assert fork_events.sync(timeout=2).status is telemetry.DrainStatus.COMPLETED
         day = datetime.now(UTC).strftime("%Y%m%d")
         path = logs_dir() / f"events-{day}.jsonl"
         fork_rows: list[dict[str, Any]] = []

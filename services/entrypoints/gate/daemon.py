@@ -402,7 +402,7 @@ def main() -> None:
     from base.daemon.shutdown import install_graceful_shutdown
     from base.db import Database
     from base.db.code_version_gate import ProcessDbGate
-    from base.log import init_gateway_process
+    from base.log.process import init_gateway_process
     from base.native_process.code_version import CodeVersion
     from base.native_process.loaded_commit import LoadedCommit
     from base.telemetry.delivery.receipts import DrainStatus
@@ -435,4 +435,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
     main()

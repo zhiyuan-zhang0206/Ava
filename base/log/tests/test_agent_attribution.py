@@ -12,7 +12,7 @@ import pytest
 
 import ava
 from base.agents.context.identity import AgentIdentity
-from base.log import _message_to_params
+from base.log.process import _message_to_params
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
 
@@ -68,7 +68,7 @@ def test_transport_source_preserves_usage_payload_source() -> None:
 
 
 def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
-    import base.log as slog
+    import base.log.process as slog
 
     def producer() -> EventPipeline:
         raise AssertionError("the mocked sink must not construct a pipeline")
@@ -80,7 +80,6 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
         mock.patch.object(slog, "_add_file_sink"),
         mock.patch.object(slog, "add_postgres_sink") as init_pipeline,
         mock.patch.object(slog, "_install_stdlib_intercept"),
-        mock.patch.object(slog, "_machine_name_lazy", return_value="machine-a"),
         mock.patch.object(slog.logger, "info") as boot_log,
         mock.patch.object(slog.logger, "configure") as configure,
     ):
@@ -105,7 +104,7 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
 def test_owned_gateway_boot_uses_loaded_image_and_original_producer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import base.log as slog
+    import base.log.process as slog
 
     monkeypatch.setattr(slog, "_init_done", False)
     producer = mock.Mock(side_effect=AssertionError("the logger must pass its root's factory"))

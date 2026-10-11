@@ -20,6 +20,7 @@ import pytest
 import base.cluster as cl
 import cli.commands.data_plane.bringup as dp
 import cli.commands.data_plane.cluster_instance as ci
+from base.agents.context.clients import DatabaseFactory
 from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
 from base.db.tests.fakes import patch_database
@@ -94,7 +95,12 @@ def test_status_remote_urls_probe_the_urls_themselves(
 
     monkeypatch.setattr(ci, "_pg_running", _local_probe)
     monkeypatch.setattr(ci, "_redis_reachable", _local_probe)
-    monkeypatch.setattr(dp, "remote_pg_reachable", lambda: (True, "postgres (10.0.0.7:15433)"))
+
+    def _remote_postgres(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
+        assert database_factory is operator_database
+        return (True, "postgres (10.0.0.7:15433)")
+
+    monkeypatch.setattr(dp, "remote_pg_reachable", _remote_postgres)
     monkeypatch.setattr(dp, "remote_redis_reachable", lambda: (True, "redis (10.0.0.7:16380)"))
 
     ci.print_data_plane_status(database_factory=operator_database)

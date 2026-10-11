@@ -13,6 +13,7 @@ and redelivery resumes on the next round once the verdict is fresh again.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 
 import psycopg
 import pytest
@@ -34,6 +35,17 @@ _DISPATCH_THRESHOLD_S = 1.0
 _MAX_DISPATCH_COUNT = 5
 _DISPATCH_BACKOFF_STEPS_S = [5.0, 30.0, 120.0, 300.0]
 _HOST_STALENESS_S = 120.0
+
+
+@pytest.fixture
+def event_pipeline(database: Database) -> Iterator[telemetry.EventPipeline]:
+    """Own the process writer used by the service operation and mirror barrier."""
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+    try:
+        telemetry.init_telemetry(process="test-wake-service", pipeline=pipeline)
+        yield pipeline
+    finally:
+        pipeline.stop(timeout=2)
 
 
 @pytest.fixture
@@ -435,6 +447,7 @@ class TestSelectPendingForDispatch:
         db_conn.commit()
         assert self._select(pool) == []
 
+    @pytest.mark.usefixtures("event_pipeline")
     def test_poison_suppressed_while_host_down_then_fires_on_recovery(
         self,
         db_conn: psycopg.Connection,

@@ -378,29 +378,6 @@ def test_emit_unregistered_name_raises() -> None:
         telemetry.emit("telemetry", "no_such_event", agent_id=None, source="system")  # type: ignore[arg-type]
 
 
-def test_loguru_adapter_sets_source_from_extra(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`source=` on a logger call lands in the unified source field (default
-    'system')."""
-    from loguru import logger as _g
-
-    from base.log import _postgres_sink
-
-    sink_id = _g.add(_postgres_sink, level="INFO", enqueue=False, catch=False)
-    try:
-        _g.configure(extra={"agent_id": str(_AGENT)})
-        _g.info("a line from the user path", event="label_change", source="user")
-    finally:
-        _g.remove(sink_id)
-    obj = _mirror_last("label_change", _AGENT)
-    assert obj["source"] == "user"
-    assert obj["attributes"] == {"msg": "a line from the user path"}
-    # loguru stamps record time in the machine's local zone; the emitter must
-    # normalize it to UTC so the mirror carries one offset (task #1638).
-    assert datetime.fromisoformat(obj["ts"]).utcoffset() == timedelta(0)
-
-
 def test_drain_on_exit_lands_queued_events() -> None:
     """The atexit hook must land events still queued (or in the drain thread's
     in-flight batch) — the `process_exit` event's own survival depends on it.

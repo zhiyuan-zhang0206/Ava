@@ -19,7 +19,7 @@ from base.cluster.machine import is_gateway
 from base.cluster.transport_encryption import verify_transport_encryption
 from base.config import ConfigBoot, settings
 from base.deploy.schema.migrations import assert_schema_current
-from base.log import init_gateway_process
+from base.log.process import init_gateway_process
 from base.native_process.os_platform import raise_fd_limit
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.middleware import stopping

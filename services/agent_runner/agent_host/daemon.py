@@ -1,7 +1,6 @@
 """Agent-host daemon — the supervised process that runs every local agent's turns.
 
-The service roster starts this process to own wake dispatch, agent turns,
-health, process boot and their shutdown.
+The service roster owns wake dispatch, turns, health, boot and shutdown through this process.
 
 Usage:
     .venv/bin/python -m services.agent_runner.agent_host.daemon
@@ -37,9 +36,11 @@ from collections.abc import Callable, Collection, Coroutine, Iterable
 from pathlib import Path
 from typing import cast
 
-# The executable entry fixes SDK posture before agent/plugin modules can inspect
-# inherited environment identity. Importing the module as a library does not boot it.
+from base.log import logger, prepare_process_logging
+
+# The executable owns inherited SDK posture; importing this module never boots it.
 if __name__ == "__main__":
+    prepare_process_logging()
     from base.native_process.child_env import inherited_process_env
 
     if "AVA_AGENT_ID" in inherited_process_env():
@@ -88,7 +89,6 @@ from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus, EventBusConfig
 from base.lm.catalog import ModelCatalog
-from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.sessions.helper_chain_guard import parent_chain_intact
 

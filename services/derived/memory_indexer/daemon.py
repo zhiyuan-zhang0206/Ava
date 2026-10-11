@@ -43,7 +43,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.deploy.maintenance import admission
 from base.lm.plugin_providers import build_model_catalog
-from base.log import init_gateway_process
+from base.log import prepare_process_logging
+from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import CREATE_NO_WINDOW
@@ -795,4 +796,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    prepare_process_logging()
     main()

@@ -67,7 +67,7 @@ def _init_cli_logging(args_in: list[str], *, producer: Callable[[], EventPipelin
     """
     name = _CLI_LOG_NAMES.get(tuple(args_in[:1])) or _CLI_LOG_NAMES.get(tuple(args_in[:2]))
     if name is not None:
-        from base.log import init_cli_process
+        from base.log.process import init_cli_process
         from cli.database import operator_machine_name
 
         init_cli_process(
@@ -295,5 +295,13 @@ def main(
         _close_command_pipeline(producer, primary=sys.exception())
 
 
+def entry() -> int:
+    """Prepare a fresh executable process; embedded callers use main directly."""
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
+    return main()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(entry())

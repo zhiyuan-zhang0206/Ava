@@ -24,6 +24,7 @@ import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle._start_readiness_preflight as _start_readiness_preflight_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
+from base.agents.context.clients import DatabaseFactory
 from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.telemetry import EventPipeline
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -63,7 +64,11 @@ def test_declined_restart_reports_its_own_exit_code(
     stopped: list[bool] = []
     monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 1)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # type: ignore[func-returns-value]
-    monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", lambda: None)
+
+    def _release_pause(*, database_factory: DatabaseFactory) -> None:
+        assert database_factory is operator_database
+
+    monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", _release_pause)
 
     assert (
         _stop_commands.cmd_restart(

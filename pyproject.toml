@@ -81,7 +81,7 @@ dependencies = [
 # Implementation in `cli/main.py` (argparse entry), settings-free domain builders
 # and adapters, and `cli/commands/` (cmd_* implementations). Decoupled from the `ava/`
 # SDK — the agent is unaware of docker / cron.
-ava = "cli.main:main"
+ava = "cli.main:entry"
 
 [project.urls]
 Homepage = "https://github.com/zhiyuan-zhang0206/Ava"
@@ -221,6 +221,10 @@ entry_modules = ["scripts.codegen.sdk_surface.contracts"]
 [[tool.ava.public_contracts.components]]
 module = "scripts.audit"
 entry_modules = ["scripts.audit.module_moves", "scripts.audit.where_used"]
+
+[[tool.ava.public_contracts.components]]
+module = "base.log"
+entry_modules = ["base.log", "base.log.process"]
 
 [[tool.ava.public_contracts.components]]
 module = "base.daemon.schedules.inputs"

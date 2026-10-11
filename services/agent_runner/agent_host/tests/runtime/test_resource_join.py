@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -14,7 +15,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ava.sdk_surface.install import Installation
+from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
+from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -101,7 +105,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
     assert events == ["clients", "pools"]
 
 
-def _exercise_unfinished_main(*, database_gate: ProcessDbGate) -> None:
+def _exercise_unfinished_main() -> None:
     """Production main's existing hard exit must skip a still-owned async task."""
     from base.deploy.schema import migrations
 
@@ -110,7 +114,15 @@ def _exercise_unfinished_main(*, database_gate: ProcessDbGate) -> None:
 
     migrations.assert_schema_current = schema_gate
 
-    async def run(**_inputs: object) -> None:
+    async def run(
+        *,
+        config: ConfigBoot,
+        database: Callable[[], Database],
+        machine: MachineIdentity,
+        clients: ClientSet,
+        on_clients_owned: Callable[[], None],
+    ) -> None:
+        on_clients_owned()
         host = AgentHost(
             policy=configured_policy(),
             pool=cast(Any, MagicMock()),
@@ -119,7 +131,8 @@ def _exercise_unfinished_main(*, database_gate: ProcessDbGate) -> None:
             machine="resource-join-test",
             catalog=cast(ModelCatalog, MagicMock()),
             bus=EventBus.from_settings(),
-            db=Database.from_settings(gate=database_gate),
+            db=database(),
+            clients=clients,
         )
         marker = Path(os.environ["RESOURCE_JOIN_MARKER"])
         patch = pytest.MonkeyPatch()
@@ -144,7 +157,7 @@ def _exercise_unfinished_main(*, database_gate: ProcessDbGate) -> None:
             marker.write_text(str(host.resources_joined))
             await daemon._close_joined_host_pools(host, cast(Any, object()), cast(Any, object()))
 
-    daemon.run = run
+    pytest.MonkeyPatch().setattr(daemon, "run", run)
     daemon.main()
 
 

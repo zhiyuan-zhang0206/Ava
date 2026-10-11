@@ -45,7 +45,7 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-import base.log
+import base.log.process
 from base import db, telemetry
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
@@ -170,7 +170,7 @@ def test_log_sink_pipeline_drain_thread_stays_alive(database: db.Database) -> No
     remains live until this entry removes the adapter and performs bounded close.
     """
     pipeline = telemetry.build_pipeline(database=lambda: database)
-    sink_id = base.log.add_postgres_sink(
+    sink_id = base.log.process.add_postgres_sink(
         producer=lambda: pipeline, machine_reader=lambda: settings.cluster.self_machine_name
     )
     try:

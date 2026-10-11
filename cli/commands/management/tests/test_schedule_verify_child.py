@@ -98,7 +98,9 @@ def test_a_removed_module_attribute_is_red() -> None:
         "from schedules.catchup import catch_up\n\ndef catch_up(): ...\n\ncatch_up()\n",
         "from schedules.catchup import catch_up\n\ndef f(catch_up):\n    catch_up()\n",
         # A callee reached through an instance cannot be resolved without running anything.
-        "from base.db import Database\nDatabase.from_settings().connect()\n",
+        "from base.db import Database\nfrom base.db.code_version_gate import ProcessDbGate\n"
+        "def connect(gate: ProcessDbGate):\n"
+        "    Database.from_settings(gate=gate).connect()\n",
         # The agent SDK is wrapped by plugins at load time, so its static signature is not the contract.
         "import ava\nava.agents.spawn(prompt='x', label='plugin-added keyword')\n",
         # A namespace a plugin installs into `ava` at load time (2026-10-04, model-scan-backstop).

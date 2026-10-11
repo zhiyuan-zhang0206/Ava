@@ -44,7 +44,12 @@ def test_on_preserves_explicit_other_service_choices(
     )
     assert marker.exists()
     assert calls == [
-        {"only_services": ("grafana", "loki", "ops", "prometheus"), "retained_children": []}
+        {
+            "only_services": ("grafana", "loki", "ops", "prometheus"),
+            "retained_children": [],
+            "database_factory": operator_database,
+            "producer": operator_pipeline,
+        }
     ]
 
 
@@ -70,6 +75,8 @@ def test_off_disables_backends_even_on_role_declared_station(
             "disabled_services": ("browser", "grafana", "loki", "prometheus"),
             "all_services": False,
             "retained_children": [],
+            "database_factory": operator_database,
+            "producer": operator_pipeline,
         }
     ]
     assert data.read_bytes() == b"durable history"
@@ -99,7 +106,12 @@ def test_off_only_backend_allowlist_does_not_enable_all_services(
         == 0
     )
     assert calls == [
-        {"disabled_services": ("gateway", "loki", "prometheus", "grafana"), "retained_children": []}
+        {
+            "disabled_services": ("gateway", "loki", "prometheus", "grafana"),
+            "retained_children": [],
+            "database_factory": operator_database,
+            "producer": operator_pipeline,
+        }
     ]
 
 

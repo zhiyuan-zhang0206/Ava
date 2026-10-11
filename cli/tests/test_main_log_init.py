@@ -1,11 +1,11 @@
 """The verbs that bring a unit up keep their loguru records.
 
-Importing `base.log` drops loguru's default handler, so a CLI process that
+The fresh executable prelude drops loguru's default handler, so a CLI process that
 opens no sink discards every record it writes through loguru. On the start
 path some warnings exist only there: a skipped pgvector pre-create, untracked
 migration files that will not be applied. `ava start`, `ava restart`
 and `ava lgtm on|off` (every in-process `cmd_start`)
-open the sinks `base.log.init_cli_process` gives: stderr, the unit's
+open the sinks `base.log.process.init_cli_process` gives: stderr, the unit's
 `logs/cli-<verb>.log` and the event pipeline, without a `service_started`
 row. Other verbs print to the caller's terminal and open none.
 """
@@ -34,8 +34,9 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.telemetry import EventPipeline
 from cli import parsers
-from cli.database import operator_database_factory, operator_event_pipeline
+from cli.database import OperatorDatabaseFactory, operator_database_factory, operator_event_pipeline
 from cli.parsers import build_parser
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -51,6 +52,8 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from cli import main, start_intent
 from base import cluster
+from base.log import prepare_process_logging
+prepare_process_logging()
 home = Path(os.environ["AVA_HOME"])
 checkout = home.parent / "checkout"
 checkout.mkdir()
@@ -137,7 +140,7 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
 ) -> None:
     """Opening the sinks builds Settings; a runner whose gateway is unreachable
     fails there with the same message the command itself would print."""
-    import base.log
+    import base.log.process
     from base.host.env.bootstrap import BootstrapFetchError
 
     def unreachable(
@@ -146,7 +149,7 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
         raise BootstrapFetchError(f"could not fetch cluster config ({name})")
 
     dispatched: list[str] = []
-    monkeypatch.setattr(base.log, "init_cli_process", unreachable)
+    monkeypatch.setattr(base.log.process, "init_cli_process", unreachable)
     monkeypatch.setattr(
         parsers, "build_parser", _ignoring_retention(lambda: _dispatching(dispatched))
     )
@@ -168,8 +171,14 @@ def test_main_reuses_only_the_explicit_caller_child_owner(monkeypatch: pytest.Mo
     owners: list[list[subprocess.Popen[bytes]]] = []
 
     def dispatched(
-        _args: argparse.Namespace, *, retained_children: list[subprocess.Popen[bytes]]
+        _args: argparse.Namespace,
+        *,
+        retained_children: list[subprocess.Popen[bytes]],
+        database_factory: DatabaseFactory,
+        producer: Callable[[], EventPipeline],
     ) -> int:
+        assert database_factory is _args.database_factory
+        assert producer is _args.producer
         owners.append(retained_children)
         return 0
 
@@ -199,7 +208,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
 ) -> None:
     from unittest.mock import MagicMock
 
-    import base.log
+    import base.log.process
     from base import telemetry
 
     pipeline = MagicMock(spec=telemetry.EventPipeline)
@@ -227,7 +236,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
     parser.set_defaults(func=dispatch)
     monkeypatch.setattr(parsers, "build_parser", _ignoring_retention(lambda: parser))
     monkeypatch.setattr(telemetry, "build_pipeline", build)
-    monkeypatch.setattr(base.log, "init_cli_process", initialize)
+    monkeypatch.setattr(base.log.process, "init_cli_process", initialize)
     assert _main.main(["restart"]) == 0
     assert len(factories) == 1
     assert inputs == [pipeline, pipeline]
@@ -452,3 +461,23 @@ def test_command_close_preserves_original_writer_error_and_primary(
     assert repeated.value is cleanup
     if body_fails:
         assert any("writer failed" in note for note in primary.__notes__)
+
+
+def test_status_handler_body_forwards_the_parsed_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: OperatorDatabaseFactory,
+) -> None:
+    """The routing test above stubs the `_h_*` handler itself, so no handler body
+    ever runs under test — a handler reading a flag the parser no longer defines
+    (`args.via_gateway` after `--via-gateway` was dropped) stays green here and
+    AttributeErrors on the first real `ava status`. Stub one level lower instead:
+    `cmd_status`, which `_h_status` lazy-imports, so the real body executes against
+    the real Namespace."""
+    import cli.commands.lifecycle.status as _status_commands
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr("cli.database.operator_database_factory", lambda: operator_database)
+    monkeypatch.setattr(_status_commands, "cmd_status", lambda **kwargs: calls.append(kwargs) or 0)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _main.main(["status"]) == 0
+    assert calls == [{"database_factory": operator_database}]

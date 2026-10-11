@@ -126,7 +126,7 @@ def test_numbers_are_agent_scoped_and_permanent(
 def test_concurrent_requests_cannot_share_control(
     owner: RuntimeIncarnation, *, config_authority: ConfigAuthority, database_gate: ProcessDbGate
 ) -> None:
-    def attempt(_index: int, *, database_gate: ProcessDbGate) -> int | None:
+    def attempt(_index: int) -> int | None:
         try:
             return start(
                 owner, active=False, authority=config_authority, database_gate=database_gate

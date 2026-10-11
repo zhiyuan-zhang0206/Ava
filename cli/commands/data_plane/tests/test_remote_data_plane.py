@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from base.agents.context.clients import DatabaseFactory
 from base.config import settings
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup as dp
@@ -43,7 +44,11 @@ def test_status_remote_probes_urls_and_skips_pgbouncer_line(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
 ) -> None:
-    monkeypatch.setattr(dp, "remote_pg_reachable", lambda: (True, "postgres (10.9.8.7:5432)"))
+    def _remote_postgres(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
+        assert database_factory is operator_database
+        return (True, "postgres (10.9.8.7:5432)")
+
+    monkeypatch.setattr(dp, "remote_pg_reachable", _remote_postgres)
     monkeypatch.setattr(dp, "remote_redis_reachable", lambda: (True, "redis (10.9.8.7:6380)"))
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
 
@@ -61,7 +66,11 @@ def test_status_remote_reports_unreachable_component(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
 ) -> None:
-    monkeypatch.setattr(dp, "remote_pg_reachable", lambda: (True, "postgres (10.9.8.7:5432)"))
+    def _remote_postgres(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
+        assert database_factory is operator_database
+        return (True, "postgres (10.9.8.7:5432)")
+
+    monkeypatch.setattr(dp, "remote_pg_reachable", _remote_postgres)
     monkeypatch.setattr(
         dp,
         "remote_redis_reachable",

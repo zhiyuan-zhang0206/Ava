@@ -233,7 +233,7 @@ def _execute(
 
 def main() -> None:
     request, output = worker_request(sys.argv)
-    from base.log import init_gateway_process
+    from base.log.process import init_gateway_process
 
     # The store-verified publish ACK is an INFO record: route it to the log sinks.
     config = ConfigBoot()
@@ -267,4 +267,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
     main()

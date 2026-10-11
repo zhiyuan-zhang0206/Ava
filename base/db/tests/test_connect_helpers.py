@@ -394,16 +394,18 @@ def _read_minimum() -> int:
 
 
 def test_gateway_start_raises_the_minimum_to_its_version(
-    process_gate: gate.ProcessDbGate, stored_minimum: int, database: Database
+    process_gate: gate.ProcessDbGate, stored_minimum: int
 ) -> None:
+    database = Database.from_settings(gate=process_gate)
     _set_minimum(0)
     assert process_gate.raise_min_code_version(database) == _VERSION
     assert _read_minimum() == _VERSION
 
 
 def test_a_repeat_start_at_the_same_version_changes_nothing(
-    process_gate: gate.ProcessDbGate, stored_minimum: int, database: Database
+    process_gate: gate.ProcessDbGate, stored_minimum: int
 ) -> None:
+    database = Database.from_settings(gate=process_gate)
     _set_minimum(_VERSION)
     assert process_gate.raise_min_code_version(database) == _VERSION
     assert _read_minimum() == _VERSION

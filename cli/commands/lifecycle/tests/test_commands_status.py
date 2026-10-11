@@ -17,6 +17,7 @@ import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle.status as _status_commands
 import cli.commands.probe as _probe_commands
 import ops.roster as _roster
+from base.agents.context.clients import DatabaseFactory
 from base.config import settings
 from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
 from cli.tests._commands_helpers import _FakeResponse, _FakeResult, _patch_gateway_http, _sess
@@ -25,7 +26,9 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 @pytest.fixture(autouse=True)
-def _local_status_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+def _local_status_boundary(
+    monkeypatch: pytest.MonkeyPatch, operator_database: DatabaseFactory
+) -> None:
     """Status presentation does not require native database tools or a live cluster."""
     import httpx
 
@@ -43,7 +46,10 @@ def _local_status_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
         def status(self) -> object:
             raise RootClientError("isolated status test")
 
-    monkeypatch.setattr(_status_commands, "print_data_plane_status", lambda: None)
+    def _print_plane(*, database_factory: DatabaseFactory) -> None:
+        assert database_factory is operator_database
+
+    monkeypatch.setattr(_status_commands, "print_data_plane_status", _print_plane)
     monkeypatch.setattr(httpx, "get", _unreachable)
     monkeypatch.setattr("base.native_process.root_control.client.RootClient", _AbsentRoot)
 
@@ -517,7 +523,11 @@ def test_status_prints_a_live_host_reading(
     monkeypatch.setattr(status_mod, "_source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: None)
     monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
-    monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
+
+    def _print_plane(*, database_factory: DatabaseFactory) -> None:
+        assert database_factory is operator_database
+
+    monkeypatch.setattr(status_mod, "print_data_plane_status", _print_plane)
     monkeypatch.setattr(status_mod, "print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert status_mod.cmd_status(database_factory=operator_database) == 0
@@ -537,7 +547,11 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     monkeypatch.setattr(status_mod, "_source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: None)
     monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
-    monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
+
+    def _print_plane(*, database_factory: DatabaseFactory) -> None:
+        assert database_factory is operator_database
+
+    monkeypatch.setattr(status_mod, "print_data_plane_status", _print_plane)
     monkeypatch.setattr(status_mod, "print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         "base.host.resource_sample.resource_sample",
