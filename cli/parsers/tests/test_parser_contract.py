@@ -14,7 +14,7 @@ from cli.parsers import build_parser, command_options, parse_args
 
 @pytest.mark.parametrize(
     "argv",
-    [["memory", "search", "text"], ["cluster", "destroy"], ["agents", "context", "7"]],
+    [["memory", "search", "text"], ["cluster", "destroy"], ["agents", "timeline", "7"]],
 )
 def test_parsing_keeps_defaults_and_bound_handlers(argv: list[str]) -> None:
     assert vars(parse_args(argv)) == vars(build_parser().parse_args(argv))
@@ -44,17 +44,17 @@ def test_omitted_arguments_read_the_process_argv(monkeypatch: pytest.MonkeyPatch
     assert args.query == "text" and args.limit == 8
 
 
-def test_options_keep_command_paths_aliases_and_fresh_snapshots() -> None:
+def test_options_keep_command_paths_and_fresh_snapshots() -> None:
     options = command_options()
     assert options[("ava",)] == {"--help"}
     assert "--keep-infra" in options[("ava", "stop")]
     assert "--keep-infra" not in options[("ava", "start")]
     timeline = ("ava", "agents", "timeline")
-    context = ("ava", "agents", "context")
-    assert options[timeline] == options[context] == {"--help", "--limit", "--before"}
-    options[context].clear()
-    assert "--limit" in options[timeline]
-    assert "--limit" in command_options()[context]
+    fresh_options = command_options()
+    assert options[timeline] == fresh_options[timeline] == {"--help", "--limit", "--before"}
+    options[timeline].clear()
+    assert "--limit" in fresh_options[timeline]
+    assert "--limit" in command_options()[timeline]
 
 
 def test_public_queries_do_not_load_settings_or_dispatch(tmp_path: Path) -> None:
