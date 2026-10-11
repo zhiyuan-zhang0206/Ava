@@ -1,6 +1,5 @@
 """Live sampling uses validated snapshots and never blocks SDK calls on a fetch."""
 
-import builtins
 import os
 import subprocess
 import sys
@@ -279,16 +278,9 @@ def test_refresh_dependency_import_failure_reaches_the_caller(
 ) -> None:
     cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy()
-    original_import = builtins.__import__
-
-    def importing(name: str, *args: Any, **kwargs: Any) -> Any:
-        if name == "httpx":
-            raise ImportError("HTTPX unavailable")
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", importing)
+    monkeypatch.setitem(sys.modules, "httpx", None)
     cache.refresh()
-    with pytest.raises(ImportError, match="HTTPX unavailable"):
+    with pytest.raises(ImportError, match="httpx"):
         cache.read()
 
 

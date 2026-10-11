@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 
 import pytest
@@ -54,7 +55,7 @@ def test_a_journal_without_a_shepherd_reads_none() -> None:
 
     pause_owner.state_path().write_text(
         '{"state":"paused","holder":"A","acquired_at":"2026-08-25T01:02:00+00:00",'
-        f'"maintenance":{__import__("json").dumps(MaintenanceHold().encode())}}}'
+        f'"maintenance":{json.dumps(MaintenanceHold().encode())}}}'
     )
     snapshot = pause_owner.read()
     assert snapshot.status == "paused"
