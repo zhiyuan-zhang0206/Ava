@@ -1481,40 +1481,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/pages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Pages
-         * @description UI page-load fetches the agent's currently open page list; SSE PageOpened/Closed handles deltas.
-         */
-        get: operations["get_pages_api_agents__agent_id__pages_get"];
-        put?: never;
-        /**
-         * Post Page Register
-         * @description ava.ui.show / .serve register / update a page — SDK main entry.
-         *
-         *     Each agent can have at most one open page. Before registering the new
-         *     page, any existing open pages for this agent are auto-closed (one
-         *     agent, one page). The closed pages get individual PageClosed events
-         *     so the frontend removes them from the popover.
-         *
-         *     Returns 409 when the agent is terminated (dead agents do not show UI), or
-         *     when another live page already holds (host, port) — in the port-conflict
-         *     case the agent's current page is left open and the response detail names
-         *     the occupying page.
-         */
-        post: operations["post_page_register_api_agents__agent_id__pages_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/keyed/v1/agents/{agent_id}/pages": {
         parameters: {
             query?: never;
@@ -1526,7 +1492,17 @@ export interface paths {
         put?: never;
         /**
          * Post Guarded Page Register
-         * @description Accept one registration atomically; never downgrade this intent to the legacy path.
+         * @description ava.ui.show / .serve register a page — SDK main entry.
+         *
+         *     Each agent can have at most one open page. Registering atomically closes any
+         *     existing open page of the agent (the closed pages get individual PageClosed
+         *     events so the frontend removes them from the popover) and commits the original
+         *     acceptance, so a replay returns it without a second effect.
+         *
+         *     Returns 409 when the agent is terminated (dead agents do not show UI), or
+         *     when another live page already holds (host, port) — in the port-conflict
+         *     case the agent's current page is left open and the response detail names
+         *     the occupying page.
          */
         post: operations["post_guarded_page_register_api_keyed_v1_agents__agent_id__pages_post"];
         delete?: never;
@@ -1546,34 +1522,13 @@ export interface paths {
         put?: never;
         /**
          * Post Guarded Page Close
-         * @description Close only the observed row; replay returns its historical acceptance.
+         * @description ava.ui.close a page — closes only the observed row (`expected_page_id`).
+         *
+         *     A newer registration under the same name makes the observation stale (409);
+         *     replay returns the historical acceptance.
          */
         post: operations["post_guarded_page_close_api_keyed_v1_agents__agent_id__pages__name__close_post"];
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/pages/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Page
-         * @description ava.ui.close close a page — CAS open->closed.
-         *
-         *     404: agent does not exist / page name does not exist / already closed
-         *     (single 404 does not distinguish them; caller only cares that "the
-         *     target page is no longer in open state").
-         */
-        delete: operations["delete_page_api_agents__agent_id__pages__name__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1593,6 +1548,26 @@ export interface paths {
          *     SSE PageOpened/PageClosed handles deltas.
          */
         get: operations["get_all_pages_api_pages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{agent_id}/pages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Pages
+         * @description UI page-load fetches the agent's currently open page list; SSE PageOpened/Closed handles deltas.
+         */
+        get: operations["get_pages_api_agents__agent_id__pages_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1659,7 +1634,9 @@ export interface paths {
          *     ones ride the agent snapshot. include_awaiting=True returns both kinds:
          *     the IM bridge's "/notice list" queue view (Task #941) lists everything
          *     still open and hands each item its own processing buttons. A notice is
-         *     open when resolved_at IS NULL. Omit `limit` for the configured default cap
+         *     open when resolved_at IS NULL. `agent_id` narrows the feed to one agent's
+         *     open notices — how an agent observes its own notice's global id before a
+         *     guarded edit/withdraw. Omit `limit` for the configured default cap
          *     (``display.notices_open_default_limit``, 200 out of the box).
          */
         get: operations["get_open_notices_api_notices_open_get"];
@@ -1737,49 +1714,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/notices/{notice_id}/resolve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Notice Resolve
-         * @description Resolve one open notice and (when a reply is given) wake the agent with it.
-         *
-         *     `action` is the explicit close verb: answer applies to both kinds — the
-         *     user can reply to an FYI too (Task #1061, the reply reaches the notice's
-         *     agent like a require_response answer); dismiss applies to a require_response
-         *     notice, read to an FYI notice. The endpoint marks the notice resolved
-         *     (resolved_at + resolution + cached reply) iff it is still open, then — when a
-         *     reply is supplied, or a require_response notice is dismissed — INSERTs a
-         *     self-describing chat inbound so the agent knows which notice this answers and
-         *     (for a dismissed blocking notice) stops waiting. The inbound is system-sourced
-         *     (`system:notice-reply` / `system:notice-dismiss`), rendered `[system] ...`
-         *     with no User envelope: a notice resolution is a notice-system event, not user
-         *     speech, so no user-role message is consumed and nothing is shaped like a
-         *     reply request.
-         *
-         *     409 when the notice does not exist, or `action` does not match the notice's
-         *     kind (dismiss on an FYI notice, or read on one needing a response). A bare
-         *     `read` on an already-resolved notice is an idempotent success (user ruling
-         *     2026-08-28: "Mark read" means "I have read it", so the already-read state
-         *     ends silently, like the normal path — the same skip-not-error semantics as
-         *     the batch endpoint); a note attached to that read still reaches the agent,
-         *     and `answer` / `dismiss` on an already-resolved notice keep the 409 so a
-         *     reply or a dismissal is never silently dropped. 422 when `action` is
-         *     `answer` without a reply.
-         */
-        post: operations["post_notice_resolve_api_agents__agent_id__notices__notice_id__resolve_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/agents/{agent_id}/notices": {
         parameters: {
             query?: never;
@@ -1805,54 +1739,6 @@ export interface paths {
          *     count + titles (for the SDK's pending list), and the superseded ids.
          */
         post: operations["post_notice_create_api_agents__agent_id__notices_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/notices/current": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Patch Notice Edit
-         * @description Revise the agent's open notice (the SDK ava.ui.edit_notice contract).
-         *
-         *     Pass only the fields to change; require_response cannot change (turn an
-         *     FYI into a question by dismissing and posting fresh). No open notice ->
-         *     idempotent 204 (the SDK contract: silently return). The posted event is
-         *     re-published so the frontend feed picks up the revision.
-         */
-        patch: operations["patch_notice_edit_api_agents__agent_id__notices_current_patch"];
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/notices/current/dismiss": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Notice Dismiss
-         * @description Withdraw the agent's open notice (the SDK ava.ui.dismiss_notice
-         *     contract): resolution 'withdrawn' + resolve event, plus an inspector
-         *     snapshot refresh when the withdrawn row required a response. No open notice
-         *     -> idempotent 204.
-         */
-        post: operations["post_notice_dismiss_api_agents__agent_id__notices_current_dismiss_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6905,22 +6791,6 @@ export interface components {
             expire_at?: string | null;
         };
         /**
-         * NoticeEditIn
-         * @description PATCH /api/agents/{id}/notices/current request body — revise the agent's
-         *     open notice (the SDK ava.ui.edit_notice contract). All fields optional;
-         *     pass only what changes. `require_response` cannot be changed (turn an FYI
-         *     into a question by dismissing and posting fresh).
-         */
-        NoticeEditIn: {
-            /** Title */
-            title?: string | null;
-            /** Content */
-            content?: string | null;
-            priority?: components["schemas"]["Priority"] | null;
-            /** Blocking */
-            blocking?: boolean | null;
-        };
-        /**
          * NoticeItem
          * @description One agent_notices row — element of GET /api/notices/open (the FYI feed:
          *     require_response false, resolved_at None) and the resolved page of
@@ -7162,7 +7032,7 @@ export interface components {
         };
         /**
          * PageRegisterRequest
-         * @description POST /api/agents/{aid}/pages request body — SDK ava.ui.show / .serve call.
+         * @description POST /api/keyed/v1/agents/{aid}/pages request body — SDK ava.ui.show / .serve call.
          *
          *     `host`: the agent-runner's reachable address (the agent self-reports
          *         it) — where the gateway's reverse proxy dials the page server
@@ -7460,7 +7330,7 @@ export interface components {
         };
         /**
          * ResolveNoticeIn
-         * @description POST /api/agents/{id}/notices/{notice_id}/resolve request body.
+         * @description POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve request body.
          *
          *     `action` is the explicit close verb (never inferred from whether `reply` is
          *     present): `answer` / `dismiss` apply to a require_response notice, `read`
@@ -11003,72 +10873,6 @@ export interface operations {
             };
         };
     };
-    get_pages_api_agents__agent_id__pages_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PageRow"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_page_register_api_agents__agent_id__pages_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PageRegisterRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PageRow"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     post_guarded_page_register_api_keyed_v1_agents__agent_id__pages_post: {
         parameters: {
             query?: never;
@@ -11146,38 +10950,6 @@ export interface operations {
             };
         };
     };
-    delete_page_api_agents__agent_id__pages__name__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PageRow"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_all_pages_api_pages_get: {
         parameters: {
             query?: never;
@@ -11194,6 +10966,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PageRow"][];
+                };
+            };
+        };
+    };
+    get_pages_api_agents__agent_id__pages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -11266,6 +11069,7 @@ export interface operations {
             query?: {
                 limit?: number | null;
                 include_awaiting?: boolean;
+                agent_id?: number | null;
             };
             header?: never;
             path?: never;
@@ -11359,44 +11163,6 @@ export interface operations {
             };
         };
     };
-    post_notice_resolve_api_agents__agent_id__notices__notice_id__resolve_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
-            path: {
-                agent_id: number;
-                notice_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ResolveNoticeIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentMessageEnqueued"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     post_notice_create_api_agents__agent_id__notices_post: {
         parameters: {
             query?: never;
@@ -11424,68 +11190,6 @@ export interface operations {
                         [key: string]: unknown;
                     };
                 };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    patch_notice_edit_api_agents__agent_id__notices_current_patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NoticeEditIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_notice_dismiss_api_agents__agent_id__notices_current_dismiss_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Validation Error */
             422: {

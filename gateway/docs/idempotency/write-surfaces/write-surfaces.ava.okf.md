@@ -54,12 +54,7 @@ Owners:
 | `POST /api/mcp/clients/{client_id}/revoke` | natural | client revocation — guarded update; repeats cannot revoke twice |
 | `POST /api/memory/refresh` | natural | re-scan — repeats are harmless |
 | `POST /api/memory/search` | natural | pure read |
-| `POST /api/agents/{agent_id}/notices/{notice_id}/resolve` | keyed | operation receipt and reply inbound commit together; intentional later replies use new keys |
 | `POST /api/agents/{agent_id}/notices` | keyed | immutable request and original notice snapshot replay before mutable expiry/task checks |
-| `PATCH /api/agents/{agent_id}/notices/current` | one-shot | retry can edit a newer current notice |
-| `POST /api/agents/{agent_id}/notices/current/dismiss` | one-shot | retry can withdraw a newer current notice |
-| `POST /api/agents/{agent_id}/pages` | one-shot | replaces current page; replay may close newer work; no receipt |
-| `DELETE /api/agents/{agent_id}/pages/{name}` | one-shot | name-based close can affect a later registration |
 | `POST /api/presets` | one-shot | optional keyed creation receipt commits with the resource; replay returns original identity after rename/delete |
 | `PATCH /api/presets/{preset_id}` | natural | update — repeats are harmless |
 | `DELETE /api/presets/{preset_id}` | natural | delete — repeats are harmless |

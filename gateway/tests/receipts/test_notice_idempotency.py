@@ -14,14 +14,14 @@ from gateway.tests.events.test_notices_endpoint import _insert_notice, _seed_age
 def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) -> None:
     agent = _seed_agent(db_conn)
     notice = _insert_notice(db_conn, agent, "question", require_response=True)
-    path = f"/api/agents/{agent}/notices/{notice}/resolve"
+    path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
     with TestClient(app) as client, ThreadPoolExecutor(max_workers=4) as executor:
 
         def resolve() -> dict[str, object]:
             response = client.post(
                 path,
                 json={"action": "answer", "reply": "yes"},
-                headers={"Idempotency-Key": "answer-once"},
+                headers={"Idempotency-Key": "answer-once", "Idempotency-Scope": "principal-v1"},
             )
             assert response.status_code == 201
             return response.json()
@@ -31,7 +31,7 @@ def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) ->
         changed = client.post(
             path,
             json={"action": "answer", "reply": "no"},
-            headers={"Idempotency-Key": "answer-once"},
+            headers={"Idempotency-Key": "answer-once", "Idempotency-Scope": "principal-v1"},
         )
         assert changed.status_code == 409
     with db_conn.cursor() as cur:
@@ -42,12 +42,24 @@ def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) ->
 def test_distinct_later_read_replies_remain_distinct(db_conn: psycopg.Connection) -> None:
     agent = _seed_agent(db_conn)
     notice = _insert_notice(db_conn, agent, "FYI")
-    path = f"/api/agents/{agent}/notices/{notice}/resolve"
+    path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
     with TestClient(app) as client:
         body = {"action": "read", "reply": "thanks"}
-        first = client.post(path, json=body, headers={"Idempotency-Key": "read-1"})
-        replay = client.post(path, json=body, headers={"Idempotency-Key": "read-1"})
-        later = client.post(path, json=body, headers={"Idempotency-Key": "read-2"})
+        first = client.post(
+            path,
+            json=body,
+            headers={"Idempotency-Key": "read-1", "Idempotency-Scope": "principal-v1"},
+        )
+        replay = client.post(
+            path,
+            json=body,
+            headers={"Idempotency-Key": "read-1", "Idempotency-Scope": "principal-v1"},
+        )
+        later = client.post(
+            path,
+            json=body,
+            headers={"Idempotency-Key": "read-2", "Idempotency-Scope": "principal-v1"},
+        )
     assert first.status_code == replay.status_code == later.status_code == 201
     assert first.json()["inbound_id"] == replay.json()["inbound_id"]
     assert later.json()["inbound_id"] != first.json()["inbound_id"]
@@ -84,7 +96,7 @@ def test_resolution_recovers_after_committed_wake_failure(
 
     agent = _seed_agent(db_conn)
     notice = _insert_notice(db_conn, agent, "question", require_response=True)
-    path = f"/api/agents/{agent}/notices/{notice}/resolve"
+    path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
     original = notices.publish_inbound_wake
 
     def unavailable(*args: object) -> bool:
@@ -95,14 +107,14 @@ def test_resolution_recovers_after_committed_wake_failure(
         first = client.post(
             path,
             json={"action": "answer", "reply": "yes"},
-            headers={"Idempotency-Key": "lost-tail"},
+            headers={"Idempotency-Key": "lost-tail", "Idempotency-Scope": "principal-v1"},
         )
         assert first.status_code == 500
         monkeypatch.setattr(notices, "publish_inbound_wake", original)
         second = client.post(
             path,
             json={"action": "answer", "reply": "yes"},
-            headers={"Idempotency-Key": "lost-tail"},
+            headers={"Idempotency-Key": "lost-tail", "Idempotency-Scope": "principal-v1"},
         )
         assert second.status_code == 201
     with db_conn.cursor() as cur:
@@ -141,7 +153,7 @@ def test_missing_key_cannot_mutate_notice(db_conn: psycopg.Connection, resolve: 
     path = f"/api/agents/{agent}/notices"
     body = {"title": "replacement"}
     if resolve:
-        path += f"/{notice}/resolve"
+        path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
         body = {"action": "answer", "reply": "yes"}
     with TestClient(app) as client:
         assert client.post(path, json=body).status_code == 422

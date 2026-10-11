@@ -113,7 +113,7 @@ def register(
             _target(conn, agent_id, register=True)
             validate_target(conn)
             assert_port_free(conn, agent_id, body.host, body.port)
-            closed = close_all_agent_pages_in_transaction(conn, agent_id, include_expired=True)
+            closed = close_all_agent_pages_in_transaction(conn, agent_id)
             record = register_page_in_transaction(
                 conn,
                 agent_id,

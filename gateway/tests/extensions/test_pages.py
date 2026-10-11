@@ -1,9 +1,9 @@
-"""POST /api/agents/{aid}/pages + DELETE / GET integration tests.
+"""Keyed page register / close + GET integration tests.
 
 Covers:
 - register: new row + idempotent upsert (re-register with same name updates host/port)
   + gateway reverse-proxy URL
-- close: open→closed CAS + already-closed → 404
+- close: observed-row open→closed CAS, already-closed no-op, stale observation → 409
 - list: only returns open
 - agent terminated: register returns 409
 - port conflicts: one live page per (host, port) — refused with 409 (naming the
@@ -19,6 +19,7 @@ stays in the registry for the proxy's dialing.
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,29 @@ from base.db import create_agent
 from gateway.app import app
 
 _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)
+
+
+def _keyed_headers() -> dict[str, str]:
+    return {"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"}
+
+
+def _post_page(client: TestClient, agent_id: int, body: dict[str, Any]) -> Any:
+    """Register a page through the keyed route, one fresh operation key per call."""
+    return client.post(
+        f"/api/keyed/v1/agents/{agent_id}/pages", json=body, headers=_keyed_headers()
+    )
+
+
+def _close_page(client: TestClient, agent_id: int, name: str) -> Any:
+    """Observe the agent's open page `name`, then close exactly that registry row."""
+    opened = {
+        page["name"]: page["id"] for page in client.get(f"/api/agents/{agent_id}/pages").json()
+    }
+    return client.post(
+        f"/api/keyed/v1/agents/{agent_id}/pages/{name}/close",
+        json={"expected_page_id": opened[name]},
+        headers=_keyed_headers(),
+    )
 
 
 def _page_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple]:
@@ -59,9 +83,8 @@ def _page_deadline(
 def test_register_page_inserts_open_row(db_conn: psycopg.Connection) -> None:
     aid = create_agent(db_conn)
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "cleanup", "port": 8765, "host": _HOST, "title": "Cleanup picker"},
+        resp = _post_page(
+            client, aid, {"name": "cleanup", "port": 8765, "host": _HOST, "title": "Cleanup picker"}
         )
     assert resp.status_code == 201
     body = resp.json()
@@ -93,10 +116,7 @@ def test_register_page_url_uses_gateway_url_var_not_request_host(
     aid = create_agent(db_conn)
     # Simulate the SDK caller: dials the gateway at localhost...
     with TestClient(app, base_url="http://localhost:8000") as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": 8001, "host": _HOST},
-        )
+        resp = _post_page(client, aid, {"name": "p", "port": 8001, "host": _HOST})
     assert resp.status_code == 201
     # ...yet the URL is the configured Gateway URL variable, not localhost.
     assert resp.json()["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-p/"
@@ -112,10 +132,7 @@ def test_register_page_url_falls_back_to_request_base_without_gateway_url(
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     aid = create_agent(db_conn)
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": 8001, "host": _HOST},
-        )
+        resp = _post_page(client, aid, {"name": "p", "port": 8001, "host": _HOST})
     assert resp.status_code == 201
     assert resp.json()["url"] == f"http://testserver/pages/{aid}-p/"
 
@@ -144,12 +161,9 @@ def test_register_page_same_name_auto_closes_then_creates(db_conn: psycopg.Conne
     """Single page per agent: re-registering auto-closes the old page, creates a new row."""
     aid = create_agent(db_conn)
     with TestClient(app) as client:
-        r1 = client.post(
-            f"/api/agents/{aid}/pages", json={"name": "p", "port": 8001, "host": _HOST}
-        )
-        r2 = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": 8002, "host": "localhost", "title": "v2"},
+        r1 = _post_page(client, aid, {"name": "p", "port": 8001, "host": _HOST})
+        r2 = _post_page(
+            client, aid, {"name": "p", "port": 8002, "host": "localhost", "title": "v2"}
         )
     assert r1.status_code == 201
     assert r2.status_code == 201
@@ -162,16 +176,13 @@ def test_register_page_same_name_auto_closes_then_creates(db_conn: psycopg.Conne
 
 def test_register_page_missing_host_422() -> None:
     with TestClient(app) as client:
-        resp = client.post("/api/agents/1/pages", json={"name": "p", "port": 8001})
+        resp = _post_page(client, 1, {"name": "p", "port": 8001})
     assert resp.status_code == 422
 
 
 def test_register_page_rejects_zero_ttl() -> None:
     with TestClient(app) as client:
-        resp = client.post(
-            "/api/agents/1/pages",
-            json={"name": "p", "port": 8001, "host": _HOST, "ttl_seconds": 0},
-        )
+        resp = _post_page(client, 1, {"name": "p", "port": 8001, "host": _HOST, "ttl_seconds": 0})
     assert resp.status_code == 422
 
 
@@ -179,9 +190,8 @@ def test_register_page_sets_explicit_expiry(db_conn: psycopg.Connection) -> None
     aid = create_agent(db_conn)
     before = datetime.now(UTC)
     with TestClient(app) as client:
-        response = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "timed", "port": 8001, "host": _HOST, "ttl_seconds": 120},
+        response = _post_page(
+            client, aid, {"name": "timed", "port": 8001, "host": _HOST, "ttl_seconds": 120}
         )
     assert response.status_code == 201
     db_conn.rollback()
@@ -202,10 +212,7 @@ def test_register_page_applies_gateway_default_expiry(
     aid = create_agent(db_conn)
     before = datetime.now(UTC)
     with TestClient(app) as client:
-        response = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "defaulted", "port": 8001, "host": _HOST},
-        )
+        response = _post_page(client, aid, {"name": "defaulted", "port": 8001, "host": _HOST})
     assert response.status_code == 201
     db_conn.rollback()
     expires_at, _ = _page_deadline(db_conn, aid, "defaulted")
@@ -217,17 +224,13 @@ def test_register_page_applies_gateway_default_expiry(
 
 def test_register_page_invalid_name_422() -> None:
     with TestClient(app) as client:
-        resp = client.post(
-            "/api/agents/1/pages", json={"name": "bad/name", "port": 8001, "host": _HOST}
-        )
+        resp = _post_page(client, 1, {"name": "bad/name", "port": 8001, "host": _HOST})
     assert resp.status_code == 422
 
 
 def test_register_page_404_when_agent_missing() -> None:
     with TestClient(app) as client:
-        resp = client.post(
-            "/api/agents/99999/pages", json={"name": "p", "port": 8001, "host": _HOST}
-        )
+        resp = _post_page(client, 99999, {"name": "p", "port": 8001, "host": _HOST})
     assert resp.status_code == 404
 
 
@@ -240,17 +243,15 @@ def test_register_page_409_when_agent_terminated(db_conn: psycopg.Connection) ->
         )
     db_conn.commit()
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages", json={"name": "p", "port": 8001, "host": _HOST}
-        )
+        resp = _post_page(client, aid, {"name": "p", "port": 8001, "host": _HOST})
     assert resp.status_code == 409
 
 
 def test_close_page_cas_open_to_closed(db_conn: psycopg.Connection) -> None:
     aid = create_agent(db_conn)
     with TestClient(app) as client:
-        client.post(f"/api/agents/{aid}/pages", json={"name": "p", "port": 8001, "host": _HOST})
-        r = client.delete(f"/api/agents/{aid}/pages/p")
+        _post_page(client, aid, {"name": "p", "port": 8001, "host": _HOST})
+        r = _close_page(client, aid, "p")
     assert r.status_code == 200
     assert r.json()["closed_at"] is not None
 
@@ -260,14 +261,36 @@ def test_close_page_cas_open_to_closed(db_conn: psycopg.Connection) -> None:
     assert rows[0][5] is not None  # closed_at
 
 
-def test_close_page_already_closed_404(db_conn: psycopg.Connection) -> None:
+def test_close_page_already_closed_is_an_accepted_noop(db_conn: psycopg.Connection) -> None:
+    """Closing the observed row twice is accepted once and then a no-op: the
+    second observation names the same immutable row, which is already closed."""
     aid = create_agent(db_conn)
     with TestClient(app) as client:
-        client.post(f"/api/agents/{aid}/pages", json={"name": "p", "port": 8001, "host": _HOST})
-        r1 = client.delete(f"/api/agents/{aid}/pages/p")
-        r2 = client.delete(f"/api/agents/{aid}/pages/p")
+        opened = _post_page(client, aid, {"name": "p", "port": 8001, "host": _HOST}).json()
+        body = {"expected_page_id": opened["id"]}
+        path = f"/api/keyed/v1/agents/{aid}/pages/p/close"
+        r1 = client.post(path, json=body, headers=_keyed_headers())
+        r2 = client.post(path, json=body, headers=_keyed_headers())
     assert r1.status_code == 200
-    assert r2.status_code == 404
+    assert r2.status_code == 200
+    assert r2.json()["id"] == opened["id"]
+
+
+def test_close_page_rejects_a_stale_observation(db_conn: psycopg.Connection) -> None:
+    """A newer registration under the same name makes the observed row id stale."""
+    aid = create_agent(db_conn)
+    with TestClient(app) as client:
+        first = _post_page(client, aid, {"name": "p", "port": 8001, "host": _HOST}).json()
+        second = _post_page(client, aid, {"name": "p", "port": 8002, "host": _HOST}).json()
+        stale = client.post(
+            f"/api/keyed/v1/agents/{aid}/pages/p/close",
+            json={"expected_page_id": first["id"]},
+            headers=_keyed_headers(),
+        )
+    assert stale.status_code == 409
+    db_conn.rollback()
+    assert second["id"] != first["id"]
+    assert [row[1] for row in _page_rows(db_conn, aid) if row[5] is None] == [8002]
 
 
 def test_list_pages_returns_only_open(db_conn: psycopg.Connection) -> None:
@@ -275,7 +298,7 @@ def test_list_pages_returns_only_open(db_conn: psycopg.Connection) -> None:
     aid = create_agent(db_conn)
     with TestClient(app) as client:
         # Register page "a" — this is the only open page.
-        client.post(f"/api/agents/{aid}/pages", json={"name": "a", "port": 8001, "host": _HOST})
+        _post_page(client, aid, {"name": "a", "port": 8001, "host": _HOST})
         r = client.get(f"/api/agents/{aid}/pages")
         assert r.status_code == 200
         body = r.json()
@@ -283,7 +306,7 @@ def test_list_pages_returns_only_open(db_conn: psycopg.Connection) -> None:
         assert body[0]["name"] == "a"
         assert body[0]["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-a/"
         # Close it — list should be empty.
-        client.delete(f"/api/agents/{aid}/pages/a")
+        _close_page(client, aid, "a")
         r2 = client.get(f"/api/agents/{aid}/pages")
         assert r2.status_code == 200
         assert r2.json() == []
@@ -292,10 +315,7 @@ def test_list_pages_returns_only_open(db_conn: psycopg.Connection) -> None:
 def test_list_pages_excludes_expired_rows(db_conn: psycopg.Connection) -> None:
     aid = create_agent(db_conn)
     with TestClient(app) as client:
-        response = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "expired", "port": 8001, "host": _HOST},
-        )
+        response = _post_page(client, aid, {"name": "expired", "port": 8001, "host": _HOST})
         assert response.status_code == 201
     with db_conn.cursor() as cur:
         cur.execute(
@@ -317,11 +337,11 @@ def test_list_all_pages_spans_agents_open_only(db_conn: psycopg.Connection) -> N
     a2 = create_agent(db_conn)
     a3 = create_agent(db_conn)
     with TestClient(app) as client:
-        client.post(f"/api/agents/{a1}/pages", json={"name": "p1", "port": 8001, "host": _HOST})
-        client.post(f"/api/agents/{a2}/pages", json={"name": "p2", "port": 8002, "host": _HOST})
+        _post_page(client, a1, {"name": "p1", "port": 8001, "host": _HOST})
+        _post_page(client, a2, {"name": "p2", "port": 8002, "host": _HOST})
         # a3 has a page that we'll close.
-        client.post(f"/api/agents/{a3}/pages", json={"name": "gone", "port": 8003, "host": _HOST})
-        client.delete(f"/api/agents/{a3}/pages/gone")
+        _post_page(client, a3, {"name": "gone", "port": 8003, "host": _HOST})
+        _close_page(client, a3, "gone")
         r = client.get("/api/pages")
     assert r.status_code == 200
     body = r.json()
@@ -347,11 +367,8 @@ def test_cascade_close_on_agent_terminate(db_conn: psycopg.Connection) -> None:
         )
     db_conn.commit()
     with TestClient(app) as client:
-        client.post(f"/api/agents/{a1}/pages", json={"name": "x", "port": 8001, "host": _HOST})
-        client.post(
-            f"/api/agents/{a2}/pages",
-            json={"name": "y", "port": 8002, "host": _HOST, "serve_dir": "/data/y"},
-        )
+        _post_page(client, a1, {"name": "x", "port": 8001, "host": _HOST})
+        _post_page(client, a2, {"name": "y", "port": 8002, "host": _HOST, "serve_dir": "/data/y"})
     # Terminate both agents.
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (a1,))
@@ -379,9 +396,9 @@ def test_list_open_page_names_returns_open_only(db_conn: psycopg.Connection) -> 
     db_conn.commit()
     with TestClient(app) as client:
         # Register one page — it's the only open one.
-        client.post(f"/api/agents/{aid}/pages", json={"name": "x", "port": 8001, "host": _HOST})
+        _post_page(client, aid, {"name": "x", "port": 8001, "host": _HOST})
         # Register another — this auto-closes "x" (single page per agent).
-        client.post(f"/api/agents/{aid}/pages", json={"name": "y", "port": 8002, "host": _HOST})
+        _post_page(client, aid, {"name": "y", "port": 8002, "host": _HOST})
     db_conn.rollback()
     with db_conn.cursor() as cur:
         cur.execute(
@@ -398,9 +415,10 @@ def test_register_page_with_serve_dir(db_conn: psycopg.Connection) -> None:
     """serve_dir (the directory serve() records) passes through registration to row and response."""
     aid = create_agent(db_conn)
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "report", "port": 8766, "host": _HOST, "serve_dir": "/data/report"},
+        resp = _post_page(
+            client,
+            aid,
+            {"name": "report", "port": 8766, "host": _HOST, "serve_dir": "/data/report"},
         )
     assert resp.status_code == 201
     body = resp.json()
@@ -416,9 +434,7 @@ def test_register_page_without_serve_dir_leaves_null(db_conn: psycopg.Connection
     """show() \u8def\u5f84\u4e0d\u5e26 serve_dir → \u884c\u91cc\u4fdd\u6301 NULL\u3002"""
     aid = create_agent(db_conn)
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages", json={"name": "p", "port": 8001, "host": _HOST}
-        )
+        resp = _post_page(client, aid, {"name": "p", "port": 8001, "host": _HOST})
     assert resp.status_code == 201
     assert resp.json()["serve_dir"] is None
 
@@ -434,10 +450,10 @@ def test_cascade_reopen_on_resurrect(db_conn: psycopg.Connection) -> None:
     db_conn.commit()
     with TestClient(app) as client:
         # x: explicitly closed before termination and must remain historical.
-        client.post(f"/api/agents/{aid}/pages", json={"name": "x", "port": 8001, "host": _HOST})
-        client.delete(f"/api/agents/{aid}/pages/x")
+        _post_page(client, aid, {"name": "x", "port": 8001, "host": _HOST})
+        _close_page(client, aid, "x")
         # y: an open show() page, so termination closes it.
-        client.post(f"/api/agents/{aid}/pages", json={"name": "y", "port": 8002, "host": _HOST})
+        _post_page(client, aid, {"name": "y", "port": 8002, "host": _HOST})
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_pages (agent_id, name, port, host, serve_dir) "
@@ -479,7 +495,7 @@ def test_cascade_reopen_repeated_terminate_resurrect(db_conn: psycopg.Connection
         )
     db_conn.commit()
     with TestClient(app) as client:
-        client.post(f"/api/agents/{aid}/pages", json={"name": "a", "port": 8001, "host": _HOST})
+        _post_page(client, aid, {"name": "a", "port": 8001, "host": _HOST})
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_pages (agent_id, name, port, host, serve_dir) "
@@ -565,10 +581,7 @@ def test_register_page_rejects_foreign_host(db_conn: psycopg.Connection) -> None
     Redis / IM bridge / any other host on the network)."""
     aid = _agent_with_machine(db_conn, "test-mc")
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": 8001, "host": "10.0.0.99"},
-        )
+        resp = _post_page(client, aid, {"name": "p", "port": 8001, "host": "10.0.0.99"})
     assert resp.status_code == 400
     assert "refusing to proxy" in resp.json()["detail"]
 
@@ -582,10 +595,7 @@ def test_register_page_allows_agents_own_machine_host(
     for what the cluster reaches that machine at)."""
     aid = _agent_with_machine(db_conn, "runner-a", url="http://10.0.0.1:8000", tmp_path=tmp_path)
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": 8001, "host": "10.0.0.1"},
-        )
+        resp = _post_page(client, aid, {"name": "p", "port": 8001, "host": "10.0.0.1"})
     assert resp.status_code == 201, resp.text
 
 
@@ -595,10 +605,7 @@ def test_register_page_allows_machine_name_host(db_conn: psycopg.Connection) -> 
     split-deployment spelling of "my own machine")."""
     aid = _agent_with_machine(db_conn, "test-mc")
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": 8001, "host": "test-mc"},
-        )
+        resp = _post_page(client, aid, {"name": "p", "port": 8001, "host": "test-mc"})
     assert resp.status_code == 201, resp.text
 
 
@@ -607,10 +614,7 @@ def test_register_page_rejects_privileged_port(db_conn: psycopg.Connection) -> N
     server, even on loopback (defense in depth under the host check)."""
     aid = _agent_with_machine(db_conn, "test-mc")
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": 80, "host": "127.0.0.1"},
-        )
+        resp = _post_page(client, aid, {"name": "p", "port": 80, "host": "127.0.0.1"})
     assert resp.status_code == 400
     assert "privileged" in resp.json()["detail"]
 
@@ -627,13 +631,9 @@ def test_register_page_rejects_port_held_by_another_live_page(
     owner = create_agent(db_conn)
     other = create_agent(db_conn)
     with TestClient(app) as client:
-        first = client.post(
-            f"/api/agents/{owner}/pages", json={"name": "holder", "port": 8771, "host": _HOST}
-        )
+        first = _post_page(client, owner, {"name": "holder", "port": 8771, "host": _HOST})
         assert first.status_code == 201
-        resp = client.post(
-            f"/api/agents/{other}/pages", json={"name": "clash", "port": 8771, "host": _HOST}
-        )
+        resp = _post_page(client, other, {"name": "clash", "port": 8771, "host": _HOST})
     assert resp.status_code == 409
     detail = resp.json()["detail"]
     assert f"page 'holder' of agent {owner}" in detail
@@ -648,13 +648,9 @@ def test_register_page_own_port_is_not_a_conflict(db_conn: psycopg.Connection) -
     the conflict rule is about *another* live page, not the caller's own."""
     aid = create_agent(db_conn)
     with TestClient(app) as client:
-        first = client.post(
-            f"/api/agents/{aid}/pages", json={"name": "one", "port": 8772, "host": _HOST}
-        )
+        first = _post_page(client, aid, {"name": "one", "port": 8772, "host": _HOST})
         assert first.status_code == 201
-        resp = client.post(
-            f"/api/agents/{aid}/pages", json={"name": "two", "port": 8772, "host": _HOST}
-        )
+        resp = _post_page(client, aid, {"name": "two", "port": 8772, "host": _HOST})
     assert resp.status_code == 201, resp.text
     db_conn.rollback()
     closed = {r[0]: r[5] for r in _page_rows(db_conn, aid)}
@@ -667,14 +663,10 @@ def test_register_page_port_conflict_is_host_scoped(db_conn: psycopg.Connection)
     loopback_agent = create_agent(db_conn)
     machine_agent = _agent_with_machine(db_conn, "port-scope-mc")
     with TestClient(app) as client:
-        first = client.post(
-            f"/api/agents/{loopback_agent}/pages",
-            json={"name": "loop", "port": 8773, "host": _HOST},
-        )
+        first = _post_page(client, loopback_agent, {"name": "loop", "port": 8773, "host": _HOST})
         assert first.status_code == 201
-        resp = client.post(
-            f"/api/agents/{machine_agent}/pages",
-            json={"name": "machine", "port": 8773, "host": "port-scope-mc"},
+        resp = _post_page(
+            client, machine_agent, {"name": "machine", "port": 8773, "host": "port-scope-mc"}
         )
     assert resp.status_code == 201, resp.text
 
@@ -685,9 +677,7 @@ def test_register_page_reuses_port_freed_by_expiry(db_conn: psycopg.Connection) 
     owner = create_agent(db_conn)
     other = create_agent(db_conn)
     with TestClient(app) as client:
-        first = client.post(
-            f"/api/agents/{owner}/pages", json={"name": "old", "port": 8774, "host": _HOST}
-        )
+        first = _post_page(client, owner, {"name": "old", "port": 8774, "host": _HOST})
         assert first.status_code == 201
     with db_conn.cursor() as cur:
         cur.execute(
@@ -696,7 +686,5 @@ def test_register_page_reuses_port_freed_by_expiry(db_conn: psycopg.Connection) 
         )
     db_conn.commit()
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{other}/pages", json={"name": "fresh", "port": 8774, "host": _HOST}
-        )
+        resp = _post_page(client, other, {"name": "fresh", "port": 8774, "host": _HOST})
     assert resp.status_code == 201, resp.text

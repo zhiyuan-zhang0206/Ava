@@ -14,9 +14,8 @@ per (agent, name); historical closed rows do not block re-registration.
 
 register_page_in_transaction is an idempotent upsert — re-registering the same name
 updates host + port (agent restarted the server on a different port /
-name reuse), without colliding on the UNIQUE index. close is a CAS
-UPDATE; 0 rows returns None so the caller can distinguish not-found vs
-already-closed.
+name reuse), without colliding on the UNIQUE index. close_observed_page_in_transaction
+closes the observed row by its immutable id.
 
 Port rule: a live (open, unexpired) row exclusively holds its (host, port).
 assert_port_free reports the occupying row before the auto-close, and the
@@ -208,25 +207,6 @@ def register_page_in_transaction(
     return _row_to_record(row)
 
 
-def close_page(
-    db: psycopg.Connection,
-    agent_id: int,
-    name: str,
-) -> PageRow | None:
-    """CAS open->closed. Returns None for 0 rows (caller distinguishes not-found / already-closed)."""
-    lock_page_agent(db, agent_id)
-    with db.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_pages SET closed_at = now() "  # noqa: S608
-            "WHERE agent_id = %s AND name = %s AND closed_at IS NULL "
-            "RETURNING " + _SELECT_COLUMNS,
-            (agent_id, name),
-        )
-        row = cur.fetchone()
-    db.commit()
-    return _row_to_record(row) if row is not None else None
-
-
 def get_open_page_target(
     db: psycopg.Connection,
     agent_id: int,
@@ -275,43 +255,32 @@ def list_all_open_pages(db: psycopg.Connection) -> list[PageRow]:
     return [_row_to_record(r) for r in rows]
 
 
-def close_all_agent_pages_in_transaction(
-    db: psycopg.Connection,
-    agent_id: int,
-    *,
-    include_expired: bool = False,
-) -> list[str]:
-    """Close every currently open page for ``agent_id``.
+def close_all_agent_pages_in_transaction(db: psycopg.Connection, agent_id: int) -> list[str]:
+    """Close every open page for ``agent_id``, expired rows included.
 
-    HTTP registration includes expired rows so a fresh registration cannot
-    revive an older numeric identity. The raw committing wrapper retains its
-    existing unexpired-only policy. This primitive never commits.
+    Registration closes expired rows too, so a fresh registration cannot revive
+    an older numeric identity. This primitive never commits.
 
     Returns the names of the closed pages so the caller can publish
     PageClosed events for each one (every close needs its own event for
     the frontend to remove the entry from the popover).
 
-    Unlike ``close_page``, this is not a CAS on a single name — it closes
-    all open rows in one UPDATE, which is safe because the UNIQUE partial
-    index already limits an agent to one open row per name, and the
+    It closes all open rows in one UPDATE, which is safe because the UNIQUE
+    partial index already limits an agent to one open row per name, and the
     single-page-per-agent convention (enforced by the SDK and the router)
-    guarantees at most one open row at a time in normal operation. A
-    bulk-close is still needed for the terminate cascade and for the
-    migration path where pre-existing agents had multiple pages.
+    guarantees at most one open row at a time in normal operation.
     """
     lock_page_agent(db, agent_id)
     with db.cursor() as cur:
         cur.execute(
-            "SELECT name FROM agent_pages "
-            "WHERE agent_id = %s AND closed_at IS NULL AND (%s OR expired_at IS NULL)",
-            (agent_id, include_expired),
+            "SELECT name FROM agent_pages WHERE agent_id = %s AND closed_at IS NULL", (agent_id,)
         )
         names = [r[0] for r in cur.fetchall()]
         if names:
             cur.execute(
                 "UPDATE agent_pages SET closed_at = now() "
-                "WHERE agent_id = %s AND closed_at IS NULL AND (%s OR expired_at IS NULL)",
-                (agent_id, include_expired),
+                "WHERE agent_id = %s AND closed_at IS NULL",
+                (agent_id,),
             )
     return names
 

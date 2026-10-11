@@ -128,34 +128,21 @@ def test_consumed_original_reply_does_not_resurrect(
     ).fetchone() == (0 if remove else 1,)
 
 
-def test_authentication_and_principal_are_rechecked_on_replay(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+def test_authentication_is_rechecked_on_replay(
+    client: TestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = _seed_agent(db_conn)
     notice = _insert_notice(db_conn, agent, "FYI")
     path = _path(agent, notice)
-    body = {"action": "read"}
-    assert client.post(path, json=body, headers=HEADERS).status_code == 201
+    body = {"action": "read", "reply": "yes"}
+    first = client.post(path, json=body, headers=HEADERS)
+    assert first.status_code == 201
     assert (
         client.post(
             path, json=body, headers={**HEADERS, "Authorization": "Bearer revoked"}
         ).status_code
         == 401
     )
-
-
-def test_guarded_and_legacy_paths_do_not_share_receipts(
-    client: TestClient, db_conn: psycopg.Connection
-) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "FYI")
-    body = {"action": "read", "reply": "yes"}
-    guarded = client.post(_path(agent, notice), json=body, headers=HEADERS)
-    legacy = client.post(
-        f"/api/agents/{agent}/notices/{notice}/resolve", json=body, headers=HEADERS
-    )
-    assert guarded.status_code == legacy.status_code == 201
-    assert guarded.json()["inbound_id"] != legacy.json()["inbound_id"]
 
 
 def test_openapi_requires_both_identity_headers() -> None:

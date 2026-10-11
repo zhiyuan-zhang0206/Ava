@@ -2570,102 +2570,10 @@
         }
       }
     },
-    "/api/agents/{agent_id}/pages": {
-      "post": {
-        "summary": "Post Page Register",
-        "description": "ava.ui.show / .serve register / update a page — SDK main entry.\n\nEach agent can have at most one open page. Before registering the new\npage, any existing open pages for this agent are auto-closed (one\nagent, one page). The closed pages get individual PageClosed events\nso the frontend removes them from the popover.\n\nReturns 409 when the agent is terminated (dead agents do not show UI), or\nwhen another live page already holds (host, port) — in the port-conflict\ncase the agent's current page is left open and the response detail names\nthe occupying page.",
-        "operationId": "post_page_register_api_agents__agent_id__pages_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PageRegisterRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PageRow"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "Get Pages",
-        "description": "UI page-load fetches the agent's currently open page list; SSE PageOpened/Closed handles deltas.",
-        "operationId": "get_pages_api_agents__agent_id__pages_get",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/PageRow"
-                  },
-                  "title": "Response Get Pages Api Agents  Agent Id  Pages Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/keyed/v1/agents/{agent_id}/pages": {
       "post": {
         "summary": "Post Guarded Page Register",
-        "description": "Accept one registration atomically; never downgrade this intent to the legacy path.",
+        "description": "ava.ui.show / .serve register a page — SDK main entry.\n\nEach agent can have at most one open page. Registering atomically closes any\nexisting open page of the agent (the closed pages get individual PageClosed\nevents so the frontend removes them from the popover) and commits the original\nacceptance, so a replay returns it without a second effect.\n\nReturns 409 when the agent is terminated (dead agents do not show UI), or\nwhen another live page already holds (host, port) — in the port-conflict\ncase the agent's current page is left open and the response detail names\nthe occupying page.",
         "operationId": "post_guarded_page_register_api_keyed_v1_agents__agent_id__pages_post",
         "parameters": [
           {
@@ -2735,7 +2643,7 @@
     "/api/keyed/v1/agents/{agent_id}/pages/{name}/close": {
       "post": {
         "summary": "Post Guarded Page Close",
-        "description": "Close only the observed row; replay returns its historical acceptance.",
+        "description": "ava.ui.close a page — closes only the observed row (`expected_page_id`).\n\nA newer registration under the same name makes the observation stale (409);\nreplay returns the historical acceptance.",
         "operationId": "post_guarded_page_close_api_keyed_v1_agents__agent_id__pages__name__close_post",
         "parameters": [
           {
@@ -2811,55 +2719,6 @@
         }
       }
     },
-    "/api/agents/{agent_id}/pages/{name}": {
-      "delete": {
-        "summary": "Delete Page",
-        "description": "ava.ui.close close a page — CAS open->closed.\n\n404: agent does not exist / page name does not exist / already closed\n(single 404 does not distinguish them; caller only cares that \"the\ntarget page is no longer in open state\").",
-        "operationId": "delete_page_api_agents__agent_id__pages__name__delete",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PageRow"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/pages": {
       "get": {
         "summary": "Get All Pages",
@@ -2876,6 +2735,50 @@
                   },
                   "type": "array",
                   "title": "Response Get All Pages Api Pages Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/pages": {
+      "get": {
+        "summary": "Get Pages",
+        "description": "UI page-load fetches the agent's currently open page list; SSE PageOpened/Closed handles deltas.",
+        "operationId": "get_pages_api_agents__agent_id__pages_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PageRow"
+                  },
+                  "title": "Response Get Pages Api Agents  Agent Id  Pages Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -2971,7 +2874,7 @@
     "/api/notices/open": {
       "get": {
         "summary": "Get Open Notices",
-        "description": "The cross-fleet open notices feed, priority-then-newest.\n\nBy default only FYI notices (require_response false) — response-required\nones ride the agent snapshot. include_awaiting=True returns both kinds:\nthe IM bridge's \"/notice list\" queue view (Task #941) lists everything\nstill open and hands each item its own processing buttons. A notice is\nopen when resolved_at IS NULL. Omit `limit` for the configured default cap\n(``display.notices_open_default_limit``, 200 out of the box).",
+        "description": "The cross-fleet open notices feed, priority-then-newest.\n\nBy default only FYI notices (require_response false) — response-required\nones ride the agent snapshot. include_awaiting=True returns both kinds:\nthe IM bridge's \"/notice list\" queue view (Task #941) lists everything\nstill open and hands each item its own processing buttons. A notice is\nopen when resolved_at IS NULL. `agent_id` narrows the feed to one agent's\nopen notices — how an agent observes its own notice's global id before a\nguarded edit/withdraw. Omit `limit` for the configured default cap\n(``display.notices_open_default_limit``, 200 out of the box).",
         "operationId": "get_open_notices_api_notices_open_get",
         "parameters": [
           {
@@ -3000,6 +2903,23 @@
               "type": "boolean",
               "default": false,
               "title": "Include Awaiting"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Id"
             }
           }
         ],
@@ -3195,76 +3115,6 @@
         }
       }
     },
-    "/api/agents/{agent_id}/notices/{notice_id}/resolve": {
-      "post": {
-        "summary": "Post Notice Resolve",
-        "description": "Resolve one open notice and (when a reply is given) wake the agent with it.\n\n`action` is the explicit close verb: answer applies to both kinds — the\nuser can reply to an FYI too (Task #1061, the reply reaches the notice's\nagent like a require_response answer); dismiss applies to a require_response\nnotice, read to an FYI notice. The endpoint marks the notice resolved\n(resolved_at + resolution + cached reply) iff it is still open, then — when a\nreply is supplied, or a require_response notice is dismissed — INSERTs a\nself-describing chat inbound so the agent knows which notice this answers and\n(for a dismissed blocking notice) stops waiting. The inbound is system-sourced\n(`system:notice-reply` / `system:notice-dismiss`), rendered `[system] ...`\nwith no User envelope: a notice resolution is a notice-system event, not user\nspeech, so no user-role message is consumed and nothing is shaped like a\nreply request.\n\n409 when the notice does not exist, or `action` does not match the notice's\nkind (dismiss on an FYI notice, or read on one needing a response). A bare\n`read` on an already-resolved notice is an idempotent success (user ruling\n2026-08-28: \"Mark read\" means \"I have read it\", so the already-read state\nends silently, like the normal path — the same skip-not-error semantics as\nthe batch endpoint); a note attached to that read still reaches the agent,\nand `answer` / `dismiss` on an already-resolved notice keep the 409 so a\nreply or a dismissal is never silently dropped. 422 when `action` is\n`answer` without a reply.",
-        "operationId": "post_notice_resolve_api_agents__agent_id__notices__notice_id__resolve_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "notice_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Notice Id"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "title": "Idempotency-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResolveNoticeIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentMessageEnqueued"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/agents/{agent_id}/notices": {
       "post": {
         "summary": "Post Notice Create",
@@ -3314,82 +3164,6 @@
                 }
               }
             }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/notices/current": {
-      "patch": {
-        "summary": "Patch Notice Edit",
-        "description": "Revise the agent's open notice (the SDK ava.ui.edit_notice contract).\n\nPass only the fields to change; require_response cannot change (turn an\nFYI into a question by dismissing and posting fresh). No open notice ->\nidempotent 204 (the SDK contract: silently return). The posted event is\nre-published so the frontend feed picks up the revision.",
-        "operationId": "patch_notice_edit_api_agents__agent_id__notices_current_patch",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NoticeEditIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/notices/current/dismiss": {
-      "post": {
-        "summary": "Post Notice Dismiss",
-        "description": "Withdraw the agent's open notice (the SDK ava.ui.dismiss_notice\ncontract): resolution 'withdrawn' + resolve event, plus an inspector\nsnapshot refresh when the withdrawn row required a response. No open notice\n-> idempotent 204.",
-        "operationId": "post_notice_dismiss_api_agents__agent_id__notices_current_dismiss_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -14353,56 +14127,6 @@
         "title": "NoticeCreateIn",
         "description": "POST /api/agents/{id}/notices request body — the unified notice write API\n(R3 door ④).\n\nMirrors the SDK ava.ui.notify() contract: `priority` P0-P3, `blocking`\nmeaningful only when `require_response` is true (an FYI never stalls).\n`task_id` optionally groups the notice under a task in the user's queue.\n`expire_at` specifies the notice lifetime; omitted uses the configured default TTL."
       },
-      "NoticeEditIn": {
-        "properties": {
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "content": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content"
-          },
-          "priority": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Priority"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "blocking": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Blocking"
-          }
-        },
-        "type": "object",
-        "title": "NoticeEditIn",
-        "description": "PATCH /api/agents/{id}/notices/current request body — revise the agent's\nopen notice (the SDK ava.ui.edit_notice contract). All fields optional;\npass only what changes. `require_response` cannot be changed (turn an FYI\ninto a question by dismissing and posting fresh)."
-      },
       "NoticeItem": {
         "properties": {
           "id": {
@@ -14972,7 +14696,7 @@
           "port"
         ],
         "title": "PageRegisterRequest",
-        "description": "POST /api/agents/{aid}/pages request body — SDK ava.ui.show / .serve call.\n\n`host`: the agent-runner's reachable address (the agent self-reports\n    it) — where the gateway's reverse proxy dials the page server\n    (loopback on a single box). Never appears in any URL.\n`port`: port that the agent process's HTTP server is listening on\n    (bound on the runner's reachable host, never 0.0.0.0). 1-65535.\n`title`: optional human-readable title shown in the frontend\n    tab/header; falls back to name when not given.\n`serve_dir`: directory the page server serves, recorded by\n    ava.ui.serve() so agent boot can re-serve a dead\n    page server after resurrect/restart; absent for ava.ui.show()\n    pages (the agent manages those servers itself)."
+        "description": "POST /api/keyed/v1/agents/{aid}/pages request body — SDK ava.ui.show / .serve call.\n\n`host`: the agent-runner's reachable address (the agent self-reports\n    it) — where the gateway's reverse proxy dials the page server\n    (loopback on a single box). Never appears in any URL.\n`port`: port that the agent process's HTTP server is listening on\n    (bound on the runner's reachable host, never 0.0.0.0). 1-65535.\n`title`: optional human-readable title shown in the frontend\n    tab/header; falls back to name when not given.\n`serve_dir`: directory the page server serves, recorded by\n    ava.ui.serve() so agent boot can re-serve a dead\n    page server after resurrect/restart; absent for ava.ui.show()\n    pages (the agent manages those servers itself)."
       },
       "PageRow": {
         "properties": {
@@ -15589,7 +15313,7 @@
           "action"
         ],
         "title": "ResolveNoticeIn",
-        "description": "POST /api/agents/{id}/notices/{notice_id}/resolve request body.\n\n`action` is the explicit close verb (never inferred from whether `reply` is\npresent): `answer` / `dismiss` apply to a require_response notice, `read`\napplies to an FYI notice. `reply` is the user's free-text reply — required\nfor `answer`, optional for `dismiss` and `read`. When present it is cached on\nthe notice row and delivered back to the agent as a normal chat inbound."
+        "description": "POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve request body.\n\n`action` is the explicit close verb (never inferred from whether `reply` is\npresent): `answer` / `dismiss` apply to a require_response notice, `read`\napplies to an FYI notice. `reply` is the user's free-text reply — required\nfor `answer`, optional for `dismiss` and `read`. When present it is cached on\nthe notice row and delivered back to the agent as a normal chat inbound."
       },
       "ResolvedConfigView": {
         "properties": {
