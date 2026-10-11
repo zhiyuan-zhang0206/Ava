@@ -125,53 +125,6 @@ EVENTS: dict[str, EventSpec] = {
     "exec_cancelled": telemetry_event(
         "exec_cancelled", "execute_code cancelled", tier="anomaly", persist=True
     ),
-    "exec(timeout)": telemetry_event(
-        "exec(timeout)",
-        "historical parenthesized name (migration target)",
-        tier="anomaly",
-        site=(
-            "Legacy bracketed name: the pre-W8-rename value, still a "
-            "migrate_events.py mapping target and present in existing DB rows. New "
-            "code must not emit it; the registration survives only to backfill the "
-            "metric."
-        ),
-        persist=True,
-    ),
-    "exec(failed)": telemetry_event(
-        "exec(failed)",
-        "historical parenthesized name (migration target)",
-        tier="anomaly",
-        site=(
-            "Legacy bracketed name: the pre-W8-rename value, still a "
-            "migrate_events.py mapping target and present in existing DB rows. New "
-            "code must not emit it; the registration survives only to backfill the "
-            "metric."
-        ),
-        persist=True,
-    ),
-    "exec(cancelled)": telemetry_event(
-        "exec(cancelled)",
-        "historical parenthesized name (migration target)",
-        tier="anomaly",
-        site=(
-            "Legacy bracketed name: the pre-W8-rename value, still a "
-            "migrate_events.py mapping target and present in existing DB rows. New "
-            "code must not emit it; the registration survives only to backfill the "
-            "metric."
-        ),
-        persist=True,
-    ),
-    "exec(thread-stuck)": telemetry_event(
-        "exec(thread-stuck)",
-        "historical parenthesized name (migration target)",
-        tier="anomaly",
-        site=(
-            "Legacy bracketed name: the pre-W8-rename value, still a "
-            "migrate_events.py mapping target and present in existing DB rows. New "
-            "code must not emit it; the registration survives only to backfill the "
-            "metric."
-        ),
-    ),
     "exec_timeout": telemetry_event(
         "exec_timeout", "execute_code timed out", tier="anomaly", persist=True
     ),

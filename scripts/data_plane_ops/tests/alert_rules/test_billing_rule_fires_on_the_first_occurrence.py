@@ -438,7 +438,7 @@ def test_telemetry_queue_loss_is_an_immediate_error_on_independent_metrics() -> 
 
 
 def test_delete_rules_tombstones_never_name_live_rules() -> None:
-    """The R23 tombstone must stay listed (orgId 1) and never name a live rule;
+    """The retired-rule tombstones must stay listed (orgId 1) and never name a live rule;
     a dropped entry silently re-orphans the retire (README "Retired rules")."""
     doc = yaml.safe_load((_RULES.parent / "delete-rules.yml").read_text(encoding="utf-8"))
     assert doc["apiVersion"] == 1
@@ -449,3 +449,4 @@ def test_delete_rules_tombstones_never_name_live_rules() -> None:
         assert set(entry) == {"orgId", "uid"} and entry["orgId"] == 1
         assert entry["uid"] and len(entry["uid"]) <= 40 and entry["uid"] not in live
     assert {"orgId": 1, "uid": "ava-ops-pitr-storage-growth"} in entries
+    assert {"orgId": 1, "uid": "ava-ops-agent-restart-spike"} in entries

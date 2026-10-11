@@ -384,10 +384,8 @@ def test_building_the_prompt_records_no_skill_attribution(
     set_machine_identity: Callable[..., None],
 ) -> None:
     """An agent whose prompt was built but which never touched a skill must own
-    zero `skill_invoked` rows. Prompt assembly is exposure, and the
-    `prompt_injected` depth is no longer written at all — it was ~55K rows of
-    "installed on this machine" noise that drowned the `loaded` signal
-    ava_self_evolution actually scores. Exposure must not look like use."""
+    zero `skill_invoked` rows. Prompt assembly is exposure, not use,
+    and only the `loaded` depth is recorded."""
     set_machine_identity("agent-runner", "test-machine")  # the built prompt names its machine
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc", body="# A\n")

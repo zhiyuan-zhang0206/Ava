@@ -9135,38 +9135,6 @@
         "title": "AgentObservation",
         "description": "Machine reachability is not proof of runtime ownership.\n\nThis compatibility slice has no generation/owner binding. A fresh lease\nalone, or a PID, must not invent one. UI uses absolute deadlines."
       },
-      "AgentRestartRow": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "restarts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Restarts"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "label",
-          "restarts"
-        ],
-        "title": "AgentRestartRow",
-        "description": "One agent's restart count within the window."
-      },
       "AgentRoster": {
         "properties": {
           "agents": {
@@ -9462,7 +9430,7 @@
           "exec_failed"
         ],
         "title": "AgentStats",
-        "description": "Observed turn + exec counters within the selected window.\n\n`turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns\nexcluded); duration fields are null when no duration evidence survives.\nThe metadata declares retained historical histogram precision.\n`exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome\n(exec_failed / exec(timeout) / exec_cancelled; the prefix regex also\ncounts legacy exec_thread_stuck rows for historical continuity)."
+        "description": "Observed turn + exec counters within the selected window.\n\n`turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns\nexcluded); duration fields are null when no duration evidence survives.\nThe metadata declares retained historical histogram precision.\n`exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome\n(exec_failed / exec_timeout / exec_cancelled)."
       },
       "AgentStatus": {
         "type": "string",
@@ -16181,11 +16149,6 @@
             "type": "integer",
             "title": "Bucket"
           },
-          "agent_restarts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Agent Restarts"
-          },
           "service_starts": {
             "type": "integer",
             "minimum": 0.0,
@@ -16195,11 +16158,10 @@
         "type": "object",
         "required": [
           "bucket",
-          "agent_restarts",
           "service_starts"
         ],
         "title": "RestartBucket",
-        "description": "One bucket's process-restart counts: agent processes (agent_restarted)\nand gateway-side services (service_started)."
+        "description": "One bucket's service start count (service_started)."
       },
       "RestartReport": {
         "properties": {
@@ -16217,13 +16179,6 @@
             "type": "array",
             "title": "Services"
           },
-          "agents": {
-            "items": {
-              "$ref": "#/components/schemas/AgentRestartRow"
-            },
-            "type": "array",
-            "title": "Agents"
-          },
           "totals": {
             "$ref": "#/components/schemas/RestartTotals"
           }
@@ -16232,7 +16187,6 @@
         "required": [
           "series",
           "services",
-          "agents",
           "totals"
         ],
         "title": "RestartReport"
@@ -16247,11 +16201,6 @@
       },
       "RestartTotals": {
         "properties": {
-          "agent_restarts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Agent Restarts"
-          },
           "service_starts": {
             "type": "integer",
             "minimum": 0.0,
@@ -16260,7 +16209,6 @@
         },
         "type": "object",
         "required": [
-          "agent_restarts",
           "service_starts"
         ],
         "title": "RestartTotals"

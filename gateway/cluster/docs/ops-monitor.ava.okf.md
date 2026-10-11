@@ -34,7 +34,7 @@ schemas are `gateway/cluster/schemas.py`.
 |---|---|---|
 | `sse` | `sse_drop` (kind=queue_full/publish_error) + `event_log_drop` events (row counts) | how much did the live-view pipes back up per bucket |
 | `llm` | `llm_usage` rows (calls, tokens, latency sum, exact p50/p95/max of `latency_ms`) + LLM error-family events | latency + throughput + error rate per bucket |
-| `restarts` | `agent_restarted` + `service_started` (row counts + grouped breakdowns; agent labels from the `agents` registry) | which processes restarted, when, how often |
+| `restarts` | `service_started` (row counts + a per-service breakdown) | which services restarted, when, how often |
 
 Counts and sums are exact; p50/p95 are exact percentiles over the rows of the bucket (the
 retired Prometheus reader approximated them from a latency histogram).

@@ -361,24 +361,6 @@ EVENTS: dict[str, EventSpec] = {
         "unwind instead escalates to a daemon restart",
         tier="anomaly",
     ),
-    "claim_cas_lost": telemetry_event(
-        "claim_cas_lost",
-        "claim CAS race lost — another lifecycle op owns the row",
-        tier="anomaly",
-        retired=True,
-    ),
-    "claim_cas_lost_exit": telemetry_event(
-        "claim_cas_lost_exit",
-        "claim wait aborted by a lost CAS — process exiting cleanly",
-        tier="anomaly",
-        retired=True,
-    ),
-    "idle_cas_lost": telemetry_event(
-        "idle_cas_lost",
-        "idle-flip CAS race lost — degraded, not fatal",
-        tier="anomaly",
-        retired=True,
-    ),
     "inbound_reconcile": telemetry_event(
         "inbound_reconcile", "inbound reconciliation", tier="noise"
     ),
