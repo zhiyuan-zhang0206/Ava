@@ -30,4 +30,4 @@ apt-get install -y --no-install-recommends \
 # Shared provision pieces: pg17 + redis servers (no initdb), node 22, CLI tools.
 bash "${HERE}/database.sh"
 bash "${HERE}/node.sh"
-bash "${HERE}/../install-cli-tools.sh"
+bash "${HERE}/install-cli-tools.sh"
