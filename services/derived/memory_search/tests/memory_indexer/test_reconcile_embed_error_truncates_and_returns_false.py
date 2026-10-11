@@ -28,23 +28,21 @@ from services.derived.memory_indexer import chunking, daemon
 from services.derived.memory_indexer.backends.base import content_hash
 from services.derived.memory_indexer.checkout_refresh import refresh_gateway_checkout
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
-from services.derived.memory_indexer.tests.store_backend import StoreBackend
-from services.derived.memory_indexer.tests.test_memory_indexer import (
-    _DIM,
-    _FP,
+from services.derived.memory_indexer.tests.fake_provider import DIM, FINGERPRINT, FakeProvider
+from services.derived.memory_search.tests.store_backend import StoreBackend
+from services.derived.memory_search.tests.test_memory_indexer import (
     _assert_gap_closed,
     _assert_one_ladder_rung,
     _assert_retry_idle,
     _cancel_quietly,
-    _FakeProvider,
     _FlakyProvider,
     _liveness_timeout,
     _long_note,
 )
-from services.derived.memory_indexer.tests.test_memory_indexer import (
+from services.derived.memory_search.tests.test_memory_indexer import (
     _watched_root as _watched_root,
 )
-from services.derived.memory_indexer.tests.test_memory_indexer import (
+from services.derived.memory_search.tests.test_memory_indexer import (
     store_backend as store_backend,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -102,7 +100,7 @@ def test_reconcile_embed_error_truncates_and_returns_false(
     liveness = Liveness(600.0)
     with caplog.at_level(logging.ERROR, logger="services.derived.memory_indexer.daemon"):
         assert (
-            daemon._reconcile(store_backend, _FakeProvider(), liveness, machine=machine_identity)
+            daemon._reconcile(store_backend, FakeProvider(), liveness, machine=machine_identity)
             is False
         )
 
@@ -272,7 +270,7 @@ def test_process_paths_indexes_desc_and_body_chunks(
     daemon._process_paths(
         store_backend,
         {f.resolve()},
-        _FakeProvider(),
+        FakeProvider(),
         Liveness(_liveness_timeout()),
         machine=machine_identity,
     )
@@ -296,7 +294,7 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
     daemon._process_paths(
         backend,
         {f.resolve()},
-        _FakeProvider(),
+        FakeProvider(),
         Liveness(_liveness_timeout()),
         machine=machine_identity,
     )
@@ -306,7 +304,7 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
     daemon._process_paths(
         backend,
         {f.resolve()},
-        _FakeProvider(),
+        FakeProvider(),
         Liveness(_liveness_timeout()),
         machine=machine_identity,
     )
@@ -328,7 +326,7 @@ def test_process_paths_removes_desc_row_when_description_deleted(
     daemon._process_paths(
         backend,
         {f.resolve()},
-        _FakeProvider(),
+        FakeProvider(),
         Liveness(_liveness_timeout()),
         machine=machine_identity,
     )
@@ -338,7 +336,7 @@ def test_process_paths_removes_desc_row_when_description_deleted(
     daemon._process_paths(
         backend,
         {f.resolve()},
-        _FakeProvider(),
+        FakeProvider(),
         Liveness(_liveness_timeout()),
         machine=machine_identity,
     )
@@ -360,7 +358,7 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
     daemon._process_paths(
         backend,
         {f.resolve()},
-        _FakeProvider(),
+        FakeProvider(),
         Liveness(_liveness_timeout()),
         machine=machine_identity,
     )
@@ -370,7 +368,7 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
     daemon._process_paths(
         backend,
         {f.resolve()},
-        _FakeProvider(),
+        FakeProvider(),
         Liveness(_liveness_timeout()),
         machine=machine_identity,
     )
@@ -383,7 +381,9 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
 ) -> None:
     class _RecordingBackend(StoreBackend):
         def __init__(self) -> None:
-            super().__init__(tmp_path / "recording" / "vectors.npz", dim=_DIM, fingerprint=_FP)
+            super().__init__(
+                tmp_path / "recording" / "vectors.npz", dim=DIM, fingerprint=FINGERPRINT
+            )
             self.calls: list[list[tuple[str, float, str, np.ndarray, str, int]]] = []
 
         def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
@@ -400,7 +400,7 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
     daemon._process_paths(
         backend,
         {first.resolve(), second.resolve()},
-        _FakeProvider(),
+        FakeProvider(),
         Liveness(_liveness_timeout()),
         machine=machine_identity,
     )
@@ -417,7 +417,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
     all-old is the recoverable consistent state; the hash stays mismatching so
     the next fs event or follow-up reconcile retries it (issue #1946)."""
 
-    class _FailSecondBatchProvider(_FakeProvider):
+    class _FailSecondBatchProvider(FakeProvider):
         def embed_batch(self, texts: list[str]) -> np.ndarray:
             if self.embed_batch_count == 1:
                 raise EmbeddingAPIError("second batch failed")
@@ -425,7 +425,9 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
 
     class _RecordingBackend(StoreBackend):
         def __init__(self) -> None:
-            super().__init__(tmp_path / "recording" / "vectors.npz", dim=_DIM, fingerprint=_FP)
+            super().__init__(
+                tmp_path / "recording" / "vectors.npz", dim=DIM, fingerprint=FINGERPRINT
+            )
             self.calls: list[list[tuple[str, float, str, np.ndarray, str, int]]] = []
 
         def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
@@ -439,7 +441,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
     daemon._process_paths(
         backend,
         {note.resolve()},
-        _FakeProvider(),
+        FakeProvider(),
         Liveness(_liveness_timeout()),
         machine=machine_identity,
     )
@@ -471,7 +473,7 @@ def test_complete_file_still_commits_when_another_fails(
     """Files whose rows are ALL embedded commit even when a sibling file
     fails mid-embedding (issue #1946)."""
 
-    class _FailOnSecondFileProvider(_FakeProvider):
+    class _FailOnSecondFileProvider(FakeProvider):
         def embed_batch(self, texts: list[str]) -> np.ndarray:
             if self.embed_batch_count == 2:
                 raise EmbeddingAPIError("third batch failed")
@@ -638,9 +640,7 @@ async def test_reconcile_retry_beats_between_failed_pass_and_batch(
     # Either operation fits below the ceiling, but their combined tails do not.
     liveness = Liveness(0.6)
     task = asyncio.create_task(
-        daemon._drain_loop(
-            Mock(), dirty, liveness, _FakeProvider(), retry, machine=machine_identity
-        )
+        daemon._drain_loop(Mock(), dirty, liveness, FakeProvider(), retry, machine=machine_identity)
     )
     started = time.monotonic()
     try:
@@ -667,7 +667,7 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
 
     backend = Mock()
     backend.name = "fake"
-    provider = _FakeProvider()
+    provider = FakeProvider()
     reconcile = Mock(return_value=False)
     drain = AsyncMock()
 
@@ -701,7 +701,7 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
         catalog: object,
         timeout_reader: Callable[[], float],
         api_key_reader: Callable[[], str | None],
-    ) -> _FakeProvider:
+    ) -> FakeProvider:
         del catalog
         provider_inputs.append((name, timeout_reader(), api_key_reader()))
         return provider
@@ -751,7 +751,7 @@ async def test_reconcile_retry_wait_keeps_liveness_and_cancels_promptly(
     backend = Mock()
     task = asyncio.create_task(
         daemon._drain_loop(
-            backend, queue.Queue(), liveness, _FakeProvider(), retry, machine=machine_identity
+            backend, queue.Queue(), liveness, FakeProvider(), retry, machine=machine_identity
         )
     )
     started = time.monotonic()

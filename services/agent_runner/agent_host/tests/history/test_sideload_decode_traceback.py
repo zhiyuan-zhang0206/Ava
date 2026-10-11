@@ -19,7 +19,7 @@ from psycopg_pool import AsyncConnectionPool
 import base.agents.history.inbound_sideload as sideload_mod
 from base.agents.history.inbound_sideload import sideload_committed_ids
 from base.agents.history.tests.test_inbound_sideload_failures import _read_inputs
-from services.agent_runner.agent_host.recovery.tests.checkpoint_inputs import (
+from services.agent_runner.agent_host.tests.history.checkpoint_inputs import (
     insert_checkpoint,
     insert_write,
 )

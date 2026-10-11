@@ -17,63 +17,30 @@ locked here are the ones the hosted model cannot be correct without:
 from __future__ import annotations
 
 import asyncio
-import contextlib
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from base.agents.observation.turn_progress import TurnProgress
-from base.events.live.bus import EventBus
-from base.events.live.tests.fakes import patch_open_async_redis
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import (
-    InboundWakeDispatcher,
     TurnScheduler,
 )
-from services.agent_runner.agent_host.tests.turn_dispatcher.scan_setup import FixedClock
-
-
-class _Recorder:
-    """A `run_turn` that records calls and can be released on command."""
-
-    def __init__(self) -> None:
-        self.started: list[int] = []
-        self.finished: list[int] = []
-        self.gates: dict[int, asyncio.Event] = {}
-        self.entered: dict[int, asyncio.Event] = {}
-
-    def gate(self, agent_id: int) -> asyncio.Event:
-        return self.gates.setdefault(agent_id, asyncio.Event())
-
-    def arrival(self, agent_id: int) -> asyncio.Event:
-        return self.entered.setdefault(agent_id, asyncio.Event())
-
-    async def __call__(self, agent_id: int) -> None:
-        self.started.append(agent_id)
-        self.arrival(agent_id).set()
-        gate = self.gates.get(agent_id)
-        if gate is not None:
-            await gate.wait()
-            gate.clear()
-        self.finished.append(agent_id)
-
-
-async def _settle() -> None:
-    """Let every ready callback run. Two hops: one for the task to be scheduled,
-    one for it to run to its next await."""
-    for _ in range(6):
-        await asyncio.sleep(0)
+from services.agent_runner.agent_host.tests.turn_dispatcher.helpers import (
+    Recorder,
+    StuckTurn,
+    aclose_without_hanging,
+    settle,
+)
 
 
 class TestBasicDispatch:
     async def test_wake_starts_a_turn_and_the_task_ends_when_idle(self) -> None:
-        rec = _Recorder()
+        rec = Recorder()
         sched = TurnScheduler(rec)
 
         assert sched.active_agents == frozenset(), "an idle agent must have no task"
         sched.wake(7)
-        await _settle()
+        await settle()
 
         assert rec.started == [7]
         # The turn returned (nothing gated it), so the agent is idle again —
@@ -81,13 +48,13 @@ class TestBasicDispatch:
         assert sched.active_agents == frozenset()
 
     async def test_second_wake_after_idle_starts_a_fresh_turn(self) -> None:
-        rec = _Recorder()
+        rec = Recorder()
         sched = TurnScheduler(rec)
 
         sched.wake(7)
-        await _settle()
+        await settle()
         sched.wake(7)
-        await _settle()
+        await settle()
 
         assert rec.started == [7, 7]
 
@@ -96,54 +63,54 @@ class TestBasicDispatch:
         task synchronously, with no await between the wake and task creation.
         That is the ms-level wake latency the hosted design calls for, asserted
         structurally (a wall-clock bound would be CI flake bait)."""
-        rec = _Recorder()
+        rec = Recorder()
         sched = TurnScheduler(rec)
 
         assert sched.active_agents == frozenset()
         sched.wake(7)
         assert 7 in sched.active_agents, "the turn task must exist before any await"
-        await _settle()
+        await settle()
 
 
 class TestSerializationAndConcurrency:
     async def test_one_agents_turns_never_overlap(self) -> None:
         """The same agent's turns must serialize — they share a checkpointer
         thread. A wake during a running turn may not start a second task."""
-        rec = _Recorder()
+        rec = Recorder()
         rec.gate(7)  # turn 7 blocks until released
         sched = TurnScheduler(rec)
 
         sched.wake(7)
-        await _settle()
+        await settle()
         assert rec.started == [7]
 
         sched.wake(7)  # arrives mid-turn
-        await _settle()
+        await settle()
         assert rec.started == [7], "a second concurrent turn was started for one agent"
         assert len(sched.active_agents) == 1
 
         rec.gate(7).set()
-        await _settle()
+        await settle()
         assert rec.started == [7, 7], "the mid-turn wake did not produce a follow-up turn"
 
     async def test_different_agents_run_concurrently(self) -> None:
         """Cross-agent concurrency is the point of the model — one blocked agent
         must not hold up another."""
-        rec = _Recorder()
+        rec = Recorder()
         rec.gate(1)
         rec.gate(2)
         sched = TurnScheduler(rec)
 
         sched.wake(1)
         sched.wake(2)
-        await _settle()
+        await settle()
 
         assert sorted(rec.started) == [1, 2]
         assert sched.active_agents == frozenset({1, 2})
 
         rec.gate(1).set()
         rec.gate(2).set()
-        await _settle()
+        await settle()
         assert sched.active_agents == frozenset()
 
 
@@ -161,49 +128,49 @@ class TestWakeRace:
         releases the gate (so the turn body returns) and wakes in the SAME
         synchronous stretch, which is exactly the window the flag protects.
         """
-        rec = _Recorder()
+        rec = Recorder()
         rec.gate(7)
         sched = TurnScheduler(rec)
 
         sched.wake(7)
-        await _settle()
+        await settle()
         assert rec.started == [7]
 
         # The turn is about to finish AND a wake arrives — the exact overlap.
         rec.gate(7).set()
         sched.wake(7)
-        await _settle()
+        await settle()
 
         assert rec.started == [7, 7], "the wake was swallowed by the winding-down turn"
 
     async def test_wake_after_the_task_is_gone_starts_a_new_one(self) -> None:
         """The other side of the same window: once the task has been removed, a
         wake must start a fresh task rather than be recorded against nothing."""
-        rec = _Recorder()
+        rec = Recorder()
         sched = TurnScheduler(rec)
 
         sched.wake(7)
-        await _settle()
+        await settle()
         assert sched.active_agents == frozenset()
 
         sched.wake(7)
-        await _settle()
+        await settle()
         assert rec.started == [7, 7]
 
     async def test_two_wakes_during_one_turn_coalesce(self) -> None:
         """Two wakes are one reason to run again: the follow-up turn drains
         whatever is pending, so a chat burst must not queue a turn burst."""
-        rec = _Recorder()
+        rec = Recorder()
         rec.gate(7)
         sched = TurnScheduler(rec)
 
         sched.wake(7)
-        await _settle()
+        await settle()
         sched.wake(7)
         sched.wake(7)
         sched.wake(7)
         rec.gate(7).set()
-        await _settle()
+        await settle()
 
         assert rec.started == [7, 7], f"wakes did not coalesce: {rec.started}"
 
@@ -226,7 +193,7 @@ class TestFailureIsolation:
             boom, config_fingerprint=lambda _agent_id: "stored-config-fingerprint"
         )
         sched.wake(7)
-        await _settle()
+        await settle()
 
         report = next(r for r in records if r.get("event") == "host_turn_crashed")
         assert report["exception_type"] == "ValueError"
@@ -247,7 +214,7 @@ class TestFailureIsolation:
 
         sched = TurnScheduler(boom)
         sched.wake(7)
-        await _settle()
+        await settle()
 
         report = next(r for r in records if r.get("event") == "host_turn_crashed")
         assert report["exception_type"] == "ValueError"
@@ -264,21 +231,21 @@ class TestFailureIsolation:
 
         sched = TurnScheduler(boom)
         sched.wake(7)
-        await _settle()
+        await settle()
 
         assert calls == [7]
         assert sched.active_agents == frozenset(), "a crashed turn left its agent wedged"
 
         sched.wake(7)  # the agent is still serviceable
-        await _settle()
+        await settle()
         assert calls == [7, 7]
 
     async def test_aclose_cancels_running_turns(self) -> None:
-        rec = _Recorder()
+        rec = Recorder()
         rec.gate(7)
         sched = TurnScheduler(rec)
         sched.wake(7)
-        await _settle()
+        await settle()
         assert sched.active_agents == frozenset({7})
 
         await sched.aclose()
@@ -287,77 +254,8 @@ class TestFailureIsolation:
         # Closed: further wakes are ignored rather than resurrecting a task
         # during shutdown.
         sched.wake(7)
-        await _settle()
+        await settle()
         assert sched.active_agents == frozenset()
-
-
-class _StuckTurn:
-    """A turn that refuses the cancel, then can be released.
-
-    Swallowing `CancelledError` forever is the faithful stand-in for a task
-    blocked in a C call — and it is also unkillable at loop teardown, so a test
-    using one hangs the whole run instead of failing. `release()` re-arms
-    cancellation so the test can clean up after asserting.
-    """
-
-    def __init__(self) -> None:
-        self.entered = asyncio.Event()
-        self._released = False
-        self._task: asyncio.Task[None] | None = None
-
-    async def __call__(self, _agent_id: int) -> None:
-        self._task = asyncio.current_task()
-        self.entered.set()
-        while True:
-            try:
-                await asyncio.sleep(3600)
-            except asyncio.CancelledError:
-                if self._released:
-                    raise
-                continue  # refuses to unwind, exactly like a blocked C call
-
-    async def release(self) -> None:
-        """Let the turn die, so the loop can close on a clean task set."""
-        self._released = True
-        task = self._task
-        if task is not None and not task.done():
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
-
-
-async def _aclose_without_hanging(sched: TurnScheduler, stuck: _StuckTurn) -> bool:
-    """Run `sched.aclose()` and report whether it RETURNED, never hanging.
-
-    `asyncio.wait`, not `wait_for`: the pre-bound implementation sat in
-    `await task` under a `suppress(CancelledError, ...)` which ATE the
-    cancellation `wait_for` sends, so `wait_for` could not rescue the test and
-    the whole run hung instead of failing. Waiting without cancelling turns "it
-    never returned" into a boolean the caller can assert on.
-
-    Cleanup order is load-bearing: releasing the turn is what lets the pump task
-    die, which is what lets a still-parked `aclose` finish. Cancelling `aclose`
-    first cannot do it, for the same reason `wait_for` could not.
-    """
-    closing = asyncio.create_task(sched.aclose())
-    try:
-        done, _ = await asyncio.wait([closing], timeout=5)
-        return closing in done
-    finally:
-        await stuck.release()
-        closing.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await closing
-
-
-@contextlib.asynccontextmanager
-async def _releasing_stuck_turn() -> AsyncGenerator[_StuckTurn, None]:
-    """Release the cancellation-resistant fixture even when an assertion fails."""
-    turn = _StuckTurn()
-    try:
-        yield turn
-    finally:
-        await turn.release()
 
 
 class TestUncancellableTurn:
@@ -379,12 +277,12 @@ class TestUncancellableTurn:
         unbounded version of this method forever.
         """
         monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
-        stuck = _StuckTurn()
+        stuck = StuckTurn()
         sched = TurnScheduler(stuck)
         sched.wake(7)
         await asyncio.wait_for(stuck.entered.wait(), 2)
 
-        returned = await _aclose_without_hanging(sched, stuck)
+        returned = await aclose_without_hanging(sched, stuck)
 
         assert returned, (
             "aclose never returned — a turn that refuses to unwind is hanging shutdown, "
@@ -405,12 +303,12 @@ class TestUncancellableTurn:
             records.append(kw)
 
         monkeypatch.setattr(dispatcher.logger, "error", _capture)
-        turn = _StuckTurn()
+        turn = StuckTurn()
         sched = TurnScheduler(turn)
         sched.wake(31)
         await asyncio.wait_for(turn.entered.wait(), 2)
 
-        assert await _aclose_without_hanging(sched, turn), "aclose never returned"
+        assert await aclose_without_hanging(sched, turn), "aclose never returned"
 
         reports = [r for r in records if r.get("event") == "host_turn_uncancellable"]
         assert len(reports) == 1, "exactly one report per stuck agent"
@@ -430,11 +328,11 @@ class TestUncancellableTurn:
 
         monkeypatch.setattr(dispatcher.logger, "error", _capture)
 
-        rec = _Recorder()
+        rec = Recorder()
         rec.gate(7)
         sched = TurnScheduler(rec)
         sched.wake(7)
-        await _settle()
+        await settle()
         await asyncio.wait_for(sched.aclose(), 5)
 
         assert [r for r in records if r.get("event") == "host_turn_uncancellable"] == []
@@ -462,12 +360,12 @@ class TestUncancellableTurn:
         async def _clock(_agent_id: int) -> datetime:
             return silent_since
 
-        turn = _StuckTurn()
+        turn = StuckTurn()
         sched = TurnScheduler(turn, activity_clock=_clock)
         sched.wake(5)
         await asyncio.wait_for(turn.entered.wait(), 2)
 
-        assert await _aclose_without_hanging(sched, turn), "aclose never returned"
+        assert await aclose_without_hanging(sched, turn), "aclose never returned"
 
         report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
         assert report["last_active_at"] == silent_since.isoformat()
@@ -492,12 +390,12 @@ class TestUncancellableTurn:
         async def _broken_clock(_agent_id: int) -> datetime:
             raise RuntimeError("db unreachable")
 
-        turn = _StuckTurn()
+        turn = StuckTurn()
         sched = TurnScheduler(turn, activity_clock=_broken_clock)
         sched.wake(9)
         await asyncio.wait_for(turn.entered.wait(), 2)
 
-        assert await _aclose_without_hanging(sched, turn), "aclose never returned"
+        assert await aclose_without_hanging(sched, turn), "aclose never returned"
 
         report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
         assert report["agent_id"] == 9
@@ -528,77 +426,13 @@ class TestUncancellableTurn:
             await asyncio.sleep(3600)
             raise AssertionError("unreachable")
 
-        turn = _StuckTurn()
+        turn = StuckTurn()
         sched = TurnScheduler(turn, activity_clock=_hanging_clock)
         sched.wake(12)
         await asyncio.wait_for(turn.entered.wait(), 2)
 
-        assert await _aclose_without_hanging(sched, turn), "a hanging clock read blocked shutdown"
+        assert await aclose_without_hanging(sched, turn), "a hanging clock read blocked shutdown"
 
         report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
         assert report["agent_id"] == 12
         assert report["last_active_at"] is None
-
-
-_STALE = FixedClock(3600.0)
-_FRESH = FixedClock(10.0)
-_UNKNOWN = FixedClock(None)
-
-
-def _scan_dispatcher(
-    scheduler: object, pending: object, clock: TurnProgress, **extra: object
-) -> InboundWakeDispatcher:
-    """A dispatcher whose turn-progress clock reports a fixed age, scanning with a 180s budget."""
-    return InboundWakeDispatcher(
-        EventBus.from_settings(),
-        scheduler,  # pyright: ignore[reportArgumentType]
-        pending_scan=pending,  # pyright: ignore[reportArgumentType]
-        stale_after_s=180.0,
-        turn_progress=clock,
-        **extra,  # pyright: ignore[reportArgumentType]
-    )
-
-
-class _QueueingPubSub:
-    """Subscription fake that stays live while tests inject wake frames."""
-
-    def __init__(self) -> None:
-        self.messages: asyncio.Queue[dict[str, object]] = asyncio.Queue()
-        self.closed = False
-
-    async def psubscribe(self, _pattern: str) -> None:
-        return None
-
-    async def get_message(self, *, timeout: float) -> dict[str, object] | None:
-        try:
-            return await asyncio.wait_for(self.messages.get(), timeout=timeout)
-        except TimeoutError:
-            return None
-
-    async def aclose(self) -> None:
-        self.closed = True
-
-
-class _QueueingRedis:
-    def __init__(self, pubsub: _QueueingPubSub) -> None:
-        self._pubsub = pubsub
-        self.closed = False
-
-    def pubsub(self, **_kwargs: object) -> _QueueingPubSub:
-        return self._pubsub
-
-    async def aclose(self) -> None:
-        self.closed = True
-
-
-def _patch_redis(monkeypatch: pytest.MonkeyPatch, pubsub: _QueueingPubSub) -> list[_QueueingRedis]:
-    """Record every client open; a scan failure must never add one."""
-    clients: list[_QueueingRedis] = []
-
-    def _open(_url: str, **_kw: object) -> _QueueingRedis:
-        client = _QueueingRedis(pubsub)
-        clients.append(client)
-        return client
-
-    patch_open_async_redis(monkeypatch, _open)
-    return clients
