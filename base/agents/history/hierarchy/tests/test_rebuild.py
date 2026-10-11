@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.hierarchy import chunk_consumer as loop
+from base.agents.history.hierarchy import chunks
 from base.agents.history.hierarchy import group_consumer as gc
 from base.agents.history.hierarchy.chunks import (
     Chunk,
@@ -330,23 +331,32 @@ async def _open_before_parented(pool: AsyncConnectionPool) -> list[tuple[Any, ..
     )
 
 
-async def test_a_leaf_landing_before_a_grouped_one_queues_one_rebuild_that_closes_the_gap(
-    aops_pool: AsyncConnectionPool, _groups: list[list[int]], *, model_catalog: ModelCatalog
+async def test_a_leaf_landing_before_a_grouped_one_is_reported_and_only_a_queued_rebuild_closes_it(
+    aops_pool: AsyncConnectionPool,
+    _groups: list[list[int]],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     """The later segment lands first and is grouped; the earlier one arrives afterwards."""
+    emitted: list[str] = []
+    monkeypatch.setattr(chunks.telemetry, "emit", lambda _kind, name, **_kw: emitted.append(name))
     for i in range(5, 10):
         await _land(aops_pool, i)
     await gc.run_group_checks(
         aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
     )
-    assert not await rebuild_pending(aops_pool, AGENT)  # in order so far: nothing queued
+    assert emitted == []  # in order so far
 
     for i in range(5):
         await _land(aops_pool, i)
-    assert await rebuild_pending(aops_pool, AGENT)
-    assert len(await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds")) == 1
-    assert await _open_before_parented(aops_pool)  # the gap exists until the rebuild runs
+    # Reported, and nothing is queued: the gap stays until a person builds.
+    assert emitted and set(emitted) == {"understanding_leaf_out_of_order"}
+    assert not await rebuild_pending(aops_pool, AGENT)
+    assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []
+    assert await _open_before_parented(aops_pool)
 
+    await _rows(aops_pool, "INSERT INTO understanding_rebuilds (agent_id) VALUES (%s)", AGENT)
     await run_rebuild(
         aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
     )
@@ -354,8 +364,14 @@ async def test_a_leaf_landing_before_a_grouped_one_queues_one_rebuild_that_close
 
 
 async def test_leaves_landing_in_order_queue_no_rebuild(
-    aops_pool: AsyncConnectionPool, _groups: list[list[int]], *, model_catalog: ModelCatalog
+    aops_pool: AsyncConnectionPool,
+    _groups: list[list[int]],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
+    emitted: list[str] = []
+    monkeypatch.setattr(chunks.telemetry, "emit", lambda _kind, name, **_kw: emitted.append(name))
     for i in range(10):
         await _land(aops_pool, i)
         await gc.run_group_checks(
@@ -364,3 +380,4 @@ async def test_leaves_landing_in_order_queue_no_rebuild(
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []
     await _land(aops_pool, 9)  # a rewrite of an existing, grouped span is not out of order
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []
+    assert emitted == []

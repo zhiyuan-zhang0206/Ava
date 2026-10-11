@@ -57,9 +57,8 @@ restarts from the lifted state; chunk jobs finishing while one is pending skip t
 One row per `(agent_id, compact_version, start_index, end_index)` (re-enqueue is a no-op), with
 `end_msg_id` and, for a compaction's closing chunk, `boundary_checkpoint_id`. Enqueue is
 best-effort: a failure is the `understanding_enqueue_failed` event and never touches the turn.
-Claim is `FOR UPDATE SKIP LOCKED` over pending rows (a retry after a spacing) and `running` rows
-whose lease lapsed, only the oldest live job of its agent: runners share the queue, a crashed
-claimer's row is taken over. Statuses: pending, running, done, failed, skipped.
+Claim is `FOR UPDATE SKIP LOCKED` over pending rows, only the oldest live job of its agent: runners
+share the queue. A `running` row past its lease (claimer died) is failed by the next claim. Statuses: pending, running, done, failed, skipped.
 
 ## Consumer (`chunk_consumer.py`)
 
@@ -85,7 +84,7 @@ model, the full instruction (the correction, for one), `prefix_len` / `start_off
 usage, `duration_ms`, `error`, `kind` (`leaf` / `group-correction`), `problem` (why the groups
 were refused). A write failure is the `understanding_call_record_failed` event.
 
-Outcomes: a wait (checkpoint not caught up, a database blink) requeues the job, no attempt spent,
+A chunk is attempted once. A wait (checkpoint not caught up) requeues it, no attempt spent,
 the spacing counted from the requeue; the give-up clock (`waiting_since`, 6 hours) starts at the
 first wait, so a job queued while the feature is off is not timed. Drifted indices (`end_msg_id`
 not where recorded, a closing chunk's too) fail it (`understanding_chunk_failed`). A Gemini model
@@ -94,9 +93,9 @@ overlapping existing level-1 nodes is cut to its first uncovered run (`covered_s
 `uncovered`) and the other runs go in `understanding_chunk_gap`: nodes of a level never overlap
 and nothing is dropped silently. A closing chunk past its boundary snapshot is cut to what the
 snapshot holds, written, and the missing request indices are in the same event. A generation error
-(a reply still refused after the corrections included) retries up to three attempts, then fails;
-raw records stay. A host stopping puts its running jobs back at once (no attempt); a crash relies
-on the 60-minute lease (not renewed: longer than any honest job).
+(a reply still refused after the corrections included), a checkpoint or database error, a stopping
+host and a dead claimer (60-minute lease, not renewed) each end the job `failed` with
+`understanding_chunk_failed`; raw records stay. No retry: the stretch has no node until a manual build.
 
 ## Grouping inside the call
 
