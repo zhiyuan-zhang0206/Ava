@@ -12,8 +12,7 @@
 # from that commit's lockfiles.
 #
 # The build context is the repository root, filtered by Dockerfile.dockerignore to
-# the provisioning scripts. They are copied to the layout install-system.sh expects
-# (it reaches ../install-cli-tools.sh from its own directory).
+# the provisioning scripts, which are copied as one tree.
 
 FROM ubuntu:24.04
 
@@ -22,7 +21,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LC_ALL=en_US.UTF-8
 
 COPY scripts/provision /opt/ava-provision/scripts/provision
-COPY scripts/install-cli-tools.sh /opt/ava-provision/scripts/install-cli-tools.sh
 
 # The provisioning script is written for a host with apt and (when not root)
 # passwordless sudo; the build is root, so it needs neither. The apt lists are

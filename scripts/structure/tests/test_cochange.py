@@ -100,7 +100,7 @@ def _run_capture(root: pathlib.Path | None, *extra: str) -> tuple[int, str]:
         ("db/schema.sql", False),  # generated
         ("ui/web/src/lib/transport/api.ts", True),
         ("migrations/20260101T000000_x.sql", True),
-        ("scripts/install-cli-tools.sh", True),
+        ("scripts/provision/install-cli-tools.sh", True),
     ],
 )
 def test_source_classification_in_report(
