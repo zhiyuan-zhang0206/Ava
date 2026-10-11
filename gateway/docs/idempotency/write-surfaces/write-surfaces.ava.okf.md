@@ -45,7 +45,6 @@ Owners:
 | `PATCH /grafana/{rest:path}` | one-shot | reverse proxy — semantics follow upstream |
 | `DELETE /grafana/{rest:path}` | one-shot | reverse proxy — semantics follow upstream |
 | `PUT /grafana/{rest:path}` | one-shot | reverse proxy — semantics follow upstream |
-| `POST /api/guide/draft` | one-shot | creates an agent, commits its first prompt and forwards its launch |
 | `PUT /api/inventory` | natural | full inventory replace — PUT is idempotent |
 | `POST /api/agents/{agent_id}/impersonation/force-expire` | natural | observed-session CAS close — repeated or stale requests leave the lease unchanged |
 | `POST /api/agents/{agent_id}/terminate` | one-shot | termination is not bound to the observed incarnation |
@@ -61,14 +60,12 @@ Owners:
 | `POST /api/agents/{agent_id}/notices` | keyed | immutable request and original notice snapshot replay before mutable expiry/task checks |
 | `PATCH /api/agents/{agent_id}/notices/current` | one-shot | retry can edit a newer current notice |
 | `POST /api/agents/{agent_id}/notices/current/dismiss` | one-shot | retry can withdraw a newer current notice |
-| `POST /api/packages/draft` | one-shot | creates an agent, commits its first prompt and forwards its launch |
 | `POST /api/agents/{agent_id}/pages` | one-shot | replaces current page; replay may close newer work; no receipt |
 | `DELETE /api/agents/{agent_id}/pages/{name}` | one-shot | name-based close can affect a later registration |
 | `POST /api/presets` | one-shot | optional keyed creation receipt commits with the resource; replay returns original identity after rename/delete |
 | `PATCH /api/presets/{preset_id}` | natural | update — repeats are harmless |
 | `DELETE /api/presets/{preset_id}` | natural | delete — repeats are harmless |
 | `POST /api/schedules` | one-shot | optional keyed creation receipt commits with resource/version; replay returns original identity after rename/delete |
-| `POST /api/schedules/draft` | one-shot | creates an agent, commits its first prompt and forwards its launch |
 | `POST /api/schedules/{schedule_id}/start` | one-shot | optional keyed receipt commits desired state/sync; replay returns original acceptance without re-enabling later state |
 | `POST /api/schedules/{schedule_id}/stop` | one-shot | optional keyed receipt commits desired state/sync; unchanged disabled state is a no-op |
 | `POST /api/schedules/{schedule_id}/restart` | one-shot | optional keyed receipt commits one new desired revision/sync; same-key replay does not restart again |

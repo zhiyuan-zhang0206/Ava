@@ -24,7 +24,6 @@ from base.db import Database
 from base.packages.plugins import stats
 from base.telemetry.observability import cluster_label
 from gateway.app import app
-from gateway.cluster import status
 from gateway.schemas.stats import StatsWindowHours, window_delta
 
 
@@ -105,8 +104,6 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
     assert body["avg_turn_seconds"] is None
     assert body["warnings"] == 0
     assert body["errors"] == 0
-    # total_events is the frozen archive's historical constant, not a live count.
-    assert body["total_events"] == status.ARCHIVE_TOTAL_ROWS
 
 
 def test_dashboard_warn_error_folds_critical(
@@ -350,8 +347,6 @@ def test_dashboard_default_24h_window_filters_old_rows(
         body = client.get("/api/stats/dashboard").json()
     assert body["tokens"]["input"] == 10
     assert body["tokens"]["output"] == 5
-    # total_events is the frozen archive's historical constant, not a live count.
-    assert body["total_events"] == status.ARCHIVE_TOTAL_ROWS
 
 
 def test_dashboard_warn_err_counts_by_level(

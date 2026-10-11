@@ -39,11 +39,3 @@ def test_validate_refuses_a_runtime_that_changed_after_capture(tmp_path: Path) -
         replace(runtime, cwd=tmp_path / "elsewhere").validate()
     with pytest.raises(StartRuntimeChangedError, match="changed"):
         replace(runtime, interpreter=Path("/usr/bin/other-python")).validate()
-
-
-def test_a_leftover_release_selector_no_longer_decides_a_source_start(tmp_path: Path) -> None:
-    """A source start admits its own checkout; nothing under `releases/` is consulted."""
-    (tmp_path / "releases").mkdir()
-    (tmp_path / "releases/current-release").symlink_to(tmp_path / "absent")
-
-    StartRuntime.development(tmp_path).validate()

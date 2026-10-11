@@ -1,6 +1,5 @@
 """The schedule process composes SDK inputs at the execution boundaries."""
 
-import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -59,20 +58,6 @@ def test_plugins_load_under_guard_after_actor_and_history(
     assert runner.run(sid) == 1
     assert not guards[0].is_alive()
     assert db_conn.execute("SELECT ok FROM schedule_runs").fetchall() == [(False,)]
-
-
-def test_retired_entrypoint_fails_without_execution(unit_home: Path) -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "gateway.schedules.runner", "1"],
-        cwd=Path(__file__).resolve().parents[4],
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert result.returncode == 1
-    assert "services.wake.schedule_manager.runner" in result.stderr
-    assert not (unit_home / "schedules").exists()
 
 
 def test_main_refuses_on_foreign_checkout(monkeypatch: pytest.MonkeyPatch) -> None:

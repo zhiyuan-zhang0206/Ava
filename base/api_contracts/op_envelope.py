@@ -13,9 +13,8 @@ from pydantic import BaseModel, Field
 
 class OpEnvelope(BaseModel):
     """`POST /ops` request envelope. `kind` stays a bare str (not the OpKind
-    Literal) so an unknown kind from a version-skewed peer becomes a 'failed' op
-    result -- the dispatch switch owns the kind vocabulary -- rather than an
-    envelope-parse rejection.
+    Literal) so an unknown kind becomes a 'failed' op result -- the dispatch
+    switch owns the kind vocabulary -- rather than an envelope-parse rejection.
 
     `idempotency_key` is the caller-supplied dedup key for non-idempotent ops
     (spawn / lifecycle): every retry of one logical op carries
@@ -25,7 +24,7 @@ class OpEnvelope(BaseModel):
     errors and returns uncertainty instead of dispatching again. This replay
     record is not an atomic business receipt. Legacy records lacking request
     identity require inspection, never blind re-execution. Absent (None) for
-    idempotent ops and version-skewed old callers -- no dedup then."""
+    idempotent ops -- no dedup then."""
 
     kind: str
     payload: dict[str, Any] = Field(default_factory=dict)

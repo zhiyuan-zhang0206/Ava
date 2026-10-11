@@ -27,7 +27,6 @@ tags:
 - `compact(summary) → NoReturn` — Replace entire conversation history with summary, irreversible. First write durable state to MEMORY.md + shared memory pool, then write summary (first person, covering Requests/Progress/In flight/Dead ends/Pitfalls/Verbatim tail).
 - `restart(config_overlay=None) → NoReturn` — Replace current process with a new process. `config_overlay` merges into persistent settings. Model/effort edits validate against the final stored overlay and birth configuration under a row lock; configuration and the restart inbound commit together. An invalid pair changes neither.
 - `terminate() → NoReturn` — End current process — the normal last step when your task is done (never idle waiting for someone else to do it); state preserved, a message resurrects you.
-- ~~`update() → NoReturn`~~ — **removed (2026-08-05, cli-only-updates ruling)**: updates are an operator action (`python -m cli.fleet_update`); the method is a removed stub (`ava/self.py:update()`).
 
 ## ava_fleet Plugin Injections
 

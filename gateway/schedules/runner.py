@@ -635,7 +635,3 @@ def _run(
         logger.error("Schedule runner execution failed: {}", tb)
         _record_run_end(database, run_id, ok=False, note=_crash_note(exc, tb))
         return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit("Use python -m services.wake.schedule_manager.runner <schedule_id> [revision]")

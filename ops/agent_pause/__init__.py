@@ -53,8 +53,8 @@ def _wake(db: Database, bus: EventBus, hold: MaintenanceHold) -> None:
 def _lifecycle_wait_seconds() -> float:
     """The bounded wait when preparation meets in-flight work it did not author.
 
-    Task #3591: 0 disables the wait (the pre-#3591 refuse-immediately
-    behavior); maintenance-authored commands never wait regardless.
+    0 disables the wait (refuse immediately); maintenance-authored commands
+    never wait regardless.
     """
     from base.config import settings
 

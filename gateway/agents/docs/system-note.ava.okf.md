@@ -20,4 +20,4 @@ Replay checks the durable receipt before current task ownership: later
 reassignment does not invalidate an accepted message. Repeating wake is safe;
 resurrection remains guarded by the exact pending inbound, so a handled note
 cannot revive old work. Rows follow the existing inbound receipt retention
-policy; there is no separate response-cache expiry or client outbox.
+policy; there is no client outbox.

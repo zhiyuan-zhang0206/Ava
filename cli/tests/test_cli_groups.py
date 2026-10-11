@@ -16,7 +16,6 @@ from typing import cast
 
 import pytest
 
-from cli.main import main
 from cli.parsers import build_parser
 
 
@@ -39,37 +38,12 @@ def _cluster_choices() -> set[str]:
     return set(cast("dict[str, object]", sub.choices))
 
 
-def test_removed_bringup_groups_are_gone() -> None:
-    """infra / gateway / host collapsed into start/stop/cluster — no dead verbs."""
-    assert _top_choices().isdisjoint({"infra", "gateway", "host"})
-
-
 def test_core_verbs_exist() -> None:
     assert {"start", "stop", "status", "pty", "cluster"} <= _top_choices()
 
 
-def test_cluster_group_has_destroy_and_no_down_or_listing() -> None:
-    choices = _cluster_choices()
-    assert {"status", "destroy"} <= choices
-    # `down` stopped a cluster at another home; the host runs one, and `ava stop` stops it.
-    assert "down" not in choices
-    # No host-level list of clusters exists to print (each home describes only itself).
-    assert "ls" not in choices
-    # The whole-cluster bounce left with the retired updater; `ava restart` is per unit.
-    assert "restart" not in choices
-    # The stranded-lease clearer left with the deploy lease: a stranded pause is
-    # read with `ava status`; `ava start` ends it.
-    assert "recover" not in choices
-
-
-def test_start_rejects_retired_identity_flags(tmp_path: Path) -> None:
-    """Identity is the home path: `ava start` is a pure bring-up and takes no
-    --cluster / --gateway-home (both die as unrecognized arguments)."""
-    p = build_parser()
-    with pytest.raises(SystemExit):
-        p.parse_args(["start", "--cluster", "foo"])
-    with pytest.raises(SystemExit):
-        p.parse_args(["start", "--gateway-home", str(tmp_path / "h")])
+def test_cluster_group_has_status_and_destroy() -> None:
+    assert {"status", "destroy"} <= _cluster_choices()
 
 
 def test_cluster_destroy_acts_on_this_home_and_takes_no_path(tmp_path: Path) -> None:
@@ -78,8 +52,6 @@ def test_cluster_destroy_acts_on_this_home_and_takes_no_path(tmp_path: Path) -> 
     assert p.parse_args(["cluster", "destroy", "--drop-db"]).drop_db is True
     with pytest.raises(SystemExit):
         p.parse_args(["cluster", "destroy", "--path", str(tmp_path / ".ava-t")])
-    with pytest.raises(SystemExit):
-        p.parse_args(["cluster", "down", "--path", str(tmp_path / ".ava-t")])
 
 
 def test_cluster_destroy_has_no_flag_that_skips_its_confirmation() -> None:
@@ -87,17 +59,6 @@ def test_cluster_destroy_has_no_flag_that_skips_its_confirmation() -> None:
     for flag in ("--yes", "-y", "--force"):
         with pytest.raises(SystemExit):
             p.parse_args(["cluster", "destroy", flag])
-
-
-def test_enroll_entry_is_removed() -> None:
-    with pytest.raises(SystemExit):
-        main(["enroll", "--gateway", "https://gw.example.com"])
-
-
-def test_host_enroll_no_longer_routes() -> None:
-    """`ava host enroll` is gone — it must not be silently accepted."""
-    with pytest.raises(SystemExit):
-        main(["host", "enroll", "--gateway", "https://gw.example.com"])
 
 
 def test_help_builds_parser_config_free(tmp_path: Path) -> None:

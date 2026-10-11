@@ -18,11 +18,11 @@ agent there (`ava.agents.spawn(machine=...)`).
 
 There is deliberately **no install form in the UI**. The Skills / Plugins / MCP
 sections of `/control` take a natural-language request; `POST
-/api/packages/draft` spawns an `ava-guide.packages.install` agent that owns the whole
-lifecycle — find candidates, confirm before installing anything that runs code,
-install, verify with a test agent, judge, report. No install-by-URL field
-exists, because a user generally cannot tell a good package from a bad one,
-which is the reason an agent is in the loop at all.
+/api/keyed/v1/packages/draft` spawns an `ava-guide.packages.install` agent that owns the whole
+lifecycle — find candidates, confirm before installing code, install, verify
+with a test agent, judge, report. No install-by-URL field exists, because a
+user generally cannot tell a good package from a bad one, which is why an agent
+is in the loop.
 
 `parsers/` owns settings-free builders and handlers; `cli.parsers` composes
 them. `external_skills.py` delegates filesystem, ledger and recovery to

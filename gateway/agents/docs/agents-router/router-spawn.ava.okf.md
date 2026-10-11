@@ -58,7 +58,7 @@ Receipt lookup precedes mutable model/preset/fork validation. Reusing the key
 with changed request data returns 409; a keyless create still creates a new
 identity. `Idempotency-Scope: principal-v1` uses the existing authenticated
 principal namespace; legacy raw keys remain global. Creation identities remain
-with the agent row and are not pruned with response caches. A replay never
+with the agent row and are never pruned. A replay never
 launches an agent that has since been admitted or terminated. The SDK supplies
 one key per creation call and reuses it for connect-family retries. Automatic
 retry of an ambiguous outcome requires proven gateway capability and remains

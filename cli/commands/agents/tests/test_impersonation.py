@@ -106,11 +106,11 @@ def test_request_without_steer_endpoint_does_not_acquire_a_lease(
 ) -> None:
     from unittest.mock import Mock
 
-    from base.agents.impersonation import host_transport as codex_app_server
+    from base.agents.impersonation import host_transport
 
     request = Mock(return_value={})
     monkeypatch.setattr(sessions, "request", request)
-    monkeypatch.setattr(codex_app_server, "default_control_endpoint", lambda: None)
+    monkeypatch.setattr(host_transport, "default_control_endpoint", lambda: None)
     args = _args(
         "request",
         "--name",
