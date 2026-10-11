@@ -16,8 +16,7 @@ baseline targets.
 
 The directory also carries `README.md`, committed even when every shard is
 empty (all debt paid off): git does not track empty directories, so without it
-a fully clean baseline would vanish from the tree and become indistinguishable
-from a revision that predates the sharded baseline entirely.
+a fully clean baseline would vanish from the tree.
 """
 
 from __future__ import annotations
@@ -118,12 +117,12 @@ def _tree_listing(repo_root: Path, rev: str, *, recursive: bool) -> bytes:
     ).stdout
 
 
-def _historical_paths(repo_root: Path, rev: str) -> list[str] | None:
+def _historical_paths(repo_root: Path, rev: str) -> list[str]:
     listing = _tree_listing(repo_root, rev, recursive=True)
     if not listing:
         entry = _tree_listing(repo_root, rev, recursive=False)
         if not entry:
-            return None
+            raise ValueError(f"baseline directory missing at {rev}: {SHARD_DIR}")
         metadata, _, name = entry.partition(b"\t")
         fields = metadata.split()
         if len(fields) != 3 or fields[1] != b"tree" or name != f"{SHARD_DIR}\0".encode():
@@ -162,22 +161,21 @@ def _batch_texts(data: bytes, filenames: list[str]) -> dict[str, str]:
     return texts
 
 
-def read_at(repo_root: Path, rev: str) -> dict[str, str] | None:
+def read_at(repo_root: Path, rev: str) -> dict[str, str]:
     """Every shard (`*.json`) at a revision, by name.
 
-    None only when a valid revision's tree has no shard directory at all — the
-    one-time migration commit that predates the sharded baseline, where the
-    guard skips itself rather than comparing against nothing. Once the
-    directory exists (its README.md keeps it tracked even with zero shards),
-    this returns a dict, possibly empty — a real empty baseline, compared
-    against normally and not treated as guard-skip territory. Git failures and
-    unreadable or incomplete blobs raise instead of disabling the guard.
+    The shard directory must exist at the revision: its README.md keeps it tracked
+    even with zero shards, so a revision without it is an error, never an empty
+    baseline. An empty directory returns an empty dict - a real empty baseline,
+    compared against normally. Git failures and unreadable or incomplete blobs
+    raise instead of disabling the guard.
     """
 
-    paths = _historical_paths(repo_root, rev)
-    if paths is None:
-        return None
-    filenames = [name for name in paths if name.endswith(".json") and name != RULES_FILE]
+    filenames = [
+        name
+        for name in _historical_paths(repo_root, rev)
+        if name.endswith(".json") and name != RULES_FILE
+    ]
     if not filenames:
         return {}
     # One `cat-file --batch` for every shard: a process per shard costs ~30ms each, and the
@@ -213,8 +211,7 @@ def read_rules_at(repo_root: Path, rev: str) -> dict[str, int]:
 
     Revision resolution and Git reads must succeed before absence is accepted.
     """
-    paths = _historical_paths(repo_root, rev)
-    if paths is None or RULES_FILE not in paths:
+    if RULES_FILE not in _historical_paths(repo_root, rev):
         return {}
     shown = subprocess.run(  # noqa: S603 — local git query, no shell
         ["git", "-C", str(repo_root), "show", f"{rev}:{SHARD_DIR}/{RULES_FILE}"],

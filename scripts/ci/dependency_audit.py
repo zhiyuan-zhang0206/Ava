@@ -187,7 +187,7 @@ _PINS: tuple[tuple[str, str, str], ...] = (
         r'^OTELCOL_CONTRIB_VERSION = "([^"]+)"',
     ),
     _UV_PIN,
-    ("Grafana", "deploy/lgtm/docker-compose.yml", r"^\s*image: grafana/grafana:(\S+)$"),
+    ("Grafana", "deploy/lgtm/native/versions.yml", r"^grafana:\n  version: (\S+)$"),
 )
 
 
