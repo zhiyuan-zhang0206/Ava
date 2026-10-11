@@ -8,27 +8,16 @@ reports, so no real coverage data is involved.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "coverage_gates.py"
+from scripts.ci import coverage_gates as gates
 
-
-def _load_script() -> Any:
-    spec = importlib.util.spec_from_file_location("coverage_gates", _SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-gates = _load_script()
+# The script's report parameters are unparameterized dicts: the call-site rules stay at warning.
+# pyright: reportUnknownMemberType = warning
 
 
 @pytest.fixture(autouse=True)

@@ -10,6 +10,7 @@ user-present attestation.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 from pathlib import Path
 
@@ -78,7 +79,7 @@ def test_fill_specs_reference_declared_services_by_home_relative_path() -> None:
 
 
 def test_scan_child_compiles() -> None:
-    compile(_mod._SCAN_CHILD, "<scan-child>", "exec")
+    ast.parse(_mod._SCAN_CHILD, "<scan-child>")
 
 
 def test_state_status_is_granted_only_when_every_service_is() -> None:

@@ -3,12 +3,11 @@ stance on the stop window: it gates on `admission.quiesced()` or carries a reaso
 
 from __future__ import annotations
 
-import importlib
 import textwrap
 
 import pytest
 
-_lint = importlib.import_module("scripts.content_lint.lint_quiesced_loops")
+from scripts.content_lint import lint_quiesced_loops as _lint
 
 
 def _violations(src: str) -> list[tuple[int, str]]:
