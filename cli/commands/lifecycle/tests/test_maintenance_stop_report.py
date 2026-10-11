@@ -47,7 +47,6 @@ from tests.components.agent.test_maintenance import WHEN
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 pytestmark = [
-    pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract"),
     pytest.mark.usefixtures("written"),
 ]
 

@@ -27,7 +27,7 @@ accompanying migration, Loki rows keep their emit-time category.
 """
 
 from base.packages.plugins.extensions import PluginContributions
-from base.telemetry.metrics.logql import CATEGORY_WITH_LEGACY_LOG, event_count
+from base.telemetry.metrics.logql import CATEGORY_MATCH, event_count
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
 METRICS: tuple[MetricSpec, ...] = (
@@ -44,7 +44,7 @@ METRICS: tuple[MetricSpec, ...] = (
         category="telemetry",
         unit="short",
         panel="timeseries",
-        query=event_count(CATEGORY_WITH_LEGACY_LOG, "5m", matchers="event_name={event_name}"),
+        query=event_count(CATEGORY_MATCH, "5m", matchers="event_name={event_name}"),
         query_type="logql",
         target_names=["fixes"],
         output=["grafana"],
@@ -61,7 +61,7 @@ METRICS: tuple[MetricSpec, ...] = (
         category="telemetry",
         unit="short",
         panel="stat",
-        query=event_count(CATEGORY_WITH_LEGACY_LOG, "$__range", matchers="event_name={event_name}"),
+        query=event_count(CATEGORY_MATCH, "$__range", matchers="event_name={event_name}"),
         query_type="logql",
         target_names=["fixes"],
         output=["grafana"],

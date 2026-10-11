@@ -99,12 +99,11 @@ def test_hard_exit_reports_a_failed_step_on_stderr_and_still_exits(
     assert "sink close failed" in err
 
 
-def test_shutdown_line_avoids_the_unregistered_event_alias(
+def test_shutdown_line_logs_a_registered_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`extra["label"]` doubles as an event alias in `base.log`; the daemon
-    name it carried emitted an unregistered-event error on every stop (task
-    #3661 side fix)."""
+    """The stop line carries the daemon name as `service=` and derives a
+    registered event."""
     from base.events import EVENTS
 
     calls: list[dict[str, object]] = []
@@ -114,9 +113,6 @@ def test_shutdown_line_avoids_the_unregistered_event_alias(
             calls.append({"message": message, **kwargs})
 
     previous = signal.getsignal(signal.SIGTERM)
-    previous_break: int | None = None
-    if sys.platform == "win32":
-        previous_break = signal.getsignal(signal.SIGBREAK)
     try:
         monkeypatch.setattr(shutdown, "logger", _Capture())
         shutdown.install_graceful_shutdown("pg-backup")
@@ -124,41 +120,13 @@ def test_shutdown_line_avoids_the_unregistered_event_alias(
             signal.raise_signal(signal.SIGTERM)
     finally:
         signal.signal(signal.SIGTERM, previous)
-        if sys.platform == "win32" and previous_break is not None:
-            signal.signal(signal.SIGBREAK, previous_break)
     assert len(calls) == 1
     call = calls[0]
     assert call["message"] == "[{service}] received {sig}, shutting down"
     assert call["service"] == "pg-backup"
     assert call["sig"] == "SIGTERM"
     assert "label" not in call
-    assert (call.get("event") or call.get("label") or "log") in EVENTS
-
-
-def test_windows_break_uses_the_shared_interrupt_handler(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # A real spare POSIX signal exercises Windows registration on non-Windows
-    # CI; the native-console test below covers actual Ctrl-Break delivery.
-    if sys.platform == "win32":
-        break_signal = signal.SIGBREAK
-    else:
-        break_signal = signal.SIGUSR1
-    monkeypatch.setattr(signal, "SIGBREAK", break_signal, raising=False)
-    previous = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, break_signal)}
-    sigint = signal.getsignal(signal.SIGINT)
-    try:
-        with monkeypatch.context() as windows_registration:
-            windows_registration.setattr(sys, "platform", "win32")
-            shutdown.install_graceful_shutdown("signal-test")
-        assert signal.getsignal(signal.SIGINT) is sigint
-        assert signal.getsignal(break_signal) is signal.getsignal(signal.SIGTERM)
-        for sig in previous:
-            with pytest.raises(KeyboardInterrupt):
-                signal.raise_signal(sig)
-    finally:
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
+    assert (call.get("event") or "log") in EVENTS
 
 
 _SERVICE = """

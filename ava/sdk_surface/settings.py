@@ -12,7 +12,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from base.agents.context.clients import DatabaseFactory, DatabaseHandle
-from base.agents.messages.delivery_outbox import DeliverySenderConfig
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, settings
@@ -39,16 +38,6 @@ def config_authority() -> ConfigAuthority:
     if installation is None or installation.authority is None:
         raise RuntimeError("the SDK installation carries no ConfigAuthority")
     return installation.authority
-
-
-def delivery_sender_config() -> DeliverySenderConfig:
-    """The SDK installation's explicit first-send cache, without constructing a new owner."""
-    from ava.sdk_surface.install import installed
-
-    installation = installed()
-    if installation is None or installation.delivery_sender is None:
-        raise RuntimeError("the SDK installation carries no DeliverySenderConfig")
-    return installation.delivery_sender
 
 
 def clock() -> Clock:

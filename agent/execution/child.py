@@ -241,9 +241,9 @@ def _init_logger(
 
     init_subprocess_logger(agent_id=agent_id)
     try:
-        from base.log.process import add_postgres_sink
+        from base.log.process import add_event_sink
 
-        add_postgres_sink(
+        add_event_sink(
             process="agent-exec",
             agent_id=agent_id,
             producer=producer,

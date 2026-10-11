@@ -167,28 +167,11 @@ CIRCUIT_REASON_PERMANENT = "permanent"
 
 
 class CircuitState(BaseModel):
-    """Heartbeat circuit breaker, nested under `BaseAgentState.circuit`.
+    """Suppress background model calls after a permanent rejection.
 
-    Opened by the runloop when a `FatalProviderError` (a PERMANENT provider
-    rejection) aborts a turn: the next heartbeat would re-fire the same doomed
-    LLM call (the 3962 incident — 80 heartbeat cycles against a permanent
-    context-overflow 400, no self-rescue). While open:
-
-    - a heartbeat check-in is consumed without appending its note or routing
-      to the LLM (no doomed call, no context growth);
-    - with `reason == CIRCUIT_REASON_CONTEXT_OVERFLOW`, any wake routes to a
-      forced compaction instead — the overflow self-rescue (see
-      `agent/hooks/compact.py:emergency_compact_summary` for the no-LLM
-      fallback when the compact request itself is rejected).
-
-    The breaker closes on the first successful LLM call (`llm_node`) — the
-    provider accepting a request again is the healed signal. Last-value
-    channel (no reducer), same discipline as `compact`: a writer reads the
-    current value and `model_copy(update=...)`'s only the fields it changes.
-
-    `reason` is a `CIRCUIT_REASON_*` value; `opened_at` is the ISO-8601 UTC
-    timestamp of the rejection that opened it. Both are informational /
-    queryable — the behaviour keys off `open` + `reason == ..._CONTEXT_OVERFLOW`.
+    Fresh chats and explicit controls still enter through normal claim routing.
+    A successful model call closes the circuit. Stored reason and opened_at
+    remain readable diagnostics; no reason authorizes automatic compaction.
     """
 
     open: bool = False
@@ -197,11 +180,8 @@ class CircuitState(BaseModel):
 
     @property
     def parks_idle(self) -> bool:
-        """Whether an open breaker parks the agent idle instead of routing work
-        to the LLM: open with any reason EXCEPT `context_overflow` — the
-        overflow reason routes to the forced-compact self-rescue instead, so
-        it must keep flowing to decide()'s compact arm."""
-        return self.open and self.reason != CIRCUIT_REASON_CONTEXT_OVERFLOW
+        """An open circuit waits for fresh input instead of continuing old work."""
+        return self.open
 
 
 __all__ = [

@@ -8,12 +8,11 @@ callers that act on an execution owner must also verify its OS birth evidence.
 `run_bounded` is the module's other half and exists because
 `subprocess.run(..., timeout=T)` does not do what its name implies: on expiry
 Python kills the **one** process it spawned and leaves every descendant running.
-Measured consequence on the fleet's Windows agent-runner: 66 orphaned `git.exe`
-+ 66 `ssh.exe` + 63 `sh.exe`, because `C:\\Program Files\\Git\\cmd\\git.exe` is a
-thin launcher for the real git — the timeout killed the launcher and the
-three-process tail below it survived. Every Ava-initiated subprocess with a
-timeout should go through `run_bounded` instead, so the bound applies to the
-work rather than to whichever wrapper happened to be on top.
+Measured consequence: orphaned `git` + `ssh` + `sh` processes, because a
+timeout kills the launcher and the process tail below it survives. Every
+Ava-initiated subprocess with a timeout should go through `run_bounded`
+instead, so the bound applies to the work rather than to whichever wrapper
+happened to be on top.
 """
 
 from __future__ import annotations
@@ -28,7 +27,6 @@ from typing import Any, Literal
 
 import psutil
 
-from base.native_process.os_platform import CREATE_NO_WINDOW, SIGKILL
 from base.native_process.ownership import OwnedProcess, capture_tree
 
 __all__ = ["run_bounded"]
@@ -255,7 +253,7 @@ def force_kill(pid: int) -> None:
     failed, so an unhandled exception must not interrupt that verification.
     """
     try:
-        os.kill(pid, SIGKILL)
+        os.kill(pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         return
 
@@ -343,7 +341,7 @@ def kill_process_tree(
         return
     for identity in alive:
         with contextlib.suppress(*_GONE):
-            identity.send_signal(SIGKILL)
+            identity.send_signal(signal.SIGKILL)
     _wait_owned(alive, _REAP_TIMEOUT_S)
 
 
@@ -386,9 +384,6 @@ def run_bounded(
             raise ValueError("stdin and input arguments may not both be used")
         popen_kwargs["stdin"] = subprocess.PIPE
 
-    if "creationflags" not in popen_kwargs:
-        popen_kwargs["creationflags"] = CREATE_NO_WINDOW
-
     proc = subprocess.Popen(argv, **popen_kwargs)  # type: ignore[call-overload]  # noqa: S603 — argv is list-form, callers pass fixed argv
     try:
         # Keep the no-input call shape exactly `communicate(timeout=timeout)`
@@ -425,7 +420,7 @@ def timeout_stderr_tail(exc: subprocess.TimeoutExpired, *, lines: int = 3) -> st
     None are normalized so callers can log/return the tail without type games:
     a fetch killed before ssh/git printed anything yields an empty string, which
     is itself the evidence that it died in the local/connect phase rather than
-    mid-transfer (2026-08-27 win/wsl fetch forensics).
+    mid-transfer (2026-08-27 fetch forensics).
     """
     raw: str | bytes | None = exc.stderr
     if isinstance(raw, bytes):

@@ -24,8 +24,8 @@ Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpe
 | agent-host | Executes local agents as isolated asyncio turns in one daemon; its background loops include the understanding-chunk consumer ([[base/agents/history/hierarchy/docs/chunks.ava.okf.md]]) | `services/agent_runner/agent_host/` |
 
 ## Also Under agent-runner Capability
-- **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's PLUS AF_UNIX (its wrapper→daemon transport is a Unix socket), so it is **POSIX-only** where `browser` is not; see [[services/docs/agent_runner_side/browser/browser/browser.ava.okf.md]]
-- **computer-mcp** — computer-use executor. Capability = permissions-helper + AF_UNIX; no code gate (governance removed 2026-08-10, peer trust model); see [[computer-mcp.ava.okf.md]]
+- **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's; see [[services/docs/agent_runner_side/browser/browser/browser.ava.okf.md]]
+- **computer-mcp** — computer-use executor. Capability = permissions-helper; no code gate (governance removed 2026-08-10, peer trust model); see [[computer-mcp.ava.okf.md]]
 
 ## Notes
 The permissions helper is the macOS root ancestor and remains outside `build_services()`. Root diagnostics observes its protocol without repair authority; Linux has no helper ancestor.

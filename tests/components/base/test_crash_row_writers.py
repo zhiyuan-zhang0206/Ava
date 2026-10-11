@@ -94,15 +94,9 @@ def test_marker_stamp_sites_are_enumerated() -> None:
 
 
 def test_relaxed_guard_consumers_embed_the_shared_predicates() -> None:
-    """The two relaxed CAS sites and the automatic-recovery gates must use the
-    shared constants; a re-inlined literal would drift from the predicate."""
+    """Surviving lifecycle guards must use shared predicate constants."""
     expectations = {
-        "services/wake/delivery_watchdog/resurrect_retry.py": [
-            "SYSTEM_REAPED_CRASH_ROW",
-            "RECOVERY_BREAKER_CLEAR",
-        ],
-        "ops/agents/wake.py": ["SYSTEM_REAPED_CRASH_ROW", "RECOVERY_BREAKER_CLEAR"],
-        "services/wake/delivery_watchdog/dispatch_guard.py": ["RECOVERY_BREAKER_CLEAR"],
+        "ops/agents/wake.py": ["RECOVERY_BREAKER_CLEAR"],
     }
     for rel, names in expectations.items():
         text = (_REPO / rel).read_text(encoding="utf-8")

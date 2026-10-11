@@ -65,7 +65,7 @@ async def test_actual_cold_materialization_gap_never_acknowledges_marker_alone(
         await accepted.host.run_turn(accepted.agent)
     status = accepted.status(client)
     assert observed == [True] and model.calls == 1
-    assert status["outcome"] == "applying" and status["checkpoint_id"] is None
+    assert status["outcome"] == "uncertain" and status["checkpoint_id"] is None
     assert not status["continuation_released"] and status["result_available"]
     cold = await cold_reader(accepted.saver).aget_tuple(accepted.config)
     assert cold is not None and cold.checkpoint["channel_values"]["native_compact"] is not None

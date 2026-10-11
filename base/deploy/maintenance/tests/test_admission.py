@@ -88,8 +88,6 @@ def test_quiesced_covers_only_the_stop_window() -> None:
         MaintenancePhase.DRAINED,
         MaintenancePhase.STOPPING,
         MaintenancePhase.STOPPED,
-        MaintenancePhase.STARTING,
-        MaintenancePhase.READY,
     ):
         current = admission.set_phase("migration", WHEN, phase)
         assert current.maintenance is not None
@@ -101,29 +99,6 @@ def test_quiesced_covers_only_the_stop_window() -> None:
         "migration", WHEN, final.maintenance, final.maintenance, resumed=True
     )
     assert not admission.quiesced()
-
-
-def test_in_stop_leg_covers_only_the_drained_to_stopped_slice() -> None:
-    assert not admission.in_stop_leg()
-
-    first = pause_owner.begin_maintenance("migration", WHEN).snapshot
-    assert first.maintenance is not None
-    assert not admission.in_stop_leg()
-
-    pause_owner.change_maintenance(
-        "migration", WHEN, first.maintenance, MaintenanceHold(MaintenancePhase.DRAINING)
-    )
-    assert not admission.in_stop_leg()
-
-    for phase in (MaintenancePhase.DRAINED, MaintenancePhase.STOPPING, MaintenancePhase.STOPPED):
-        current = admission.set_phase("migration", WHEN, phase)
-        assert current.maintenance is not None
-        assert admission.in_stop_leg(), phase
-
-    for phase in (MaintenancePhase.STARTING, MaintenancePhase.READY):
-        current = admission.set_phase("migration", WHEN, phase)
-        assert current.maintenance is not None
-        assert not admission.in_stop_leg(), phase
 
 
 def test_business_gate_tracks_the_journal_without_posture_or_time() -> None:
@@ -138,12 +113,7 @@ def test_business_gate_tracks_the_journal_without_posture_or_time() -> None:
     assert not admission.business_paused()
     admission.set_phase("migration", WHEN, MaintenancePhase.DRAINED)
     assert not admission.business_paused()  # Other hosts may still need this gateway's SDK.
-    for phase in (
-        MaintenancePhase.STOPPING,
-        MaintenancePhase.STOPPED,
-        MaintenancePhase.STARTING,
-        MaintenancePhase.READY,
-    ):
+    for phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED):
         admission.set_phase("migration", WHEN, phase)
         assert admission.business_paused(), phase
     final = admission.snapshot()
@@ -156,24 +126,13 @@ def test_business_gate_tracks_the_journal_without_posture_or_time() -> None:
         pause_owner.begin_maintenance("migration", WHEN)
 
 
-def _retired_updater_record(state: str, holder: str) -> None:
-    """The plain record (no maintenance hold) the retired updater's stop op wrote."""
-    record = {"state": state, "holder": holder, "acquired_at": WHEN.isoformat()}
+def test_business_gate_refuses_holdless_and_invalid_pause_records() -> None:
+    record = {"state": "paused", "holder": "incomplete", "acquired_at": WHEN.isoformat()}
     pause_owner.state_path().write_text(json.dumps(record))
-
-
-def test_business_gate_refuses_incomplete_and_invalid_pause_records() -> None:
-    _retired_updater_record("paused", "incomplete")
+    assert pause_owner.read().status == "invalid"
     assert admission.business_paused()
     pause_owner.state_path().write_text("invalid")
     assert admission.business_paused()
-
-
-def test_resumed_tombstone_cannot_reopen_without_a_new_generation() -> None:
-    _retired_updater_record("resumed", "completed")
-    with pytest.raises(RuntimeError, match="already resumed"):
-        pause_owner.begin_maintenance("completed", WHEN)
-    assert pause_owner.read().status == "resumed"
 
 
 def test_business_gate_refuses_unreadable_state(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -192,7 +151,6 @@ def test_windows_read_an_unreadable_owner_as_held(
 
     monkeypatch.setattr(admission, "snapshot", _unreadable)
     assert admission.quiesced()
-    assert admission.in_stop_leg()
 
 
 def test_clear_failures_drops_blocking_receipts_and_keeps_the_rest() -> None:

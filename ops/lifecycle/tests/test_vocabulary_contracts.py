@@ -14,7 +14,12 @@ def test_wake_trigger_wire_accepts_exact_pending_work_subset(kind: InboundKind) 
     from base.agents.messages.inbound import validate_wake_trigger_kind
     from ops.rpc_schemas import LifecyclePayload
 
-    allowed = {InboundKind.CHAT, InboundKind.COMPACT_REQUEST, InboundKind.SYSTEM_NOTE}
+    allowed = {
+        InboundKind.CHAT,
+        InboundKind.COMPACT_REQUEST,
+        InboundKind.SYSTEM_NOTE,
+        InboundKind.HEARTBEAT,
+    }
     data = {"path": "test", "trigger_inbound_id": 1, "trigger_inbound_kind": kind.value}
     if kind in allowed:
         payload = LifecyclePayload.model_validate(data)
@@ -74,13 +79,13 @@ def test_lifecycle_result_models_reuse_operation_enums(model_name: str, enum_nam
         model.model_validate({"status": "unrecognized"})
 
 
-def test_wake_trigger_schema_keeps_exact_three_wire_values() -> None:
+def test_wake_trigger_schema_keeps_exact_four_wire_values() -> None:
     from ops.rpc_schemas import LifecyclePayload
 
     alternatives = LifecyclePayload.model_json_schema()["properties"]["trigger_inbound_kind"][
         "anyOf"
     ]
     assert alternatives == [
-        {"enum": ["chat", "compact_request", "system_note"], "type": "string"},
+        {"enum": ["chat", "compact_request", "system_note", "heartbeat"], "type": "string"},
         {"type": "null"},
     ]

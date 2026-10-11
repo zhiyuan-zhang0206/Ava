@@ -216,7 +216,7 @@ def _get_services_status() -> ServicesStatus:
 
 
 # Per-machine status_probe timeout — `settings.gateway.status_probe_timeout_seconds`
-# (default 8s). Raised from a 3.0s hardcode (task #1200): a slow-but-healthy WSL
+# (default 8s). Raised from a 3.0s hardcode (task #1200): a slow-but-healthy
 # runner's status_snapshot measured 3.07-3.27s on 2026-08-12, and a budget
 # shorter than the handler's own wall time flipped it offline while /healthz
 # answered in ~15ms. The budget of a dial the gateway makes itself (a fresh read,

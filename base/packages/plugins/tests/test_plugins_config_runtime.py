@@ -27,7 +27,6 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     user = tmp_path / "plugins"
     user.mkdir()
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setattr(paths, "plugins_config_path", lambda: tmp_path / "plugins.json")
     monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
 

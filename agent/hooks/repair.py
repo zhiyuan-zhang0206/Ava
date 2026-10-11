@@ -161,7 +161,7 @@ def _synthetic_tool_result(tool_call_id: str) -> ToolMessage:
     return exec_output_message(
         content=_INTERRUPTED_TOOL_RESULT,
         tool_call_id=tool_call_id,
-        status=ExecStatus.NOT_RUN,
+        status=ExecStatus.UNKNOWN,
         body_start=0,
         created_at=datetime.now(UTC),
     )

@@ -13,3 +13,5 @@ POSIX tarball map; the guide embeds the x86_64 value and names the ARM64 hash,
 and the contract test (`tests/scripts/test_toolchain_uv_pin.py`) asserts the
 guide never drifts — it also now covers `audit-branch-protection.yml`, the one
 remaining setup-uv workflow outside the contract.
+
+Superseded in part by: [decisions/2026-10-11-remove-windows-and-wsl-support.md](2026-10-11-remove-windows-and-wsl-support.md) — Windows and WSL support is removed.

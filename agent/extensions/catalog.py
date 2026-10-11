@@ -189,6 +189,19 @@ SURFACES: tuple[Surface, ...] = (
         ),
     ),
     Surface(
+        id="decisionProviders",
+        entry_points=("base.lm.provider_api:DecisionProviderContribution",),
+        manifest_key="decisionProviders",
+        protocol=None,
+        note=(
+            "`decision_providers` of what the plugin's `provider.py` `contribute()` returns: a "
+            "decision-model provider (typed questions answered with probabilities, never text), "
+            "its model rows and live prices, installed into the catalog's decision tables, which "
+            "no chat path can reach; a prefix that collides with another plugin's provider is a "
+            "hard error"
+        ),
+    ),
+    Surface(
         id="skillSources",
         entry_points=("base.packages.plugins.extensions:PluginContributions",),
         manifest_key=None,

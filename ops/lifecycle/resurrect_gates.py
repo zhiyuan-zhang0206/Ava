@@ -51,10 +51,7 @@ def system_notice_source_of_trigger(
     never resurrect their owner (user ruling 2026-08-27; task #3687) — else
     None.
 
-    The delivery watchdog's hosted-turn recovery chat is NOT a notice: its
-    payload carries the `hosted_turn_recovery` marker, and the shared
-    predicate (fail-closed on any non-boolean marker value) returns False, so
-    the recovery reaches dispatch (task #3687 review, Ava #3242).
+    Historical recovery markers do not grant an exception.
 
     No row, a non-chat kind, or any other source returns None so the caller
     proceeds on the normal resurrect path; the home runner's final CAS still
@@ -72,39 +69,6 @@ def system_notice_source_of_trigger(
     kind, source, payload = row
     if kind == "chat" and is_system_notice_source(source, payload):
         return str(source)
-    return None
-
-
-def recovery_halt_reason(db: Database, agent_id: int) -> str | None:
-    """Why automatic recovery is halted for `agent_id`, else None — the
-    reason-resolution sibling of `recovery_halted` for the stalled-harvest
-    requester (task #3618).
-
-    The durable gate is the recovery breaker's streak
-    (`RECOVERY_BREAKER_CLEAR` inverts it: consecutive permanent provider
-    rejections with no successful turn between them), which even a claim
-    cannot clear; it always reports `permanent_provider_reject`. An active
-    wake-suppression window without a tripped breaker reports its
-    operator-readable reason (or the `wake_suppressed` fallback)."""
-    from base.agents.recovery.breaker import (
-        HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
-        SUPPRESS_REASON_PERMANENT_REJECT,
-    )
-
-    with db.connect() as conn:
-        row = conn.execute(
-            "SELECT permanent_reject_streak >= %s, wake_suppress_reason, "
-            "(wake_suppressed_until IS NOT NULL AND wake_suppressed_until >= now()) "
-            "FROM agents_meta WHERE id=%s",
-            (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, agent_id),
-        ).fetchone()
-    if row is None:
-        return None
-    halted, suppress_reason, suppress_active = row
-    if halted:
-        return SUPPRESS_REASON_PERMANENT_REJECT
-    if suppress_active:
-        return suppress_reason or "wake_suppressed"
     return None
 
 

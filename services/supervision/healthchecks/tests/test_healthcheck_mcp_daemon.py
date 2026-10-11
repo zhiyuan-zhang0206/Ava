@@ -1,18 +1,4 @@
-"""ava-mcp-daemon healthcheck — a probe returns a bool, never an exception.
-
-The regression this locks: `_probe` names `socket.AF_UNIX`, which does not exist
-on Windows. The daemon binds that very socket, so on such a host the service
-cannot run at all — it is gated out of the ops roster (`ops.spec._gate_reason`)
-and the watchdog never schedules this check. Before the gate, the win runner's
-watchdog judged the daemon dead every 60s (the healthcheck's broad except
-degraded the probe failure to "dead"), attempted a restart that could never
-succeed, and logged an ERROR each round — measured 1,257 ERRORs/24h with the
-mcp health monitoring effectively blind.
-
-The explicit no-AF_UNIX branch in `_is_alive` is the second line of defence
-(a manual run, or a future gate regression): it no-ops as alive instead of
-walking dead -> restart against a service that can never start.
-"""
+"""ava-mcp-daemon healthcheck — a probe returns a bool, never an exception."""
 
 import json
 import logging
@@ -47,22 +33,6 @@ def test_alive_false_on_expected_probe_failures(
 
     monkeypatch.setattr(hc, "_probe", _boom)
     assert hc._is_alive() is False
-
-
-def test_alive_true_without_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The Windows shape: no AF_UNIX, so no probe is even attempted — the
-    healthcheck no-ops as alive (the service is gated out; a restart could
-    never succeed)."""
-    called: list[bool] = []
-
-    def _probe() -> bool:
-        called.append(True)
-        return False
-
-    monkeypatch.setattr(hc, "unix_sockets_available", lambda: False)
-    monkeypatch.setattr(hc, "_probe", _probe)
-    assert hc._is_alive() is True
-    assert called == []
 
 
 def test_alive_false_on_any_unexpected_exception(

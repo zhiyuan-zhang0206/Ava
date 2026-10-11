@@ -505,7 +505,6 @@ def test_child_boot_timing_emits_ready_duration(
     assert record["extra"]["duration_ms"] == pytest.approx(250.0)  # pyright: ignore[reportUnknownMemberType]
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 def test_child_watchdog_hard_exits_124(tmp_path: Path) -> None:
     """With no parent to signal it, the child's own watchdog os._exit(124)s
     past (timeout + grace + margin) — an orphaned exec child cannot run long."""

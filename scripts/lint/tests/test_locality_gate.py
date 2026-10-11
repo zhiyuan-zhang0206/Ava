@@ -107,31 +107,6 @@ def test_current_retired_fields_cannot_permit_sites(
     assert f"unknown section '{kind}'" in capsys.readouterr().err
 
 
-def test_historical_empty_retired_fields_are_read_without_permission(
-    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _baseline(_repo, {kind: {} for kind in locality.STRICT_SECTIONS})
-    _commit_baseline(_repo, "Historical empty locality sections")
-    _baseline(_repo)
-    _write(_repo, "base/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from base._priv import mod\n")
-    assert lcs.main([], repo_root=_repo) == 1
-    output = capsys.readouterr().out
-    assert "reaches private `base._priv`" in output
-    assert "invalid base baseline" not in output
-
-
-@pytest.mark.parametrize("kind", locality.STRICT_SECTIONS)
-def test_nonempty_retired_history_cannot_be_used_for_comparison(
-    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str], kind: str
-) -> None:
-    _baseline(_repo, {kind: {"gateway/importer.py::base._priv": 1}})
-    _commit_baseline(_repo, "Invalid retired allowance")
-    _baseline(_repo)
-    assert lcs.main([], repo_root=_repo) == 1
-    assert f"retired {kind} baseline must be empty" in capsys.readouterr().out
-
-
 def test_renaming_a_private_reach_in_still_fails_directly(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

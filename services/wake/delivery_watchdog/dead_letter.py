@@ -1,12 +1,4 @@
-"""Stale-inbound dead-letter sweeps — delivery watchdog job 4.
-
-Split out of `daemon.py` at its line budget. Each sweep closes only rows
-whose consumer is gone: a stale claimed chat of a terminated/idling owner
-(boot reconcile cannot finalize it), a pending resurrect whose wake was
-abandoned, a one-shot lifecycle notice of a terminated owner, or a pending
-chat past the G4 resurrect-retry age gate (issue #2049 — the retry selector
-and this sweep share that gate, in lockstep).
-"""
+"""Consume abandoned inbound rows; no automatic resurrection is performed."""
 
 from psycopg_pool import ConnectionPool
 
@@ -14,17 +6,10 @@ from base.db.transaction import write_transaction
 
 
 def dead_letter_stale_pending_chats(pool: ConnectionPool, threshold_s: float) -> int:
-    """Dead-letter stale pending chats whose terminated owner never claimed them.
+    """Consume stale pending chats whose terminated owner never claimed them.
 
-    A pending chat newer than the latest termination makes its terminated
-    owner a G4 resurrect candidate on every tick. That retry must not run
-    forever: a chat that stays pending past `threshold_s` is a dead letter, so
-    the reaper closes it here (issue #2049) — marked done, never deleted — and
-    the resurrect-suicide loop can no longer accumulate an ever-growing
-    pending queue. `select_terminated_owners_with_pending` applies the same
-    age gate, so the two stay in lockstep: a dead-lettered row is never a
-    trigger and a trigger row is never dead-lettered. Live owners are untouched; their pending
-    chats still wake through the normal dispatch path.
+    Mark them done without deleting the stored input. Live owners keep the normal
+    pending-delivery path. This sweep does not restart terminated owners.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -44,22 +29,10 @@ def dead_letter_stale_claimed(
     threshold_s: float,
     idling_threshold_s: float = 7200.0,
 ) -> int:
-    """Dead-letter stale claimed chats of terminated or idling owners.
+    """Consume stale claims left by terminated or idling owners.
 
-    Terminated agents leave 'claimed' rows behind: reconcile runs only at
-    process boot, so a cleanly terminated (or long-dead) process never
-    finalizes its claims. The rows sit forever — and worse, if the agent is
-    ever resurrected (delivery auto-resurrect, Task #689 G4, or manually),
-    boot reconcile sees no commit evidence (checkpoint pruned) and resets
-    them all to 'pending', re-delivering ancient messages as fresh ones
-    (Task #654). Dead-lettering rows older than the threshold keeps the
-    two-phase crash-recovery guarantee (rows younger than the threshold still
-    reset to 'pending' on boot) while making a resurrected agent start from
-    its real conversation, not a flood of stale mail.
-
-    Age is measured from `claimed_at`. Running owners are never touched; idling
-    owners are swept past the idling threshold because hosted agents may never
-    boot again to finalize their claims.
+    Interrupted claims are never returned to pending. Running owners are untouched;
+    idling owners use their separate age threshold.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(

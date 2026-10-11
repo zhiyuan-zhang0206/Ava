@@ -1,11 +1,9 @@
-# Native variant of deploy/lgtm/config/prometheus.yml. This copy renders its
-# scrape targets from the telemetry read URLs (so a widened listen host + a
-# consistent AVA_TELEMETRY_*_URL keeps self-scrape working) while the container
-# copy keeps compose DNS names; keep all other scrape settings aligned.
 # Prometheus — scrapes only the viewer's own components (zero impact on the
-# main flow). Ava's own series arrive by OTLP push
-# (--web.enable-otlp-receiver in the compose command); retention is set there
-# too (180h time / 8GB size).
+# main flow). Converge renders the scrape targets from the telemetry read URLs,
+# so a widened listen host plus a consistent AVA_TELEMETRY_*_URL keeps
+# self-scrape working. Ava's own series arrive by OTLP push
+# (--web.enable-otlp-receiver in the native service arguments); retention is
+# set there too (180h time / 8GB size).
 #
 # There is no node_exporter here and there will not be one: host metrics
 # (issue #46) arrive on the same OTLP push, scraped by each machine's own OTel

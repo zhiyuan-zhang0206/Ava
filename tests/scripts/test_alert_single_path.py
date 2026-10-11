@@ -21,7 +21,7 @@ _ROOTS = ("agent", "ava", "ava_builtins", "base", "cli", "gateway", "ops", "serv
 
 # The only module that writes alert rows and fans them out: the ingest core and its one router.
 _INGEST = {"base/telemetry/alerts/__init__.py", "gateway/alerts/router.py"}
-_WRITERS = {"upsert_alert", "stamp_notified", "notify_im"}
+_WRITERS = {"upsert_alert"}
 
 
 def _production_modules() -> list[Path]:

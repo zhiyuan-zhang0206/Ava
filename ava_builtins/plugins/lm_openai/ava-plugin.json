@@ -8,6 +8,9 @@
   "contributions": {
     "providers": [
       "gpt-"
+    ],
+    "decisionProviders": [
+      "gpt-"
     ]
   }
 }

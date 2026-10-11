@@ -148,7 +148,7 @@ def test_sync_deadline_covers_marker_admission_and_write(monkeypatch: pytest.Mon
         assert entered.wait(1)
         pipe.enqueue(event(2))
         started = time.monotonic()
-        assert pipe.sync(timeout=0.03, bounded=True) == telemetry.DrainResult(
+        assert pipe.sync(timeout=0.03) == telemetry.DrainResult(
             telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.MARKER
         )
         assert time.monotonic() - started < 0.5
@@ -159,7 +159,7 @@ def test_sync_deadline_covers_marker_admission_and_write(monkeypatch: pytest.Mon
 
         monkeypatch.setattr(threading, "Thread", forbid_thread)
         pipe._queue.get_nowait()  # give the barrier a slot while the sole writer stays blocked
-        assert pipe.sync(timeout=0.03, bounded=True) == telemetry.DrainResult(
+        assert pipe.sync(timeout=0.03) == telemetry.DrainResult(
             telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.DRAIN
         )
     finally:
@@ -303,7 +303,7 @@ def test_one_deadline_spans_queue_admission_and_blocked_writer() -> None:
         pipe.enqueue(event(2))
         timer.start()
         started = time.monotonic()
-        assert pipe.sync(timeout=0.2, bounded=True) == telemetry.DrainResult(
+        assert pipe.sync(timeout=0.2) == telemetry.DrainResult(
             telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.DRAIN
         )
         assert time.monotonic() - started < 0.28

@@ -10,7 +10,6 @@ import shutil
 import signal
 import socket
 import subprocess
-import sys
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -32,9 +31,6 @@ from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler, _native_birth
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
-
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="native POSIX pooler")
-
 
 # Port 1 on loopback never listens for an unprivileged test: a refused dial is
 # the stop path's proof that this home has no Redis, and no other process can

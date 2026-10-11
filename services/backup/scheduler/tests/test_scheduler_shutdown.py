@@ -30,8 +30,6 @@ from base.native_process.loaded_commit import LoadedCommit
 from services.backup.scheduler import daemon, worker
 from services.backup.scheduler.operation.worker_process import CompletedOperation, StopSignal
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="backup scheduler is POSIX-only")
-
 
 @pytest.fixture
 def postgres_base(tmp_path: Path) -> Iterator[Path]:

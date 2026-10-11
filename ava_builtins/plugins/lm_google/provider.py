@@ -267,10 +267,6 @@ PROVIDER = ProviderContribution(
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
         ),
-        # Removed 2026-09-23 (task #4508): gemini-2.5-pro and gemini-2.5-flash
-        # were never selectable here (implicit spawnable=False) and have no
-        # live references. Historical prices remain in
-        # base/lm/pricing/pricing_catalog_archive.json.
     },
     pricing={
         "gemini-3.8-flash": PriceRates(

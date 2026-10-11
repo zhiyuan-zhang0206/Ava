@@ -62,9 +62,7 @@ def ensure_cluster_role(
 
     The owner never logs in: every DDL path is the administrator acting as it
     (`owner_session`), and application processes hold write-generation logins.
-    An existing role is never given LOGIN or a password here; demoting a legacy
-    login owner belongs to birth authority
-    (`base.cluster.authority.retire_legacy_logins`). The initdb bootstrap
+    An existing role is never given LOGIN or a password here. The initdb bootstrap
     superuser (the installing OS user) cannot be an owner that must lose LOGIN,
     so an identity equal to it refuses. When the database already exists,
     ownership is adopted so migrations acting as the owner own their objects.
@@ -107,11 +105,7 @@ def _adopt_database(
     *,
     expected_data_dir: Path | None = None,
 ) -> None:
-    """Make `owner` own database `target`. Idempotent — safe on every bring-up.
-
-    The legacy single shared `ava` role's REASSIGN OWNED migration is retired
-    (2026-09-20, batch b5): no live instance still needs it, and the fleet's
-    target databases carry no `ava`-owned objects (verified per host)."""
+    """Make `owner` own database `target`. Idempotent — safe on every bring-up."""
     from psycopg import sql as pgsql
 
     from base.db.pg_admin import connect

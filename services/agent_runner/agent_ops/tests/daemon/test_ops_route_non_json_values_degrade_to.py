@@ -135,7 +135,7 @@ async def test_ops_route_failed_status_is_still_http_200(
     status, body, _ = await daemon._ops_route(
         json.dumps(
             {
-                "kind": "spawn-launch-v2",
+                "kind": "spawn-launch",
                 "payload": {
                     "launch_attempt_id": "00000000-0000-0000-0000-000000000001",
                     "agent_id": 1,
@@ -242,7 +242,7 @@ async def test_ops_route_crash_becomes_failed_result(
     status, body, _ = await daemon._ops_route(
         json.dumps(
             {
-                "kind": "spawn-launch-v2",
+                "kind": "spawn-launch",
                 "payload": {
                     "launch_attempt_id": "00000000-0000-0000-0000-000000000001",
                     "agent_id": 1,
@@ -326,7 +326,7 @@ async def test_ops_route_semaphore_caps_concurrency(
     bodies = [
         json.dumps(
             {
-                "kind": "spawn-launch-v2",
+                "kind": "spawn-launch",
                 "payload": {
                     "launch_attempt_id": "00000000-0000-0000-0000-000000000001",
                     "agent_id": i,
@@ -475,7 +475,7 @@ def test_register_boot_failure_does_not_stop_the_daemon(
         raise RuntimeError("central postgres unreachable")
 
     monkeypatch.setattr("base.cluster.machines.register_self", unreachable)
-    machine_identity.set(name="wsl", role="agent-runner", host="10.0.0.2")
+    machine_identity.set(name="runner-a", role="agent-runner", host="10.0.0.2")
     boot.register_boot(
         database=ops_database,
         config=snapshot_process_config(),
@@ -556,7 +556,7 @@ async def test_ops_route_dedupes_by_envelope_key(
 
     body = json.dumps(
         {
-            "kind": "spawn-launch-v2",
+            "kind": "spawn-launch",
             "payload": {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
             "idempotency_key": "route-key",
         }
@@ -618,7 +618,7 @@ async def test_ops_route_without_key_does_not_dedupe(
 
     body = json.dumps(
         {
-            "kind": "spawn-launch-v2",
+            "kind": "spawn-launch",
             "payload": {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
         }
     ).encode()
@@ -670,7 +670,7 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The 2026-08-12 incident in one assertion. A blocking op on the Windows
+    """The 2026-08-12 incident in one assertion. A blocking op on a
     runner stopped returning; because the arm ran inline on the
     loop it took the whole daemon with it — 2 h 03 m with not one line logged, every
     controller stopped, and the stranded-pause self-heal that exists for exactly

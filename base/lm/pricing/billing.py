@@ -45,6 +45,9 @@ def vendor_of_model(model: str, *, catalog: ModelCatalog) -> str | None:
     for prefix, binding in catalog.bindings.items():
         if model.startswith(prefix):
             return binding.display_name.lower()
+    for prefix, provider in catalog.decision_providers.items():
+        if model.startswith(prefix):
+            return provider.display_name.lower()
     return None
 
 

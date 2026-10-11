@@ -20,7 +20,6 @@ from langgraph.types import Command, interrupt
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
-from base.agents.incarnation import exec_request_evidence
 from base.cluster.machine import MachineIdentity
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
@@ -338,34 +337,30 @@ def test_unattributable_exec_envelope_refuses_cold_prepare_with_disposition(
     )
 
 
-def test_unreadable_exec_envelope_past_the_bound_parks_cold_prepare(
+def test_old_unreadable_exec_envelope_still_refuses_cold_prepare(
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A zero-byte remnant older than the bound no longer fences cold prepare."""
+    """Age cannot prove unknown code execution settled; retain the envelope."""
     agent = _retired(db_conn, machine_identity=machine_identity)
     exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
-    bound = exec_request_evidence._unreadable_expiry_age_s()
     request = exec_dir / str(agent) / f"req-{uuid4().hex}.json"
     request.parent.mkdir(parents=True, exist_ok=True)
     request.write_text("")
-    stamp = request.stat().st_mtime - bound - 60
+    stamp = request.stat().st_mtime - 7 * 86400
     os.utime(request, (stamp, stamp))
     _hide_machine_processes(monkeypatch)
 
-    _prepare(db_conn, machine_identity=machine_identity)
+    with pytest.raises(RuntimeError, match="unsettled exec request"):
+        _prepare(db_conn, machine_identity=machine_identity)
 
+    assert request.exists() and not quarantine.exists()
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
         "idling",
     )
-    assert not request.exists()
-    (moved,) = quarantine.glob(f"*/{agent}/{request.name}")
-    receipt = json.loads((moved.parent / "receipt.json").read_text())
-    assert receipt["reason"] == "maintenance cold prepare"
-    assert receipt["entries"][0]["verdict"] == "disposable"
 
 
 def test_young_unreadable_exec_envelope_still_refuses_cold_prepare(

@@ -178,7 +178,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/components/cli/test_converge_lgtm_contract.py": (
         "contract",
-        "the rendered LGTM configs equal the repository's deploy/lgtm provisioning files (loki.yaml, datasources.yml) and the native Loki limits match the container rollback config",
+        "the rendered LGTM configs equal the repository's deploy/lgtm provisioning files (loki.yaml, datasources.yml) and the native Loki template ships the noise-reducing log level",
     ),
     "tests/components/cli/test_converge_redis_bridge.py": (
         "integration",

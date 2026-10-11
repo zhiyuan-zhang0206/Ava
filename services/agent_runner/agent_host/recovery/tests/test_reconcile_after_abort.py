@@ -3,8 +3,8 @@
 The same startup reconcile disposes rows left claimed after a hosted abort.
 Coverage includes ownership fences, idempotency and committed-row suppression.
 Committed IDs come from claim-window message writes; normal paths do not read
-settled checkpoints. Unresolved windows and threads without writes retain their
-explicit fallback behavior.
+settled checkpoints. Interrupted claims are consumed even without commit proof,
+so an abort cannot cause execution to replay.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ from services.agent_runner.agent_host.recovery.tests.checkpoint_inputs import (
     insert_checkpoint,
     insert_write,
 )
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import admit_recovery
+from services.agent_runner.agent_host.recovery.tests.helpers import admit as _admit
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -126,10 +126,8 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The abort settlement's reconcile finalizes the turn's rows at once:
-    committed to the flushed checkpoint -> done, fresh orphans -> pending for
-    the next claim, rows past the stale threshold -> dead-lettered."""
-    incarnation = await admit_recovery(
+    """Abort settlement consumes committed, orphaned and stale claims."""
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -148,13 +146,13 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
 
     assert row_statuses(db_conn, [committed, orphan, stale]) == {
         committed: "done",
-        orphan: "pending",
+        orphan: "done",
         stale: "done",
     }
     records = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
     assert len(records) == 1
     extra = records[0]["extra"]
-    assert (extra["committed"], extra["reset"], extra["dead_lettered"]) == (1, 1, 1)
+    assert (extra["committed"], extra["reset"], extra["dead_lettered"]) == (1, 0, 2)
 
 
 async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
@@ -169,7 +167,7 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
 ) -> None:
     """A kill after the abort leaves the rows already final: the boot pass
     (the same helper) is idempotent and silent on the second run."""
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -184,7 +182,7 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
     await settlement_mod.reconcile_inbounds_after_abort(
         aops_pool, saver, incarnation, resources=None, inputs=configured_policy().reconcile_inputs
     )
-    settled = {committed: "done", orphan: "pending"}
+    settled = {committed: "done", orphan: "done"}
     assert row_statuses(db_conn, [committed, orphan]) == settled
     logged = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
     await reconcile_claimed_inbounds_at_startup(
@@ -199,7 +197,7 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
     assert [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"] == logged
 
 
-async def test_next_claim_does_not_re_deliver_the_committed_row(
+async def test_next_claim_does_not_re_deliver_any_interrupted_row(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -208,10 +206,8 @@ async def test_next_claim_does_not_re_deliver_the_committed_row(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """At-least-once delivery still permits duplicates, but a row the
-    checkpoint committed is not re-delivered by the next claim cycle — only
-    the uncommitted orphan is."""
-    incarnation = await admit_recovery(
+    """Neither committed input nor an unproven orphan is retried after abort."""
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -228,8 +224,8 @@ async def test_next_claim_does_not_re_deliver_the_committed_row(
     )
     claimed = await claim_inbound_batch(aops_pool, agent, incarnation=incarnation, work=None)
 
-    assert [c.id for c in claimed] == [orphan]
-    assert row_statuses(db_conn, [committed]) == {committed: "done"}
+    assert claimed == []
+    assert row_statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
 
 
 async def _seed_counting_checkpoint(
@@ -300,7 +296,7 @@ async def test_no_claimed_rows_never_reads_the_checkpoint(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -331,7 +327,7 @@ async def test_only_stale_claims_skip_the_read_and_dead_letter(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -366,7 +362,7 @@ async def test_mixed_claims_fall_back_for_unproven_orphan(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -386,10 +382,10 @@ async def test_mixed_claims_fall_back_for_unproven_orphan(
     )
 
     assert saver.aget_calls == 1
-    assert row_statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
+    assert row_statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
     records = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
     extra = records[0]["extra"]
-    assert (extra["committed"], extra["reset"], extra["dead_lettered"]) == (1, 1, 0)
+    assert (extra["committed"], extra["reset"], extra["dead_lettered"]) == (1, 0, 1)
 
 
 async def test_committed_and_later_removed_is_finalized_not_reset(
@@ -402,7 +398,7 @@ async def test_committed_and_later_removed_is_finalized_not_reset(
     machine_identity: MachineIdentity,
 ) -> None:
     """The window proof finalizes a commit the list-presence check would reset."""
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -424,7 +420,7 @@ async def test_committed_and_later_removed_is_finalized_not_reset(
     assert row_statuses(db_conn, [committed]) == {committed: "done"}
 
 
-async def test_pending_write_without_successor_is_reset(
+async def test_pending_write_without_successor_is_consumed(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -433,8 +429,8 @@ async def test_pending_write_without_successor_is_reset(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A durable pending write alone is not a settled message commit."""
-    incarnation = await admit_recovery(
+    """A pending write cannot prove a commit or authorize execution replay."""
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -467,10 +463,10 @@ async def test_pending_write_without_successor_is_reset(
         inputs=configured_policy().reconcile_inputs,
     )
 
-    assert row_statuses(db_conn, [claimed]) == {claimed: "pending"}
+    assert row_statuses(db_conn, [claimed]) == {claimed: "done"}
 
 
-async def test_pending_write_with_unrelated_successor_is_reset(
+async def test_pending_write_with_unrelated_successor_is_consumed(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -479,8 +475,8 @@ async def test_pending_write_with_unrelated_successor_is_reset(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A child checkpoint that did not advance messages cannot commit a write."""
-    incarnation = await admit_recovery(
+    """An unrelated successor cannot authorize replay of an interrupted claim."""
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -513,7 +509,7 @@ async def test_pending_write_with_unrelated_successor_is_reset(
         inputs=configured_policy().reconcile_inputs,
     )
 
-    assert row_statuses(db_conn, [claimed]) == {claimed: "pending"}
+    assert row_statuses(db_conn, [claimed]) == {claimed: "done"}
 
 
 async def test_unresolved_window_falls_back_to_the_full_read(
@@ -526,7 +522,7 @@ async def test_unresolved_window_falls_back_to_the_full_read(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -553,7 +549,7 @@ async def test_unresolved_window_falls_back_to_the_full_read(
     )
 
     assert saver.aget_calls == 1
-    assert row_statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
+    assert row_statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
 
 
 async def test_thread_without_messages_writes_falls_back_to_the_full_read(
@@ -566,7 +562,7 @@ async def test_thread_without_messages_writes_falls_back_to_the_full_read(
     machine_identity: MachineIdentity,
 ) -> None:
     """A materialized thread (no write rows) must not read as "nothing committed"."""
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -586,7 +582,7 @@ async def test_thread_without_messages_writes_falls_back_to_the_full_read(
     )
 
     assert saver.aget_calls == 1
-    assert row_statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
+    assert row_statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
 
 
 async def test_materialized_thread_with_only_pending_write_falls_back(
@@ -599,7 +595,7 @@ async def test_materialized_thread_with_only_pending_write_falls_back(
     machine_identity: MachineIdentity,
 ) -> None:
     """A pending write does not prove the thread uses settled message deltas."""
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -747,7 +743,7 @@ async def test_reclaimed_row_keeps_its_first_claim_window(
     machine_identity: MachineIdentity,
 ) -> None:
     """A new claimed_at must not hide a commit from an earlier claim."""
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,

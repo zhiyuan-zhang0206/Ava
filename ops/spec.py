@@ -25,9 +25,8 @@ Native Postgres, Redis, and PgBouncer have separate data-plane custody so they
 can remain available during an application-root transition. The macOS helper
 is root's platform parent, not an application service. Read-only extra checks
 live in the root diagnostic roster; they never acquire service ownership.
-``cli.commands._repo`` re-exports ``ServiceSpec`` / ``build_services`` /
-``services_for_capabilities`` as a cli-facing façade; the definitions live in
-``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``.
+The definitions live in ``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``;
+callers import them from there.
 """
 
 from __future__ import annotations
@@ -43,9 +42,7 @@ from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.host.system.probes import (
     browser_incapability,
-    browser_mcp_incapability,
     permissions_helper_incapability,
-    unix_sockets_available,
 )
 from base.log import logger
 from base.paths import ava_home
@@ -69,7 +66,7 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
     coupling it to the agent-plugin-registration plane would be cross-plane
     semantics. A plugin gates its own service (whether it starts) via an explicit
     settings field in ``ServiceSpec.gate`` — e.g. task-maintenance's
-    ``AVA_TASK_MAINTENANCE_ENABLED`` — which is deterministic at daemon-start and
+    Fleet ``task_maintenance_enabled`` — which is deterministic at daemon-start and
     unaffected by any per-agent config overlay. start / root / status all
     follow, since they derive from `build_services()`.
 
@@ -165,18 +162,15 @@ class PluginServiceError(RuntimeError):
 def _computer_mcp_gate_reason() -> str | None:
     """Why the computer-mcp service is gated out, or None when it should run.
 
-    Platform gates only: the daemon needs the permissions helper (the single
-    TCC grant-holder it executes through), the AF_UNIX transport its socket
-    protocol uses. There is no governance gate — per-agent permission
-    division is a prompt-level peer convention, not code-enforced (user ruling
-    2026-08-10).
+    Platform gate only: the daemon needs the permissions helper (the single
+    TCC grant-holder it executes through). There is no governance gate —
+    per-agent permission division is a prompt-level peer convention, not
+    code-enforced (user ruling 2026-08-10).
     """
     if not settings.services.permissions_helper_enabled:
         return "disabled (AVA_PERMISSIONS_HELPER_ENABLED off)"
     if permissions_helper_incapability() is not None:
         return permissions_helper_incapability()
-    if not unix_sockets_available():
-        return "no AF_UNIX sockets (computer-mcp's transport is POSIX-only)"
     return None
 
 
@@ -240,17 +234,9 @@ def _flag_gate_reason(session: str) -> str | None:
     return None
 
 
-def _browser_family_gate_reason(session: str) -> str | None:
+def _browser_family_gate_reason() -> str | None:
     if not settings.services.browser_enabled:
         return "disabled (AVA_BROWSER_ENABLED off)"
-    # Two services, two capability probes: browser-mcp needs a strict SUPERSET
-    # of what the headed browser needs (the same display / Chrome / npx prongs
-    # plus an AF_UNIX transport), so a host can legitimately run `browser` and
-    # not `browser-mcp` — which is exactly a Windows agent-runner. Sharing one
-    # probe put browser-mcp in that host's start roster with no skip
-    # annotation, and it failed every launch.
-    if session == "browser-mcp":
-        return browser_mcp_incapability()
     return browser_incapability()  # display / Chrome / npx, or None when capable
 
 
@@ -258,17 +244,7 @@ def _core_gate_reason(session: str, *, machine: MachineIdentity) -> str | None:
     """The session-name-keyed half of `_gate_reason` — every core service
     without its own plugin-registered ``gate``."""
     if session in ("browser", "browser-mcp"):
-        return _browser_family_gate_reason(session)
-    if session == "mcp-daemon" and not unix_sockets_available():
-        # Same transport story as browser-mcp: the daemon binds a Unix socket
-        # (ava/mcps/_daemon.py) and its healthcheck dials it, so without AF_UNIX
-        # the service can never start and the root would judge it dead every
-        # round and log a restart failure — a Windows agent-runner, exactly.
-        return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"
-    if session == "pty-sessions" and not unix_sockets_available():
-        # The service binds a Unix socket and forks ptys: a host without them
-        # (a Windows unit, which runs no shells) cannot start it.
-        return "no AF_UNIX sockets (pty-sessions' transport is POSIX-only)"
+        return _browser_family_gate_reason()
     if session == "computer-mcp":
         return _computer_mcp_gate_reason()
     if session in {"loki", "prometheus", "grafana"}:

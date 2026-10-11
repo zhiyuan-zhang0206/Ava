@@ -14,7 +14,6 @@ from base.agents import (
     MachinePaused,
     ResurrectAlreadyAlive,
     ResurrectBudgetExhausted,
-    ResurrectRefused,
 )
 from base.agents.incarnation.lifecycle_acceptance import (
     LIFECYCLE_RELEASE,
@@ -82,7 +81,6 @@ def _transition_terminated_to_unclaimed_idling(
     if trigger_inbound_id is not None:
         from base.agents.incarnation.lifecycle_acceptance import (
             FAILED_RESTART_FOR_CURRENT_TARGET,
-            SYSTEM_REAPED_CRASH_ROW,
         )
         from base.agents.recovery.breaker import RECOVERY_BREAKER_CLEAR
 
@@ -96,21 +94,18 @@ def _transition_terminated_to_unclaimed_idling(
                 "WHERE id = %s AND status = %s AND {} "
                 "AND pid IS NULL AND lifecycle_command_id IS NULL "
                 "AND NOT {} "
-                "AND (agents_meta.wake_suppressed_until IS NULL "
-                "     OR agents_meta.wake_suppressed_until < now()) "
                 "AND {} "
                 "AND EXISTS ("
                 "  SELECT 1 FROM inbound_messages m "
                 "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
                 "    AND m.status = 'pending' AND m.kind = %s "
-                "    AND (m.created_at > agents_meta.status_changed_at OR {}) "
+                "    AND m.created_at > agents_meta.status_changed_at "
                 "    AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0)"
                 ") RETURNING status_changed_at"
             ).format(
                 sql.SQL(_RESURRECTION_TARGET),
                 sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET),
-                sql.SQL(RECOVERY_BREAKER_CLEAR),
-                sql.SQL(SYSTEM_REAPED_CRASH_ROW),
+                sql.SQL("TRUE" if trigger_inbound_kind == "chat" else RECOVERY_BREAKER_CLEAR),
             ),
             (*base_params, trigger_inbound_id, trigger_inbound_kind),
         )
@@ -128,6 +123,13 @@ def _transition_terminated_to_unclaimed_idling(
         )
     transition_row = cur.fetchone()
     if transition_row is not None:
+        if trigger_inbound_kind == "chat":
+            cur.execute(
+                "UPDATE agents_meta SET permanent_reject_streak=0, "
+                "last_permanent_reject_reason=NULL, wake_suppressed_until=NULL, "
+                "wake_suppress_reason=NULL WHERE id=%s",
+                (agent_id,),
+            )
         return transition_row[0]
     cur.execute(
         "SELECT home.paused_at IS NOT NULL "
@@ -189,17 +191,9 @@ def _prepare_resurrect_attempt(
     prompt: str | None,
     trigger_inbound_id: int | None,
     trigger_inbound_kind: WakeTriggerKind | None,
-    billing_recovery: bool = False,
     local_machine: str,
 ) -> telemetry.Event:
-    """Commit resurrection and its optional prompt before waking the host.
-
-    `billing_recovery=True` (the versioned `resurrect-billing-v1` action, task
-    #3919) re-checks the billing-victim contract under the same row lock: a
-    row that is not a billing-class recovery-breaker halt is refused
-    (`ResurrectRefused`) — the batch entry only reinstates the recorded
-    billing cohort.
-    """
+    """Commit ordinary resurrection and its optional prompt before waking the host."""
     from base.agents.incarnation.exec_owner_recovery import recover_local_resources
     from base.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_resurrect
 
@@ -237,17 +231,6 @@ def _prepare_resurrect_attempt(
             resources=row[8],
             unowned_termination=unowned_termination,
         )
-        if billing_recovery:
-            from base.agents.recovery.breaker import (
-                HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
-                PERMANENT_REJECT_REASON_BILLING,
-            )
-
-            if (
-                row[2] < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
-                or row[3] != PERMANENT_REJECT_REASON_BILLING
-            ):
-                raise ResurrectRefused("not_billing_halted")
         if resurrected_by == "system":
             cur.execute(
                 "SELECT count(*) FROM inbound_messages "
@@ -300,7 +283,6 @@ def _prepare_resurrect_attempt(
             agent_id,
             resurrected_by,
             prompt,
-            billing_recovery=billing_recovery,
         )
         conn.commit()
         publish_agent_updated_sync(bus, agent_id)
@@ -313,13 +295,9 @@ def _stage_resurrect_event(
     agent_id: int,
     resurrected_by: str,
     prompt: str | None,
-    *,
-    billing_recovery: bool,
 ) -> telemetry.Event:
     """Stage the exact resurrection audit fact inside the owning transaction."""
     payload: dict[str, object] = {"prompt": prompt} if prompt else {}
-    if billing_recovery:
-        payload["via"] = "billing_recovery"
     event = prepare_event_log(
         event_type="resurrect",
         agent_id=agent_id,
@@ -341,28 +319,14 @@ def resurrect_agent(
     prompt: str | None = None,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
-    billing_recovery: bool = False,
     local_machine: str,
 ) -> int:
-    """Resume a terminated hosted incarnation and enqueue lifecycle plus optional chat.
+    """Resume a terminated hosted incarnation for explicit or exact new input.
 
-    Historical process/unknown runtimes and incomplete hosted identities require
-    explicit cutover reconciliation. Only the hosted lifecycle owner settles an
-    applied command; resurrection never infers its completion from process exit.
-
-    Pending-work callers name the exact post-termination inbound. Its ID and
-    the latest force-termination fence are checked under the metadata row lock,
-    and — for a row the system itself reaped after a crash
-    (`SYSTEM_REAPED_CRASH_ROW`) — work that predates the termination still
-    qualifies: a reaper death is not an operator's decision. The automatic
-    trigger additionally requires clear automatic wakes (no suppression window,
-    `RECOVERY_BREAKER_CLEAR`); explicit manual resurrection passes no trigger
-    and keeps its unconditional contract. The versioned billing batch-recovery
-    action (`billing_recovery=True`) refuses any non-billing-class halt
-    (`ResurrectRefused`) and marks the resurrect event payload with
-    `via='billing_recovery'`. The host resumes the existing checkpoint after
-    the transaction commits.
-    """
+    Home-machine admission and resource fences remain required. Pending triggers
+    must be newer than termination and above the force fence. A permanent provider
+    error blocks background triggers; new chat clears that halt as an explicit
+    attempt after the fix. Resurrection does not replay prior graph work."""
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
     if trigger_inbound_kind is not None:
@@ -375,7 +339,6 @@ def resurrect_agent(
         prompt=prompt,
         trigger_inbound_id=trigger_inbound_id,
         trigger_inbound_kind=trigger_inbound_kind,
-        billing_recovery=billing_recovery,
         local_machine=local_machine,
     )
     telemetry.emit_prepared(prepared_event)

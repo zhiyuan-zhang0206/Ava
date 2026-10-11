@@ -4,7 +4,6 @@ import logging
 import subprocess
 
 from base.cluster.machine import MachineIdentity
-from base.native_process.os_platform import CREATE_NO_WINDOW
 
 __all__ = ["refresh_gateway_checkout"]
 
@@ -30,7 +29,6 @@ def refresh_gateway_checkout(*, machine: MachineIdentity) -> None:
         before = subprocess.check_output(  # noqa: S603 — argv is a static literal
             ["git", "-C", str(cwd), "rev-parse", "HEAD"],
             text=True,
-            creationflags=CREATE_NO_WINDOW,
         ).strip()
         head = pull_main(machine=machine)
     except Exception as exc:

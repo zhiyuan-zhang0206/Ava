@@ -8,7 +8,7 @@ gone): a service that died uncleanly closed its masters. Hangup may end foregrou
 work, but ignored hangup and background jobs can outlive it.
 The sweep attempts closure only for the identities the ledger names, each verified by
 birth before any signal, through the one terminal closure, and reports the busy
-ones it closed so their owners are told (`ops/pty_close_notices.py`).
+ones it closed for local diagnostics.
 """
 
 from __future__ import annotations

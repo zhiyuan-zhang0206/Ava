@@ -29,7 +29,7 @@ def test_dispatch_idempotent_requires_daemon_pool() -> None:
     """Idempotency cannot run without its invocation's pool binding."""
     with pytest.raises(TypeError, match="pool"):
         inspect.signature(daemon._dispatch_idempotent).bind(
-            "spawn-launch-v2", {"agent_id": 1}, "key-4", active_ops={}, workers=set()
+            "spawn-launch", {"agent_id": 1}, "key-4", active_ops={}, workers=set()
         )
 
 
@@ -59,7 +59,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
         assert _db is ops_database()
         seen.append(probe_pool)
         return ClusterStatus(
-            machine_name="win",
+            machine_name="runner-a",
             serve_gateway=False,
             serve_agent_runner=True,
             paused=False,
@@ -82,7 +82,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
     )
 
     assert status == "completed"
-    assert result["machine_name"] == "win"
+    assert result["machine_name"] == "runner-a"
     assert seen == [pool]
 
 

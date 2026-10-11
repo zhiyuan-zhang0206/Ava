@@ -56,7 +56,6 @@ class HostPolicy:
     default_reader: Callable[[str, str], Any]
     clock_factory: Callable[[], Clock]
     handoff_notes: HandoffNotes
-    recovery_wake_enabled: Callable[[], bool]
     recrash_reap_enabled: Callable[[], bool]
     reconcile_inputs: ReconcileReadInputs
 

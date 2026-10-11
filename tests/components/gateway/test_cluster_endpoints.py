@@ -397,7 +397,7 @@ class TestStatusSnapshot:
         from base.deploy.state import host_deploy_state
 
         monkeypatch.setattr(start_serving, "run_dir", lambda: fake_flag.parent)
-        set_machine_identity(role="agent-runner", name="wsl")
+        set_machine_identity(role="agent-runner", name="runner-a")
         host_deploy_state.set_posture(database, "idle", machine=machine_identity.name())
         start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
         # unpaused
@@ -406,7 +406,7 @@ class TestStatusSnapshot:
             image=LoadedCommit(source_root=Path(__file__).parent, sha=None),
             local_machine=machine_identity,
         )
-        assert snap.machine_name == "wsl"
+        assert snap.machine_name == "runner-a"
         assert snap.serve_gateway is False
         assert snap.serve_agent_runner is True
         assert snap.paused is False
@@ -429,7 +429,7 @@ class TestStatusSnapshot:
     ) -> None:
         """status_snapshot threads the prod-source HEAD so the roster can compare
         it against the cluster pin."""
-        set_machine_identity(role="agent-runner", name="wsl")
+        set_machine_identity(role="agent-runner", name="runner-a")
         monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "abc1234")
         assert (
             cluster_status.status_snapshot(
@@ -454,7 +454,7 @@ class TestStatusSnapshot:
         own boot — distinct from head_sha (the checkout the pin verdict compares)
         so the roster can expose a node running stale code even when its checkout
         reads on-pin."""
-        set_machine_identity(role="agent-runner", name="wsl")
+        set_machine_identity(role="agent-runner", name="runner-a")
 
         def unexpected_process_read(_root: Path) -> str | None:
             raise AssertionError("snapshot must use its supplied image")
@@ -490,7 +490,7 @@ class TestStatusSnapshot:
         saw running_sha == head_sha for a node on days-old code. The snapshot
         answers from the process, so the stale commit survives the bookmark's
         advance and the divergence every drift renderer keys on is there."""
-        set_machine_identity(role="agent-runner", name="wsl")
+        set_machine_identity(role="agent-runner", name="runner-a")
         monkeypatch.setattr("base.deploy.git.running_sha.get", lambda: "n3wn3w0bbbb")
         monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "n3wn3w0bbbb")
 
@@ -559,10 +559,12 @@ class TestClusterEndpoints:
             lambda _db, name, home: marked.append((name, home)),  # pyright: ignore[reportUnknownArgumentType]
         )
         with TestClient(app) as client:
-            r = client.post("/api/cluster/stopping", params={"machine": "wsl", "home": "~/.ava"})
+            r = client.post(
+                "/api/cluster/stopping", params={"machine": "runner-a", "home": "~/.ava"}
+            )
         assert r.status_code == 200
-        assert r.json() == {"machine": "wsl"}
-        assert marked == [("wsl", "~/.ava")]
+        assert r.json() == {"machine": "runner-a"}
+        assert marked == [("runner-a", "~/.ava")]
 
 
 # ─── admin events query ──────────────────────────────────────────────────────

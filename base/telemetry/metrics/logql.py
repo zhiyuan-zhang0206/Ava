@@ -26,8 +26,8 @@ here instead — a lightweight contract rather than a grammar whitelist:
 
 It also owns the template-building vocabulary every metric definition
 (core panels and plugin ``metrics.py`` alike) writes its queries in:
-``EVENT_SELECTOR`` / ``EVENT_NAME_SELECTOR``, ``event_count`` and
-``CATEGORY_WITH_LEGACY_LOG``.
+``EVENT_SELECTOR`` / ``EVENT_NAME_SELECTOR``, ``event_count``,
+``CATEGORY_MATCH`` and ``CATEGORY_OR_LOG``.
 
 Imports stay one-directional (logql -> plugin_metrics): the
 exception class lives in the registry module and is referenced through the
@@ -53,10 +53,14 @@ EVENT_NAME_SELECTOR = f"{{{EVENT_STREAM_MATCHER}, event_name={{event_name}}}}"
 (2026-08-23 cutover), so it is matched inside the selector through the
 ``{event_name}`` placeholder."""
 
-CATEGORY_WITH_LEGACY_LOG = 'category=~"{category_re}|log"'
-"""Category filter that keeps the ``|log`` alternative for rows emitted before
-the 2026-08-05 category convention. ``{category_re}`` renders the category
-unquoted for the regex."""
+CATEGORY_MATCH = 'category=~"{category_re}"'
+"""Category filter for a metric scoped to one registered event: ``{category_re}``
+renders the event's declared category unquoted for the regex."""
+
+CATEGORY_OR_LOG = 'category=~"{category_re}|log"'
+"""Category filter for whole-stream health panels that count the declared
+category together with the ``log`` category (bare logger lines and the
+log-category warnings)."""
 
 
 def event_count(pipeline: str, window: str, matchers: str | None = None) -> str:

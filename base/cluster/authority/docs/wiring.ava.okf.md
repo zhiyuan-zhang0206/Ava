@@ -32,9 +32,7 @@ The generation's API tokens gate the HTTP API and `/ops`:
 ## Remote agent-runner units
 
 Bootstrap (`GET /api/bootstrap`) serves the credential-free endpoint and no
-login, and a runner strips any password an older gateway still serves
-(`base.host.env.bootstrap.fetch_bootstrap_config`). `unit` is the only path that
-carries a login to another home:
+login. `unit` is the only path that carries a login to another home:
 
 - **Issue** (gateway, `ava cluster db-authority issue-unit --machine M --home H
   --out FILE`): `issue_bundle` seals the ACTIVE generation's runner login, the
@@ -79,7 +77,6 @@ What a bundle carries and who shares it:
 
 - **Birth** (`cli/commands/_data_plane.complete_gateway_data_plane`, start
   intent `configured`): `ensure_groups` -> `ensure_monitor` ->
-  `retire_legacy_logins` ->
   `create_ledger` -> `ensure_pooler_admin` -> `mint_generation` -> pooler
   serving the pending pair -> a pooled `SELECT 1` as each login -> `activate`.
   A retry reconciles to the same generation 0.

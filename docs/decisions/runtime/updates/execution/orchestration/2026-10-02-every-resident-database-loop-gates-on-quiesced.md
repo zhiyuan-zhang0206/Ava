@@ -61,3 +61,6 @@ hand-written check, and nothing made the next loop remember it.
   pool when an event arrives inside the window; they are not loops and are not covered.
 
 Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](../../../../agents/graph/2026-10-03-delete-ava-pause.md).
+
+Forward: [decisions/2026-10-11-remove-starting-and-ready-maintenance-phases.md](../../../processes/shutdown/2026-10-11-remove-starting-and-ready-maintenance-phases.md)
+removes `in_stop_leg()`; the host dispatcher's turn scan now gates on `quiesced()`.

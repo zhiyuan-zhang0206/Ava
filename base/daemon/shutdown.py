@@ -1,14 +1,12 @@
 """Route service stop signals through cleanup, then leave without thread joins.
 
-Normal stop requests SIGTERM on POSIX and Ctrl-Break in each Windows
-service's verified private console. Both become KeyboardInterrupt, matching
-the daemon's existing asyncio.run()/finally cleanup. Normal stop waits for
-actual completion and reports an incomplete stop on timeout; only an explicit
-force request interrupts the remaining resources.
+Normal stop requests SIGTERM, which becomes KeyboardInterrupt, matching the
+daemon's existing asyncio.run()/finally cleanup. Normal stop waits for actual
+completion and reports an incomplete stop on timeout; only an explicit force
+request interrupts the remaining resources.
 
-POSIX launchers exec into the daemon before direct SIGTERM delivery. Windows
-delivery reaches the interpreter through its verified private console, whose
-recorded root may still be a launcher. SIGINT keeps Python's existing handler.
+Launchers exec into the daemon before direct SIGTERM delivery. SIGINT keeps
+Python's existing handler.
 
 Where present, the repeated-SIGTERM guard stays at each daemon's call site.
 The daemons with an explicit drain cancel and await remaining loop tasks so
@@ -102,22 +100,16 @@ def hard_exit(code: int) -> NoReturn:
 
 
 def install_graceful_shutdown(label: str) -> None:
-    """Route SIGTERM and Windows SIGBREAK into the daemon's cleanup path.
+    """Route SIGTERM into the daemon's cleanup path.
 
     Call once from a daemon's `main()`, before its loop starts. `label` names
     the daemon in the shutdown log line (e.g. ``"labeler"``).
 
     SIGINT is left on Python's default handler, which already raises
-    ``KeyboardInterrupt``. Windows Ctrl-Break arrives as SIGBREAK, which needs
-    an explicit handler to run the same cleanup instead of exiting abruptly.
+    ``KeyboardInterrupt``.
     """
 
     def _handler(signum: int, _frame: types.FrameType | None) -> None:
-        # `service=`, not `label=`: `base.log.process._message_to_params` treats an
-        # `extra["label"]` as an event alias, and a daemon name is no registered
-        # event — every stop logged "unregistered event_name='pg-backup'" (and
-        # its siblings) from inside the loguru handler, losing the row
-        # (task #3661 side fix).
         logger.info(
             "[{service}] received {sig}, shutting down",
             service=label,
@@ -126,5 +118,3 @@ def install_graceful_shutdown(label: str) -> None:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, _handler)
-    if sys.platform == "win32":
-        signal.signal(signal.SIGBREAK, _handler)

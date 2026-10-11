@@ -18,15 +18,10 @@ def log_llm_usage(
     decode_ms: float | None = None,
     priced_at: datetime | None = None,
     usage_kind: str = "agent",
-    cache_mechanism: str | None = None,
-    cache_scope: str | None = None,
 ) -> tuple[int, float] | None:
     """Log LangChain-standardized usage for one completed agent LLM call.
 
     `agent_id` is required accounting identity supplied by the completed turn.
-    `cache_mechanism` / `cache_scope` label how much of the provider's
-    cache_read field covers. Historical provenance values remain valid for
-    reading and replaying existing usage records.
     """
     if agent_id is None:
         raise ValueError("agent LLM usage requires an explicit agent id")
@@ -39,7 +34,5 @@ def log_llm_usage(
         priced_at=priced_at,
         usage_kind=usage_kind,
         for_agent_id=agent_id,
-        cache_mechanism=cache_mechanism,
-        cache_scope=cache_scope,
         stamp_message=True,
     )

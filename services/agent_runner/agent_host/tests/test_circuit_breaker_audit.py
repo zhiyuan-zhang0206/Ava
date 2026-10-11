@@ -75,7 +75,10 @@ async def test_the_breaker_open_event_is_recorded_in_audit_events(
         "WHERE agent_id = %s AND event_name = 'circuit_breaker'",
         (agent_id,),
     ).fetchall()
-    assert rows == [("system", "open", "context_overflow")]
+    assert set(rows) == {
+        ("system", "open", "context_overflow"),
+        ("system", "halt", "context_overflow"),
+    }
 
 
 async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_breaker(
@@ -126,7 +129,7 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
     circuit = update["circuit"]
     assert isinstance(circuit, CircuitState)
     assert circuit.open is True
-    assert reported == ["circuit_breaker"]
+    assert reported == ["circuit_breaker", "circuit_breaker"]
     count = db_conn.execute(
         "SELECT count(*) FROM audit_events WHERE agent_id = %s AND event_name = 'circuit_breaker'",
         (agent_id,),

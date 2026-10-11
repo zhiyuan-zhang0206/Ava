@@ -48,7 +48,7 @@ body:
     id: os
     attributes:
       label: OS
-      placeholder: e.g. macOS 26, Ubuntu 24.04, Windows 11
+      placeholder: e.g. macOS 26, Ubuntu 24.04
   - type: input
     id: model
     attributes:

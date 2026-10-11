@@ -2,8 +2,8 @@
 
 Everything lives under ``$AVA_HOME/run/``: the service's unix socket
 (``pty-sessions.sock``), its instance lock (``pty-sessions.lock``), its ledger
-(``pty-sessions.json``) and the close notices a crash has not delivered yet
-(``pty-close-notices.json``); transcripts stay at ``$AVA_HOME/logs/<name>.out.log``.
+(``pty-sessions.json``); transcripts stay at ``$AVA_HOME/logs/<name>.out.log``.
+Old ``pty-close-notices.json`` files are retained only for inspection.
 """
 
 from __future__ import annotations
@@ -81,19 +81,6 @@ def ledger_path() -> Path:
     from base.paths import run_dir
 
     return run_dir() / "pty-sessions.json"
-
-
-def close_notices_path() -> Path:
-    """Close notices a crash left undelivered (``run/pty-close-notices.json``).
-
-    The pty-sessions service stages the busy sessions its start-time sweep
-    closed here; the one-shot child (`ops/pty_close_notices`) writes them and
-    removes the file, and a child that cannot finish leaves it for the next
-    start to re-send.
-    """
-    from base.paths import run_dir
-
-    return run_dir() / "pty-close-notices.json"
 
 
 def transcript_path(name: str) -> Path:

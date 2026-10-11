@@ -18,7 +18,7 @@ interception; the event-pipeline sink stays in `base/log/process.py`.
 
 - **stderr**: human-readable colored format `_HUMAN_FORMAT` (`time level a=agent_id message`), aligned with terminal scrollback habits — **not logfmt**.
 - **File**: JSONL (`serialize=True` serializes the entire record as a single JSON line), rotated at 100MB / kept for 7 days (`_add_file_sink`). Without rotation `gateway.log` once grew to ~900MB.
-- **Unified event pipeline**: `_postgres_sink` derives each INFO+ record to an event and enqueues it into `base/telemetry` (bounded queue + drain thread). The emitter writes each batch to the JSONL mirror + OTLP export (unified schema: `ts / trace_id / span_id / agent_id / machine / cluster / process / category / event_name / level / source / target_agent_id / attributes`), with `trace_id`/`span_id` captured from the active OTel span at enqueue time (turn_span correlation). `event` value priority: `extra["event"]` → `extra["label"]` (backwards-compatible with `[{label}]` old style) → `"log"`. `payload` = extra minus dedicated columns + `msg` (original text); when `logger.opt(exception=True)` is used, automatically merges traceback / exception_type / exception_value into payload (with a guard to distinguish real exceptions from loguru's empty RecordException `NoneType: None`). `source` = `extra["source"]` (default `"system"`).
+- **Unified event pipeline**: `_event_sink` derives each INFO+ record to an event and enqueues it into `base/telemetry` (bounded queue + drain thread). The emitter writes each batch to the JSONL mirror + OTLP export (unified schema: `ts / trace_id / span_id / agent_id / machine / cluster / process / category / event_name / level / source / target_agent_id / attributes`), with `trace_id`/`span_id` captured from the active OTel span at enqueue time (turn_span correlation). `event` value priority: `extra["event"]` → `"log"` (`label=` is plain payload and never names an event). `payload` = extra minus dedicated columns + `msg` (original text); when `logger.opt(exception=True)` is used, automatically merges traceback / exception_type / exception_value into payload (with a guard to distinguish real exceptions from loguru's empty RecordException `NoneType: None`). `source` = `extra["source"]` (default `"system"`).
 
 ## Registration
 
@@ -34,8 +34,9 @@ interception; the event-pipeline sink stays in `base/log/process.py`.
 - **stderr opens first.** `init_gateway_process` and `init_cli_process` open
   it before importing `base.paths`, because that import builds Settings, and
   the build logs (a runner continuing on a stale bootstrap snapshot warns).
-  Importing the lightweight `base.log` dropped loguru's default handler, so a record
-  written before any sink exists is gone.
+  Fresh executable roots call `prepare_process_logging()` before configuration
+  to remove Loguru's default handler; an embedded caller keeps its own sinks.
+  After that fresh prelude, a record written before any sink exists is gone.
 
 ## Stdlib interception
 

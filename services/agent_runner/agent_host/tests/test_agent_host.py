@@ -197,10 +197,10 @@ class _FakePool:
 
 
 class _PendingScanCursor:
-    def __init__(self, rows: list[tuple[int, bool, bool]]) -> None:
+    def __init__(self, rows: list[tuple[int, bool]]) -> None:
         self._rows = rows
 
-    async def fetchall(self) -> list[tuple[int, bool, bool]]:
+    async def fetchall(self) -> list[tuple[int, bool]]:
         return self._rows
 
 
@@ -217,7 +217,7 @@ class _PendingScanConn:
 class _PendingScanPool:
     """One host backstop query with captured SQL and returned candidates."""
 
-    def __init__(self, rows: list[tuple[int, bool, bool]]) -> None:
+    def __init__(self, rows: list[tuple[int, bool]]) -> None:
         self.rows = rows
         self.sql = ""
         self.params: tuple[object, ...] = ()
@@ -498,7 +498,7 @@ class TestPendingInboundBackstop:
         """The hosted dispatcher scans only this machine's runnable rows. A
         fresh pending inbound wakes its agent; database timestamps identify backlog, while current turn progress must
         independently authorize cancellation."""
-        pool = _PendingScanPool([(17, True, False), (23, False, True)])
+        pool = _PendingScanPool([(17, True), (23, False)])
         host = _host(
             catalog=model_catalog,
             pool=pool,
@@ -510,26 +510,20 @@ class TestPendingInboundBackstop:
 
         candidates = await host.pending_inbound_wakes(180.0)
 
-        assert [(c.agent_id, c.stale, c.recovery) for c in candidates] == [
-            (17, True, False),
-            (23, False, True),
+        assert [(c.agent_id, c.stale) for c in candidates] == [
+            (17, True),
+            (23, False),
         ]
         assert pool.params == (
             180.0,
             180.0,
-            host._owner,
-            host._owner,
-            180.0,
-            180.0,
-            host._owner,
             "this-box",
+            host._owner,
         )
         assert "m.runtime_owner=%s" in pool.sql
-        assert "force.target_generation=m.runtime_generation" in pool.sql
-        assert "m.status = 'idling'" in pool.sql
-        assert "m.status = 'running'" in pool.sql
-        assert "m.machine = %s" in pool.sql
-        assert "pending.status = 'pending'" in pool.sql
+        assert "m.status IN ('idling','running')" in pool.sql
+        assert "m.machine=%s" in pool.sql
+        assert "pending.status='pending'" in pool.sql
 
     async def test_scan_uses_the_reserved_control_pool(
         self, *, model_catalog: ModelCatalog, database_gate: ProcessDbGate
@@ -540,7 +534,7 @@ class TestPendingInboundBackstop:
             def connection(self) -> object:
                 raise AssertionError("pending scan borrowed from the turn pool")
 
-        control_pool = _PendingScanPool([(17, True, False)])
+        control_pool = _PendingScanPool([(17, True)])
         host = _host(
             catalog=model_catalog,
             pool=cast(AsyncConnectionPool[Any], _ForbiddenTurnPool()),

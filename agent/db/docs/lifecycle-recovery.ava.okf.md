@@ -1,11 +1,11 @@
 ---
 type: doc
-title: Durable Lifecycle Recovery
-description: Exact incarnation targets, host settlement and durable successor observation.
+title: Lifecycle Settlement
+description: Original lifecycle settlement, admission fences and explicit new wakes.
 tags: []
 ---
 
-# Durable Lifecycle Recovery
+# Lifecycle Settlement
 
 ## Completion evidence
 
@@ -79,11 +79,15 @@ the successor; no OS launcher is involved.
 A queued wake keeps its original inbound identity. A changed home, paused
 machine or unsettled prior execution cannot be bypassed by retrying the wake.
 
-A corpse reap commits its own wake (task #4039): the terminating transaction
-also queues one `hosted_turn_recovery`-marked chat, and the service layer
-attempts the guarded resurrect right after — a crash death with no arriving
-work therefore still resumes near-field, with the delivery watchdog's
-terminated-owner retry as the backstop.
+A corpse reap records termination and diagnostics. It produces no recovery chat,
+resurrection request or retry job. The delivery watchdog does not resurrect
+terminated owners.
+
+An ordinary fresh chat may wake a terminated agent through the normal delivery
+path. A permanent provider rejection blocks background wakes immediately;
+explicit new chat or per-agent operator resurrection may retry after a fix.
+Native cancel and interrupted compact/restart attempts are not reconstructed
+from an old checkpoint. Unknown accepted operations stay held.
 
 ## Entry Points
 

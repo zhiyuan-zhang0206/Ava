@@ -2,7 +2,7 @@
 (ava/shell/background.py).
 
 The e2e tests run through a real pty-sessions service + real bash
-(`pty_service` fixture); POSIX-only, skip on Windows."""
+(`pty_service` fixture)."""
 
 import os
 import shlex
@@ -16,10 +16,8 @@ import pytest
 
 import ava
 from ava.shell import background
-from base.native_process.os_platform import is_windows
 
 pytestmark = [
-    pytest.mark.skipif(is_windows(), reason="PTY supervisor is POSIX-only"),
     pytest.mark.usefixtures("sdk_model_owner", "pty_service", "_isolated_agent"),
 ]
 

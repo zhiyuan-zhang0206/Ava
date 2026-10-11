@@ -80,11 +80,9 @@ def emit_error_event(
 def _circuit_reason(exc: FatalProviderError) -> str:
     """Map a permanent provider rejection to its circuit-breaker reason.
 
-    The one reason that matters for behaviour is `context_overflow` — the
-    self-rescuable case the forced-compact arm keys on. Every other rejection
-    (auth / billing / schema / ...) just stops heartbeat re-fires until a
-    real wake succeeds; they map to a stable label for the breaker event,
-    with a generic `permanent` fallback for anything unmapped."""
+    Reasons classify the required user action; every permanent rejection
+    suppresses background wakes until corrected.
+    """
     if exc.context_overflow:
         return CIRCUIT_REASON_CONTEXT_OVERFLOW
     status = exc.status
@@ -137,9 +135,8 @@ async def _record_permanent_reject_outcome(
 ) -> None:
     """Count one permanent-class rejection; at the halt threshold trip the breaker.
 
-    `base/agents/recovery/breaker.py` owns the semantics: two consecutive permanent
-    rejections with no successful turn between them halt every automatic
-    recovery path until a turn succeeds (task #3617, design #3610 section 12).
+    `base/agents/recovery/breaker.py` owns the semantics: one permanent rejection stops background wakes until fresh explicit input
+    permits another attempt (task #3617, design #3610 section 12).
     Every halted rejection re-runs the escalation — with automatic recovery
     halted, a further rejected turn was a real claimed inbound (a human or a
     delivery), and deserves one honest escalation; the state writes are
@@ -148,7 +145,6 @@ async def _record_permanent_reject_outcome(
     """
     from base.agents.recovery.breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
-        SUPPRESS_REASON_PERMANENT_REJECT,
         halt_automatic_recovery,
         record_permanent_reject_turn,
     )
@@ -212,7 +208,7 @@ async def _record_permanent_reject_outcome(
             provider=exc.provider,
             vendor=_model_vendor(ctx),
             status=exc.status,
-            reason=SUPPRESS_REASON_PERMANENT_REJECT,
+            reason=reason,
             occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
         )
     except Exception:
@@ -225,14 +221,13 @@ async def _record_permanent_reject_outcome(
         agent_id,
         f"{type(exc).__name__}: {exc} Automatic recovery is halted after "
         f"{streak} consecutive permanent provider rejections. Resolve the cause, "
-        "then revive the agent manually — automatic recovery stays off until a "
-        "turn succeeds.",
+        "then send a new message to try again.",
         error_class=exc.error_class,
         provider=exc.provider,
         status=exc.status,
         reason=reason,
         blocked=True,
-        recovery="Resolve the provider rejection, then resurrect the agent manually.",
+        recovery="Resolve the provider rejection, then send a new message.",
     )
 
 
@@ -306,39 +301,6 @@ async def _open_breaker(
     return state
 
 
-async def _report_blocked_failure(
-    ctx: AvaContext,
-    agent_id: int,
-    exc: FatalProviderError,
-    reason: str,
-    occurred_at: datetime | None,
-) -> None:
-    """Send the metadata-only blocked-provider report to the nearest alive ancestor."""
-    from agent.db import enqueue_fatal_provider_report_to_nearest_alive_ancestor
-
-    assert ctx.ops_pool is not None  # noqa: S101
-    assert exc.error_class is not None  # noqa: S101
-    try:
-        await enqueue_fatal_provider_report_to_nearest_alive_ancestor(
-            ctx.ops_pool,
-            agent_id,
-            db=ctx.require_db(),
-            bus=ctx.require_bus(),
-            error_class=exc.error_class,
-            provider=exc.provider,
-            vendor=_model_vendor(ctx),
-            status=exc.status,
-            reason=reason,
-            occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
-        )
-    except Exception as exc_report:
-        logger.warning(
-            "failed to enqueue fatal provider report to an ancestor: {exc!r}",
-            agent_id=agent_id,
-            exc=exc_report,
-        )
-
-
 async def _apply_provider_failure(
     input_update: dict[str, object],
     ctx: AvaContext,
@@ -349,13 +311,10 @@ async def _apply_provider_failure(
     *,
     occurred_at: datetime | None,
     emit_reports: bool,
-    blocked: bool,
 ) -> None:
     """Record a permanent rejection and open the heartbeat circuit breaker into `input_update`."""
     if emit_reports and ctx.ops_pool is not None and exc.error_class == "permanent":
-        # Runs before the already-open dedup below: two consecutive
-        # rejections with the SAME reason are exactly the halt-trip
-        # sequence, and the dedup would otherwise skip the second one.
+        # Persist the halt even when the checkpoint circuit was already open.
         await _record_permanent_reject_outcome(ctx, agent_id, exc, reason, occurred_at)
     if await _breaker_already_open(circuit_reader, reason):
         # The breaker is still open for the same reason from an earlier
@@ -373,8 +332,6 @@ async def _apply_provider_failure(
     input_update["circuit"] = await _open_breaker(
         ctx, agent_id, exc, reason, emit_reports=emit_reports
     )
-    if emit_reports and ctx.ops_pool is not None and blocked:
-        await _report_blocked_failure(ctx, agent_id, exc, reason, occurred_at)
 
 
 async def _handle_fatal_llm_error(
@@ -386,28 +343,12 @@ async def _handle_fatal_llm_error(
     occurred_at: datetime | None = None,
     emit_reports: bool = True,
 ) -> dict[str, object]:
-    """Fatal LLM turn abort: log + one Error event, return the fresh-run input.
+    """Abort the turn, report the error, and wait for new input.
 
-    The retry cap fired, or the provider permanently rejected the request
-    (402/401/403) — abort this turn but keep the agent alive. One Error event
-    to the frontend, traceback into the file sink, then re-invoke with a fresh
-    run: claim node idles for the next inbound so the user can see the error
-    and the agent can recover on a later user-directed wake once the cause
-    clears (e.g. balance topped up) without a manual revive.
-
-    A `FatalProviderError` additionally OPENS the heartbeat circuit breaker:
-    the next heartbeat nudge would re-fire the same doomed call (the 3962
-    incident — 80 heartbeat cycles against a permanent context-overflow 400).
-    The breaker state rides the fresh-run input (`circuit` channel); while it
-    is open the claim consumes heartbeat check-ins without routing to the
-    LLM, and for the `context_overflow` reason routes any wake into a forced
-    compaction instead. It closes on the first successful LLM call (llm_node).
-    A non-overflow permanent rejection additionally sends a metadata-only
-    report to the nearest alive immutable-SPAWN ancestor; it never replays the
-    rejected provider text or conversation history.
-
-    A retry after interrupted preparation sets ``emit_reports=False``: it
-    recomputes the state update without repeating best-effort notifications.
+    A permanent provider rejection also persists a halt for background wakes and
+    opens the checkpoint heartbeat circuit. A fresh explicit chat may retry after
+    the underlying cause is fixed; original code execution is not resumed.
+    ``emit_reports=False`` computes state without repeating notifications.
     """
     logger.opt(exception=True).error(
         "LLM turn aborted (retry cap exhausted or provider rejected) — "
@@ -423,9 +364,7 @@ async def _handle_fatal_llm_error(
     )
     reason = _circuit_reason(exc) if isinstance(exc, FatalProviderError) else None
     is_blocked_provider_failure = (
-        isinstance(exc, FatalProviderError)
-        and exc.error_class == "permanent"
-        and reason != CIRCUIT_REASON_CONTEXT_OVERFLOW
+        isinstance(exc, FatalProviderError) and exc.error_class == "permanent"
     )
     content = _abort_message(exc, blocked=is_blocked_provider_failure)
     if emit_reports:
@@ -456,7 +395,6 @@ async def _handle_fatal_llm_error(
             circuit_reader,
             occurred_at=occurred_at,
             emit_reports=emit_reports,
-            blocked=is_blocked_provider_failure,
         )
     return input_update
 

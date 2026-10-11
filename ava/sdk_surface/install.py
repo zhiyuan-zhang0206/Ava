@@ -47,7 +47,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from base.agents.messages.delivery_outbox import DeliverySenderConfig
 from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
@@ -83,7 +82,6 @@ class Installation:
     configs: Mapping[str, BaseModel] = field(default_factory=dict[str, BaseModel])
     catalog: ModelCatalog | None = None
     authority: ConfigAuthority | None = None
-    delivery_sender: DeliverySenderConfig | None = None
     clock_factory: Callable[[], Clock] | None = None
     producer: Callable[[], Any] | None = None
 
@@ -319,7 +317,6 @@ def install(
     *,
     catalog: ModelCatalog | None = None,
     authority: ConfigAuthority | None = None,
-    delivery_sender: DeliverySenderConfig | None = None,
     sampling: SamplingPolicyOwner | None = None,
     clock_factory: Callable[[], Clock] | None = None,
     producer: Callable[[], Any] | None = None,
@@ -335,8 +332,6 @@ def install(
         raise RuntimeError(
             "the SDK surface is already installed; uninstall() it before installing another registry"
         )
-    if delivery_sender is not None and delivery_sender.authority is not authority:
-        raise ValueError("delivery sender belongs to another configuration authority")
     from base.packages.plugins import config_registration, flags
 
     from . import metering, sdk_disable
@@ -394,8 +389,6 @@ def install(
         authority=authority,
         clock_factory=clock_factory,
         producer=producer,
-        delivery_sender=delivery_sender
-        or (DeliverySenderConfig(authority) if authority is not None else None),
     )
     setattr(ava_module(), _SLOT, installation)
     if sampling is None:

@@ -13,8 +13,6 @@ class MaintenancePhase(StrEnum):
     DRAINED = "drained"
     STOPPING = "stopping"
     STOPPED = "stopped"
-    STARTING = "starting"
-    READY = "ready"
 
 
 # From `drained` on the drain is certified: that transition required every
@@ -24,8 +22,6 @@ CERTIFIED_PHASES = frozenset(
         MaintenancePhase.DRAINED,
         MaintenancePhase.STOPPING,
         MaintenancePhase.STOPPED,
-        MaintenancePhase.STARTING,
-        MaintenancePhase.READY,
     }
 )
 

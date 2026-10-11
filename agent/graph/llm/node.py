@@ -27,8 +27,8 @@ pending row the claim node dispatches next pass.
 State type hint (`state: _state.AgentState`): static only; see `agent/graph/exec/node.py` — the
 graph build, not the annotation, decides which state class a node receives.
 Module layout (Task #1004 >800-line split): streaming consumption, the cancel
-race, chunk assembly + final-message validation, and the error taxonomy /
-consecutive-error tracking live in the sibling modules ``_stream.py`` /
+race, chunk assembly + final-message validation, and the error taxonomy
+live in the sibling modules ``_stream.py`` /
 ``_cancel.py`` / ``_chunk.py`` (all in this ``llm/`` package) plus the parent
 package's ``llm_errors.py``; this module keeps the node entry + turn dispatch
 (``llm_node``, ``_llm_node_impl``). ``_cancel`` imports ``LlmGoto`` from here,
@@ -60,7 +60,6 @@ from agent.graph.llm_errors import (
     FatalProviderError,
     LlmLedger,
     LLMRetryBudgetExceededError,
-    LLMStreamStallPairError,
 )
 from agent.graph.node_log import node_lifecycle
 from agent.graph.tool_calls import code_from_args
@@ -211,7 +210,6 @@ async def llm_node(
                 failed,
                 model=model,
                 agent_id=agent_id,
-                ledger=ledger,
                 catalog=runtime.context.require_catalog(),
                 read_lm=lambda field: runtime.context.require_agent().read("lm", field),
                 max_attempts_pin=runtime.context.require_agent().read(
@@ -229,16 +227,8 @@ async def llm_node(
             )
 
 
-def _enforce_retry_budget(
-    attempt: Attempt, agent_id: int, ledger: LlmLedger, *, read_lm: Callable[[str], Any]
-) -> None:
-    if (
-        attempt.elapsed_seconds() >= read_lm("llm_retry_max_total_seconds")
-        # The transient-retry budget is sized for seconds-scale
-        # backoffs; while a delayed stall sequence is active its own
-        # schedule (streak cap) owns the bound — see _retry.
-        and not ledger.stall_pair_streak_active(str(agent_id))
-    ):
+def _enforce_retry_budget(attempt: Attempt, *, read_lm: Callable[[str], Any]) -> None:
+    if attempt.elapsed_seconds() >= read_lm("llm_retry_max_total_seconds"):
         _log_llm_retry_duration(attempt, outcome="budget_exhausted")
         _raise_retry_budget_exhausted(attempt.number, read_lm=read_lm)
 
@@ -248,7 +238,7 @@ def _note_failed_attempt(
 ) -> None:
     """Mark the settled attempt as progress and record the retry budget left on `exc`."""
     runtime.context.turn_progress.mark(agent_id)
-    if isinstance(exc, Exception) and not isinstance(exc, LLMStreamStallPairError):
+    if isinstance(exc, Exception):
         remaining_seconds = (
             runtime.context.require_agent().read("lm", "llm_retry_max_total_seconds")
             - attempt.elapsed_seconds()
@@ -312,19 +302,11 @@ async def llm_attempt(
         try:
             _enforce_retry_budget(
                 attempt,
-                agent_id,
-                ledger,
                 read_lm=lambda field: runtime.context.require_agent().read("lm", field),
             )
             result = await _llm_node_impl(state, runtime, config, ledger)
         except BaseException as exc:
-            # A settled (failed) attempt is real activity: mark the turn clock
-            # now so the following retry sleep is the ONLY silence the hosted
-            # no-progress stall guard sees. The delayed stall schedule may
-            # sleep for up to `llm_stall_retry_max_interval_seconds` (default
-            # 1800s, jittered, under the guard's 2400s) — without this mark
-            # the silence would include the whole stalled attempt on top of
-            # the sleep and could cross the guard's bound.
+            # Report the failed attempt before returning to the bounded retry layer.
             _note_failed_attempt(exc, attempt, runtime, agent_id)
             logger.opt(exception=True).warning(
                 "turn ended in {duration_seconds:.2f}s ok=False — _llm_node_impl raised",
@@ -534,20 +516,6 @@ async def _llm_node_impl(
         goto = compacted.pop("goto")
         return Command[LlmGoto](update=compacted, goto=goto)
 
-    # Consecutive same-error retry cap: if the same LLMStreamError has occurred
-    # N times across retries, fail fast with FatalLLMStreamError instead of
-    # wasting another 30-480s retry cycle on a deterministic error.
-    ledger.check_consecutive_error_cap(
-        str(agent_id),
-        max_cap=ctx.require_agent().read("lm", "llm_retry_max_consecutive_same_error"),
-    )
-    # Stall-pair cap: a spent delayed stall-retry streak (default 4 pairs) ends
-    # the turn here as a fatal abort — the next attempt would only burn another
-    # stalled pair while the provider is still degraded.
-    ledger.check_stall_pair_cap(
-        str(agent_id), max_pairs=ctx.require_agent().read("lm", "llm_stall_retry_max_consecutive")
-    )
-
     # Streaming forwarding (chat / reasoning / code) is isolated in
     # RedisStreamHandler — process_chunk is called in the chunk loop; after
     # stream completion, finish() publishes LLMDone (frontend timeline reload
@@ -589,17 +557,9 @@ async def _llm_node_impl(
             catalog=ctx.require_catalog(),
         ),
         handler,
-        ledger,
     )
     if cancelled_cmd is not None:
         return cancelled_cmd
-
-    # Stream succeeded -- reset the consecutive-error tracker so a future
-    # transient error (different type) starts from 1, not accumulated. The
-    # stall-pair streak resets with it: a served request proves the provider
-    # recovered, so a later stall pair starts a fresh delayed schedule.
-    ledger.clear_consecutive_errors(str(agent_id))
-    ledger.reset_stall_pair_streak(str(agent_id))
 
     if not chunks:
         # LLM returned empty — extremely rare; return empty code per historical
@@ -612,7 +572,7 @@ async def _llm_node_impl(
     # printed separately from code
     text = final_msg.text  # langchain-normalized text extraction (handles str + list-of-blocks)
     if text:
-        logger.info("[{label}] {body}", label="text", body=text)
+        logger.info("[text] {body}", event="text", body=text)
     await _persist_last_active(ctx, agent_id, text)
     _finalize_turn_observability(
         ctx.event_publisher,
@@ -664,19 +624,19 @@ async def _llm_node_impl(
             # Distinct WARNING so these turns are countable and the UI symptom
             # maps to a log line.
             logger.warning(
-                "[{label}] {body}",
-                label="halt",
+                "[halt] {body}",
+                event="halt",
                 body="no tool_call and EMPTY text — empty turn, user sees no reply",
             )
         else:
-            logger.info("[{label}] {body}", label="halt", body="no tool_call (idle)")
+            logger.info("[halt] {body}", event="halt", body="no tool_call (idle)")
         return Command[LlmGoto](
             update={"messages": [final_msg], "halted": True, **cut_update},
             goto=AFTER_EXEC,
         )
     logger.info(
-        "[{label}] {body}",
-        label="code",
+        "[code] {body}",
+        event="code",
         body=code_from_args(final_msg.tool_calls[0]["args"], source="llm final_msg tool_call"),
     )
     # CodeStart + CodeDelta have already been incrementally published by

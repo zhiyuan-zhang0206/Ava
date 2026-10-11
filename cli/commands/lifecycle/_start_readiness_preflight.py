@@ -269,14 +269,10 @@ def _venv_findings(repo: Path, *, check_launcher: bool) -> list[str]:
 
 
 def _entrypoint_findings(binary: Path, *, label: str, fix: str) -> list[str]:
-    """Why `binary` would fail the coming start, or [] when it is usable.
-
-    Windows runs `.exe` files and has no exec bit to read; presence is the
-    whole check there.
-    """
+    """Why `binary` would fail the coming start, or [] when it is usable."""
     if not binary.is_file():
         return [f"{binary} is missing — {label} would fail after the stop; {fix}"]
-    if os.name != "nt" and not os.access(binary, os.X_OK):
+    if not os.access(binary, os.X_OK):
         return [f"{binary} is not executable — {label} would fail after the stop; {fix}"]
     return []
 
