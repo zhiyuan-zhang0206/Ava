@@ -61,6 +61,15 @@ async def close_hosted_turn(
         crashed=outcome.crashed,
         resources=resources,
     )
+    if outcome.failure_report is not None:
+        if settlement.stamp is not None and settlement.stamp.applied and settlement.settled:
+            report, outcome.failure_report = outcome.failure_report, None
+            await report()
+        else:
+            logger.error(
+                "turn Error withheld: its fatal cutoff or owner settlement is unproven",
+                agent_id=incarnation.agent_id,
+            )
     if outcome.aborted:
         await reconcile_inbounds_after_abort(
             pool, checkpointer, incarnation, resources=resources, inputs=reconcile_inputs
