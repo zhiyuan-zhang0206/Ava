@@ -99,7 +99,7 @@ context for compaction and to END for idle or lifecycle control. Routing uses
 - [[agent/graph/docs/context.ava.okf.md]] — per-turn dependency injection
 - [[agent/graph/docs/tool-calls.ava.okf.md]] — isolated code execution
 
-Agents are allocated through `POST /api/agents`; the gateway commits their row
+Agents are allocated through `POST /api/keyed/v1/agents`; the gateway commits their row
 and work, then the home runner wakes its agent host. No agent Python process is
 started directly.
 

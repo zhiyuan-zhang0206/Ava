@@ -30,6 +30,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -191,12 +192,14 @@ def execution_completed(items: list[dict[str, Any]], reply: str) -> bool:
 
 
 def check_scripted_agent(home: Path, _source: Path) -> Detail:
+    from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
     from tests.e2e.fakes.scenarios.message_flow import REPLY_TEXT
 
     with httpx.Client(base_url=f"http://127.0.0.1:{_ports(home)['gateway']}", timeout=30) as client:
         created = client.post(
-            "/api/agents",
+            "/api/keyed/v1/agents",
             json={"spawner": "user", "prompt": "Compute 1+2.", "prompt_source": "user"},
+            headers={"Idempotency-Key": uuid.uuid4().hex, SCOPE_HEADER: PRINCIPAL_SCOPE},
         )
         created.raise_for_status()
         agent = created.json()["id"]

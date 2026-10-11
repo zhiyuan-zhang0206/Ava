@@ -26,7 +26,6 @@ Owners:
 | Method and route | Retry policy | Effect / evidence |
 |---|---|---|
 | `PATCH /api/agents/{agent_id}` | natural | label patch — CAS update |
-| `POST /api/agents` | keyed | immutable creation identity commits with birth and first prompt; SDK ambiguous retry stays gated for older gateways |
 | `POST /api/alerts` | natural | Grafana Alertmanager webhook — upsert per (fingerprint, starts_at); a 503 exhausts Grafana retries and the alert is lost |
 | `POST /api/auth/login` | natural | login — repeats just mint a fresh cookie |
 | `POST /api/auth/logout` | natural | clear session cookie — idempotent |

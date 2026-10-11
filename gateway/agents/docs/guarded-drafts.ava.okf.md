@@ -26,12 +26,12 @@ creation. The existing DTO parsing rules remain intact. The handler renders a
 prompt and delegates to the existing birth/launch owner, rather than calling an
 LLM itself. Subsequent work in the created conversation may incur model costs.
 
-Guarded drafts and strict plain creation opt in to `agent_creation_snapshots`.
+Every keyed creation (guarded drafts, plain creation, the MCP tool and task
+assignment) records an `agent_creation_snapshots` row.
 The birth owner commits the snapshot with the agent, first chat inbound and audit facts, under
 the same creation advisory transaction lock. It retains original machine,
 config overlay, birth config, launch attempt UUID, first prompt IID, content and
-source. There is no target FK, TTL pruning or guessed historical backfill.
-A record with a creation key but missing required snapshot fails closed.
+source. There is no target FK, TTL pruning or historical backfill.
 Rollback leaves no birth, prompt or snapshot. Concurrent retries accept the
 winning birth without inserting another prompt.
 
@@ -44,10 +44,6 @@ with the original agent ID and no launch. Replays never revert operator config,
 rotate attempts or insert prompts. A response is historical acceptance, not
 proof that the conversation currently exists, is available or executed.
 
-Plain guarded creation separately retains its original birth
-through the same snapshot owner; its parsed request digest is unchanged. Legacy HTTP, MCP and
-task assignment continue using their existing creation namespace and digest.
-Their shared `find_creation` default still projects current placement/config/attempt from
-`agents_meta`; after explicit retry-launch it can return the replacement attempt.
-Those remaining compatibility boundaries remain tracked in #4473. They are not
-silently upgraded or backfilled by either guarded snapshot contract.
+Plain guarded creation, the MCP tool and task assignment retain their original
+birth through the same snapshot owner; each keeps its own request digest and
+operation namespace.

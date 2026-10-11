@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from base.cluster.machine import machine_name
-from gateway.agents.creation import CreationLaunchArguments, guarded_draft_key
+from gateway.agents.creation import guarded_draft_key
 from gateway.agents.router import create_and_launch_agent
 from ops.rpc_schemas import SpawnAgentRequest
 
@@ -49,10 +49,6 @@ async def guarded_draft_guide(
         prompt_source="user",
         label="ava-guide",
     )
-    identity: CreationLaunchArguments = {
-        "creation_key": key,
-        "creation_identity": body.model_dump(mode="json"),
-    }
     spawned = await create_and_launch_agent(
         body_obj,
         machine_name(),
@@ -61,6 +57,7 @@ async def guarded_draft_guide(
         request.app.state.bus,
         catalog=request.app.state.catalog,
         authority=request.app.state.config_authority,
-        **identity,
+        creation_key=key,
+        creation_identity=body.model_dump(mode="json"),
     )
     return GuideDraftResponse(agent_id=spawned.id)

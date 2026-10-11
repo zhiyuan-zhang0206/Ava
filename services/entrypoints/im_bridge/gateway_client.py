@@ -147,9 +147,13 @@ class GatewayClient:
         config: dict[str, object] | None,
         idempotency_key: str | None = None,
     ) -> int:
-        """POST /api/agents — create an agent, return its id. A named preset
+        """POST /api/keyed/v1/agents — create an agent, return its id. A named preset
         rides config_overlay["preset"]; the gateway folds it into config, the runner never sees it."""
-        from base.api_contracts.idempotency import validate_idempotency_key
+        from base.api_contracts.idempotency import (
+            PRINCIPAL_SCOPE,
+            SCOPE_HEADER,
+            validate_idempotency_key,
+        )
 
         key = (
             uuid.uuid4().hex
@@ -164,7 +168,9 @@ class GatewayClient:
         if overlay:
             payload["config"] = overlay
         resp = await client.post(
-            "/api/agents", headers={**self._headers(), "Idempotency-Key": key}, json=payload
+            "/api/keyed/v1/agents",
+            headers={**self._headers(), "Idempotency-Key": key, SCOPE_HEADER: PRINCIPAL_SCOPE},
+            json=payload,
         )
         if resp.status_code != 201:
             raise_http_failure(

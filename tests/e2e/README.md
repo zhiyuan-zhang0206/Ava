@@ -117,7 +117,7 @@ multi-chunk.
 | `lifecycle/test_self_terminate.py` | `lifecycle_terminate` | `ava.self.terminate` → status='terminated' + inbound source='self' |
 | `lifecycle/test_self_restart.py` | `lifecycle_restart` | `ava.self.restart` → restarter respawn → new PID + status back to idling |
 | `lifecycle/test_self_resurrect.py` | `lifecycle_resurrect` | after `terminate`, `POST /resurrect` → fresh process + 'resurrect' inbound |
-| `lifecycle/test_fork_identity.py` | `fork_identity` | `POST /api/agents` fork_from=source+prompt → forked agent (new id) first claim batch contains [fork marker, prompt], reply `FORK_OK` proves context contains both |
+| `lifecycle/test_fork_identity.py` | `fork_identity` | `POST /api/keyed/v1/agents` fork_from=source+prompt → forked agent (new id) first claim batch contains [fork marker, prompt], reply `FORK_OK` proves context contains both |
 | `flow/test_message_flow.py` | `message_flow` | **Panoramic Case 1 (#1018)** — one user message → reasoning + code tool call + real exec + reply; REST timeline fan-out (reasoning/code/output/chat), reply rendered in browser via SSE, zero unrecognized-marker alarms + zero `[timeline] unrecognized` console warnings |
 | `flow/test_compact_flow.py` | `compact_flow` | **Panoramic Case 2 (#1018)** — native compact history fixture (not public manual admission) → Compaction LLM (script turn) → clean wipe → `inbound_compact_request` envelope renders, NO unrecognized-marker alarm (#1017 regression), agent replies post-compact |
 | `flow/test_error_recovery.py` | `error_recovery` | **Panoramic Case 3 (#1018)** — LLM raises FatalProviderError (no retry) → SSE `error` event → `[error]` marker in browser (NOT the unrecognized alarm), aborted turn commits no agent_chat, next message recovers normally |

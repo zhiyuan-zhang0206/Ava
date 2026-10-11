@@ -30,7 +30,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home
-from gateway.agents.creation import CreationLaunchArguments, guarded_draft_key
+from gateway.agents.creation import guarded_draft_key
 from gateway.agents.router import create_and_launch_agent
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import receipts, session_control
@@ -464,10 +464,6 @@ async def guarded_draft_schedule(
         prompt_source="user",
         label="ava-schedule-writer",
     )
-    identity: CreationLaunchArguments = {
-        "creation_key": key,
-        "creation_identity": body.model_dump(mode="json"),
-    }
     spawned = await create_and_launch_agent(
         body_obj,
         machine_name(),
@@ -476,7 +472,8 @@ async def guarded_draft_schedule(
         request.app.state.bus,
         catalog=request.app.state.catalog,
         authority=request.app.state.config_authority,
-        **identity,
+        creation_key=key,
+        creation_identity=body.model_dump(mode="json"),
     )
     return ScheduleDraftResponse(agent_id=spawned.id)
 

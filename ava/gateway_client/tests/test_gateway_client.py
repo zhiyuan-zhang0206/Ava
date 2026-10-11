@@ -204,7 +204,7 @@ class TestPostRetry:
         mock_resp.status_code = 200
         mock_client.post.return_value = mock_resp
 
-        result = post("/api/agents", {"key": "val"})
+        result = post("/api/memory/search", {"key": "val"})
         assert result is mock_resp
         assert mock_client.post.call_count == 1
 
@@ -213,9 +213,8 @@ class TestPostRetry:
 
         mock_resp = MagicMock(spec=httpx.Response)
         mock_resp.status_code = 200
-        # First two fail, third succeeds. POST /api/agents is a
-        # NON_IDEMPOTENT spawn (read timeout must NOT retry — twin risk), so
-        # this retry test uses a read-only POST endpoint instead.
+        # First two fail, third succeeds; a read-only POST endpoint, so a read
+        # timeout is safe to retry.
         mock_client.post.side_effect = [
             httpx.ConnectError("refused"),
             httpx.ReadTimeout("timeout"),
@@ -234,7 +233,7 @@ class TestPostRetry:
         mock_client.post.side_effect = httpx.ConnectError("refused")
 
         with pytest.raises(GatewayUnavailable, match="after 3 retries"):
-            post("/api/agents")
+            post("/api/memory/search")
         assert mock_client.post.call_count == 3
 
     def test_http_4xx_not_retried(self, mock_client: MagicMock):
@@ -248,7 +247,7 @@ class TestPostRetry:
         mock_client.post.return_value = mock_resp
 
         # post returns the response, raise_from_response is called by the caller
-        result = post("/api/agents")
+        result = post("/api/memory/search")
         assert result is mock_resp
         assert mock_client.post.call_count == 1  # no retry
 

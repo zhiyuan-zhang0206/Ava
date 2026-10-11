@@ -22,6 +22,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from gateway.app import app
 from gateway.http.auth.cors import cors_allowed_origins
+from tests.fixtures.gateway_config import spawn_via_http
 from tests.fixtures.model_catalog import AddModels
 
 
@@ -257,7 +258,7 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
 class TestSpawn:
     def test_spawn_minimal_no_prompt_no_spawner(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={})
+            resp = spawn_via_http(client, {})
         assert resp.status_code == 201
         new_id = resp.json()["id"]
         row = _agent_row(db_conn, new_id)
@@ -268,7 +269,7 @@ class TestSpawn:
 
     def test_spawn_with_prompt_inserts_chat_inbound(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"prompt": "\u67e5 X", "prompt_source": "user"})
+            resp = spawn_via_http(client, {"prompt": "\u67e5 X", "prompt_source": "user"})
         new_id = resp.json()["id"]
         assert _inbound_rows(db_conn, new_id) == [("\u67e5 X", "chat", "user")]
 
@@ -276,7 +277,7 @@ class TestSpawn:
         """Long reports are delivered through the shared user-content schema."""
         prompt = "a" * 100_000
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"prompt": prompt, "prompt_source": "user"})
+            resp = spawn_via_http(client, {"prompt": prompt, "prompt_source": "user"})
         assert resp.status_code == 201
         new_id = resp.json()["id"]
         assert _inbound_rows(db_conn, new_id) == [(prompt, "chat", "user")]
@@ -284,7 +285,7 @@ class TestSpawn:
     def test_spawn_with_explicit_spawner(self, db_conn: psycopg.Connection) -> None:
         """spawner can be passed explicitly — e.g., when claude-code starts an ava agent, pass 'claude-code'."""
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"spawner": "claude-code"})
+            resp = spawn_via_http(client, {"spawner": "claude-code"})
         new_id = resp.json()["id"]
         row = _agent_row(db_conn, new_id)
         assert row is not None and row[1] == "claude-code"
@@ -304,7 +305,7 @@ class TestSpawn:
 
         monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"config": {"llm_model": model}})
+            resp = spawn_via_http(client, {"config": {"llm_model": model}})
         assert resp.status_code == 201, resp.text
         body = resp.json()
         assert body["config_normalized"] == {
@@ -318,7 +319,7 @@ class TestSpawn:
     def test_spawn_available_model_carries_no_receipt(self, db_conn: psycopg.Connection) -> None:
         """An available id is stored as sent — no rewrite, no receipt."""
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"config": {"llm_model": "deepseek-flash"}})
+            resp = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}})
         assert resp.status_code == 201, resp.text
         body = resp.json()
         assert body.get("config_normalized") is None
@@ -332,7 +333,7 @@ class TestSpawn:
         """fork_from given → gateway internally SELECT max(checkpoint_id) → spawn_agent
         with explicit fork_checkpoint. New agent gets full checkpoint chain."""
         with TestClient(app) as client:
-            source = client.post("/api/agents", json={}).json()["id"]
+            source = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 for ckpt, parent in [("cka", None), ("ckb", "cka"), ("ckc", "ckb")]:
                     cur.execute(
@@ -342,7 +343,7 @@ class TestSpawn:
                     )
             db_conn.commit()
 
-            resp = client.post("/api/agents", json={"fork_from": source})
+            resp = spawn_via_http(client, {"fork_from": source})
         new_id = resp.json()["id"]
         # agents row records fork_source_*
         row = _agent_row(db_conn, new_id)
@@ -364,8 +365,8 @@ class TestSpawn:
         """fork_from's source has no checkpoint → 409 + reason='fork_source_empty'
         (follows ForkSourceEmpty wire-encoded path, handler maps uniformly, SDK reconstructs from code)."""
         with TestClient(app) as client:
-            source = client.post("/api/agents", json={}).json()["id"]
-            resp = client.post("/api/agents", json={"fork_from": source})
+            source = spawn_via_http(client, {}).json()["id"]
+            resp = spawn_via_http(client, {"fork_from": source})
         assert resp.status_code == 409
         body = resp.json()
         assert body["reason"] == "fork_source_empty"
@@ -377,7 +378,7 @@ class TestSpawn:
     ) -> None:
         """Empty prompt → 422 (pydantic StringConstraints strip + min_length)."""
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"prompt": "   "})
+            resp = spawn_via_http(client, {"prompt": "   "})
         assert resp.status_code == 422
 
     def test_spawn_prompt_without_prompt_source_returns_422(
@@ -387,7 +388,7 @@ class TestSpawn:
         """prompt given but prompt_source missing → 422 (model_validator blocks).
         Prevents the anti-pattern of "caller forgot field silently attributed to user"."""
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"prompt": "\u67e5 X"})
+            resp = spawn_via_http(client, {"prompt": "\u67e5 X"})
         assert resp.status_code == 422
         # detail contains validator's Chinese-language prompt
         assert "prompt_source" in resp.text
@@ -408,11 +409,7 @@ def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
     monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _explode)
     allowed_origin = cors_allowed_origins()[0]
     with TestClient(app) as client:
-        resp = client.post(
-            "/api/agents",
-            json={},
-            headers={"Origin": allowed_origin},
-        )
+        resp = spawn_via_http(client, {}, headers={"Origin": allowed_origin})
     assert resp.status_code == 502
     assert resp.json()["reason"] == "agent_launch_failed"
     assert resp.json()["agent_id"] > 0
@@ -426,7 +423,7 @@ class TestTerminate:
         self, db_conn: psycopg.Connection
     ) -> None:
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
@@ -434,7 +431,7 @@ class TestTerminate:
 
     def test_terminate_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
@@ -464,7 +461,7 @@ class TestTerminate:
         """A force request durably fences the identity before reporting acceptance."""
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
@@ -482,7 +479,7 @@ class TestTerminate:
         """force=true passes source parameter through to audit inbound."""
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "source": "agent:42"},
@@ -498,7 +495,7 @@ class TestTerminate:
     ) -> None:
         """Repeated force records a fresh inbound fence without another status transition."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agents_meta SET status = 'terminated', pid = 424242 WHERE id = %s",
@@ -543,7 +540,7 @@ class TestAutoResurrect:
         """Sending chat message to a terminated agent → auto-resurrect triggers automatically,
         INSERT 'resurrect' lifecycle inbound."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _terminate_hosted(db_conn, agent_id)
             resp = client.post(
                 f"/api/agents/{agent_id}/messages",
@@ -558,7 +555,7 @@ class TestAutoResurrect:
     def test_chat_to_alive_agent_no_resurrect(self, db_conn: psycopg.Connection) -> None:
         """Sending chat to an alive agent → no resurrect inbound inserted."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/messages",
                 json={"content": "hello", "source": "user"},
@@ -574,7 +571,7 @@ class TestAutoResurrect:
     def test_chat_illegal_source_rejected_422(self, db_conn: psycopg.Connection) -> None:
         """source not in envelope allowlist → 422."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/messages",
                 json={"content": "hello", "source": "ui:web"},

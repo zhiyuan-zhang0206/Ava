@@ -6,7 +6,6 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 from base.config import settings
@@ -88,21 +87,10 @@ def test_lost_response_and_concurrency_replay_one_birth(
     assert all(response.json()["id"] == accepted.json()["id"] for response in responses)
     assert _count(db_conn) == 1
     key = principal_key(AuthPrincipal("cluster", "administrator"), "POST", PATH, "intent")
-    row = db_conn.execute("SELECT creation_key FROM agents_meta").fetchone()
+    row = db_conn.execute("SELECT creation_key FROM agent_creation_snapshots").fetchone()
     assert row is not None and row[0] == key
     assert client.post(PATH, json={**body, "prompt": "changed"}, headers=HEADERS).status_code == 409
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
-
-
-def test_original_path_remains_a_distinct_legacy_namespace(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-) -> None:
-    legacy = client.post("/api/agents", json={"machine": "local-test"}, headers=HEADERS)
-    guarded = client.post(PATH, json={"machine": "local-test"}, headers=HEADERS)
-    assert legacy.status_code == guarded.status_code == 201
-    assert legacy.json()["id"] != guarded.json()["id"]
-    assert _count(db_conn) == 2
 
 
 def test_revoked_credential_cannot_replay_guarded_receipt(
@@ -114,31 +102,6 @@ def test_revoked_credential_cannot_replay_guarded_receipt(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-guarded-secret")
     assert client.post(PATH, json={}, headers=HEADERS).status_code == 401
     assert _count(db_conn) == 1
-
-
-def test_older_routing_rejects_guarded_path_without_creating_an_agent(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-) -> None:
-    # Preserve real original routing/middleware/lifespan and omit only the new
-    # entry. This exercises actual route matching rather than mocking a 404.
-    older = FastAPI(
-        lifespan=app.router.lifespan_context,
-        middleware=app.user_middleware,
-    )
-    older.exception_handlers = app.exception_handlers.copy()
-    legacy_routes = APIRouter()
-    legacy_routes.routes = [
-        route for route in agent_router.router.routes if getattr(route, "path", None) != PATH
-    ]
-    older.include_router(legacy_routes)
-    with TestClient(older, headers={"Authorization": f"Bearer {SECRET}"}) as old:
-        assert old.post(PATH, json={}, headers=HEADERS).status_code in (404, 405)
-        assert _count(db_conn) == 0
-        assert old.post("/api/agents", json={"machine": "local-test"}).status_code == 201
-        assert _count(db_conn) == 1
-        assert old.post(PATH, json={}, headers=HEADERS).status_code in (404, 405)
-        assert _count(db_conn) == 1
 
 
 def test_preexisting_mcp_canonical_hash_replays_original_agent(
@@ -186,12 +149,12 @@ def test_preexisting_mcp_canonical_hash_replays_original_agent(
         assert _count(db_conn) == 1
 
 
-def test_default_helper_preserves_canonical_path_for_proxy_requests() -> None:
+def test_scoped_creation_key_binds_the_principal_and_the_operation_path() -> None:
     from starlette.requests import Request
 
     request = Request({"type": "http", "method": "POST", "path": "/mcp", "headers": []})
     principal = AuthPrincipal("mcp_client", "42")
     request.state.auth_principal = principal
-    assert scoped_creation_key(request, "prior") == principal_key(
-        principal, "POST", "/api/agents", "prior"
+    assert scoped_creation_key(request, "prior", operation_path=PATH) == principal_key(
+        principal, "POST", PATH, "prior"
     )

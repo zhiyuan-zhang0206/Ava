@@ -168,6 +168,7 @@ def test_creation_key_survives_caller_retry_without_automatic_ambiguous_retry() 
             "event-b",
         ]
         assert requests[0].content == requests[1].content
-        assert all("Idempotency-Scope" not in request.headers for request in requests)
+        assert all(request.url.path == "/api/keyed/v1/agents" for request in requests)
+        assert all(request.headers["Idempotency-Scope"] == "principal-v1" for request in requests)
 
     asyncio.run(scenario())

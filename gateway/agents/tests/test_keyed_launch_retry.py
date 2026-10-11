@@ -15,7 +15,7 @@ from gateway.agents import launch_retry
 from gateway.agents import router as birth_router
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 @pytest.fixture
@@ -42,8 +42,8 @@ def client(
 
 
 def birth(client: TestClient) -> tuple[int, str]:
-    result = client.post(
-        "/api/agents", json={"machine": "local-test", "prompt": "once", "prompt_source": "user"}
+    result = spawn_via_http(
+        client, {"machine": "local-test", "prompt": "once", "prompt_source": "user"}
     )
     assert result.status_code == 201, result.text
     agent_id = result.json()["id"]

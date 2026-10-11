@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from tests.fixtures.gateway_config import spawn_via_http
 
 # Every field of an `/api/agents` directory card; detail-only fields stay off it.
 _DIRECTORY_CARD_KEYS = frozenset(
@@ -43,8 +44,8 @@ class TestList:
         self, db_conn: psycopg.Connection
     ) -> None:
         with TestClient(app) as client:
-            a_id = client.post("/api/agents", json={}).json()["id"]
-            b_id = client.post("/api/agents", json={"spawner": f"agent:{a_id}"}).json()["id"]
+            a_id = spawn_via_http(client, {}).json()["id"]
+            b_id = spawn_via_http(client, {"spawner": f"agent:{a_id}"}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (b_id,))
             db_conn.commit()
@@ -72,8 +73,8 @@ class TestList:
     ) -> None:
         """History is explicit; the default contains all nonterminated states."""
         with TestClient(app) as client:
-            live_id = client.post("/api/agents", json={}).json()["id"]
-            terminated_id = client.post("/api/agents", json={}).json()["id"]
+            live_id = spawn_via_http(client, {}).json()["id"]
+            terminated_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agents_meta SET status = 'terminated' WHERE id = %s",
@@ -103,7 +104,7 @@ class TestList:
     def test_directory_cards_omit_detail_only_fields(self, db_conn: psycopg.Connection) -> None:
         """List consumers receive only the fields they actually render or parse."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             response = client.get("/api/agents")
             detail = client.get(f"/api/agents/{agent_id}")
 
@@ -121,7 +122,7 @@ class TestList:
 
     def test_directory_page_search_and_cursor(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            ids = [client.post("/api/agents", json={}).json()["id"] for _ in range(4)]
+            ids = [spawn_via_http(client, {}).json()["id"] for _ in range(4)]
             for agent_id in ids:
                 client.patch(f"/api/agents/{agent_id}", json={"label": "alpha worker"})
             client.patch(f"/api/agents/{ids[2]}", json={"label": "unrelated"})
@@ -165,7 +166,7 @@ class TestList:
     def test_get_agents_joins_thread_label(self, db_conn: psycopg.Connection) -> None:
         """label field fetched from agents JOIN — after PATCH write, GET should see it."""
         with TestClient(app) as client:
-            a_id = client.post("/api/agents", json={}).json()["id"]
+            a_id = spawn_via_http(client, {}).json()["id"]
             client.patch(f"/api/agents/{a_id}", json={"label": "\u6211\u7684 agent"})
             resp = client.get("/api/agents")
         assert resp.status_code == 200
@@ -174,7 +175,7 @@ class TestList:
 
     def test_get_single_agent_returns_label(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            a_id = client.post("/api/agents", json={}).json()["id"]
+            a_id = spawn_via_http(client, {}).json()["id"]
             client.patch(f"/api/agents/{a_id}", json={"label": "single-x"})
             resp = client.get(f"/api/agents/{a_id}")
         assert resp.status_code == 200
@@ -184,7 +185,7 @@ class TestList:
         """AgentRow.machine comes from agents_meta.machine — frontend sidebar uses it to display
         machine badge + fork picker default placement."""
         with TestClient(app) as client:
-            a_id = client.post("/api/agents", json={}).json()["id"]
+            a_id = spawn_via_http(client, {}).json()["id"]
             # manually change machine to simulate cross-machine deployment (default spawn_agent writes local machine_name())
             with db_conn.cursor() as cur:
                 cur.execute("UPDATE agents_meta SET machine = 'test-host' WHERE id = %s", (a_id,))
