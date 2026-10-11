@@ -28,7 +28,11 @@ HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
 
 @pytest.fixture
 def client(
-    monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any, *, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    monkeypatch: pytest.MonkeyPatch,
+    set_machine_identity: Any,
+    *,
+    machine_identity: MachineIdentity,
 ) -> Iterator[TestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
@@ -111,6 +115,7 @@ def test_revoked_credential_cannot_replay_guarded_receipt(
 
 
 def test_preexisting_mcp_canonical_hash_replays_original_agent(
+    gateway_data_plane: None,
     client: TestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,

@@ -33,6 +33,7 @@ pytestmark = pytest.mark.real_service_readiness_gate
 
 @pytest.mark.usefixtures("held")
 def test_start_measures_real_health_then_resumes_without_early_business_admission(
+    gateway_data_plane: None,
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     operator_database: Callable[[], Any],

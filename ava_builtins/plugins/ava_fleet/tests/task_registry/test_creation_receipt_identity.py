@@ -19,7 +19,7 @@ from tests.fixtures.pin_agent import pin_agent
 
 
 def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     actor, owner = _seed_agent(db_conn), _seed_agent(db_conn)
     pin_agent(actor)

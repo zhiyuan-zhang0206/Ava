@@ -20,7 +20,7 @@ from tests.fixtures.pin_agent import pin_agent
 
 @pytest.mark.parametrize("key", ["", "x" * 129, 23])
 def test_invalid_key_fails_without_receipt(
-    db_conn: psycopg.Connection, root_task_id: int, key: object
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, key: object
 ) -> None:
     _actor, _owner, tid = _setup(db_conn, root_task_id)
     with pytest.raises((ValueError, TypeError), match="idempotency key"):
@@ -30,7 +30,7 @@ def test_invalid_key_fails_without_receipt(
 
 
 def test_mutation_requires_key_and_established_actor(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     _actor, _owner, tid = _setup(db_conn, root_task_id)
     pin_agent(None)
@@ -45,7 +45,7 @@ def test_mutation_requires_key_and_established_actor(
 
 
 def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     actor, owner, tid = _setup(db_conn, root_task_id)
     task_registry.log(tid, "once", operation_key="native")
@@ -69,7 +69,7 @@ def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
 
 
 def test_lease_expiring_during_operation_lock_wait_cannot_write(
-    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor, owner, tid = _setup(db_conn, root_task_id)
     active, validated = Event(), Event()

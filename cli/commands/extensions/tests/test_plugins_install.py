@@ -55,6 +55,7 @@ def _make_plugin_repo(root: Path) -> str:
 
 
 def test_install_skill_records_and_surfaces(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
@@ -80,6 +81,7 @@ def test_install_skill_records_and_surfaces(
 
 
 def test_install_disabled_skill_hidden_from_scanner(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -97,6 +99,7 @@ def test_install_disabled_skill_hidden_from_scanner(
 
 
 def test_install_rejects_duplicate(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -172,6 +175,7 @@ def test_install_bare_mcp_package_signposts_mcp_install(
 
 
 def test_uninstall_removes_dir_and_entry(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -192,6 +196,7 @@ def test_uninstall_unknown_errors(unit_home: Path) -> None:
 
 
 def test_installed_lists_entries(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
@@ -213,6 +218,7 @@ def test_installed_lists_entries(
 
 
 def test_upgrade_refetches(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],

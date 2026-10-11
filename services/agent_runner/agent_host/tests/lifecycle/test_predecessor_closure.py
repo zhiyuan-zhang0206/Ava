@@ -152,6 +152,7 @@ def _warnings(records: list[dict[str, Any]]) -> list[str]:
 
 
 async def test_retired_row_is_a_recorded_loud_refusal(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
@@ -185,6 +186,7 @@ async def test_retired_row_is_a_recorded_loud_refusal(
 
 
 async def test_closed_form_is_admitted_exactly_once(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     model_catalog: ModelCatalog,
@@ -227,6 +229,7 @@ async def test_closed_form_is_admitted_exactly_once(
 
 
 async def test_closed_form_without_its_receipt_is_not_admissible(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     model_catalog: ModelCatalog,
@@ -290,6 +293,7 @@ def _resurrected(
 
 
 async def test_a_resurrected_row_never_readmitted_is_admitted_through_its_terminate_receipt(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     model_catalog: ModelCatalog,

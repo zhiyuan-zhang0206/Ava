@@ -296,7 +296,9 @@ def test_sync_redis_uses_pinned_connection_class() -> None:
 
 
 class TestPinnedIPv4ConnectionConnect:
-    def test_ipv4_literal_never_calls_getaddrinfo(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_ipv4_literal_never_calls_getaddrinfo(
+        self, monkeypatch: pytest.MonkeyPatch, redis_access: None
+    ) -> None:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.bind(("127.0.0.1", 0))
         server.listen(1)
@@ -379,6 +381,7 @@ def _make_client(**kwargs: Any) -> aredis.Redis:
     )
 
 
+@pytest.mark.usefixtures("redis_url")
 class TestTransportAwareAsyncConnection:
     """`is_connected` sees an asyncio transport that already died."""
 
@@ -407,6 +410,7 @@ class TestTransportAwareAsyncConnection:
         await client.aclose()
 
 
+@pytest.mark.usefixtures("redis_url")
 class TestDeadTransportRecovery:
     """End-to-end: a transport that died mid-flight no longer raises the
     TypeError and recovers (pool publish and pubsub read paths)."""

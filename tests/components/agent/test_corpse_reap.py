@@ -373,6 +373,7 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
 
 
 async def test_corpse_stamp_failure_keeps_its_traceback(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],

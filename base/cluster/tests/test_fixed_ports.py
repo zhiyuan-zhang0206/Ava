@@ -109,7 +109,7 @@ def test_settings_defaults_match_the_table() -> None:
         assert urlsplit(default).port == FIXED_PORTS[slot], field
 
 
-def test_the_session_holds_no_table_port_in_any_setting() -> None:
+def test_the_session_holds_no_table_port_in_any_setting(process_config: object) -> None:
     """The env block of `tests/fixtures/env_bootstrap.py` pins every setting that
     defaults to a table port to a kernel-assigned one. A setting added later with a
     table default, and not pinned there, fails here on any machine — with no

@@ -32,7 +32,11 @@ def _agent(db_conn: psycopg.Connection) -> int:
 
 
 def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
-    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate, machine_identity: MachineIdentity
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     import base.db
 
@@ -184,6 +188,7 @@ def test_unknown_digest_failure_propagates_to_service(
 
 
 def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbound(
+    redis_url: str,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,

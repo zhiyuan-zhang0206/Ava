@@ -38,7 +38,7 @@ def running_agent_id(db_conn: psycopg.Connection) -> int:
 
 
 @pytest.fixture
-def db_pool() -> Iterator[ConnectionPool]:
+def db_pool(db_url: str) -> Iterator[ConnectionPool]:
     with ConnectionPool(
         settings.data_plane.db_url,
         min_size=1,

@@ -37,6 +37,7 @@ async def _publish_inbound(agent_id: int, inbound_id: int = 42) -> None:
         r.close()
 
 
+@pytest.mark.usefixtures("redis_url")
 class TestRedisInboundListener:
     """RedisInboundListener basic behavior tests."""
 
@@ -241,6 +242,7 @@ class TestWaitOneBudgetAndCancel:
         assert any("did not complete within" in r["message"] for r in loguru_records)
         await asyncio.sleep(0)  # let the cancelled open task unwind before loop close
 
+    @pytest.mark.usefixtures("redis_url")
     async def test_wait_one_abandons_and_warns_when_consume_never_ticks(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -279,6 +281,7 @@ class TestWaitOneBudgetAndCancel:
         )
         await asyncio.sleep(0)  # let the cancelled consume task unwind before loop close
 
+    @pytest.mark.usefixtures("redis_url")
     async def test_wait_one_consume_task_not_leaked_on_caller_cancel(self) -> None:
         """Cancelling `wait_one` mid-consume must not leave an orphaned consumer on
         the shared pubsub — a leaked `get_message` would race the next wait's
@@ -322,6 +325,7 @@ class TestWakeHealth:
         finally:
             r.close()
 
+    @pytest.mark.usefixtures("redis_url")
     async def test_clean_idle_timeout_stays_healthy(
         self,
         loguru_records: list[dict],
@@ -341,6 +345,7 @@ class TestWakeHealth:
             await listener.close()
         assert not any("wake path degraded" in record["message"] for record in loguru_records)
 
+    @pytest.mark.usefixtures("redis_url")
     async def test_getdel_timeout_degrades_drops_and_recovers(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -392,6 +397,7 @@ class TestWakeHealth:
         )
         assert any("wake path recovered" in record["message"] for record in loguru_records)
 
+    @pytest.mark.usefixtures("redis_url")
     async def test_consume_abandon_degrades_and_drops_connection(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -504,6 +510,7 @@ def _make_scoped_user(user: str, channel_grant: str) -> None:
         r.close()
 
 
+@pytest.mark.usefixtures("redis_url")
 class TestAclScopedChannel:
     """The per-cluster ACL interaction — the dev-cluster NOPERM path."""
 
@@ -585,6 +592,7 @@ class TestAclScopedChannel:
         )
 
 
+@pytest.mark.usefixtures("redis_url")
 class TestWakeKeyBreadcrumb:
     """The durable wake-key breadcrumb (`base.cluster.wake_key`) — the
     publisher SETEXes it alongside every pub/sub wake; the listener GETDELs it
@@ -664,6 +672,7 @@ class TestWakeKeyBreadcrumb:
             await listener.close()
 
 
+@pytest.mark.usefixtures("redis_url")
 class TestDeadTransportSurvival:
     """The agent-2613 outage shape (2026-08-04): the pubsub connection's
     asyncio transport died mid-wait (connection_lost fired, redis-py not

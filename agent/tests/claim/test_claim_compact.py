@@ -81,6 +81,7 @@ async def _insert_inbound_kind_async(
 
 
 async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -126,6 +127,7 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
 
 
 async def test_claim_compact_summary_bumps_compact_version(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -167,6 +169,7 @@ async def test_claim_compact_summary_bumps_compact_version(
 
 
 async def test_claim_compact_request_calls_backend_llm(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -207,6 +210,7 @@ async def test_claim_compact_request_calls_backend_llm(
 
 
 async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -254,6 +258,7 @@ async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
 
 
 async def test_claim_two_compact_requests_second_replaces_first(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -303,6 +308,7 @@ async def test_claim_two_compact_requests_second_replaces_first(
 
 
 async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_replaced(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -351,6 +357,7 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
 
 
 async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -398,6 +405,7 @@ async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
 
 
 async def test_claim_compact_request_empty_conversation_consumed_as_noop(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -435,6 +443,7 @@ async def test_claim_compact_request_empty_conversation_consumed_as_noop(
 
 
 async def test_claim_compact_request_retries_then_raises_compaction_failed(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -486,6 +495,7 @@ async def test_claim_compact_request_retries_then_raises_compaction_failed(
 
 
 async def test_claim_compact_request_retries_then_succeeds(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,

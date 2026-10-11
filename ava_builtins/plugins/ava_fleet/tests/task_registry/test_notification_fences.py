@@ -79,7 +79,7 @@ def test_reassigned_task_refuses_delayed_home_wake(
 
 
 def test_assignment_deadline_has_inspectable_failure(
-    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor = _seed_agent(db_conn)
     pin_agent(actor)
@@ -106,7 +106,7 @@ def test_assignment_deadline_has_inspectable_failure(
 
 
 def test_reminder_policy_never_resurrects_terminated_owner(
-    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor = _seed_agent(db_conn)
     pin_agent(actor)

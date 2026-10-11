@@ -176,34 +176,15 @@ def _apply_e2e_seq_offset() -> None:
 @pytest.fixture(scope="package")
 def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[None]:
     """Layer e2e-specific process config on the suite's session Postgres +
-    Redis (provisioned by the autouse fixtures in tests/fixtures/provisioning.py). The DB/Redis
-    URLs are already in settings + os.environ (AVA_DB_URL / AVA_REDIS_URL), so the
-    gateway / agent subprocesses inherit them. This adds the e2e Redis channel
-    names, AVA_HOME, machine files, and the agents_id_seq PID offset.
+    Redis requested from tests/fixtures/provisioning.py. This package delivers
+    their URLs to settings and environment for gateway / agent subprocesses.
+    It adds the e2e channel names, AVA_HOME, machine files and the agents_id_seq offset.
 
-    **`scope="package"` is what makes the restore below honest, and it only works
-    because `tests/e2e/__init__.py` exists.** This fixture reassigns seven
-    process-global env vars, `AVA_HOME` and `AVA_GATEWAY_URL` among them, and puts them
-    back in its `finally`. Under `scope="session"` that `finally` fired at the end of
-    the *pytest session* — not when pytest left `tests/e2e/` — so every test collected
-    after this package in the same process ran with the e2e values still installed.
-    `tests/harness/test_home_isolation.py` always sorts after `tests/e2e/`, and it is the guard
-    that exists to notice exactly this class of leak; it failed on two of its four
-    assertions in every serial run, on `main`, for as long as the keyword said
-    `session`.
-
-    **The `__init__.py` is not decoration.** `_pytest.fixtures.get_scope_package`
-    walks the node's parents for a `Package` whose nodeid matches this fixture's and
-    **returns `node.session` when it finds none** — silently, no warning. pytest builds
-    a `Package` node only for a directory containing `__init__.py`; without one the
-    directory is a plain `Dir` and `scope="package"` is a synonym for
-    `scope="session"`. So the keyword alone is a no-op here: both changes landed
-    together, and `tests/harness/test_home_isolation.py` asserts both.
-
-    Why it was invisible: CI's backend job runs `--ignore=tests/e2e`, so the two files
-    never share a process there at all, and under `-n auto` they land in different
-    workers regardless. The leak could only ever be seen locally, where a reader had
-    every reason to write the red off as someone else's flake.
+    Package scope and tests/e2e/__init__.py make restoration happen when pytest
+    leaves this package. Without that file pytest silently falls back to session
+    scope, leaking this environment into later tests. The independent contracts
+    in tests/harness/test_home_isolation.py cover scope, env keys and the actual
+    post-package environment; the e2e CI command runs both in one serial worker.
 
     Anything that depends on this fixture must be package-scoped or narrower —
     `e2e_db` is (a session-scoped consumer raises `ScopeMismatch`, which is how pytest
@@ -216,12 +197,13 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     # and at teardown a failure must not skip the env restore below.
     with contextlib.suppress(Exception):
         sweep_stale_e2e_processes(receipt_path=_LOG_DIR / f"cleanup-{_E2E_SUFFIX}.jsonl")
-    _apply_e2e_seq_offset()
     # Every key assigned below, no exceptions — `tests/harness/test_home_isolation.py`'s
     # `test_the_e2e_fixture_restores_every_env_key_it_assigns` derives the assigned set
     # from this body by AST and fails if the tuple falls behind it, so a key added to
     # the setup without a line here cannot merge.
     _env_keys = (
+        "AVA_DB_URL",
+        "AVA_REDIS_URL",
         "AVA_CLUSTER_SECRET",
         "AVA_CONFIG_FETCH",
         "AVA_DB_GENERATION",
@@ -235,8 +217,19 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
         "AVA_MACHINE_NAME",
         "AVA_NODE_STALL_DUMP_SECONDS",
     )
-    prev_events = settings.data_plane.events_channel
+    previous = (
+        settings.data_plane.events_channel,
+        settings.data_plane.db_url,
+        settings.data_plane.redis_url,
+    )
     prev_env = {k: os.environ.get(k) for k in _env_keys}
+    settings.data_plane.db_url, settings.data_plane.redis_url = (
+        _provisioned_db,
+        _provisioned_redis,
+    )
+    os.environ["AVA_DB_URL"] = _provisioned_db
+    os.environ["AVA_REDIS_URL"] = _provisioned_redis
+    _apply_e2e_seq_offset()
 
     settings.data_plane.events_channel = f"ava:events:e2e:{_E2E_SUFFIX}"
     os.environ["AVA_EVENTS_CHANNEL"] = settings.data_plane.events_channel
@@ -312,17 +305,19 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     os.environ["AVA_DB_GENERATION"] = "0"
 
     env_lines = [
-        f"{key}={os.environ[key]}"
-        for key in sorted(cluster_scope_aliases())
-        if key in os.environ and key not in _health_port_keys
-    ]
-    env_lines += [
-        f"{key}={os.environ[key]}"
-        for key in (
-            "AVA_MACHINE_NAME",
-            "AVA_MACHINE_SERVE_AGENT_RUNNER",
-            "AVA_MACHINE_SERVE_GATEWAY",
-        )
+        *(
+            f"{key}={os.environ[key]}"
+            for key in sorted(cluster_scope_aliases())
+            if key in os.environ and key not in _health_port_keys
+        ),
+        *(
+            f"{key}={os.environ[key]}"
+            for key in (
+                "AVA_MACHINE_NAME",
+                "AVA_MACHINE_SERVE_AGENT_RUNNER",
+                "AVA_MACHINE_SERVE_GATEWAY",
+            )
+        ),
     ]
     (_AVA_HOME / ".env").write_text("\n".join(env_lines) + "\n")
     try:
@@ -335,7 +330,11 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
             sweep_stale_e2e_processes(
                 include_own=True, receipt_path=_LOG_DIR / f"cleanup-{_E2E_SUFFIX}.jsonl"
             )
-        settings.data_plane.events_channel = prev_events
+        (
+            settings.data_plane.events_channel,
+            settings.data_plane.db_url,
+            settings.data_plane.redis_url,
+        ) = previous
         forget_credentials()
         for k, v in prev_env.items():
             if v is None:
@@ -353,6 +352,11 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
                     shutil.copy2(log, _LOG_DIR / log.name)
         with contextlib.suppress(OSError):
             shutil.rmtree(_AVA_HOME)
+
+
+@pytest.fixture(autouse=True)
+def _e2e_data_plane(db_url: str, redis_url: str) -> None:
+    """Every e2e test uses the assembled native data plane, admitted per test."""
 
 
 @pytest.fixture(scope="package")

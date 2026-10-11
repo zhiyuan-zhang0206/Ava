@@ -92,7 +92,9 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     return make_sandbox(tmp_path, monkeypatch)
 
 
-def test_postgres_runs_the_archive_command_and_ships_a_closed_segment(sandbox: Sandbox) -> None:
+def test_postgres_runs_the_archive_command_and_ships_a_closed_segment(
+    sandbox: Sandbox, postgres_access: None
+) -> None:
     expected = archive.expected_archive(path_reader=lambda: settings.walg.walg_config_file)
     assert expected is not None
 
@@ -127,7 +129,9 @@ def test_postgres_runs_the_archive_command_and_ships_a_closed_segment(sandbox: S
         assert not any(secret in expected.command for secret in SECRETS)
 
 
-def test_a_failing_archive_command_is_visible_and_never_blocks_writes(sandbox: Sandbox) -> None:
+def test_a_failing_archive_command_is_visible_and_never_blocks_writes(
+    sandbox: Sandbox, postgres_access: None
+) -> None:
     sandbox.set_mode("fail")
 
     with archiving_postgres() as pg, pg.connect() as conn:

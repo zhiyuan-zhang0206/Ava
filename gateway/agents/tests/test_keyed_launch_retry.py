@@ -22,6 +22,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 @pytest.fixture
 def client(
+    gateway_data_plane: None,
     monkeypatch: pytest.MonkeyPatch,
     set_machine_identity: Callable[..., None],
     db_conn: psycopg.Connection[Any],

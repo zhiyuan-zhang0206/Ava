@@ -33,7 +33,7 @@ from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool]:
+def pool(db_url: str) -> Iterator[ConnectionPool]:
     with ConnectionPool[Connection](settings.data_plane.db_url, min_size=1, max_size=2) as pool:
         yield pool
 

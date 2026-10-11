@@ -342,7 +342,9 @@ def test_add_file_sink_tightens_permissions(tmp_path: Path) -> None:
 # keeps every other `logger.add(...)` call honest.
 
 
-def test_a_password_bearing_dsn_failure_via_logger_exception_never_leaks() -> None:
+def test_a_password_bearing_dsn_failure_via_logger_exception_never_leaks(
+    postgres_access: None,
+) -> None:
     """The second leak path the PR #3479 review confirmed independently of
     `RoleSecret`: `psycopg.connect(dsn)` against a password-bearing DSN, on
     connect failure, logged via `logger.exception(...)`. `connect()` itself

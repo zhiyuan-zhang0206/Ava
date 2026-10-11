@@ -74,6 +74,7 @@ def _mark_predecessor_idle(
 
 
 async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,

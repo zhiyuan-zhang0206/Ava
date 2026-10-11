@@ -82,6 +82,7 @@ def receipts(pool: ConnectionPool) -> list[tuple[Any, ...]]:
 
 
 async def test_new_install_accepts_atomically_and_worker_sends_frozen_target_buttons(
+    redis_url: str,
     pool: ConnectionPool,
     *,
     model_catalog: ModelCatalog,
@@ -120,6 +121,7 @@ async def test_new_install_accepts_atomically_and_worker_sends_frozen_target_but
 
 
 async def test_two_connections_reverse_commit_do_not_skip_late_lower_id(
+    redis_url: str,
     pool: ConnectionPool,
     *,
     model_catalog: ModelCatalog,
@@ -159,6 +161,7 @@ def cutover(pool: ConnectionPool) -> tuple[int, str]:
 
 
 async def test_first_initialization_retains_existing_history_only(
+    redis_url: str,
     pool: ConnectionPool,
     tmp_path: Path,
     *,
@@ -216,6 +219,7 @@ async def test_empty_history_initializes_at_floor_zero(pool: ConnectionPool) -> 
 
 
 async def test_filtered_decision_commits_without_owner_and_does_not_later_replay(
+    redis_url: str,
     pool: ConnectionPool,
     *,
     model_catalog: ModelCatalog,
@@ -249,6 +253,7 @@ async def test_filtered_decision_commits_without_owner_and_does_not_later_replay
 
 
 async def test_no_owner_holds_without_fake_receipt_then_accepts_when_available(
+    redis_url: str,
     pool: ConnectionPool,
     *,
     model_catalog: ModelCatalog,
@@ -280,6 +285,7 @@ async def test_no_owner_holds_without_fake_receipt_then_accepts_when_available(
 
 
 async def test_acceptance_rollback_then_lost_response_converge_without_inline_send(
+    redis_url: str,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -334,6 +340,7 @@ async def test_acceptance_rollback_then_lost_response_converge_without_inline_se
 
 
 async def test_concurrent_normal_acceptances_freeze_first_target_without_duplicate(
+    redis_url: str,
     pool: ConnectionPool,
     *,
     model_catalog: ModelCatalog,

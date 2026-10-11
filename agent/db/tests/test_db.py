@@ -174,6 +174,7 @@ class TestReconcileClaimedInbounds:
 
     async def test_committed_rows_become_done(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
         *,
@@ -211,6 +212,7 @@ class TestReconcileClaimedInbounds:
 
     async def test_orphan_rows_are_consumed_without_redelivery(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
         *,
@@ -248,6 +250,7 @@ class TestReconcileClaimedInbounds:
 
     async def test_mixed_claimed_rows_split_correctly(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
         *,
@@ -295,6 +298,7 @@ class TestReconcileClaimedInbounds:
 
     async def test_no_claimed_rows_is_noop(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
         *,
@@ -319,6 +323,7 @@ class TestReconcileClaimedInbounds:
 
     async def test_scope_limited_to_agent_id(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
         *,
@@ -362,6 +367,7 @@ class TestReconcileClaimedInbounds:
 
     async def test_stale_orphan_rows_dead_lettered_not_redelivered(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
         *,
@@ -402,6 +408,7 @@ class TestReconcileClaimedInbounds:
 
     async def test_fresh_orphan_rows_are_also_consumed(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
         *,
@@ -441,6 +448,7 @@ class TestReconcileClaimedInbounds:
 
     async def test_stale_uncommitted_row_dead_lettered_beside_committed(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
         *,

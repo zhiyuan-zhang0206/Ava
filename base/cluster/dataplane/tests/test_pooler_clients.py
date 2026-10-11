@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_lists_the_open_clients_and_leaves_out_the_console(
-    *, machine_identity: MachineIdentity
+    *, postgres_access: None, machine_identity: MachineIdentity
 ) -> None:
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
@@ -50,7 +50,7 @@ def test_lists_the_open_clients_and_leaves_out_the_console(
 
 
 def test_an_unreadable_console_raises_instead_of_reading_as_no_clients(
-    *, machine_identity: MachineIdentity
+    *, postgres_access: None, machine_identity: MachineIdentity
 ) -> None:
     with (
         postgres(machine_name=machine_identity.name) as pg_url,

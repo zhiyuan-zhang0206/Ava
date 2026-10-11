@@ -660,7 +660,7 @@ def test_report_verify_tool_error_names_the_error(
 
 
 def test_verify_reads_all_rows_from_the_real_table(
-    capsys: pytest.CaptureFixture[str], operator_database: Callable[[], Any]
+    db_url: str, capsys: pytest.CaptureFixture[str], operator_database: Callable[[], Any]
 ) -> None:
     """The sweep input is the DB table itself: every row including disabled /
     stopped ones, in id order."""

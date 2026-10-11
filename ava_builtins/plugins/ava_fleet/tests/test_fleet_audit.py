@@ -68,7 +68,7 @@ def _refuse(_conn: object, _event: Event) -> Event:
 
 
 def test_a_created_task_is_recorded_with_its_row(
-    db_conn: psycopg.Connection, agent_id: int, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, agent_id: int, root_task_id: int
 ) -> None:
     task = task_registry.create(
         "audited", "detail", parent=root_task_id, operation_key=str(uuid4())
@@ -95,7 +95,7 @@ def test_a_task_whose_audit_fact_cannot_be_recorded_is_not_created(
 
 
 def test_a_task_update_is_recorded_with_its_change(
-    db_conn: psycopg.Connection, agent_id: int, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, agent_id: int, root_task_id: int
 ) -> None:
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
 

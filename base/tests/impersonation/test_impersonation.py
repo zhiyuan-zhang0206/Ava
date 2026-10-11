@@ -112,6 +112,7 @@ def test_native_without_lease_does_not_contend_with_agent_writes(
 
 
 def test_external_identity_read_does_not_contend_with_lease_writes(
+    redis_url: str,
     db_conn: psycopg.Connection,
     short_lock_timeout: Database,
     *,
@@ -671,6 +672,7 @@ def test_plugin_journal_blocks_new_lease_until_checkpoint_receipt(
 
 
 def test_competing_requests_have_one_winner(
+    redis_url: str,
     db_conn: psycopg.Connection,
     *,
     config_authority: ConfigAuthority,
@@ -697,6 +699,7 @@ def test_competing_requests_have_one_winner(
 
 
 def test_attestation_and_same_machine_checks(
+    redis_url: str,
     db_conn: psycopg.Connection,
     database: Database,
     *,

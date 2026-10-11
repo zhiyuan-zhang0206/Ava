@@ -179,7 +179,9 @@ def _admin_console_url(pooled: str) -> str:
     return make_conninfo(pooled, user=POOLER_ADMIN, password=_SECRET, dbname="pgbouncer")
 
 
-def test_scram_client_auth_and_pooled_select(*, machine_identity: MachineIdentity) -> None:
+def test_scram_client_auth_and_pooled_select(
+    *, postgres_access: None, machine_identity: MachineIdentity
+) -> None:
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
         _pgbouncer_in_front(pg_url) as pooled,
@@ -189,7 +191,9 @@ def test_scram_client_auth_and_pooled_select(*, machine_identity: MachineIdentit
         assert row is not None and row[0] == 1
 
 
-def test_wrong_secret_is_rejected(*, machine_identity: MachineIdentity) -> None:
+def test_wrong_secret_is_rejected(
+    *, postgres_access: None, machine_identity: MachineIdentity
+) -> None:
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
         _pgbouncer_in_front(pg_url) as pooled,
@@ -199,7 +203,9 @@ def test_wrong_secret_is_rejected(*, machine_identity: MachineIdentity) -> None:
             psycopg.connect(bad, prepare_threshold=None, connect_timeout=5)
 
 
-def test_transaction_pooling_never_prepare(*, machine_identity: MachineIdentity) -> None:
+def test_transaction_pooling_never_prepare(
+    *, postgres_access: None, machine_identity: MachineIdentity
+) -> None:
     """The same query across many autocommit transactions (each may land on a
     different backend under default_pool_size=2) never errors with
     prepare_threshold=None — the property that makes transaction pooling safe
@@ -250,6 +256,7 @@ def _insert_agent(pg_url: str) -> int:
 
 
 def test_write_transaction_overrides_a_read_only_default_on_connect(
+    postgres_access: None,
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
@@ -275,6 +282,7 @@ def test_write_transaction_overrides_a_read_only_default_on_connect(
 
 
 def test_schedule_provision_overrides_a_read_only_default(
+    postgres_access: None,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     *,
@@ -335,7 +343,9 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
         assert row is None
 
 
-def test_session_touch_overrides_a_read_only_default(*, machine_identity: MachineIdentity) -> None:
+def test_session_touch_overrides_a_read_only_default(
+    *, postgres_access: None, machine_identity: MachineIdentity
+) -> None:
     """R3 Rule B session writes declare a raw pool borrow read-write first."""
     from gateway.http.auth.session_store import touch_session
 
@@ -369,7 +379,7 @@ def test_session_touch_overrides_a_read_only_default(*, machine_identity: Machin
 
 
 def test_async_write_transaction_overrides_a_read_only_default(
-    *, machine_identity: MachineIdentity
+    *, postgres_access: None, machine_identity: MachineIdentity
 ) -> None:
     """Rule C opens an explicit read-write transaction on an autocommit pool."""
     from base.db.transaction import async_write_transaction
@@ -399,6 +409,7 @@ def test_async_write_transaction_overrides_a_read_only_default(
 
 
 def test_plain_autocommit_write_still_fails_under_a_read_only_default(
+    postgres_access: None,
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
     *,
@@ -423,7 +434,7 @@ def test_plain_autocommit_write_still_fails_under_a_read_only_default(
 
 
 def test_pooler_isolates_one_clients_read_only_posture_from_another(
-    *, machine_identity: MachineIdentity
+    *, postgres_access: None, machine_identity: MachineIdentity
 ) -> None:
     """PgBouncer >= 1.26 keeps a client's `default_transaction_read_only` to itself.
 
@@ -456,7 +467,7 @@ def _statement_timeout(conn: psycopg.Connection) -> str:
 
 
 def test_connect_query_bounds_pooled_backends_at_birth(
-    *, machine_identity: MachineIdentity
+    *, postgres_access: None, machine_identity: MachineIdentity
 ) -> None:
     """A pooled backend is born with statement_timeout=60s via the connect_query,
     even for a client that never issues the SET itself — the pooler-side half of
@@ -472,6 +483,7 @@ def test_connect_query_bounds_pooled_backends_at_birth(
 
 
 def test_base_connect_applies_statement_timeout_on_pooled_dial(
+    postgres_access: None,
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
@@ -502,6 +514,7 @@ def test_base_connect_applies_statement_timeout_on_pooled_dial(
 
 
 def test_base_pool_applies_statement_timeout_on_pooled_dial(
+    postgres_access: None,
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
@@ -529,7 +542,7 @@ def test_base_pool_applies_statement_timeout_on_pooled_dial(
 
 
 def test_langgraph_saver_setup_and_roundtrip_through_pgbouncer(
-    *, machine_identity: MachineIdentity
+    *, postgres_access: None, machine_identity: MachineIdentity
 ) -> None:
     """PostgresSaver.setup() DDL + put/get run through the pooler in transaction
     mode — the flagged DDL-through-transaction-pooling risk. setup() is idempotent
@@ -553,7 +566,9 @@ def test_langgraph_saver_setup_and_roundtrip_through_pgbouncer(
         assert got.checkpoint["id"] == ckpt["id"]
 
 
-def test_admin_probe_reaches_the_bound_address_only(*, machine_identity: MachineIdentity) -> None:
+def test_admin_probe_reaches_the_bound_address_only(
+    *, postgres_access: None, machine_identity: MachineIdentity
+) -> None:
     """P4: the admin-console probe authenticates as the pooler admin and dials
     exactly the address it names — an address pgbouncer did not bind FAILS,
     while the bound one answers. (Public-bind verification itself reads the
@@ -613,6 +628,7 @@ def _poison_backend(pooled: str) -> None:
 
 
 def test_pooled_borrow_scrubs_a_poisoned_backend(
+    postgres_access: None,
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
@@ -713,6 +729,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
 
 
 def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
+    postgres_access: None,
     monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,

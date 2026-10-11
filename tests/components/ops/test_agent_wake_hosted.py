@@ -427,6 +427,7 @@ def test_operator_death_still_refuses_leftover_work(
 
 
 def test_suppressed_wakes_refuse_the_reaped_crash_trigger(
+    redis_url: str,
     db_conn: psycopg.Connection,
     *,
     config_authority: ConfigAuthority,
@@ -457,6 +458,7 @@ def test_suppressed_wakes_refuse_the_reaped_crash_trigger(
 
 
 def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
+    redis_url: str,
     db_conn: psycopg.Connection,
     *,
     config_authority: ConfigAuthority,
@@ -485,6 +487,7 @@ def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
 
 
 def test_reaped_crash_row_keeps_the_failed_restart_fence(
+    redis_url: str,
     db_conn: psycopg.Connection,
     *,
     config_authority: ConfigAuthority,

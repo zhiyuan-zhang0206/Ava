@@ -24,6 +24,7 @@ _INSERT_NODE = (
 
 
 def test_load_nodes_returns_every_node_ordered_by_depth_then_position(
+    db_url: str,
     database_gate: ProcessDbGate,
 ) -> None:
     db = Database.from_settings(gate=database_gate)
@@ -44,6 +45,7 @@ def test_load_nodes_returns_every_node_ordered_by_depth_then_position(
 
 
 def test_generation_costs_are_summed_per_chunk_job_and_per_grouping_check(
+    db_url: str,
     database_gate: ProcessDbGate,
 ) -> None:
     db = Database.from_settings(gate=database_gate)
@@ -81,7 +83,9 @@ def test_generation_costs_are_summed_per_chunk_job_and_per_grouping_check(
     assert checks["ck-1"].calls == 1 and checks["ck-1"].seconds == 2.0
 
 
-def test_a_node_names_the_job_and_the_check_that_wrote_it(database_gate: ProcessDbGate) -> None:
+def test_a_node_names_the_job_and_the_check_that_wrote_it(
+    db_url: str, database_gate: ProcessDbGate
+) -> None:
     db = Database.from_settings(gate=database_gate)
     with db.write_transaction() as conn:
         conn.execute(_INSERT_NODE, (AGENT_A + 10, 1, 0, 4, T0, T1, "leaf", None))

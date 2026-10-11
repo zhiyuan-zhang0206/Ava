@@ -30,7 +30,11 @@ def _create(client: TestClient) -> int:
     ],
 )
 def test_same_value_edit_preserves_version_timestamp_and_queue(
-    db_conn: psycopg.Connection, fields: dict[str, object], *, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    db_conn: psycopg.Connection,
+    fields: dict[str, object],
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
@@ -50,7 +54,11 @@ def test_same_value_edit_preserves_version_timestamp_and_queue(
 
 
 def test_concurrent_identical_edits_append_one_version(
-    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
@@ -71,6 +79,7 @@ def test_concurrent_identical_edits_append_one_version(
 
 
 def test_enqueue_failure_rolls_back_config_and_version(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -98,6 +107,7 @@ def test_enqueue_failure_rolls_back_config_and_version(
 
 
 def test_response_failure_leaves_committed_convergence_work(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -121,7 +131,12 @@ def test_response_failure_leaves_committed_convergence_work(
 
 @pytest.mark.parametrize("enabled,action", [(True, "start"), (False, "stop")])
 def test_repeated_enabled_choice_does_not_enqueue(
-    db_conn: psycopg.Connection, enabled: bool, action: str, *, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    db_conn: psycopg.Connection,
+    enabled: bool,
+    action: str,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
         sid = client.post(
@@ -134,7 +149,11 @@ def test_repeated_enabled_choice_does_not_enqueue(
 
 @pytest.mark.parametrize("status", ["completed", "error"])
 def test_explicit_start_preserves_terminal_rerun(
-    db_conn: psycopg.Connection, status: str, *, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    db_conn: psycopg.Connection,
+    status: str,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)

@@ -35,7 +35,9 @@ def _repo(tmp_path: Path) -> Path:
     return repo
 
 
-def test_converged_namespaces_load_real_task_instructions(tmp_path: Path, unit_home: Path) -> None:
+def test_converged_namespaces_load_real_task_instructions(
+    db_url: str, tmp_path: Path, unit_home: Path
+) -> None:
     repo = _repo(tmp_path)
     converge_skills(repo, unit_home)
 

@@ -43,6 +43,7 @@ def _breaker_ctx(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> 
 
 @pytest.mark.parametrize("overflow", [False, True])
 async def test_host_persists_provider_failure_before_releasing_turn(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     overflow: bool,

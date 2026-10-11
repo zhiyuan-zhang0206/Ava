@@ -35,7 +35,7 @@ _TASK_TITLE = count(1)
 
 
 @pytest.fixture
-def pool():
+def pool(db_url: str):
     p = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
     try:
         yield p
@@ -128,7 +128,10 @@ def _escalated_at(db: psycopg.Connection, tid: int) -> Any:
 
 
 def test_delegator_escalation_at_most_once_per_overdue_window(
-    pool: ConnectionPool, db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """Two sweeps inside one stalled window deliver one digest: the first
     stamps `escalated_at`, so the second re-selects the task and skips it.
@@ -170,7 +173,10 @@ def test_delegator_escalation_retries_after_delivery_failure(
 
 
 def test_delegator_escalation_rearms_after_owner_update(
-    pool: ConnectionPool, db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """Any update() clears the marker with the reminder counters; after the
     owner re-engages and a later window re-crosses the threshold, the delegator

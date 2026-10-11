@@ -112,6 +112,7 @@ def test_closure_restores_six_native_owners(
 
 @pytest.mark.parametrize("guard", ["consistent", "unowned", "terminated", "machine", "requested"])
 def test_closure_preserves_guarded_rows(
+    redis_url: str,
     db_conn: psycopg.Connection,
     guard: str,
     *,

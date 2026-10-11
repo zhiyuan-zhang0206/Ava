@@ -22,7 +22,11 @@ def _create(client: TestClient) -> int:
 
 
 def test_concurrent_restart_uses_one_desired_revision(
-    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
@@ -43,7 +47,7 @@ def test_concurrent_restart_uses_one_desired_revision(
 
 
 def test_delayed_restart_replay_cannot_undo_newer_stop(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
@@ -60,7 +64,7 @@ def test_delayed_restart_replay_cannot_undo_newer_stop(
 
 
 def test_edit_receipt_replays_original_result_and_conflicts_on_changed_payload(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
@@ -89,7 +93,11 @@ def test_edit_receipt_replays_original_result_and_conflicts_on_changed_payload(
     ],
 )
 def test_malformed_operation_identity_does_not_change_schedule(
-    db_conn: psycopg.Connection, headers: dict[str, str], *, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    db_conn: psycopg.Connection,
+    headers: dict[str, str],
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
@@ -100,7 +108,7 @@ def test_malformed_operation_identity_does_not_change_schedule(
 
 
 def test_new_restart_identity_is_a_new_deliberate_rerun(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)

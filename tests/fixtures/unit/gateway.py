@@ -12,6 +12,7 @@ from tests.fixtures.configuration import snapshot_process_config
 
 @pytest.fixture
 def gateway_unit(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,

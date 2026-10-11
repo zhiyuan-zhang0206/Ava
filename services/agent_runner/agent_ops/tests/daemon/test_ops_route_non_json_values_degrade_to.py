@@ -491,7 +491,7 @@ def test_register_boot_failure_does_not_stop_the_daemon(
 
 
 def test_register_boot_unstops_a_host_that_came_back(
-    machine_identity: MachineIdentity, *, ops_database: Callable[[], Database]
+    db_conn: None, machine_identity: MachineIdentity, *, ops_database: Callable[[], Database]
 ) -> None:
     """The bug this call fixes, end to end against the real tables.
 

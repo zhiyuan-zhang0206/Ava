@@ -54,6 +54,7 @@ class _TestClientTransport(httpx.BaseTransport):
 
 @pytest.fixture
 def gateway_client(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     gateway_config_owner: None,
     machine_identity: MachineIdentity,

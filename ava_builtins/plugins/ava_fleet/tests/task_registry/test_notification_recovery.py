@@ -55,6 +55,7 @@ def test_sdk_commit_survives_producer_loss(
 
 
 def test_gateway_enqueue_failure_rolls_back_assignment(
+    redis_url: str,
     db_conn: psycopg.Connection,
     root_task_id: int,
     monkeypatch: pytest.MonkeyPatch,
@@ -101,7 +102,7 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
 
 
 def test_aba_assignment_supersedes_old_directions(
-    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor = _seed_agent(db_conn)
     owner_a = _seed_agent(db_conn, status="terminated")

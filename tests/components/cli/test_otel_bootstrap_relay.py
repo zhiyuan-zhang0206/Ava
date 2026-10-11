@@ -27,6 +27,7 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 
 @pytest.mark.parametrize(("gateway_port", "local_port"), [(4318, 4319), (54318, 4318)])
 def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
+    gateway_data_plane: None,
     db_conn,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -70,10 +70,10 @@ class _BoomAsyncClient:
 
 
 class TestPublishBestEffortSync:
-    def test_returns_receiver_count_on_real_redis(self) -> None:
+    def test_returns_receiver_count_on_real_redis(self, event_bus: EventBus) -> None:
         """A successful publish returns the receiver count (0 with nobody subscribed)
         — an int, never None."""
-        n = _bus.publish_best_effort_sync("{}", context="test")
+        n = event_bus.publish_best_effort_sync("{}", context="test")
         assert n == 0
 
     def test_never_raises_and_debug_logs_on_transient(
@@ -133,8 +133,8 @@ class TestPublishBestEffortSync:
 
 
 class TestPublishBestEffortAsync:
-    async def test_returns_receiver_count_on_real_redis(self) -> None:
-        n = await _bus.publish_best_effort("{}", context="test")
+    async def test_returns_receiver_count_on_real_redis(self, event_bus: EventBus) -> None:
+        n = await event_bus.publish_best_effort("{}", context="test")
         assert n == 0
 
     async def test_never_raises_and_debug_logs_on_transient(
@@ -162,7 +162,7 @@ class TestPublishBestEffortAsync:
             for r in loguru_records
         )
 
-    async def test_reports_live_receiver_count(self) -> None:
+    async def test_reports_live_receiver_count(self, event_bus: EventBus) -> None:
         """With a real subscriber on the channel, the count is the number of
         receivers — the signal any 0-receiver guard relies on."""
         import redis.asyncio as aredis
@@ -173,7 +173,7 @@ class TestPublishBestEffortAsync:
         await pubsub.subscribe(channel)
         await pubsub.get_message(timeout=1.0)  # drain the subscribe confirmation
         try:
-            n = await _bus.publish_best_effort("{}", channel=channel, context="test")
+            n = await event_bus.publish_best_effort("{}", channel=channel, context="test")
             assert n == 1
         finally:
             await pubsub.unsubscribe(channel)  # pyright: ignore[reportUnknownMemberType]
@@ -181,13 +181,13 @@ class TestPublishBestEffortAsync:
             await client.aclose()
 
 
-def test_zero_receivers_distinguished_from_failure() -> None:
+def test_zero_receivers_distinguished_from_failure(event_bus: EventBus) -> None:
     """0 (delivered to nobody) and None (publish failed) are distinct return
     values — the contract callers that check receiver counts rely on. A real
     publish with no subscriber is 0, not None."""
     with redis.Redis.from_url(settings.data_plane.redis_url) as _r:  # pyright: ignore[reportUnknownMemberType]
         pass  # sanity: redis reachable
-    assert _bus.publish_best_effort_sync("{}", channel="ava:nobody") == 0
+    assert event_bus.publish_best_effort_sync("{}", channel="ava:nobody") == 0
 
 
 async def test_warning_cadence_is_shared_by_bus_publishers_and_isolated_across_buses(

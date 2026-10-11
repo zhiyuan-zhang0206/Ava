@@ -90,14 +90,16 @@ def _set_table_to(
 
 
 @pytest.fixture(autouse=True)
-def _reset_schema_migrations_state() -> Iterator[None]:
+def _reset_schema_migrations_state(db_url: str) -> Iterator[None]:
     """Rebuild schema_migrations to the canonical baselined state before/after each
     test. Rebuilds the table itself (not just TRUNCATE) so a cutover test that
     swapped it to the legacy shape cannot leak into the next test or module.
 
-    conftest's `db_conn` TRUNCATE list does not include schema_migrations (it is
+    The per-test TRUNCATE behind `db_url` does not include schema_migrations (it is
     not business data), so this module self-manages it — the same pattern the
-    pre-cutover suite used.
+    pre-cutover suite used. It requests the database URL, not a connection: an
+    open `db_conn` transaction that read the table would block this teardown's
+    DROP TABLE.
     """
 
     def _reseed(names: list[str]) -> None:

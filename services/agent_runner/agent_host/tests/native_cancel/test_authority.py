@@ -34,6 +34,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_force_observation_waits_for_actual_projection_continuation(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,

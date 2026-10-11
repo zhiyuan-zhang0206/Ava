@@ -26,7 +26,9 @@ from tests.fixtures.unit.sdk import sdk_metering as sdk_metering
 
 
 @pytest.fixture(autouse=True)
-def _core_durable_seams(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
+def _core_durable_seams(
+    db_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[None]:
     from services.entrypoints.im_bridge.tests import test_im_bridge_core
 
     monkeypatch.setenv("AVA_HOME", str(tmp_path))

@@ -24,7 +24,7 @@ from ava_builtins.plugins.ava_fleet.tests.test_task_registry import (
 from tests.fixtures.pin_agent import pin_agent
 
 
-def test_create_unique_title_no_conflict(db_conn, root_task_id: int):
+def test_create_unique_title_no_conflict(redis_url: str, db_conn, root_task_id: int):
     """Creating a task with a truly unique title succeeds."""
     agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     pin_agent(agent_id)
@@ -38,7 +38,7 @@ def test_create_unique_title_no_conflict(db_conn, root_task_id: int):
 
 
 def test_update_note_with_cancel_appends_to_results(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """note with status='cancelled' appends a timestamped line to results."""
     agent_id = _seed_agent(db_conn)
@@ -58,7 +58,7 @@ def test_update_note_with_cancel_appends_to_results(
 
 
 def test_update_note_with_done_appends_to_results(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """note works with any status, not just cancelled."""
     agent_id = _seed_agent(db_conn)
@@ -71,7 +71,7 @@ def test_update_note_with_done_appends_to_results(
 
 
 def test_update_note_standalone_no_status_change(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """note alone (no status change) works as a drop-in for log()."""
     agent_id = _seed_agent(db_conn)
@@ -85,7 +85,9 @@ def test_update_note_standalone_no_status_change(
     assert task_registry.get(task.id).status == "in_progress"
 
 
-def test_update_note_with_no_prior_results(db_conn: psycopg.Connection, root_task_id: int) -> None:
+def test_update_note_with_no_prior_results(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
     """When a task has no prior results, the note line is the only content."""
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
@@ -98,7 +100,7 @@ def test_update_note_with_no_prior_results(db_conn: psycopg.Connection, root_tas
 
 
 def test_update_note_with_results_overwrite_appends_after(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """When results is also set, the note is appended after the new results."""
     agent_id = _seed_agent(db_conn)
@@ -118,7 +120,9 @@ def test_update_note_with_results_overwrite_appends_after(
     assert lines[1].endswith("out of scope")
 
 
-def test_update_note_none_is_noop(db_conn: psycopg.Connection, root_task_id: int) -> None:
+def test_update_note_none_is_noop(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
     """note=None does nothing — no line appended."""
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
@@ -129,7 +133,9 @@ def test_update_note_none_is_noop(db_conn: psycopg.Connection, root_task_id: int
     assert results is None
 
 
-def test_log_delegates_to_update_note(db_conn: psycopg.Connection, root_task_id: int) -> None:
+def test_log_delegates_to_update_note(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
     """log() is a thin wrapper around update(note=...)."""
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
@@ -160,6 +166,7 @@ def test_update_root_task_is_rejected(db_conn: psycopg.Connection, root_task_id:
 
 @pytest.mark.parametrize("next_status", ["in_progress", "done", "cancelled"])
 def test_update_statuses_are_peer_open(
+    redis_url: str,
     db_conn: psycopg.Connection,
     root_task_id: int,
     next_status: str,
@@ -183,7 +190,7 @@ def test_update_statuses_are_peer_open(
 
 
 def test_zero_shim_update_status_open_is_rejected(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """The 'open' status is gone entirely (user ruling 2026-08-29): update()
     refuses it with the narrowed enum's error — no backward-compat shim."""
@@ -198,7 +205,7 @@ def test_zero_shim_update_status_open_is_rejected(
 
 
 def test_zero_shim_update_status_ongoing_is_rejected(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """The 'ongoing' status is gone entirely (user ruling 2026-09-15): update()
     refuses it with the three-value enum's error — no backward-compat shim."""
@@ -214,7 +221,7 @@ def test_zero_shim_update_status_ongoing_is_rejected(
 
 @pytest.mark.parametrize("removed_status", ["open", "ongoing"])
 def test_zero_shim_list_status_is_rejected(
-    db_conn: psycopg.Connection, root_task_id: int, removed_status: str
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, removed_status: str
 ) -> None:
     """list() refuses a removed status too — the read filter is the same enum
     ('open' went 2026-08-29, 'ongoing' went 2026-09-15)."""
@@ -237,7 +244,7 @@ def test_create_requires_parent(db_conn: psycopg.Connection, root_task_id: int) 
 
 
 def test_create_with_root_parent_anchors_to_root(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """A top-level task passes the system root task's id as its parent. The
     root itself is never made its own parent (it stays parent-less)."""
@@ -252,7 +259,9 @@ def test_create_with_root_parent_anchors_to_root(
     assert _parent_of(db_conn, root_task_id) is None
 
 
-def test_create_with_explicit_parent(db_conn: psycopg.Connection, root_task_id: int) -> None:
+def test_create_with_explicit_parent(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
     """A subtask passes the id of an existing task as its parent; the parent
     itself is top-level (parented by the system root)."""
     agent_id = _seed_agent(db_conn)
@@ -278,7 +287,7 @@ def test_create_rejects_missing_parent(db_conn: psycopg.Connection, root_task_id
 
 @pytest.mark.parametrize("closed_status", ["done", "cancelled"])
 def test_create_rejects_closed_parent(
-    db_conn: psycopg.Connection, closed_status: str, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, closed_status: str, root_task_id: int
 ) -> None:
     """A closed (done / cancelled) task must never gain children — creating a
     subtask under it is rejected instead of silently building the parent chain
@@ -306,7 +315,7 @@ def test_create_rejects_closed_parent(
         assert cur.fetchone()[0] == 0  # type: ignore[index]
 
 
-def test_create_rejects_parent_1_when_not_root(db_conn: psycopg.Connection) -> None:
+def test_create_rejects_parent_1_when_not_root(redis_url: str, db_conn: psycopg.Connection) -> None:
     """The documented root id (1) is enforced: on a deployment where task 1 is
     not the system root, create(parent=1) fails loudly instead of silently
     attaching a top-level task under a different parent."""
@@ -330,7 +339,9 @@ def test_create_rejects_parent_1_when_not_root(db_conn: psycopg.Connection) -> N
     assert task.parent_id == 2
 
 
-def test_update_reparents_under_new_parent(db_conn: psycopg.Connection, root_task_id: int) -> None:
+def test_update_reparents_under_new_parent(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
     parent = task_registry.create(
@@ -342,7 +353,9 @@ def test_update_reparents_under_new_parent(db_conn: psycopg.Connection, root_tas
     assert _persisted_parent(db_conn, child.id) == parent.id
 
 
-def test_update_parent_none_moves_to_root(db_conn: psycopg.Connection, root_task_id: int) -> None:
+def test_update_parent_none_moves_to_root(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
     parent = task_registry.create(
@@ -359,7 +372,9 @@ def test_update_parent_none_moves_to_root(db_conn: psycopg.Connection, root_task
     assert _persisted_parent(db_conn, child.id) == root_task_id
 
 
-def test_update_rejects_self_parent(db_conn: psycopg.Connection, root_task_id: int) -> None:
+def test_update_rejects_self_parent(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("self-parent", "d", parent=root_task_id, operation_key=str(uuid4()))
@@ -367,7 +382,9 @@ def test_update_rejects_self_parent(db_conn: psycopg.Connection, root_task_id: i
         task_registry.update(task.id, parent_id=task.id, operation_key=str(uuid4()))
 
 
-def test_update_rejects_missing_parent(db_conn: psycopg.Connection, root_task_id: int) -> None:
+def test_update_rejects_missing_parent(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
@@ -379,7 +396,7 @@ def test_update_rejects_missing_parent(db_conn: psycopg.Connection, root_task_id
 
 @pytest.mark.parametrize("closed_status", ["done", "cancelled"])
 def test_update_rejects_closed_parent(
-    db_conn: psycopg.Connection, closed_status: str, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, closed_status: str, root_task_id: int
 ) -> None:
     """Reparenting a task under a closed (done / cancelled) parent is rejected —
     a closed task never gains children, the same invariant as create() (task #1975)."""
@@ -405,7 +422,7 @@ def test_update_rejects_closed_parent(
 
 
 def test_create_serializes_against_concurrent_parent_close(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """TOCTOU guard (QA #993): create() locks the parent row FOR UPDATE, and the
     close path holds the same lock — so a concurrent close cannot commit between
@@ -441,7 +458,7 @@ def test_create_serializes_against_concurrent_parent_close(
 
 
 def test_update_reparent_serializes_against_concurrent_parent_close(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """The reparent path locks the parent row FOR UPDATE too (QA #993), so a
     concurrent close cannot land between the status read and the parent_id
@@ -478,7 +495,7 @@ def test_update_reparent_serializes_against_concurrent_parent_close(
 
 
 def test_update_rejects_cycle_under_own_descendant(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)
@@ -496,7 +513,7 @@ def test_update_rejects_cycle_under_own_descendant(
 
 
 def test_update_parent_alone_is_a_valid_update(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """A pure reparent (no other field) must not hit the nothing-to-update guard."""
     agent_id = _seed_agent(db_conn)
@@ -510,7 +527,7 @@ def test_update_parent_alone_is_a_valid_update(
 
 
 def test_sdk_task_timestamps_are_bare_cluster_zone(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """Issue #181: the SDK task object must not mix timestamp conventions.
 

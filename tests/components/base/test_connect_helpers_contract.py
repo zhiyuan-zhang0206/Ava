@@ -9,7 +9,7 @@ import psycopg
 from base.config import settings
 
 
-def test_the_migration_restores_the_column_where_the_baseline_has_it() -> None:
+def test_the_migration_restores_the_column_where_the_baseline_has_it(db_conn: None) -> None:
     """With the column dropped, the migration restores it (twice over: it is
     idempotent) with the shape and comment `db/schema.sql` gives a fresh database.
     Run inside one transaction, so the suite database is untouched."""

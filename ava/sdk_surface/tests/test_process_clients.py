@@ -13,7 +13,7 @@ from ava.sdk_surface.process_context import context_from_description, process_cl
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 
@@ -46,7 +46,10 @@ def test_default_sql_refuses_a_missing_resource_before_dial(
 
 
 def test_process_custom_database_is_independent_of_the_default(
-    monkeypatch: pytest.MonkeyPatch, config_boot: ConfigBoot, database_gate: ProcessDbGate
+    db_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    config_boot: ConfigBoot,
+    database_gate: ProcessDbGate,
 ) -> None:
     database = Database.from_settings(gate=database_gate)
     custom = process_clients(database=lambda: database, config=config_boot)
@@ -62,11 +65,11 @@ def test_process_custom_database_is_independent_of_the_default(
 
 
 def test_process_resources_resolve_after_overlay_and_again_after_close(
+    db_url: str,
+    redis_url: str,
     monkeypatch: pytest.MonkeyPatch,
     config_boot: ConfigBoot,
 ) -> None:
-    db_url = settings.data_plane.db_url
-    redis_url = settings.data_plane.redis_url
     config_boot.set_field("db_url", "")
     config_boot.set_field("redis_url", "")
     clients = process_clients(config=config_boot)

@@ -66,10 +66,15 @@ def _seed_agent(db: psycopg.Connection) -> int:
 
 
 @pytest.fixture(autouse=True)
-def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity):
+def _sdk_via_inprocess_gateway(
+    gateway_data_plane: None, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
+):
     """The notice SDK now goes through the unified gateway write API (R3 door
     ④): route the SDK's gateway client at the in-process app so notify /
-    edit_notice / dismiss_notice hit the real endpoints against the test DB."""
+    edit_notice / dismiss_notice hit the real endpoints against the test DB.
+
+    The assembled Gateway reads both data stores, so the fixture declares
+    `gateway_data_plane`."""
     from ava.gateway_client.transport import use_client
     from gateway.app import app
     from tests.fixtures.gateway_config import gateway_test_client
