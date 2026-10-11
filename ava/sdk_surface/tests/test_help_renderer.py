@@ -278,6 +278,40 @@ def test_class_child_expands_dataclass_fields() -> None:
     assert out.index("title: str") < out.index("url: str") < out.index("truncated: bool")
 
 
+def test_class_child_expands_namedtuple_fields_under_future_annotations() -> None:
+    """A NamedTuple turns string annotations into ForwardRefs; fields must still
+    render as plain `name: type`, not `ForwardRef('type')`."""
+    mod = _fake_module(
+        '''
+        """Module."""
+
+        from __future__ import annotations
+
+        from typing import NamedTuple
+
+        __all_for_ava__ = ["Pair"]
+
+        class Pair(NamedTuple):
+            """Two things."""
+            first: str
+            second: int | None
+        ''',
+        name="t_namedtuple_fields",
+    )
+    out = _render(mod)
+    assert "    first: str" in out
+    assert "    second: int | None" in out
+    assert "ForwardRef" not in out
+
+
+def test_shell_help_renders_background_run_fields() -> None:
+    """`run_background` returns a BackgroundRun; its fields must be visible in help."""
+    out = _render(ava.shell)
+    assert "class BackgroundRun" in out
+    assert "    session_id: int" in out
+    assert "    output_path: str" in out
+
+
 def test_class_child_expands_methods_with_signature() -> None:
     """A class child's public methods expand to `def name(sig): doc`, just like
     a free function does — not hidden behind a drill-in."""
