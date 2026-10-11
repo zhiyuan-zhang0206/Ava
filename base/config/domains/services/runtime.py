@@ -310,6 +310,45 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    memory_rerank_model: str = Field(
+        default="jev-1.13.0",
+        alias="AVA_MEMORY_RERANK_MODEL",
+        description=(
+            "Decision model that ranks memory search results. After vector search, the "
+            "gateway asks it one yes/no question per retrieved chunk ('is this excerpt "
+            "relevant to the query?') and orders results by the probability of yes. "
+            "A decision model only answers questions, so no text is generated. If it "
+            "fails, the search fails; there is no fallback to vector order."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    memory_rerank_candidates: int = Field(
+        default=50,
+        ge=1,
+        le=100,
+        alias="AVA_MEMORY_RERANK_CANDIDATES",
+        description=(
+            "How many notes vector search hands to the decision model per memory search "
+            "(each represented by its best-matching chunk). More candidates raise recall "
+            "of the ranking and its cost; a search asking for more results than this "
+            "ranks that many instead."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     memory_search_max_batch_rows: int = Field(
         default=65536,
         gt=0,

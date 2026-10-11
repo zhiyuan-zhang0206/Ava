@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from gateway.routers.tests.test_memory_search import _app_db as _app_db
-from gateway.routers.tests.test_memory_search import _legacy_extract_meta
 
 
 class TestMemoryGraph:
@@ -552,42 +551,3 @@ def test_primary_tag_falls_back_to_the_type_tag_when_it_is_all_there_is() -> Non
 
     assert _primary_tag(["type/user"]) == "type/user"
     assert _primary_tag([]) == ""
-
-
-def test_extract_meta_equivalent_to_legacy(tmp_path: Path) -> None:
-    """Description/tags extraction matches the old inline parser on the three
-    input classes it promised to handle: normal, no frontmatter, bad YAML."""
-    from gateway.routers.memory import _extract_meta
-
-    cases = {
-        "normal.md": (
-            "---\ntype: Memory\ndescription: A note about health\ntags: [type/user, health]\n"
-            "---\n\n# Health\n"
-        ),
-        "no_fm.md": "# Just a heading\n",
-        "bad_yaml.md": "---\ntags: [unclosed\n---\nb\n",
-        "unterminated.md": "---\ntitle: X\n",
-        "non_dict.md": "---\n- a\n- list\n---\nb\n",
-        "blank_desc.md": "---\ndescription: \ntags: [a]\n---\nb\n",
-    }
-    for name, body in cases.items():
-        p = tmp_path / name
-        p.write_text(body, encoding="utf-8")
-        assert _extract_meta(p) == _legacy_extract_meta(p), name
-
-
-def test_extract_meta_unreadable_returns_empty(tmp_path: Path) -> None:
-    from gateway.routers.memory import _extract_meta
-
-    assert _extract_meta(tmp_path / "missing.md") == ("", [])
-    assert _extract_meta(tmp_path) == ("", [])  # a directory — read_text raises IsADirectoryError
-
-
-def test_extract_meta_coerces_non_string_description(tmp_path: Path) -> None:
-    """`description: 123` used to 500 the graph endpoint (pydantic str field);
-    it now surfaces as its string form instead."""
-    from gateway.routers.memory import _extract_meta
-
-    p = tmp_path / "scalar.md"
-    p.write_text("---\ndescription: 123\ntags: 5\n---\nb\n", encoding="utf-8")
-    assert _extract_meta(p) == ("123", [])

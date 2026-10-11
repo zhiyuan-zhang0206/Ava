@@ -233,8 +233,27 @@ def test_search_topk_exact_cosine_order_and_aggregation(tmp_path: Path) -> None:
     store.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     store.upsert("/a.md", 1.0, "ha", 0.9 * ones, kind="body", chunk_idx=1)
     store.upsert("/b.md", 2.0, "hb", -ones, kind="body", chunk_idx=0)
-    assert store.search_topk(ones, k=5) == ["/a.md", "/b.md"]
-    assert store.search_topk(ones, k=1) == ["/a.md"]
+    assert [hit.path for hit in store.search_topk(ones, k=5)] == ["/a.md", "/b.md"]
+    assert [hit.path for hit in store.search_topk(ones, k=1)] == ["/a.md"]
+
+
+def test_search_topk_reports_each_files_best_chunk_and_cosine_score(tmp_path: Path) -> None:
+    """The hit names the winning row (kind + chunk_idx) and its cosine similarity."""
+    store = _store(tmp_path)
+    axis = np.eye(_DIM, dtype=np.float32)
+    store.upsert("/a.md", 1.0, "ha", axis[0], kind="body", chunk_idx=0)
+    store.upsert("/a.md", 1.0, "ha", axis[1], kind="body", chunk_idx=1)
+    store.upsert("/a.md", 1.0, "ha", axis[2], kind="desc", chunk_idx=0)
+    store.upsert("/b.md", 2.0, "hb", axis[0], kind="body", chunk_idx=0)
+    query = axis[2] + 0.5 * axis[0]
+    hits = store.search_topk(query, k=5)
+    assert [(h.path, h.kind, h.chunk_idx) for h in hits] == [
+        ("/a.md", "desc", 0),
+        ("/b.md", "body", 0),
+    ]
+    norm = 1.25**0.5  # |axis[2] + 0.5 * axis[0]|
+    assert hits[0].score == pytest.approx(1.0 / norm)
+    assert hits[1].score == pytest.approx(0.5 / norm)
 
 
 def test_search_topk_empty_store(tmp_path: Path) -> None:
@@ -301,7 +320,7 @@ def test_save_load_roundtrip(tmp_path: Path) -> None:
     fresh = _store(tmp_path)
     fresh.load()
     assert fresh.all_meta() == {"/a.md": (1.0, "ha", _FP)}
-    assert fresh.search_topk(ones, k=5) == ["/a.md"]
+    assert [hit.path for hit in fresh.search_topk(ones, k=5)] == ["/a.md"]
     assert len(fresh) == 2
 
 

@@ -97,7 +97,7 @@ def test_delete_stale_batch_removes_tail_and_persists(tmp_path: Path) -> None:
         assert len(reloaded) == 1
 
 
-def test_search_returns_ordered_paths(tmp_path: Path) -> None:
+def test_search_returns_ordered_hits(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         ones = np.ones(_DIM, dtype=np.float32)
         for path, vector in [("/a.md", ones), ("/b.md", -ones)]:
@@ -116,7 +116,13 @@ def test_search_returns_ordered_paths(tmp_path: Path) -> None:
                 == 200
             )
         body = client.post("/search", json={"vector": ones.tolist(), "k": 5}).json()
-        assert body == {"paths": ["/a.md", "/b.md"]}
+        assert [(h["path"], h["kind"], h["chunk_idx"]) for h in body["hits"]] == [
+            ("/a.md", "body", 0),
+            ("/b.md", "body", 0),
+        ]
+        assert body["hits"][0]["score"] == pytest.approx(1.0)
+        assert body["hits"][1]["score"] == pytest.approx(-1.0)
+        assert set(body) == {"hits"}
 
 
 def test_upsert_persists_before_ack(tmp_path: Path) -> None:
@@ -140,7 +146,7 @@ def test_upsert_persists_before_ack(tmp_path: Path) -> None:
     fresh = _store(tmp_path)
     fresh.load()
     assert fresh.all_meta() == {"/a.md": (1.0, "ha", _FP)}
-    assert fresh.search_topk(ones, k=5) == ["/a.md"]
+    assert [hit.path for hit in fresh.search_topk(ones, k=5)] == ["/a.md"]
 
 
 def test_upsert_batch_persists_all_rows_before_ack(tmp_path: Path) -> None:

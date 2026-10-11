@@ -98,22 +98,27 @@ class MemorySearchResult(NamedTuple):
         empty string when the note has none (never synthesized from title/body).
     tags: the note's frontmatter `tags`, including its `type/<x>`; empty when it
         has none. What lets a caller weigh a hit by the kind of note it is, not
-        just by how it scored. A tuple, so the default is not a mutable object
-        shared by every result that has no tags.
+        just by how it scored.
+    score: the ranking model's probability (0..1) that `chunk` is relevant to
+        the query.
+    chunk: the text of the note's best-matching chunk, or its description line.
     """
 
     path: str
     description: str
-    tags: tuple[str, ...] = ()
+    tags: tuple[str, ...]
+    score: float
+    chunk: str
 
 
 def memory_search(
     query: str, k: int, *, timeout: float | None = None, context: AvaContext | None = None
 ) -> list[MemorySearchResult]:
-    """POST /api/memory/search → list of `MemorySearchResult`.
+    """POST /api/memory/search → list of `MemorySearchResult`, most relevant first.
 
-    Gateway-side primary directly calls embedder + the memory-search service; secondary
-    forwards to primary. Returns relative paths with frontmatter
+    The gateway embeds the query, retrieves candidate chunks from the memory-search
+    service, and has a decision model score each chunk's relevance (see
+    `MemorySearchResult`). Returns relative paths with frontmatter
     descriptions extracted server-side, so callers do not need to
     re-read every file to get a summary.
 
@@ -142,7 +147,11 @@ def memory_search(
     raise_from_response(resp)
     return [
         MemorySearchResult(
-            path=r["path"], description=r["description"], tags=tuple(r.get("tags", []))
+            path=r["path"],
+            description=r["description"],
+            tags=tuple(r["tags"]),
+            score=float(r["score"]),
+            chunk=r["chunk"],
         )
         for r in resp.json()["results"]
     ]

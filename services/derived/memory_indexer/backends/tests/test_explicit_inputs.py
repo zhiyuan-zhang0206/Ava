@@ -23,7 +23,7 @@ async def test_uri_readers_are_lazy_separate_and_live_per_async_search(
 
     def respond(request: httpx.Request) -> httpx.Response:
         requests.append(str(request.url))
-        return httpx.Response(200, json={"paths": []})
+        return httpx.Response(200, json={"hits": []})
 
     def transport_client(*, base_url: str, timeout: float) -> httpx.AsyncClient:
         return client(base_url=base_url, timeout=timeout, transport=httpx.MockTransport(respond))
