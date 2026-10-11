@@ -143,8 +143,8 @@ def _render_agent_activity(data: dict[str, Any]) -> str:
     text = (
         f"agents: {data['distinct_agents']} distinct  "
         f"{data['spawns_total']} spawns ({data['subagent_spawns']} subagents)  {data['idle_halts']} idle halts\n"
-        f"  lifecycle: terminated={data['lifecycle']['terminated']} "
-        f"restarted={data['lifecycle']['restarted']} resurrected={data['lifecycle']['resurrected']}\n"
+        f"  lifecycle: spawned={data['lifecycle']['spawned']} "
+        f"resurrected={data['lifecycle']['resurrected']}\n"
     )
     if data["spawns_by_spawner"]:
         text += render_counts("spawns by spawner:", data["spawns_by_spawner"])

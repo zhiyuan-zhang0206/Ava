@@ -5,7 +5,6 @@ effective intervals, input-token tiers, recurring UTC windows, and provenance;
 provider plugins mirror that complete shape for chat models, while catalog-only
 services such as embeddings continue to price directly from the archive. Both
 sources use the same parser and deterministic selection path.
-``pricing_catalog.json`` is an empty placeholder that runtime never loads;
 ``load_archive`` reads the archive.
 ``quote`` returns the selected rates with their cost atomically, and
 ``cost_usd`` remains the compatibility surface for existing readers. Schema v2
@@ -405,10 +404,9 @@ class PriceBook:
         entry = self.archive.get(model)
         if entry is None:
             entry = self.plugin.get(model)
-        if entry is not None:
-            return entry.rates_at(instant, input_tokens)
-        retired = RETIRED_MODEL_PRICING.get(model)
-        return Rates(*retired) if retired is not None else None
+        if entry is None:
+            return None
+        return entry.rates_at(instant, input_tokens)
 
 
 def model_vendor(model: str, *, prices: PriceBook) -> str | None:
@@ -532,30 +530,6 @@ def plugin_model_price(
         effective_time_note=None,
         periods=_parse_periods(model, raw_periods),
     )
-
-
-# Retired models — their FINAL published rate, frozen at retirement (add-only
-# ledger). A model leaves MODELS when it is replaced (fail-fast on residual
-# config_overlay references), but historical llm_usage rows keep their model
-# id forever: cost is computed at usage time with the price in force then
-# (user principle — price changes must never rewrite history), and the read
-# path prices pre-snapshot legacy rows against THIS table (plus MODEL_PRICING)
-# instead of the live registry, so a retirement does not drop historical rows
-# from cost. Provenance per entry: the rate + the commit/date that retired it.
-RETIRED_MODEL_PRICING: dict[str, tuple[float, float, float]] = {
-    # gemini-3.6-flash — retired 2026-08-13 (swap to gemini-3.7-flash, GA;
-    # commit 06c593a45). Final standard rate $1.50 / $7.50 per 1M, cache read
-    # 0.1x input ($0.15) — the 3.7 entry carries the same post-intro rate.
-    "gemini-3.6-flash": (1.5, 0.15, 7.5),
-    # kimi-k2.7-code — removed from the registry 2026-08-04 (revert #850,
-    # commits 630fe6b65/bc60f0151). Official ¥6.50 / ¥1.30 / ¥27.00 per 1M
-    # converted at ~6.77 CNY/USD (the price the registry entry carried).
-    "kimi-k2.7-code": (0.96, 0.19, 3.99),
-    # grok-4.5 — retired with the provider-plugin extraction commit. Final
-    # published rate $2.00 / $0.50 / $6.00 per 1M; source
-    # https://docs.x.ai/docs/models checked 2026-06-27.
-    "grok-4.5": (2.0, 0.5, 6.0),
-}
 
 
 def _aware_utc(instant: datetime | None) -> datetime:

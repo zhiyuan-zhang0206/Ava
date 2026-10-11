@@ -4435,18 +4435,6 @@ export interface components {
             runtime_owner: "unknown";
         };
         /**
-         * AgentRestartRow
-         * @description One agent's restart count within the window.
-         */
-        AgentRestartRow: {
-            /** Agent Id */
-            agent_id: number;
-            /** Label */
-            label: string | null;
-            /** Restarts */
-            restarts: number;
-        };
-        /**
          * AgentRoster
          * @description A coherent live tree. Ancestors carry links, never historical agent details.
          */
@@ -4521,8 +4509,7 @@ export interface components {
          *     excluded); duration fields are null when no duration evidence survives.
          *     The metadata declares retained historical histogram precision.
          *     `exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome
-         *     (exec_failed / exec(timeout) / exec_cancelled; the prefix regex also
-         *     counts legacy exec_thread_stuck rows for historical continuity).
+         *     (exec_failed / exec_timeout / exec_cancelled).
          */
         AgentStats: {
             /** Turn Total */
@@ -7711,14 +7698,11 @@ export interface components {
         };
         /**
          * RestartBucket
-         * @description One bucket's process-restart counts: agent processes (agent_restarted)
-         *     and gateway-side services (service_started).
+         * @description One bucket's service start count (service_started).
          */
         RestartBucket: {
             /** Bucket */
             bucket: number;
-            /** Agent Restarts */
-            agent_restarts: number;
             /** Service Starts */
             service_starts: number;
         };
@@ -7728,8 +7712,6 @@ export interface components {
             series: components["schemas"]["RestartBucket"][];
             /** Services */
             services: components["schemas"]["ServiceRestartRow"][];
-            /** Agents */
-            agents: components["schemas"]["AgentRestartRow"][];
             totals: components["schemas"]["RestartTotals"];
         };
         /**
@@ -7739,8 +7721,6 @@ export interface components {
         RestartResult: "enqueued" | "already_terminated";
         /** RestartTotals */
         RestartTotals: {
-            /** Agent Restarts */
-            agent_restarts: number;
             /** Service Starts */
             service_starts: number;
         };
