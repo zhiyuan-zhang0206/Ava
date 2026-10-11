@@ -245,9 +245,9 @@ def _roster_for(
     """The launch roster of the resolved service selection; `publish=False` only inspects it."""
     import cli.commands.lifecycle.root_driver as _root_driver_commands
     from base.deploy.lifecycle.service_selection import resolve_selection
-    from cli.commands._repo import _services_for_roles_annotated
+    from ops.spec import services_for_capabilities_annotated
 
-    names = {spec.session for spec, _reason in _services_for_roles_annotated(roles)}
+    names = {spec.session for spec, _reason in services_for_capabilities_annotated(roles)}
     launch_skip = resolve_selection(
         names,
         only=selection.only_services,

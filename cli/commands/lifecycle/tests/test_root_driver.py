@@ -13,8 +13,8 @@ from typing import Any, cast
 import pytest
 
 from base.daemon.health import DaemonProbe
-from cli.commands._repo import ServiceSpec
 from cli.commands.lifecycle import root_driver as driver
+from ops.roster.service_spec import ServiceSpec
 
 # Keep the public readiness entry point real when this owner suite reaches it.
 pytestmark = pytest.mark.real_service_readiness_gate

@@ -25,9 +25,8 @@ Native Postgres, Redis, and PgBouncer have separate data-plane custody so they
 can remain available during an application-root transition. The macOS helper
 is root's platform parent, not an application service. Read-only extra checks
 live in the root diagnostic roster; they never acquire service ownership.
-``cli.commands._repo`` re-exports ``ServiceSpec`` / ``build_services`` /
-``services_for_capabilities`` as a cli-facing façade; the definitions live in
-``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``.
+The definitions live in ``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``;
+callers import them from there.
 """
 
 from __future__ import annotations
