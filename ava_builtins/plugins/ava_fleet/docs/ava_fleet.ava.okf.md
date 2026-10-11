@@ -92,4 +92,4 @@ The pure config face declares the non-secret Core dependency `daemon.notice_ttl_
 
 Plugin writes reject invalid candidates and mixed-owner requests with `InvalidConfigOverlay` (panel 400). Only image CAS mismatches raise `PluginConfigChangedError` (panel 409). Both reject host RPC writes. Declaration, persisted-image, default and IO failures propagate unchanged.
 
-On upgrade, `ava plugins update` reconciles schema in memory before importing the five legacy aliases. Stored current fields validate first; explicit conflicts preserve both inputs, while missing fields adopt typed legacy values instead of new defaults. Image commit and alias removal are separate writes; failed removal allows a same-value retry. Bootstrap/admin/direct daemon readers reject pending input before import, and service discovery propagates it to abort roster evaluation. Pure readers never create a home. Repository merges do not migrate a real home or deploy.
+`ava plugins update` reconciles the declared schema in memory against the stored image. Pure readers never create a home. Repository merges do not migrate a real home or deploy.

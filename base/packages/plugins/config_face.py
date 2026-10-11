@@ -108,7 +108,7 @@ def plugin_bootstrap_config() -> str:
     import json
 
     from base.config import schema_extra
-    from base.packages.plugins.config_registration import disk_image_path, read_authority_config
+    from base.packages.plugins.config_registration import disk_image_path, read_config_image
     from base.packages.plugins.enable_config import discover_plugins
 
     payload: dict[str, dict[str, object]] = {}
@@ -128,7 +128,7 @@ def plugin_bootstrap_config() -> str:
                 raise ValueError(f"plugin cluster config {plugin}.{name} may not carry secrets")
             fields.append(name)
         if fields:
-            config = read_authority_config(plugin, cls, disk_image_path(plugin))
+            config = read_config_image(cls, disk_image_path(plugin))
             values = config.model_dump(mode="json")
             payload[plugin] = {name: values[name] for name in fields}
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)

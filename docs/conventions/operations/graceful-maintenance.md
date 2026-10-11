@@ -234,9 +234,8 @@ does not establish that the owner is absent.
 | `stopping` | Re-run `ava stop` to verify and finish closure, then `ava start`; or `ava start` directly. |
 | `stopped`, `starting`, `ready` | `ava start` brings services back, verifies readiness and releases the hold. |
 
-An unreadable journal, or a `paused` record with no maintenance hold (what the
-retired updater's stop left), has no exact generation to match, and no command
-clears it. After confirming no `ava stop` is in flight for this home (`ava
+An unreadable journal, or a record with no maintenance hold, has no exact
+generation to match, and no command clears it. After confirming no `ava stop` is in flight for this home (`ava
 status` reports what it can read), remove `$AVA_HOME/run/deploy-pause-owner.json`
 by hand and run `ava start`.
 

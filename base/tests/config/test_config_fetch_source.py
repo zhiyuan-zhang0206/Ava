@@ -227,13 +227,11 @@ class _BootstrapHandler(BaseHTTPRequestHandler):
 def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> None:
     """The money path: a pure runner's Settings import fetches /api/bootstrap
     and the fetched values are authoritative — including over a stale
-    pre-cutover .env materialization (migration tolerance). A database
-    password in the served URL (an older gateway's runner projection) is never
-    taken: the runner's login comes only from its installed unit capability."""
+    cluster fact left in the runner's .env."""
     handler = _BootstrapHandler
     handler.queries.clear()
     handler.payload = {
-        "AVA_DB_URL": "postgresql://ava_runner:runner-fetched@db:5432/ava",
+        "AVA_DB_URL": "postgresql://ava_runner@db:5432/ava",
         "AVA_REDIS_URL": "redis://db:6380/0",
         "DEEPSEEK_API_KEY": "sk-fetched",
         "AVA_EVENTS_CHANNEL": "ava:events",
@@ -245,8 +243,7 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
         port = server.server_address[1]
         home = tmp_path / "home"
         home.mkdir()
-        # An older join left stale cluster facts in the .env — tolerated:
-        # the fetch must override them. (AVA_GATEWAY_URL is in derived_env_keys(),
+        # Stale cluster facts left in the .env: the fetch must override them. (AVA_GATEWAY_URL is in derived_env_keys(),
         # so `_enforce_cluster_env_authority` forces the file value over an
         # inherited env — write the real port into the file.)
         (home / ".env").write_text(
@@ -265,8 +262,7 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
         )
         assert result.returncode == 0, result.stderr
         lines = result.stdout.strip().splitlines()
-        # The fetched endpoint wins over the stale owner URL, without the
-        # password an older gateway still projected.
+        # The fetched endpoint wins over the stale owner URL.
         assert lines[0] == "postgresql://ava_runner@db:5432/ava", lines
         assert lines[1] == "ava:events", lines
         # The runner's Settings-build fetch requests no projection.

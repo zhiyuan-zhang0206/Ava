@@ -43,10 +43,6 @@ from base.native_process.os_platform import is_macos, is_windows
 PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")
 PG_BIN_WINDOWS = Path("C:\\Program Files\\PostgreSQL\\17\\bin")  # EDB installer default
 
-# Historical private name: tests monkeypatch it to redirect artifact writes.
-_fixture_log_artifact_dir = fixture_log_artifact_dir
-
-
 # mmap-backed shared memory for every Postgres this codebase starts (Task #1263).
 # Both settings make Postgres keep shared memory in files under the data
 # directory instead of POSIX shm segments in /dev/shm, so an external unlink of
@@ -567,7 +563,7 @@ def _preserve_failed_fixture_log(instance_dir: Path) -> Path | None:
     mask the start failure itself. Returns the artifact path, or None when
     nothing could be written."""
     log = instance_dir / "pg.log"
-    dest_dir = _fixture_log_artifact_dir()
+    dest_dir = fixture_log_artifact_dir()
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / f"{instance_dir.name}.pg.log"
