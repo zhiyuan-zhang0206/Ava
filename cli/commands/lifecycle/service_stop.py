@@ -219,7 +219,7 @@ def _record_close_notices(
     *,
     direct_db: bool,
     database_factory: DatabaseFactory,
-    local_machine: MachineIdentity,
+    machine_name: str,
 ) -> None:
     """Write one closure notice per closed busy session to the database (issue #2044).
 
@@ -237,7 +237,7 @@ def _record_close_notices(
         reason=notice.reason,
         operation=notice.operation,
         acquired_at=notice.acquired_at,
-        local_machine=local_machine.name(),
+        local_machine=machine_name,
     )
     for unwritten, exc in pty_close_notices.write_notices(
         database_factory(), EventBus.from_settings(), notices, direct=direct_db
@@ -287,7 +287,7 @@ def close_terminals(
         _Notice(operation, acquired_at, reason),
         direct_db=direct_db,
         database_factory=database_factory,
-        local_machine=local_machine,
+        machine_name=local_machine.name(),
     )
     _report_terminal_job_leftovers(outcome)
     if any(s.role == "terminal" and live_identities([s.process]) for s in outcome.survivors):

@@ -77,16 +77,14 @@ def _request_actor(request: Request) -> tuple[str | None, str | None]:
     return actor, trace_id if isinstance(trace_id, str) else None
 
 
-def _assert_machine_known(
-    target: str, pool: ConnectionPool, *, local_machine: MachineIdentity
-) -> None:
+def _assert_machine_known(target: str, pool: ConnectionPool, *, local_machine_name: str) -> None:
     """404 if `target` is not in the machines table — distinguishes a typo'd
     machine name from a registered-but-offline host (which 503s on timeout).
 
     Skips the lookup for `target == machine_name()` (this host always exists,
     even before its own startup UPSERT lands).
     """
-    if target == local_machine.name():
+    if target == local_machine_name:
         return
 
     with pool.connection() as conn, conn.cursor() as cur:
@@ -338,7 +336,7 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
         _assert_machine_known,
         target,
         request.app.state.db_pool,
-        local_machine=request.app.state.machine,
+        local_machine_name=request.app.state.machine.name(),
     )
     read = await _dispatch_config_read(
         target,
@@ -473,7 +471,7 @@ async def get_config_audit(
             _assert_machine_known,
             target,
             request.app.state.db_pool,
-            local_machine=request.app.state.machine,
+            local_machine_name=request.app.state.machine.name(),
         )
         results = [
             await _dispatch_config_audit_read(
@@ -727,7 +725,7 @@ async def put_config(
         _assert_machine_known,
         target,
         request.app.state.db_pool,
-        local_machine=request.app.state.machine,
+        local_machine_name=request.app.state.machine.name(),
     )
 
     metas = {m.name: m for m in get_config_metadata(authority=request.app.state.config_authority)}

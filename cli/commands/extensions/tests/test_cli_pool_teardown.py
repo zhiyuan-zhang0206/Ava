@@ -99,7 +99,9 @@ def test_adopt_local_extensions_closes_pool_on_success(
 
     monkeypatch.setattr(adopt, "adopt_local_installs", _noop_adopt)
 
-    adopt_local_extensions(database_factory=operator_database, machine=command_runtime.machine)
+    adopt_local_extensions(
+        database_factory=operator_database, machine_name=command_runtime.machine.name
+    )
 
     assert spy.closed
 
@@ -120,7 +122,9 @@ def test_adopt_local_extensions_closes_pool_when_adopt_raises(
 
     monkeypatch.setattr(adopt, "adopt_local_installs", raise_adopt)
 
-    adopt_local_extensions(database_factory=operator_database, machine=command_runtime.machine)
+    adopt_local_extensions(
+        database_factory=operator_database, machine_name=command_runtime.machine.name
+    )
 
     assert spy.closed
 

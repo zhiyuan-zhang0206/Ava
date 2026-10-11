@@ -606,6 +606,6 @@ def cmd_converge(
         materialize_cluster_extensions,
     )
 
-    adopt_local_extensions(database_factory=database_factory, machine=command.machine)
+    adopt_local_extensions(database_factory=database_factory, machine_name=command.machine.name)
     materialize_cluster_extensions(database_factory=database_factory)
     return 0
