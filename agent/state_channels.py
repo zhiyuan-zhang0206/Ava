@@ -125,6 +125,23 @@ class CapabilitiesState(BaseModel):
     indexed: set[str] | None = None
 
 
+class SkillRecallState(BaseModel):
+    """Skill-recall bookkeeping, nested under `BaseAgentState.skill_recall`.
+
+    `prompted` are the skill identifiers a recall note already named in the current
+    context window, so the same skill is not offered twice. `window` is the
+    `compact.version` the record belongs to: a compaction summarizes the note away,
+    and the recall hook, seeing the version past `window`, clears this record and
+    `BaseAgentState.skill_reads` (the skills whose body was loaded) together.
+
+    Last-value channel (no reducer): the recall hook is the only writer and
+    commits the whole record each time.
+    """
+
+    prompted: set[str] = Field(default_factory=set)
+    window: int = 0
+
+
 class ContextReset(BaseModel):
     """A pending context (re)establishment, nested under
     `BaseAgentState.context_reset` — written by whoever clears the history,
@@ -220,4 +237,5 @@ __all__ = [
     "CompactState",
     "ContextReset",
     "MemoryState",
+    "SkillRecallState",
 ]

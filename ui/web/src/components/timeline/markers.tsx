@@ -63,6 +63,7 @@ export const NOTE_SOURCES = new Set([
   "project_skills",
   "preloaded_skills",
   "new_skills",
+  "skill_recall",
 ]);
 
 // Classify a system_marker by its source. The backend tag set is closed — a

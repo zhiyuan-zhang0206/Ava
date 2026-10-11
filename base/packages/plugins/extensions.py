@@ -70,8 +70,9 @@ PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = frozenset({"messages"})
 
 # The core channels the SDK itself writes through `ava.state_update` with no plugin declaring them
 # (`ava.security` appends prompt-injection findings; `ava.self.attach` appends the files to hand
-# the model next); every other undeclared core key is a typo.
-SDK_WRITTEN_BASE_FIELDS: frozenset[str] = frozenset({"security_findings", "attach"})
+# the model next; `ava.skills` appends the identifier of each skill body it hands over); every
+# other undeclared core key is a typo.
+SDK_WRITTEN_BASE_FIELDS: frozenset[str] = frozenset({"security_findings", "attach", "skill_reads"})
 
 # Rank a note gets when it states none: after every ranked note, in declaration order.
 DEFAULT_NOTE_RANK = 100

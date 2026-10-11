@@ -292,7 +292,11 @@ async def post_agent_restart(
         )
 
         try:
-            validate_config_overlay(body.config_overlay, models=request.app.state.catalog.models)
+            validate_config_overlay(
+                body.config_overlay,
+                models=request.app.state.catalog.models,
+                decision_models=request.app.state.catalog.decision_models,
+            )
         except InvalidConfigOverlay as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     forwarded = await forward_to_home_machine(

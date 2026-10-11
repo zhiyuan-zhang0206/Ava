@@ -61,14 +61,15 @@ __all__ = [
 # items fit between).
 _LG_TS_STEP_US = 1
 
-# system_note tags whose chip hides the wall-clock ts: memory recall (standing
-# ambient context) and the one-time guidance notes (compact reminder, the SDK
+# system_note tags whose chip hides the wall-clock ts: memory and skill recall (ambient
+# context) and the one-time guidance notes (compact reminder, the SDK
 # hint, the agent-reply pointer, the silent idle-continue). They read as
 # context, not events, so a timestamp is noise. Heartbeats and lifecycle_*
 # transitions are real events and keep their ts (the default True).
 _NO_TIMESTAMP_NOTE_TAGS = frozenset(
     {
         NoteTag.MEMORY,
+        NoteTag.SKILL_RECALL,
         NoteTag.AGENT_ID,
         NoteTag.COMPACT_REMINDER,
         NoteTag.HISTORY_DUMP,

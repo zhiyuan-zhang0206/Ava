@@ -320,3 +320,20 @@ def tail_has_recallable_inbound(messages: list[AnyMessage]) -> bool:
     silent-idle).
     """
     return any(not s.startswith(("watcher:", "shell:")) for s in _tail_inbound_sources(messages))
+
+
+def tail_has_skill_recall_inbound(messages: list[AnyMessage]) -> bool:
+    """Whether the messages added since the last assistant turn include an
+    inbound that skill recall should fire on: a human message (`user`,
+    `ui:page:<name>`) or a schedule trigger (`schedule:<id>`).
+
+    Narrower than `tail_has_recallable_inbound`, which only excludes background
+    wake-ups: a peer agent's message, a system notice and a watcher or shell
+    completion are not a request the agent has to pick a playbook for, so they
+    never trigger skill recall. Takes its own source list rather than widening
+    that gate, whose memory-recall consumer keeps its semantics.
+    """
+    return any(
+        s == "user" or s.startswith(("ui:page:", "schedule:"))
+        for s in _tail_inbound_sources(messages)
+    )
