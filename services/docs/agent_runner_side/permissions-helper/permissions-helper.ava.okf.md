@@ -72,7 +72,9 @@ any is posted; a local `defer` posts the release after the drag. Boolean and
 nonfinite values are rejected. The result carries `start` and `end` point objects.
 
 Mouse buttons/counts/modifier chords and bounded holds are advertised as
-`ping.native_input_v1`: [[../computer-mcp/native-input.ava.okf.md]]. The new
+`ping.native_input_v1`: [[../computer-mcp/native-input.ava.okf.md]]. Desktop-changing
+methods stop with `error_code: "user_abort"` while the pointer is parked at the main
+display's top-left corner (`ping.corner_failsafe_v1`, same document). The new
 `move`, `cursor_position`, `list_apps`, `list_windows`, `focus_app` and
 `screencapture_window` methods use the same single-call JSON transport.
 Observation freshness and frame boundaries:
