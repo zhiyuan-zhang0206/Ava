@@ -13,11 +13,12 @@ from typing import Any
 import pytest
 
 import ava
-from ava.sdk_surface import agent_identity, injection_check
+from ava.sdk_surface import agent_identity
 from ava.sdk_surface import settings as sdk_settings
 from ava.sdk_surface.injection_check import QUESTION, begin_check, page_probability, split_for_model
 from base.config import settings
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.decide import call as decide_call
 from base.lm.catalog.decide.types import (
     Decision,
     DecisionError,
@@ -78,7 +79,7 @@ def _scan_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _install(monkeypatch: pytest.MonkeyPatch, answer: Answer) -> FakeDecide:
     fake = FakeDecide(answer)
-    monkeypatch.setattr(injection_check, "decide", fake)
+    monkeypatch.setattr(decide_call, "decide", fake)
     return fake
 
 

@@ -17,9 +17,9 @@ from unittest.mock import patch
 import pytest
 
 import ava
-from ava.sdk_surface import injection_check
 from ava.tests.web._web_helpers import _FakeResp
 from base.config import settings
+from base.lm.catalog.decide import call as decide_call
 from base.lm.catalog.decide.types import Decision, DecisionRequestError, Question
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
@@ -82,7 +82,7 @@ def _fetch() -> list[str]:
 def test_a_suspicious_page_adds_a_finding_and_leaves_the_answer_alone(
     monkeypatch: pytest.MonkeyPatch, events: list[str], exec_update: dict[str, Any]
 ) -> None:
-    monkeypatch.setattr(injection_check, "decide", _fake_decide(events, probability=0.97))
+    monkeypatch.setattr(decide_call, "decide", _fake_decide(events, probability=0.97))
 
     assert _fetch() == ["SUMMARY"]
 
@@ -117,7 +117,7 @@ def test_the_raw_page_is_judged_while_it_is_summarized(
     monkeypatch.setattr("ava.web._answer", answer)
     monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
     monkeypatch.setattr(settings.web, "jina_api_key", None)
-    monkeypatch.setattr(injection_check, "decide", decide)
+    monkeypatch.setattr(decide_call, "decide", decide)
 
     assert _fetch() == ["SUMMARY"]
 
@@ -136,7 +136,7 @@ def test_a_finding_is_kept_when_the_summary_fails(
         raise ava.web.FetchError("summary model down")
 
     monkeypatch.setattr("ava.web._answer", failing_answer)
-    monkeypatch.setattr(injection_check, "decide", _fake_decide(events, probability=0.97))
+    monkeypatch.setattr(decide_call, "decide", _fake_decide(events, probability=0.97))
 
     with pytest.raises(ava.web.FetchError):
         _fetch()
@@ -147,7 +147,7 @@ def test_a_finding_is_kept_when_the_summary_fails(
 def test_a_failing_decision_model_does_not_fail_the_fetch(
     monkeypatch: pytest.MonkeyPatch, events: list[str], exec_update: dict[str, Any]
 ) -> None:
-    monkeypatch.setattr(injection_check, "decide", _fake_decide(events, probability=None))
+    monkeypatch.setattr(decide_call, "decide", _fake_decide(events, probability=None))
 
     assert _fetch() == ["SUMMARY"]
     assert exec_update.get("security_findings", []) == []
@@ -157,7 +157,7 @@ def test_a_disabled_check_leaves_the_fetch_exactly_as_before(
     monkeypatch: pytest.MonkeyPatch, events: list[str], exec_update: dict[str, Any]
 ) -> None:
     monkeypatch.setattr(settings.web, "web_fetch_injection_check_enabled", False)
-    monkeypatch.setattr(injection_check, "decide", _fake_decide(events, probability=0.99))
+    monkeypatch.setattr(decide_call, "decide", _fake_decide(events, probability=0.99))
 
     assert _fetch() == ["SUMMARY"]
     assert events == ["summary"]
