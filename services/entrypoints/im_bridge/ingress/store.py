@@ -341,7 +341,12 @@ class WeixinIngressStore:
             return receipt_from_row(row) if row is not None else None
 
     def recover_claims(self, binding: PollBinding) -> None:
-        """Startup ownership replacement retains unknown calls without ever re-executing them."""
+        """Startup ownership replacement finalizes every unfinished source and never runs it again.
+
+        A claimed command may have started, so it becomes uncertain. A retained command was never
+        claimed and so never started; it is rejected rather than dispatched late. Both verdicts
+        release the cursor checkpoint guard.
+        """
         with write_transaction(self.require_pool()) as conn:
             self.lock_binding(conn, binding)
             conn.execute(
@@ -349,20 +354,11 @@ class WeixinIngressStore:
                 "WHERE namespace=%s AND account_id=%s AND status='claimed'",
                 (binding.namespace, binding.account_id),
             )
-
-    def pending(self, binding: PollBinding) -> list[IngressReceipt]:
-        with write_transaction(self.require_pool()) as conn:
-            self.lock_binding(conn, binding)
-            return [
-                receipt_from_row(row)
-                for row in conn.execute(
-                    sql.SQL(
-                        "SELECT {} FROM weixin_ingress_receipts "
-                        "WHERE namespace=%s AND account_id=%s AND status='retained' ORDER BY id LIMIT 100"
-                    ).format(sql.SQL(_RECEIPT_COLUMNS)),
-                    (binding.namespace, binding.account_id),
-                ).fetchall()
-            ]
+            conn.execute(
+                "UPDATE weixin_ingress_receipts SET status='rejected',outcome_reason='command_not_started_at_restart',completed_at=now() "
+                "WHERE namespace=%s AND account_id=%s AND status='retained'",
+                (binding.namespace, binding.account_id),
+            )
 
     def checkpoint(
         self,
