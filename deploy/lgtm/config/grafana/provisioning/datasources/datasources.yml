@@ -1,8 +1,8 @@
 apiVersion: 1
 # Grafana datasources. URLs use Grafana's native $__env{} expansion (the Tempo
 # precedent): the process env supplies the values, so this checkout file is
-# ALWAYS a valid configuration — compose (static env defaults) and native
-# (converge-rendered runtime.env) load the same file with the same mechanism.
+# ALWAYS a valid configuration — native Grafana loads this file with the
+# converge-rendered runtime.env supplying the values.
 # AVA_OBSERVABILITY_URL empty (default) → loopback backends (current behavior);
 # non-empty → the remote observatory station's URLs (converge bakes the derived
 # values into the native runtime.env).
@@ -36,8 +36,8 @@ datasources:
   # instead of an event-stream approximation; the event panels read Loki and
   # the retired events table was dropped entirely on 2026-08-29. The role is
   # grafana_ro — a dedicated read-only role (SELECT-only grants, no writes),
-  # password injected via the container env ($GRAFANA_PG_PASSWORD from
-  # deploy/lgtm/.env, gitignored — never in this repo).
+  # password injected via the Grafana process env ($GRAFANA_PG_PASSWORD, never
+  # in this repo).
   #
   # ⚠️ PG is the most typical bomb in observatory cutovers (#3606): it is the
   # CLUSTER's OWN database (grafana_ro/ava_main), not an observatory service.

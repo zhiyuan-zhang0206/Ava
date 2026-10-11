@@ -117,9 +117,7 @@ layering and single-owner checks remain enforced during this migration.
 
 Rules 4, 5, 6 and 8 reject every measured site directly. Their retired
 `private_imports`, `owner_bypasses`, `path_imports` and `patch_targets` baseline fields may not
-be reintroduced, even empty. Historical comparison revisions may carry empty
-retired fields; nonempty historical locality/path-import fields are invalid too.
-Historical patch-target fields are parsed and discarded without granting any allowance.
+be reintroduced, even empty, in the working tree or in the comparison revision.
 
 Only ambient-state sites retain exact `path::target -> site count` maps in their
 baseline shards until the remaining debt is cleared. Their guards remain shrink-only,
@@ -271,10 +269,8 @@ The remaining site-exemption guard selects one comparison commit:
    can explicitly set `LINT_STRUCTURE_BASELINE_BASE=HEAD` or another fetched revision.
 
 Git rename-query and historical-read failures are hard errors. The guard reads the
-baseline at the selected commit. Only a valid revision that predates the baseline
-directory emits a note and skips comparison. Empty retired budget sections in the comparison
-revision are discarded; nonempty retired sections or malformed baselines fail.
-Retired sections are always refused in the working tree, including empty ones.
+baseline at the selected commit; a revision without the baseline directory, with a
+retired section (even an empty one) or with a malformed baseline fails.
 Every remaining site section stays shrink-only when a lint is added or its rule
 version changes; a new measurement does not authorize new exemptions. This
 catches raises after committing them too:
