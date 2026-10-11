@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_CHILD = Path(__file__).with_name("_config_child.py")
 
 
 @pytest.fixture(autouse=True)
@@ -31,10 +32,10 @@ def _clean_env(**overrides: str) -> dict[str, str]:
 
 
 def _spawn(
-    code: str, *, env: dict[str, str] | None = None, timeout: float = 180
+    *, env: dict[str, str] | None = None, timeout: float = 180
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 — fixed argv, sys.executable owns the child
-        [sys.executable, "-B", "-c", code],
+        [sys.executable, "-B", str(_CHILD), "skip_defers_prepare"],
         check=False,
         cwd=_REPO_ROOT,
         env=_clean_env(**(env or {})),
@@ -45,15 +46,7 @@ def _spawn(
 
 
 def test_skip_mode_defers_prepare_and_plants_placeholders() -> None:
-    proc = _spawn(
-        "import os, base.config as c\n"
-        "from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL\n"
-        "prepared_before = c._boot_state()['prepared']\n"
-        "value = c.settings.lm.llm_model\n"
-        "print('DEFER', prepared_before, c._boot_state()['prepared'], value,\n"
-        "      os.environ.get('AVA_DB_URL') == PLACEHOLDER_DB_URL)\n",
-        env={"AVA_CONFIG_FETCH": "skip"},
-    )
+    proc = _spawn(env={"AVA_CONFIG_FETCH": "skip"})
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("DEFER False True "), proc.stdout
     assert proc.stdout.rstrip().endswith("True"), proc.stdout

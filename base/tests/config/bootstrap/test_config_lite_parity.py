@@ -40,54 +40,7 @@ _CASES: list[tuple[str, str, str]] = [
     ("machine_serve_gateway", "AVA_MACHINE_SERVE_GATEWAY", "true"),
 ]
 
-_CHILD = """import json, os
-import base.config._lite as lite
-from base.config import _full
-from base.host.env.config_lite_table import FIELD_DOMAINS
-from base.host.env.config_registry import DOMAIN_MODELS
-
-MODELS = {
-    attr: getattr(_full, model_name)
-    for attr, _label, model_name, _cap in DOMAIN_MODELS
-    if isinstance(model_name, str)
-}
-
-lite.prepare()
-
-results = []
-for name, alias, raw in json.loads(os.environ["PARITY_CASES"]):
-    os.environ[alias] = raw
-    try:
-        lite_value = lite.resolve(name)
-        lite_error = None
-    except Exception as exc:  # noqa: BLE001 - the error identity IS the subject
-        lite_value = None
-        lite_error = f"{type(exc).__name__}: {exc}"
-    model = MODELS[FIELD_DOMAINS[name]]
-    try:
-        eager_value = getattr(model(), name)
-        eager_error = None
-        eager_is_value_error = None
-    except Exception as exc:  # noqa: BLE001
-        eager_value = None
-        eager_error = f"{type(exc).__name__}: {exc}"
-        eager_is_value_error = isinstance(exc, ValueError)
-    finally:
-        os.environ.pop(alias, None)
-    results.append(
-        {
-            "name": name,
-            "alias": alias,
-            "raw": raw,
-            "lite_value": repr(lite_value),
-            "lite_error": lite_error,
-            "eager_value": repr(eager_value),
-            "eager_error": eager_error,
-            "eager_is_value_error": eager_is_value_error,
-        }
-    )
-print("PARITY " + json.dumps(results))
-"""
+_CHILD = Path(__file__).with_name("_lite_parity_child.py")
 
 
 def _run_child(home: Path) -> list[dict[str, Any]]:
@@ -97,7 +50,7 @@ def _run_child(home: Path) -> list[dict[str, Any]]:
     env["AVA_CONFIG_FETCH"] = "skip"
     env["PARITY_CASES"] = json.dumps(_CASES)
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable owns the child
-        [sys.executable, "-B", "-c", _CHILD],
+        [sys.executable, "-B", str(_CHILD)],
         check=False,
         cwd=_REPO_ROOT,
         env=env,

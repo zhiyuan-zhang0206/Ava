@@ -1,6 +1,5 @@
 """Live sampling uses validated snapshots and never blocks SDK calls on a fetch."""
 
-import builtins
 import os
 import subprocess
 import sys
@@ -257,13 +256,12 @@ def test_failed_policy_read_still_starts_one_refresh_when_due(
 
 
 def test_sdk_telemetry_cold_import_does_not_load_httpx(tmp_path: Path) -> None:
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 — fixed argv, this interpreter runs the child script
         [
             sys.executable,
             "-I",
-            "-c",
-            "import sys; import base.agents.sdk.telemetry; "
-            "assert 'httpx' not in sys.modules; assert 'httpcore' not in sys.modules",
+            str(Path(__file__).with_name("_sdk_cold_child.py")),
+            "cold_import_loads_no_httpx",
         ],
         cwd=tmp_path,
         env={**os.environ, "AVA_HOME": str(tmp_path / "home"), "AVA_CONFIG_FETCH": "skip"},
@@ -279,16 +277,9 @@ def test_refresh_dependency_import_failure_reaches_the_caller(
 ) -> None:
     cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy()
-    original_import = builtins.__import__
-
-    def importing(name: str, *args: Any, **kwargs: Any) -> Any:
-        if name == "httpx":
-            raise ImportError("HTTPX unavailable")
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", importing)
+    monkeypatch.setitem(sys.modules, "httpx", None)
     cache.refresh()
-    with pytest.raises(ImportError, match="HTTPX unavailable"):
+    with pytest.raises(ImportError, match="httpx"):
         cache.read()
 
 
