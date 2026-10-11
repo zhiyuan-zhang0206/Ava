@@ -1,7 +1,6 @@
 """Feishu websocket work belongs to the daemon's service task scope."""
 
 import asyncio
-import importlib
 import secrets
 
 import pytest
@@ -69,7 +68,7 @@ async def test_ws_closing_rejects_queued_events_and_ends_owner_wait(
 async def test_ws_worker_failure_reaches_the_same_service_owner() -> None:
     import threading
 
-    importlib.import_module("lark_oapi.ws.client")
+    import lark_oapi.ws.client as _lark_ws_client  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
     fault = RuntimeError("websocket implementation bug")
     workers: list[threading.Thread] = []
@@ -108,7 +107,8 @@ async def test_service_wait_stops_while_sdk_worker_stays_blocked(
 ) -> None:
     import threading
 
-    importlib.import_module("lark_oapi.ws.client")
+    import lark_oapi.ws.client as _lark_ws_client  # noqa: F401  # pyright: ignore[reportUnusedImport]
+
     entered, release, exited = threading.Event(), threading.Event(), threading.Event()
 
     class BlockedWsClient(FakeWsClient):
@@ -150,7 +150,8 @@ async def test_queued_ws_job_is_not_send_ready_and_shutdown_cancels_boot() -> No
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
-    importlib.import_module("lark_oapi.ws.client")
+    import lark_oapi.ws.client as _lark_ws_client  # noqa: F401  # pyright: ignore[reportUnusedImport]
+
     occupied, release = threading.Event(), threading.Event()
 
     def occupy() -> None:

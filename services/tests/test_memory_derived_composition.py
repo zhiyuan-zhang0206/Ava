@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import os
 import time
 from collections.abc import Coroutine, Iterator
@@ -18,8 +17,10 @@ from base.db import Database
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
+from services.derived.memory_indexer import daemon as memory_indexer_daemon
+from services.derived.memory_search import daemon as memory_search_daemon
 
-_ENTRIES = ("services.derived.memory_search.daemon", "services.derived.memory_indexer.daemon")
+_ENTRIES = (memory_search_daemon, memory_indexer_daemon)
 
 
 @pytest.fixture(autouse=True)
@@ -36,9 +37,9 @@ class _Runner:
         asyncio.run(work)
 
 
-@pytest.fixture(params=_ENTRIES)
+@pytest.fixture(params=_ENTRIES, ids=lambda module: module.__name__)
 def entry(request: pytest.FixtureRequest) -> ModuleType:
-    return importlib.import_module(request.param)
+    return request.param
 
 
 def _prepare(

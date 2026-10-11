@@ -117,15 +117,13 @@ def test_sigterm_exits_while_feishu_sdk_worker_remains_blocked(
     }
     env.pop("AVA_PERMISSIONS_HELPER_PID", None)
     log_file = log_path.open("wb")
-    proc = subprocess.Popen(
+    proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter and repository-owned helper
         [
             sys.executable,
-            "-c",
-            "import os; from pathlib import Path; "
-            "from services.entrypoints.im_bridge.tests.test_feishu_worker_exit "
-            "import run_blocked_ws_child; "
-            "run_blocked_ws_child(Path(os.environ['DAEMON_SHUTDOWN_TEST_MARKERS']), "
-            "responsive=bool(int(os.environ['FEISHU_TEST_RESPONSIVE_LOOP'])))",
+            str(
+                Path(__file__).resolve().parents[1]
+                / "adapters/tests/feishu_adapter/child_blocked_ws.py"
+            ),
         ],
         cwd=Path(__file__).resolve().parents[4],
         env=env,
