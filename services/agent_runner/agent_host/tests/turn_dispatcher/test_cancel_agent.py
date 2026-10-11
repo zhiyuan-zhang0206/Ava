@@ -15,6 +15,7 @@ from services.agent_runner.agent_host.dispatcher import (
     agent_id_from_channel,
 )
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
+from services.agent_runner.agent_host.scheduling.pending_wakes import PendingInboundWake
 from services.agent_runner.agent_host.tests.test_turn_dispatcher import (
     _FRESH,
     _STALE,
@@ -143,8 +144,8 @@ class TestCancelBeforeTheFirstSlice:
         rec = _Recorder()
         sched = TurnScheduler(rec)
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [dispatcher.PendingInboundWake(agent_id=7, stale=True)]
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
+            return [PendingInboundWake(agent_id=7, stale=True)]
 
         disp = _scan_dispatcher(sched, _pending, _STALE)
 
@@ -288,8 +289,8 @@ class TestPendingScan:
         """Redis notification loss may cost latency, never durable work."""
         scheduler = ScanScheduler()
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [dispatcher.PendingInboundWake(agent_id=23, stale=False)]
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
+            return [PendingInboundWake(agent_id=23, stale=False)]
 
         disp = InboundWakeDispatcher(
             EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
@@ -311,9 +312,9 @@ class TestPendingScan:
         scanner_calls: list[int] = []
         scheduler = ScanScheduler()
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             scanner_calls.append(1)
-            return [dispatcher.PendingInboundWake(agent_id=23, stale=False)]
+            return [PendingInboundWake(agent_id=23, stale=False)]
 
         disp = InboundWakeDispatcher(
             EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
@@ -333,8 +334,8 @@ class TestPendingScan:
         """Old pending work and an actually stalled turn allow recovery."""
         scheduler = ScanScheduler({23})
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [dispatcher.PendingInboundWake(agent_id=23, stale=True)]
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
+            return [PendingInboundWake(agent_id=23, stale=True)]
 
         disp = _scan_dispatcher(scheduler, _pending, _STALE)
 
@@ -353,8 +354,8 @@ class TestPendingScan:
         """
         scheduler = ScanScheduler({23}, unwinds_on_cancel=False)
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [dispatcher.PendingInboundWake(agent_id=23, stale=True)]
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
+            return [PendingInboundWake(agent_id=23, stale=True)]
 
         disp = _scan_dispatcher(scheduler, _pending, _STALE)
 
@@ -397,7 +398,7 @@ class TestStallRestartEscalation:
         _patch_redis(monkeypatch, pubsub)
         scheduler = ScanScheduler(restart_required=True)
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
         disp = InboundWakeDispatcher(
@@ -425,7 +426,7 @@ class TestTurnLevelStaleScan:
     ) -> None:
         scheduler = ScanScheduler({23})
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
         disp = _scan_dispatcher(scheduler, _pending, _STALE)
@@ -440,7 +441,7 @@ class TestTurnLevelStaleScan:
     ) -> None:
         scheduler = ScanScheduler({23})
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
         disp = _scan_dispatcher(scheduler, _pending, _FRESH)
@@ -458,7 +459,7 @@ class TestTurnLevelStaleScan:
         about — the same reading the uncancellable report uses for None."""
         scheduler = ScanScheduler({23})
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
         disp = _scan_dispatcher(scheduler, _pending, _UNKNOWN)
@@ -473,7 +474,7 @@ class TestTurnLevelStaleScan:
     ) -> None:
         scheduler = ScanScheduler({23}, unwinds_on_cancel=False)
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
         disp = _scan_dispatcher(scheduler, _pending, _STALE)
@@ -515,7 +516,7 @@ class TestTurnLevelStaleScan:
         for _ in range(6):
             await asyncio.sleep(0)
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
         disp = _scan_dispatcher(scheduler, _pending, _STALE)
@@ -540,7 +541,7 @@ class TestAdmissionWaitExemption:
         admission = TurnAdmission(1)
         admission._waiting[23] = 0.0
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
         disp = _scan_dispatcher(scheduler, _pending, _STALE, turn_admission=admission)
@@ -556,8 +557,8 @@ class TestAdmissionWaitExemption:
         admission = TurnAdmission(1)
         admission._waiting[17] = 0.0
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [dispatcher.PendingInboundWake(agent_id=17, stale=True)]
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
+            return [PendingInboundWake(agent_id=17, stale=True)]
 
         disp = _scan_dispatcher(scheduler, _pending, _STALE, turn_admission=admission)
         await disp.scan_once()

@@ -44,7 +44,7 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
 ) -> None:
     from base.native_process.turn_identity import HostedTurnResources
     from services.agent_runner.agent_host.host import AgentHost
-    from services.agent_runner.agent_host.runtime import _StoredConfig
+    from services.agent_runner.agent_host.runtime import StoredConfig
 
     host = object.__new__(AgentHost)
     machine_identity.set(name="local")
@@ -62,7 +62,7 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     monkeypatch.setattr(
         "services.agent_runner.agent_host.host.read_stored_config",
         AsyncMock(
-            return_value=_StoredConfig(
+            return_value=StoredConfig(
                 machine="local", status="idling", config_overlay=None, birth_config=None
             )
         ),

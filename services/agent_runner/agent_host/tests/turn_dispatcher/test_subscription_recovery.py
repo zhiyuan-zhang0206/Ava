@@ -12,6 +12,7 @@ from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
+from services.agent_runner.agent_host.scheduling.pending_wakes import PendingInboundWake
 from services.agent_runner.agent_host.tests.test_turn_dispatcher import (
     _patch_redis,
     _QueueingPubSub,
@@ -34,7 +35,7 @@ class TestSubscriptionRecovery:
             if fields["event"] == "host_dispatcher_scan_failed":
                 failure_events.append(fields)
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             nonlocal scans
             scans += 1
             if scans >= 3:
@@ -73,7 +74,7 @@ class TestSubscriptionRecovery:
         first_failure = asyncio.Event()
         scheduler = ScanScheduler()
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             first_failure.set()
             raise RuntimeError("database unavailable")
 
@@ -110,7 +111,7 @@ class TestSubscriptionRecovery:
         successful_scans = 0
         successful_scan_times: list[float] = []
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             nonlocal scans, successful_scans
             scans += 1
             if scans <= 2:
@@ -149,7 +150,7 @@ class TestSubscriptionRecovery:
         pubsub = _QueueingPubSub()
         clients = _patch_redis(monkeypatch, pubsub)
 
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             raise dispatcher.HostRestartRequiredError("stale turn did not unwind")
 
         disp = InboundWakeDispatcher(

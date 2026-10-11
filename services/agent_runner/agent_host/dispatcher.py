@@ -62,6 +62,7 @@ from base.events.live.bus import EventBus
 from base.events.live.redis_client import retry_auth_failures_async
 from base.log import logger
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
+from services.agent_runner.agent_host.scheduling.pending_wakes import PendingInboundWake
 from services.agent_runner.agent_host.scheduling.turn_gates import (
     admission_waiting,
     database_waiting,
@@ -434,21 +435,6 @@ def agent_id_from_channel(channel: str) -> int | None:
     if not sep or not tail.isdigit():
         return None
     return int(tail)
-
-
-@dataclass(frozen=True)
-class PendingInboundWake:
-    """One local hosted agent needing a durable scan wake.
-
-    ``stale`` means BOTH that one pending inbound has passed the running
-    turn grace and that the agent has made no completed-turn progress for
-    that grace (an active turn may legitimately run up to the exec +
-    LLM-retry budget). A fresh pending row still receives the scan's normal
-    wake, but does not interrupt a legitimate turn that happens to be running.
-    """
-
-    agent_id: int
-    stale: bool
 
 
 class _WakeScheduler(Protocol):

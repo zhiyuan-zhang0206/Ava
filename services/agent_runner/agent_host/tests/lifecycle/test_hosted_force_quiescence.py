@@ -33,8 +33,8 @@ from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
+from services.agent_runner.agent_host.health_routes import cancel_turn_route
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.scheduling.health_routes import cancel_turn_route
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from tests.fixtures.pin_agent import exec_context as ctx_of
 from tests.fixtures.unit.identity import machine_identity as machine_identity
