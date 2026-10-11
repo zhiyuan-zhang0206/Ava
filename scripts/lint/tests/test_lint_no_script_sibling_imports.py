@@ -8,17 +8,16 @@ the same function. See the script header for the full rule and scope.
 
 from __future__ import annotations
 
-import importlib
 import textwrap
 from pathlib import Path
 
 import pytest
 
+from scripts.lint import no_script_sibling_imports as _lint
+
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
 # pyright: reportUnknownArgumentType = warning
-
-_lint = importlib.import_module("scripts.lint.no_script_sibling_imports")
 
 
 @pytest.fixture()

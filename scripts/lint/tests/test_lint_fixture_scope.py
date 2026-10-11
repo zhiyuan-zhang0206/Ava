@@ -8,12 +8,11 @@ fixtures preserve the session-scope mutation and missing-package defects.
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.fixture_scope")
+from scripts.lint import fixture_scope as _lint
 
 
 def _findings(src: str, rel: str = "tests/sub/conftest.py", *, init: bool = False) -> list[str]:
