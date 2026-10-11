@@ -171,7 +171,7 @@ A worker can stop early or idle silently — thinking it finished when it has no
 Launch the watcher **before** the worker starts, so you do not miss its first idle:
 
 ```python
-watcher = ava.files.read(f"{ava.skills.ava-fleet.path}/reference/watch_idle.py")
+watcher = ava.files.read(f"{ava.skills.ava_fleet.path}/reference/watch_idle.py")
 watcher = watcher.replace("TARGET_AGENT_ID = 0", f"TARGET_AGENT_ID = {worker_id}")
 ava.watcher.launch(watcher, timeout="6h", name="goal-watcher")
 ```

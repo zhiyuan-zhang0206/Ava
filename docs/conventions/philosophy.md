@@ -71,5 +71,10 @@ every time:
    and prompt section that fires emits one event carrying the model in force,
    counted per contribution by the `plugin_activation` metric.
 
+7. **Every equivalent entry point is an ambiguity the agent must resolve.** A
+   second spelling for the same capability costs the model a choice and the
+   prompt a sentence explaining it. Keep one entry per capability; see
+   [when a public SDK entry earns its place](python-conventions.md#when-a-public-sdk-entry-earns-its-place).
+
 In one line: every design choice asks *"can a stronger invariant make this
 problem not exist?"* Strong model + strong invariants = the least scaffolding.

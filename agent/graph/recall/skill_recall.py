@@ -48,7 +48,9 @@ STATE_PREAMBLE = (
 )
 
 # The calibrated question, asked once per skill. `{identifier}` and `{description}` are the
-# skill's display identifier and its index-line description.
+# skill's display identifier and its index-line description. The wording and the display
+# spelling are what the question was calibrated on; the note the agent reads spells the
+# loadable path instead (`render_note`).
 QUESTION_TEMPLATE = (
     "Skill `ava.skills.{identifier}` -- {description}\n\n"
     "If the agent loads this skill now and follows it, will that clearly help it handle "
@@ -109,7 +111,7 @@ def pick_skills(scores: Mapping[str, float], *, threshold: float, limit: int) ->
 
 def render_note(candidates: Sequence[RecallCandidate]) -> HumanMessage:
     """The system-styled note naming `candidates`, one index line each."""
-    lines = [index_entry(c.identifier, c.description) for c in candidates]
+    lines = [index_entry(c.target, c.description) for c in candidates]
     return system_note_message(
         content=f"{_FRAMING}\n\n" + "\n".join(lines),
         tag=NoteTag.SKILL_RECALL,

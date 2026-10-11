@@ -1,4 +1,4 @@
-"""ava.skills attribution: the curated index render, SKILL.md read consumption (ava.help / ava.skills.read / files.read), and invocation recording gated on the write landing; split from ava/tests/skills/test_skills.py (task #4922)."""
+"""ava.skills attribution: the curated index render, SKILL.md read consumption (ava.help / proxy __doc__ / files.read), and invocation recording gated on the write landing; split from ava/tests/skills/test_skills.py (task #4922)."""
 
 from pathlib import Path
 from typing import Any
@@ -46,10 +46,10 @@ def test_all_for_ava_is_the_live_top_level_index(fake_skills_dir: Path) -> None:
     d.mkdir()
     _write_skill(d, "beta", "name: beta\ndescription: b")
 
-    # The surface is skill names plus the `read` utility — the one non-skill
-    # member, so `ava.help(ava.skills)` renders its contract next to the index.
-    assert skills_mod.__all_for_ava__ == ["alpha", "grp", "read"]
-    assert ava.agent_visible_names(skills_mod) == ["alpha", "grp", "read"]
+    # The surface is skill and namespace names only: no utility member sits
+    # beside the index.
+    assert skills_mod.__all_for_ava__ == ["alpha", "grp"]
+    assert ava.agent_visible_names(skills_mod) == ["alpha", "grp"]
 
 
 def test_help_on_skills_module_is_index_only(
@@ -311,15 +311,16 @@ def test_files_read_skill_md_silent_outside_agent(fake_skills_dir: Path) -> None
     assert out.endswith("# A\n")  # no raise; body still returned
 
 
-# ─── ava.skills.read() — explicit body-consumption API ────────────────────
+# ─── proxy `__doc__` — body consumption by attribute path ─────────────────
 
 
-def test_skills_read_consumes_and_records(
+def test_proxy_doc_consumes_and_records(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`ava.skills.read(name)` returns the consumed shape (path line + body)
-    and records the attribution — the explicit API equivalent of opening the
-    proxy's `__doc__`. Names fold like everywhere else in the module."""
+    """A proxy's `__doc__` returns the consumed shape (path line + body) and
+    records the attribution, for a top-level skill and a nested one alike."""
+    import ava
+
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     d = fake_skills_dir / "grp"
     d.mkdir()
@@ -333,71 +334,16 @@ def test_skills_read_consumes_and_records(
     monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", _one_agent)
     monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
 
-    out = skills_mod.read("alpha")
+    out = ava.skills.alpha.__doc__
+    assert out is not None
     assert out.endswith("# A\n")
-    assert "alpha" in out  # path line present, __doc__ shape
+    assert "alpha" in out  # path line present
     assert recorded == [("alpha", "loaded")]
 
-    # Display identifier and its underscore/dot projection fold to one skill.
-    assert skills_mod.read("grp:beta") == skills_mod.read("grp.beta")
+    nested = ava.skills.grp.beta.__doc__
+    assert nested is not None
+    assert nested.endswith("# B\n")
     assert recorded[-1] == ("beta", "loaded")
-
-
-def test_skills_read_returns_same_shape_as_proxy_doc(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """read() and the proxy `__doc__` are the same consumption with the same
-    return shape (path line + body), so an agent switching between them sees
-    an identical payload."""
-    import ava
-
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
-
-    def _noop(_db: Database, _event: telemetry.Event) -> None:
-        return None
-
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", _one_agent)
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", _noop)
-    assert skills_mod.read("alpha") == ava.skills.alpha.__doc__
-
-
-def test_skills_read_unknown_name_raises(fake_skills_dir: Path) -> None:
-    """An unknown name fails loud (ValueError naming it) rather than silently
-    returning nothing — the same fail-fast stance as `ava.skills.<name>`."""
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
-    with pytest.raises(ValueError, match="no skill named"):
-        skills_mod.read("does-not-exist")
-
-
-def test_skills_read_rejects_non_string_name(fake_skills_dir: Path) -> None:
-    """Argument validation matches the rest of the SDK: a non-string name
-    raises TypeError, not a silent no-op. (A one-element string list is the
-    documented trailing-comma unwrap and stays legal.)"""
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
-    with pytest.raises(TypeError):
-        skills_mod.read(123)  # type: ignore[arg-type]
-    with pytest.raises(TypeError):
-        skills_mod.read(["alpha", "beta"])  # type: ignore[arg-type]
-
-
-def test_help_skills_index_lists_read(
-    fake_skills_dir: Path,
-    capsys: pytest.CaptureFixture[str],
-    model_installation: Installation,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The explicit API is discoverable: `ava.help(ava.skills)` renders `read`
-    as a function entry (the surface list carries it), and `dir()` includes it
-    — while index renders still record no attribution."""
-    import ava
-
-    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
-    ava.help(ava.skills)
-    out = capsys.readouterr().out
-    assert "def read(" in out
-    assert "read" in dir(ava.skills)
 
 
 # ─── the event is written for real, and a failed write is loud ───────────────
@@ -425,8 +371,10 @@ def test_consuming_a_skill_lands_a_skill_invoked_row(
 
     monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", resolve_agent)
 
-    skills_mod.read("alpha")
-    skills_mod.read("alpha")
+    import ava
+
+    assert ava.skills.alpha.__doc__
+    assert ava.skills.alpha.__doc__
 
     rows = db_conn.execute(
         "SELECT source, attributes FROM audit_events "
@@ -446,6 +394,8 @@ def test_a_failed_write_is_reported_and_does_not_fail_the_read(
     either: a failed `audit_events` write does not raise out of the read, and is
     reported through the audit module's loud path (error log with traceback plus
     an `audit_write_failed` anomaly event)."""
+    import ava
+
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", _one_agent)
 
@@ -457,7 +407,9 @@ def test_a_failed_write_is_reported_and_does_not_fail_the_read(
     errors: list[str] = []
     sink = logger.add(lambda m: errors.append(str(m)), level="ERROR")
     try:
-        assert skills_mod.read("alpha").endswith("# A\n")  # the read itself succeeds
+        body = ava.skills.alpha.__doc__
+        assert body is not None
+        assert body.endswith("# A\n")  # the read itself succeeds
     finally:
         logger.remove(sink)
 

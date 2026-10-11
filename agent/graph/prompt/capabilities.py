@@ -181,32 +181,34 @@ def _index_description(skill: Any) -> str | None:
     return None if is_flagged(description) else _one_line(description)
 
 
-def index_entry(identifier: str, description: str) -> str:
+def index_entry(path: str, description: str) -> str:
     """One skill line in the shape `# Capabilities` uses, so every note that names a
-    skill reads as more of the same listing."""
-    return f"- `ava.skills.{identifier}` — {description}"
+    skill reads as more of the same listing. `path` is the loadable attribute path
+    (`ava.skills.target`), which `ava.help` takes as written."""
+    return f"- `ava.skills.{path}` — {description}"
 
 
 def _index_line(skill: Any) -> str:
-    """One index entry. Display form — `ava.skills.<dash:colon>` (e.g.
-    `ava.skills.web-ai:deep-research`), the same spelling the expanded-SDK
-    section uses; the loadable form is that path with `-`/`:` -> `_`/`.`.
+    """One index entry, spelled the way `ava.help` takes it — the Python
+    attribute path (`ava.skills.web_ai.deep_research`), from `ava.skills.target`,
+    so an agent can paste the entry straight into `ava.help(...)`.
     A flagged description renders as a security marker (see `_index_description`)."""
     import ava
 
-    identifier = ava.skills.identifier(skill)
+    path = ava.skills.target(skill)
     description = _index_description(skill)
     if description is None:
         return (
-            f"- `ava.skills.{identifier}` — [security-flagged] description withheld "
-            f"(load the body with `ava.help(ava.skills.{identifier})` and judge it yourself)"
+            f"- `ava.skills.{path}` — [security-flagged] description withheld "
+            f"(load the body with `ava.help(ava.skills.{path})` and judge it yourself)"
         )
-    return index_entry(identifier, description)
+    return index_entry(path, description)
 
 
 class RecallCandidate(NamedTuple):
-    """One skill that recall may offer: its display `identifier`, the index line's
-    `description`, and `target`, the `ava.skills` access path that loads it."""
+    """One skill that recall may offer: its display `identifier` (the key of the
+    calibrated question), the index line's `description`, and `target`, the
+    `ava.skills` access path that loads it and that the offered note spells."""
 
     identifier: str
     description: str
@@ -384,10 +386,9 @@ _WHAT_MCPS = "live MCP tool servers"
 
 _SKILLS_HOWTO = (
     "Before using a skill, load its full body with `ava.help(ava.skills.<path>)` "
-    "or `ava.skills.read(<identifier>)` — both record the load; the read "
-    "returns the body plus the skill's directory path, where its other files "
-    "live. Paths nest like `ava.skills.web-ai:deep-research` — display form; the "
-    "loadable spelling of the same path is `ava.skills.web_ai.deep_research`. "
+    "with a path exactly as the skill list gives it, e.g. "
+    "`ava.skills.web_ai.deep_research`; the render also names the skill's "
+    "directory, where its other files live. "
     "This listing may be a subset of what is installed — "
     "`ava.help(ava.skills)` enumerates the full catalog, and an unlisted skill "
     "is still reachable by name. Entry skills group their sub-skills: inspect "

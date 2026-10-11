@@ -18,8 +18,7 @@ tags:
 
 ### Identity
 - `AGENT_ID: int` — Your agent ID (read-only forwarding of an internal framework slot; `AVA_SDK_DISABLE` can remove the self namespace without affecting identity).
-- `MACHINE_SPEC: MachineSpec` — `MachineSpec(name, description)`, a NamedTuple (still unpacks as `name, description`) for the current machine; `description` is free prose, empty if unset.
-- `SELF_MACHINE_NAME: str` — Current machine name, also the default value for `ava.agents.spawn(machine=...)`.
+- `MACHINE_SPEC: MachineSpec` — `MachineSpec(name, description)`, a NamedTuple (still unpacks as `name, description`) for the current machine; `description` is free prose, empty if unset. `MACHINE_SPEC.name` is the current machine name and the default for `ava.agents.spawn(machine=...)`.
 
 ### Lifecycle
 - `attach(path, label=None)` — Register a local media file for the next turn. The file is read when the current turn ends and reaches the configured model natively. Gated by the model's media capability (ruling 2026-08-28): a text-only model has no attach contract at all (SDK docs omit the member, the call raises), and a file whose modality the model's attach set excludes is rejected at registration with the allowed set — never a silent text-note delivery. Limits are 20 MiB per file, 8 files, and 48 MiB per turn.
