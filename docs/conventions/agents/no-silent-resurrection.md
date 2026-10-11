@@ -66,6 +66,23 @@ Implementation: `scripts/ci/no_silent_resurrection.py` (stdlib + git only).
    Actual distinctive calls, assignments, inline bodies and restored
    three-line blocks still fail. These fragments alone omit the operation or
    implementation that defines the deleted contract.
+   Before applying declarations, Python keyword continuation lines can carry
+   **retained-fragment evidence** from the merge-base blob at the same path.
+   The supported domain is deliberately narrow: a unique module-level function,
+   the same body statement index and assignment targets, unchanged decorators
+   and preceding statements, and one direct assignment call per callee in that
+   owner. Callee and positional AST shapes must match; all original named
+   keywords must retain their exact token spelling and relative order. Only
+   additional named keywords are admitted. Starred/unpacked inputs, duplicate
+   keywords, nested control flow, moved statements and ambiguous owners retain
+   raw detection. Parse/tokenization failures are reported and retain it too.
+   A retained line must contain just one original keyword plus an optional
+   trailing comma. Its path and head line number matter: equal text in a new
+   call is not exempt. Retained lines bridge runs like live lines, but do not
+   count as dead evidence. Complete calls/returns, removed or changed inputs,
+   new keywords and restored operations remain candidates. This proves existing
+   syntax provenance, not behavioral safety or permission to change a contract.
+
 6. **Allowances** come from the PR's commit messages (merge-base..head): a
    `Resurrects: <reason>` line allows every hit, or only the hits it names by
    deleting sha (at least 7 hex characters, containing a digit) or path
@@ -162,6 +179,12 @@ the sweep is the tool for that. Recorded passes and residual classes:
   behavior stayed intact. Type-reference-only exception headers now need
   corroborating dead lines; evaluated headers, inline suites, complete calls
   and restored three-line handler blocks still fail.
+
+- 2026-10-11, Machine identity: adding an explicit machine input unfolded three
+  already-live keywords from a one-line `notices_for` call. Position-specific
+  retained-fragment evidence removes that formatting artifact; restored calls,
+  changed/deleted inputs, control changes and genuine three-line blocks retain
+  their existing rules. The gate's historical-policy objective is unchanged.
 
 ## Local runs
 
