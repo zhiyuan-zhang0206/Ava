@@ -26,6 +26,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
 
 from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.config.domains.daemon.settings import DaemonSettings
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import LivenessGroup, LoopProgress
@@ -219,6 +220,10 @@ class _CallRecorder:
         return self.result
 
 
+def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
+    return False
+
+
 def _instrument_maintenance_slices(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, _CallRecorder]:
@@ -366,7 +371,11 @@ def test_deadline_settings_defaults_and_env_aliases() -> None:
 
 
 def test_run_gives_each_loop_its_own_progress_tracker(
-    monkeypatch: pytest.MonkeyPatch, database: Database
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     """The two concurrent loops cannot share a progress stamp at the run boundary."""
 
@@ -415,15 +424,27 @@ def test_run_gives_each_loop_its_own_progress_tracker(
     async def gauge(_pool: object, progress: LoopProgress) -> None:
         received["registry_gauge"] = progress
 
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: None)
+    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
+
+    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
+
+    def endpoint_for_entry(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+        return ServiceEndpoint("events_maintenance", 8109, Path("/nonexistent/em.pid"))
+
     monkeypatch.setattr(
         daemon,
         "_endpoint",
-        lambda: ServiceEndpoint("events_maintenance", 8109, Path("/nonexistent/em.pid")),
+        endpoint_for_entry,
     )
 
     def fake_pool(_self: object) -> _RunPool:
@@ -436,7 +457,13 @@ def test_run_gives_each_loop_its_own_progress_tracker(
 
     asyncio.run(
         asyncio.wait_for(
-            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None)), timeout=2.0
+            daemon.run(
+                process_config=process_config,
+                runtime=tmp_path / "run",
+                database=lambda: database,
+                image=LoadedCommit(Path(), None),
+            ),
+            timeout=2.0,
         )
     )
 
@@ -461,7 +488,12 @@ def test_run_gives_each_loop_its_own_progress_tracker(
 
 @pytest.mark.parametrize("crashing", ["dispatch", "resolution", "registry_gauge"])
 def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
-    monkeypatch: pytest.MonkeyPatch, database: Database, crashing: str
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    crashing: str,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     """The three loops share one TaskGroup: one that raises cancels the others and
     `run` leaves with the error, so the supervisor restarts the service."""
@@ -492,9 +524,17 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     async def fake_stop(_server: object) -> None:
         closed.append("health")
 
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: closed.append("pidfile"))
+    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
+
+    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        return closed.append("pidfile")
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
 
@@ -509,7 +549,13 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     with pytest.raises(ExceptionGroup) as raised:
         asyncio.run(
             asyncio.wait_for(
-                daemon.run(database=lambda: database, image=LoadedCommit(Path(), None)), timeout=5.0
+                daemon.run(
+                    process_config=process_config,
+                    runtime=tmp_path / "run",
+                    database=lambda: database,
+                    image=LoadedCommit(Path(), None),
+                ),
+                timeout=5.0,
             )
         )
 
@@ -519,7 +565,12 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
 
 
 def _run_with_alert_loop(
-    monkeypatch: pytest.MonkeyPatch, database: Database, *, configured: bool
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    *,
+    configured: bool,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> dict[str, object]:
     seen: dict[str, object] = {"alert_loop": False, "trackers": []}
 
@@ -545,15 +596,27 @@ def _run_with_alert_loop(
     async def fake_stop(_server: object) -> None:
         return None
 
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: None)
+    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
+
+    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
+
+    def endpoint_for_entry(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+        return ServiceEndpoint("events_maintenance", 8109, Path("/nonexistent/em.pid"))
+
     monkeypatch.setattr(
         daemon,
         "_endpoint",
-        lambda: ServiceEndpoint("events_maintenance", 8109, Path("/nonexistent/em.pid")),
+        endpoint_for_entry,
     )
 
     def fake_pool(_self: object) -> _RunPool:
@@ -573,7 +636,13 @@ def _run_with_alert_loop(
     monkeypatch.setattr(daemon, "events_maintenance_config", build_config)
     asyncio.run(
         asyncio.wait_for(
-            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None)), timeout=5.0
+            daemon.run(
+                process_config=process_config,
+                runtime=tmp_path / "run",
+                database=lambda: database,
+                image=LoadedCommit(Path(), None),
+            ),
+            timeout=5.0,
         )
     )
     return seen
@@ -582,11 +651,18 @@ def _run_with_alert_loop(
 def test_the_alert_reconciliation_loop_runs_only_with_the_grafana_credential(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
-    on = _run_with_alert_loop(monkeypatch, database, configured=True)
+    on = _run_with_alert_loop(
+        monkeypatch, database, configured=True, process_config=process_config, tmp_path=tmp_path
+    )
     assert on["alert_loop"] is True
     assert "alert_reconciliation" in cast(list[str], on["trackers"])
 
-    off = _run_with_alert_loop(monkeypatch, database, configured=False)
+    off = _run_with_alert_loop(
+        monkeypatch, database, configured=False, process_config=process_config, tmp_path=tmp_path
+    )
     assert off["alert_loop"] is False
     assert "alert_reconciliation" not in cast(list[str], off["trackers"])

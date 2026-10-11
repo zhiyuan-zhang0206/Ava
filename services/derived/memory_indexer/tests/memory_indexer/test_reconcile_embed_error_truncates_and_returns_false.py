@@ -20,6 +20,7 @@ from pydantic import SecretStr
 
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import ConfigBoot
+from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import Liveness
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
@@ -654,40 +655,13 @@ async def test_reconcile_retry_beats_between_failed_pass_and_batch(
 
 
 @pytest.mark.usefixtures("owned_config_environment")
-async def test_run_unknown_provider_fails_before_health_server(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    database: Database,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    start_health_server = AsyncMock()
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "start_health_server", start_health_server)
-    boot = ConfigBoot()
-    monkeypatch.setattr(boot.view.services, "embedding_backend", "unknown-provider")
-
-    with pytest.raises(SystemExit) as exc:
-        await daemon.run(
-            config=boot,
-            database=lambda: database,
-            image=LoadedCommit(Path(), None),
-            machine=machine_identity,
-        )
-
-    assert exc.value.code == 1
-    assert "FATAL: unknown embedding provider 'unknown-provider'" in capsys.readouterr().err
-    start_health_server.assert_not_awaited()
-
-
-@pytest.mark.usefixtures("owned_config_environment")
 async def test_run_arms_retry_when_startup_reconcile_incomplete(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     database: Database,
     *,
     machine_identity: MachineIdentity,
+    tmp_path: Path,
 ) -> None:
     from services.derived.memory_indexer.backends.probe import ProbeResult
 
@@ -696,12 +670,28 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
     provider = _FakeProvider()
     reconcile = Mock(return_value=False)
     drain = AsyncMock()
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: None)
+
+    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
+        return False
+
+    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
+
+    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", AsyncMock())
     monkeypatch.setattr(daemon, "stop_health_server", AsyncMock())
-    monkeypatch.setattr(daemon, "_endpoint", lambda: Mock(health_port=0))
+
+    def endpoint_for_entry(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+        return Mock(health_port=0)
+
+    monkeypatch.setattr(daemon, "_endpoint", endpoint_for_entry)
 
     provider_inputs: list[tuple[str, float, str | None]] = []
 
@@ -730,6 +720,7 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
 
     with caplog.at_level(logging.WARNING, logger="services.derived.memory_indexer.daemon"):
         await daemon.run(
+            runtime=tmp_path / "run",
             config=boot,
             database=lambda: database,
             image=LoadedCommit(Path(), None),

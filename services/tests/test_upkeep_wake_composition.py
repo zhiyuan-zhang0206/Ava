@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from base.config import ConfigBoot
 from base.db import Database
 from base.deploy.schema import migrations
 from base.native_process import code_version
@@ -53,7 +54,7 @@ def _prepare_entry(
     logging = Mock()
     exit_process = Mock()
     monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(entry.Database, "from_settings", create)
+    monkeypatch.setattr(entry, "Database", create)
     monkeypatch.setattr(entry, "build_pipeline", pipeline)
     monkeypatch.setattr(entry, "init_gateway_process", logging)
     monkeypatch.setattr(entry, "install_graceful_shutdown", Mock())
@@ -73,11 +74,22 @@ def test_entry_retains_one_gate_for_work_and_lazy_log_database(
     count = Mock(return_value=7)
     received: list[Callable[[], Database]] = []
 
-    async def work(*, database: Callable[[], Database], image: LoadedCommit) -> None:
+    async def work(
+        *,
+        process_config: ConfigBoot,
+        runtime: Path,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+    ) -> None:
+        assert runtime == pipeline.call_args.kwargs["home"] / "run"
         received.append(database)
         assert image is capture.return_value
         database()
+        previous_max = process_config.view.data_plane.db_pool_max_size
+        process_config.view.data_plane.db_pool_max_size = previous_max + 1
         database()
+        assert create.call_args.args[0].db_url == process_config.view.data_plane.db_url
+        assert create.call_args.args[0].db_pool_max_size == previous_max + 1
 
     monkeypatch.setattr(entry, "run", work)
     monkeypatch.setattr(code_version, "first_parent_count", count)
@@ -89,7 +101,9 @@ def test_entry_retains_one_gate_for_work_and_lazy_log_database(
     assert pipeline.call_args.kwargs["database"] is factory
     assert logging.call_args.kwargs["image"] is image
     assert logging.call_args.kwargs["producer"]() is pipeline.return_value
-    assert logging.call_args.kwargs["machine_reader"]() == entry.settings.general.machine_name
+    assert (
+        logging.call_args.kwargs["machine_reader"]() == pipeline.call_args.kwargs["machine"].name()
+    )
     factory()
     gates = [call.kwargs["gate"] for call in create.call_args_list]
     assert len(gates) == 3 and all(gate is gates[0] for gate in gates)
@@ -108,7 +122,13 @@ def test_work_failure_keeps_the_original_exception_and_exit_status(
     )
     failure = RuntimeError("original service failure")
 
-    async def work(*, database: Callable[[], Database], image: LoadedCommit) -> None:
+    async def work(
+        *,
+        process_config: ConfigBoot,
+        runtime: Path,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+    ) -> None:
         raise failure
 
     monkeypatch.setattr(entry, "run", work)

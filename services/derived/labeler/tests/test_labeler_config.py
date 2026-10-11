@@ -19,6 +19,7 @@ from base.config.domains.lm import LmSettings
 from base.daemon.endpoints import ServiceEndpoint
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import DbConfig
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.native_process import code_version
@@ -42,6 +43,8 @@ def _assert_run_lifecycle(
     error: Exception | None,
     *,
     database_gate: ProcessDbGate,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     received: list[object] = []
     cleanup: list[str] = []
@@ -81,9 +84,20 @@ def _assert_run_lifecycle(
         if error is not None:
             raise error
 
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: startup.append("pidfile"))
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: cleanup.append("pidfile"))
+    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
+        return False
+
+    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
+
+    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        return startup.append("pidfile")
+
+    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        return cleanup.append("pidfile")
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
     monkeypatch.setattr(daemon, "build_model_catalog", lambda: model_catalog)
@@ -96,17 +110,32 @@ def _assert_run_lifecycle(
         startup.append("database")
         return Database.from_settings(gate=database_gate)
 
-    monkeypatch.setattr(
-        daemon, "_endpoint", lambda: ServiceEndpoint("labeler", 1, Path("/nonexistent/labeler.pid"))
-    )
+    def endpoint_for_entry(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+        return ServiceEndpoint("labeler", 1, Path("/nonexistent/labeler.pid"))
+
+    monkeypatch.setattr(daemon, "_endpoint", endpoint_for_entry)
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", fake_dispatch)
 
     if error is None:
-        asyncio.run(daemon.run(database=database, image=image))
+        asyncio.run(
+            daemon.run(
+                process_config=process_config,
+                runtime=tmp_path / "run",
+                database=database,
+                image=image,
+            )
+        )
     else:
         with pytest.raises(type(error)) as caught:
-            asyncio.run(daemon.run(database=database, image=image))
+            asyncio.run(
+                daemon.run(
+                    process_config=process_config,
+                    runtime=tmp_path / "run",
+                    database=database,
+                    image=image,
+                )
+            )
         assert caught.value is error
     assert received == [daemon.labeler_config()]
     assert cleanup == ["pool", "health", "pidfile"]
@@ -142,6 +171,10 @@ def _run_main(monkeypatch: pytest.MonkeyPatch, *, machine_name: str) -> None:
             tzset()
 
 
+def _ignore_entry_resource(config: ConfigBoot, *, runtime: Path) -> None:
+    """Keep the entry composition test independent of real pidfile cleanup."""
+
+
 @pytest.mark.parametrize("sha", ["captured-labeler", None])
 def test_entry_shares_the_captured_gate_with_logging_and_work(
     monkeypatch: pytest.MonkeyPatch, sha: str | None
@@ -157,11 +190,11 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
     pipeline = object()
 
     class Store:
-        @classmethod
-        def from_settings(cls, *, gate: ProcessDbGate, local_host: Callable[[], str]) -> Store:
+        def __init__(
+            self, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+        ) -> None:
             assert local_host == machines[0].host
             gates.append(gate)
-            return cls()
 
     def capture() -> LoadedCommit:
         stages.append("capture")
@@ -185,7 +218,13 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
         assert inputs["machine_reader"]() == "labeler-entry"
         factories[0]()
 
-    async def work(*, database: Callable[[], Database], image: LoadedCommit) -> None:
+    async def work(
+        *,
+        process_config: ConfigBoot,
+        runtime: Path,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+    ) -> None:
         stages.append("run")
         assert image is captured
         assert database is factories[0]
@@ -210,7 +249,8 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
     monkeypatch.setattr(migrations, "assert_schema_current", checked_schema)
     monkeypatch.setattr(daemon, "install_graceful_shutdown", no_signal_handlers)
     monkeypatch.setattr(daemon, "run", work)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: None)
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", _ignore_entry_resource)
     monkeypatch.setattr(daemon, "_hard_exit", exit_process)
     _run_main(monkeypatch, machine_name="labeler-entry")
     assert stages == ["capture", "schema", "producer", "logging", "run", "exit:0"]
@@ -218,16 +258,38 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
 
 
 def test_run_hands_the_slice_to_the_dispatch_loop(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
-    _assert_run_lifecycle(monkeypatch, model_catalog, None, database_gate=database_gate)
+    _assert_run_lifecycle(
+        monkeypatch,
+        model_catalog,
+        None,
+        database_gate=database_gate,
+        process_config=process_config,
+        tmp_path=tmp_path,
+    )
 
 
 def test_run_cleans_up_after_dispatch_failure(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     _assert_run_lifecycle(
-        monkeypatch, model_catalog, TypeError("invalid dispatch"), database_gate=database_gate
+        monkeypatch,
+        model_catalog,
+        TypeError("invalid dispatch"),
+        database_gate=database_gate,
+        process_config=process_config,
+        tmp_path=tmp_path,
     )
 
 
@@ -262,7 +324,11 @@ def test_main_reports_uncaught_failure_and_exits_nonzero(
     monkeypatch.setattr(daemon, "init_gateway_process", no_logger_init)
     monkeypatch.setattr(daemon, "install_graceful_shutdown", no_signal_handlers)
     monkeypatch.setattr(daemon, "run", fail_run)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: removed.append(True))
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        return removed.append(True)
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "_hard_exit", exit_process)
     runner = asyncio.Runner()
     monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)

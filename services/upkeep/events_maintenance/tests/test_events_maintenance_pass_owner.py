@@ -12,6 +12,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.config import ConfigBoot
 from base.daemon.health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
@@ -102,9 +103,21 @@ def _mock_service(
         return Pool()
 
     config = events_maintenance_config(events_maintenance_pass_deadline_s=0.02)
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: closed.append("pidfile"))
+
+    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
+        return False
+
+    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
+
+    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        return closed.append("pidfile")
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", health)
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
     monkeypatch.setattr(daemon, "_run_maintenance", work)
@@ -118,6 +131,9 @@ def _mock_service(
 async def test_service_stop_cancels_expired_proxy_before_worker_returns(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     started = threading.Event()
     release = threading.Event()
@@ -141,7 +157,12 @@ async def test_service_stop_cancels_expired_proxy_before_worker_returns(
     before = asyncio.all_tasks()
     async with asyncio.TaskGroup() as tests:
         service = tests.create_task(
-            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None))
+            daemon.run(
+                process_config=process_config,
+                runtime=tmp_path / "run",
+                database=lambda: database,
+                image=LoadedCommit(Path(), None),
+            )
         )
         probe = tests.create_task(wait_for_wedge())
         try:

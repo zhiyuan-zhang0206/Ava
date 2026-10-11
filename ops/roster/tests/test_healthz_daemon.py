@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import math
+from collections import Counter
 from functools import partial
 from pathlib import Path
 from typing import cast
@@ -298,8 +299,8 @@ def _daemon_literals(source: str, *, module: str | None = None) -> dict[str, lis
             found.setdefault(callee, []).append(_literal(argument, constants) if argument else None)
         elif callee in _MODULE_CALLS and len(node.args) >= 2:
             found.setdefault(callee, []).append(_literal(node.args[1], constants))
-    # A composition entry may delegate logging to an imported public function.
-    missing = set(_HEALTH_NAME_CALLS) - found.keys()
+    # Composition entries may delegate logging or pidfiles to their public owner.
+    missing = {*_HEALTH_NAME_CALLS, *_MODULE_CALLS} - found.keys()
     if module is not None:
         for delegated in _called_function_sources(tree, module):
             for callee, values in _daemon_literals(delegated).items():
@@ -308,20 +309,76 @@ def _daemon_literals(source: str, *, module: str | None = None) -> dict[str, lis
     return found
 
 
-def _called_imports(tree: ast.Module, module: str) -> list[tuple[str, str]]:
-    calls = {_call_name(node) for node in ast.walk(tree) if isinstance(node, ast.Call)}
-    found: list[tuple[str, str]] = []
+def _rebound_names(tree: ast.Module) -> set[str]:
+    rebound = {
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del))
+    }
+    rebound.update(node.arg for node in ast.walk(tree) if isinstance(node, ast.arg))
+    rebound.update(
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    )
+    return rebound
+
+
+def _import_bindings(tree: ast.Module, module: str) -> list[tuple[str, str, str | None]]:
+    bindings: list[tuple[str, str, str | None]] = []
     for node in tree.body:
-        if not isinstance(node, ast.ImportFrom) or node.module is None:
-            continue
-        target = (
-            importlib.util.resolve_name("." * node.level + node.module, module.rpartition(".")[0])
-            if node.level
-            else node.module
-        )
-        found.extend(
-            (target, alias.name) for alias in node.names if (alias.asname or alias.name) in calls
-        )
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            target = (
+                importlib.util.resolve_name(
+                    "." * node.level + node.module, module.rpartition(".")[0]
+                )
+                if node.level
+                else node.module
+            )
+            bindings.extend(
+                (alias.asname or alias.name, target, alias.name) for alias in node.names
+            )
+        elif isinstance(node, ast.Import):
+            bindings.extend(
+                (alias.asname or alias.name, alias.name, None)
+                for alias in node.names
+                if alias.asname or "." not in alias.name
+            )
+    return bindings
+
+
+def _calls_for_import(
+    calls: list[ast.expr], *, bound: str, target: str, member: str | None
+) -> list[tuple[str, str]]:
+    found = (
+        [(target, member) for call in calls if isinstance(call, ast.Name) and call.id == bound]
+        if member is not None
+        else []
+    )
+    owner = target + "." + member if member is not None else target
+    found.extend(
+        (owner, call.attr)
+        for call in calls
+        if isinstance(call, ast.Attribute)
+        and isinstance(call.value, ast.Name)
+        and call.value.id == bound
+    )
+    return found
+
+
+def _called_imports(tree: ast.Module, module: str) -> list[tuple[str, str]]:
+    calls = [node.func for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    rebound = _rebound_names(tree)
+    imports = Counter(
+        alias.asname or (alias.name.split(".")[0] if isinstance(node, ast.Import) else alias.name)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    )
+    found: list[tuple[str, str]] = []
+    for bound, target, member in _import_bindings(tree, module):
+        if bound not in rebound and imports[bound] == 1:
+            found.extend(_calls_for_import(calls, bound=bound, target=target, member=member))
     return found
 
 
@@ -378,6 +435,48 @@ def test_the_literal_finder_sees_a_mismatch() -> None:
         "install_graceful_shutdown": ["b"],
         "acquire_pidfile": ["pkg.daemon"],
     }
+
+
+def test_the_literal_finder_follows_the_public_pidfile_owner() -> None:
+    source = (
+        "from services.agent_runner.page_server import resources as owned\n"
+        "def main():\n"
+        "    owned.write_pidfile(config, runtime=runtime)\n"
+        "    owned.is_running(config, runtime=runtime)\n"
+    )
+    found = _daemon_literals(source, module="services.agent_runner.page_server.daemon")
+    assert found == {
+        "acquire_pidfile": ["services.agent_runner.page_server.daemon"],
+        "pidfile_holds_daemon": ["services.agent_runner.page_server.daemon"],
+    }
+    delegated = "\n".join(
+        _called_function_sources(ast.parse(source), "services.agent_runner.page_server.daemon")
+    )
+    wrong_name = delegated.replace("services.agent_runner.page_server.daemon", "wrong.daemon")
+    assert _daemon_literals(wrong_name) == {
+        "acquire_pidfile": ["wrong.daemon"],
+        "pidfile_holds_daemon": ["wrong.daemon"],
+    }
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from services.agent_runner.page_server import resources as owned\n"
+        "owned = other\nowned.write_pidfile(config, runtime=runtime)\n",
+        "from services.agent_runner.page_server import resources as owned\n"
+        "def main(owned):\n    owned.write_pidfile(config, runtime=runtime)\n",
+        "from services.agent_runner.page_server import resources as owned\n"
+        "def main():\n    owned = other\n    owned.write_pidfile(config, runtime=runtime)\n",
+        "from services.agent_runner.page_server import resources as owned\n"
+        "other.write_pidfile(config, runtime=runtime)\n",
+        "from services.agent_runner.page_server import resources as owned\n"
+        "from other import resources as owned\nowned.write_pidfile(config, runtime=runtime)\n",
+    ],
+)
+def test_the_literal_finder_does_not_attribute_an_unknown_resource_owner(source: str) -> None:
+    assert _called_imports(ast.parse(source), "services.agent_runner.page_server.daemon") == []
+    assert _daemon_literals(source, module="services.agent_runner.page_server.daemon") == {}
 
 
 def test_the_public_probe_builder_is_still_the_roster_door() -> None:

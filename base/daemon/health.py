@@ -74,7 +74,6 @@ from enum import Enum
 from pathlib import Path
 from typing import cast
 
-from base.config import get_field
 from base.daemon.http_transport import RouteHandler as RouteHandler
 from base.daemon.http_transport import start_daemon_http
 from base.daemon.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
@@ -114,8 +113,8 @@ _HEALTH_PORT_OVERRIDES: dict[str, str] = {
 MAX_BODY_BYTES = 64 * 1024
 
 
-def _health_port(name: str) -> int:
-    """Return the healthz port for daemon `name`; read by `ServiceEndpoints.from_settings` only.
+def health_port(name: str, *, read_field: Callable[[str], int | None]) -> int:
+    """Resolve a daemon's registered health port through the caller's config reader.
 
     First reads ``settings.<name>_health_port`` (overridable by env
     ``AVA_<NAME>_HEALTH_PORT``); falls back to ``DEFAULT_PORTS``; if
@@ -124,7 +123,7 @@ def _health_port(name: str) -> int:
     allowed).
     """
     override_attr = _HEALTH_PORT_OVERRIDES.get(name)
-    override = None if override_attr is None else get_field(override_attr)
+    override = None if override_attr is None else read_field(override_attr)
     return DEFAULT_PORTS[name] if override is None else int(override)
 
 

@@ -174,10 +174,18 @@ def _exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
         else:
             await daemon._backup_loop(state, config=config)
 
+    def write_pidfile(_config: ConfigBoot, *, runtime: Path) -> None:
+        assert runtime.name == "run"
+        pidfile.write_text(str(os.getpid()))
+
+    def remove_pidfile(_config: ConfigBoot, *, runtime: Path) -> None:
+        assert runtime.name == "run"
+        pidfile.unlink(missing_ok=True)
+
     with (
         patch.object(daemon, "_is_running", return_value=False),
-        patch.object(daemon, "_write_pidfile", lambda: pidfile.write_text(str(os.getpid()))),
-        patch.object(daemon, "_remove_pidfile", lambda: pidfile.unlink(missing_ok=True)),
+        patch.object(daemon, "_write_pidfile", write_pidfile),
+        patch.object(daemon, "_remove_pidfile", remove_pidfile),
         patch.object(daemon, "start_health_server", AsyncMock(return_value=object())),
         patch.object(daemon, "stop_health_server", AsyncMock()),
         patch.object(daemon, "is_due", return_value=True),
@@ -205,7 +213,13 @@ def _exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
 def _run_daemon() -> None:
     daemon.install_graceful_shutdown("backup-shutdown-test")
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(daemon.run(config=ConfigBoot(), image=LoadedCommit(Path(), None)))
+        asyncio.run(
+            daemon.run(
+                config=ConfigBoot(),
+                image=LoadedCommit(Path(), None),
+                runtime=Path(os.environ["AVA_HOME"]) / "run",
+            )
+        )
 
 
 def _wait_file(path: Path, process: subprocess.Popen[str]) -> None:

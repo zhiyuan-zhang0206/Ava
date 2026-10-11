@@ -22,7 +22,7 @@ from pathlib import Path
 from base import telemetry
 from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine.boot import machine_from_boot
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.health_schema import DEGRADED, OK, component
@@ -30,6 +30,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -52,12 +53,13 @@ BACKUP_STALE_AFTER_S = 26 * 3600
 _SLEEP_CHUNK_S = 60
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("pg_backup")
+def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    runtime.mkdir(parents=True, exist_ok=True)
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("pg_backup")
 
 
-def _pidfile() -> Path:
-    return _endpoint().pidfile
+def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
+    return _endpoint(config, runtime=runtime).pidfile
 
 
 @dataclass
@@ -84,19 +86,24 @@ class _BackupState:
         self.detail = detail
 
 
-def _write_pidfile() -> None:
-    if not acquire_pidfile(_pidfile(), "services.backup.scheduler.daemon"):
-        _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _pidfile())
+def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    if not acquire_pidfile(_pidfile(config, runtime=runtime), "services.backup.scheduler.daemon"):
+        _log.info(
+            "[pg-backup] daemon already running (pidfile=%s), exiting",
+            _pidfile(config, runtime=runtime),
+        )
         sys.exit(1)
 
 
-def _remove_pidfile() -> None:
-    remove_pidfile(_pidfile())
+def _remove_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    remove_pidfile(_pidfile(config, runtime=runtime))
 
 
-def _is_running() -> bool:
+def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     """Whether this daemon already owns its pidfile."""
-    return pidfile_holds_daemon(_pidfile(), "services.backup.scheduler.daemon")
+    return pidfile_holds_daemon(
+        _pidfile(config, runtime=runtime), "services.backup.scheduler.daemon"
+    )
 
 
 def _backup_components(state: _BackupState) -> list[dict[str, object]]:
@@ -219,15 +226,18 @@ async def _backup_loop(state: _BackupState, *, config: ConfigBoot) -> None:
         await _sleep_until_next_backup_hour(datetime.now(UTC), config=config)
 
 
-async def run(*, config: ConfigBoot, image: LoadedCommit) -> None:
+async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path) -> None:
     """Own the pidfile and health server for the backup scheduler."""
-    if _is_running():
-        _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _pidfile())
+    if _is_running(config, runtime=runtime):
+        _log.info(
+            "[pg-backup] daemon already running (pidfile=%s), exiting",
+            _pidfile(config, runtime=runtime),
+        )
         sys.exit(1)
 
-    _write_pidfile()
+    _write_pidfile(config, runtime=runtime)
     state = _BackupState()
-    endpoint = _endpoint()
+    endpoint = _endpoint(config, runtime=runtime)
     health = await start_health_server(
         "pg_backup",
         endpoint.health_port,
@@ -239,7 +249,7 @@ async def run(*, config: ConfigBoot, image: LoadedCommit) -> None:
         await _backup_loop(state, config=config)
     finally:
         await stop_health_server(health)
-        _remove_pidfile()
+        _remove_pidfile(config, runtime=runtime)
         _log.info("[pg-backup] daemon stopped")
 
 
@@ -252,12 +262,12 @@ def main() -> None:
     machine = machine_from_boot(config)
     process_home = ava_home().resolve()
     image = LoadedCommit.capture()
-    assert_schema_current(settings.data_plane.db_url)
+    assert_schema_current(config.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="pg_backup")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, local_host=machine.host)
+        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
@@ -275,7 +285,7 @@ def main() -> None:
     # teardown is skipped by the hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run(config=config, image=image))
+        runner.run(run(config=config, image=image, runtime=process_home / "run"))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[pg-backup] interrupted, shutting down")
@@ -291,7 +301,7 @@ def main() -> None:
         _log.exception("[pg-backup] daemon crashed — uncaught exception escaped run()")
         code = 1
     finally:
-        _remove_pidfile()
+        _remove_pidfile(config, runtime=process_home / "run")
     _hard_exit(code)
 
 

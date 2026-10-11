@@ -15,7 +15,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import base.db
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -108,6 +108,9 @@ async def test_each_loop_reports_its_own_progress(
 async def test_a_crash_leaves_run_after_releasing_its_resources(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     """The exception reaches `main` (exit code 1, supervisor restarts the unit),
     and the pool, the health server and the pidfile are released on the way."""
@@ -143,7 +146,12 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     monkeypatch.setattr(daemon, "_run_loops", crashing_loops)
 
     with pytest.raises(ExceptionGroup):
-        await daemon.run(database=lambda: database, image=LoadedCommit(Path(), None))
+        await daemon.run(
+            process_config=process_config,
+            runtime=tmp_path / "run",
+            database=lambda: database,
+            image=LoadedCommit(Path(), None),
+        )
 
     assert sorted(released) == ["health", "pidfile", "pool"]
 

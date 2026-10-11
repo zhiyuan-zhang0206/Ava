@@ -17,6 +17,7 @@ import logging
 import signal
 import sys
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.deploy.maintenance import admission
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
@@ -59,30 +61,38 @@ _LIVENESS_TIMEOUT_S = 120.0
 _LIVENESS_BEAT_INTERVAL_S = 30.0
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("im_bridge")
+def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    runtime.mkdir(parents=True, exist_ok=True)
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("im_bridge")
 
 
-def _pidfile() -> Path:
-    return _endpoint().pidfile
+def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
+    return _endpoint(config, runtime=runtime).pidfile
 
 
-def _write_pidfile() -> None:
-    if not acquire_pidfile(_pidfile(), "services.entrypoints.im_bridge.daemon"):
-        _log.info("[im_bridge] daemon already running (pidfile=%s), exiting", _pidfile())
+def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    if not acquire_pidfile(
+        _pidfile(config, runtime=runtime), "services.entrypoints.im_bridge.daemon"
+    ):
+        _log.info(
+            "[im_bridge] daemon already running (pidfile=%s), exiting",
+            _pidfile(config, runtime=runtime),
+        )
         sys.exit(1)
 
 
-def _remove_pidfile() -> None:
-    remove_pidfile(_pidfile())
+def _remove_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    remove_pidfile(_pidfile(config, runtime=runtime))
 
 
-def _is_running() -> bool:
+def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_pidfile(), "services.entrypoints.im_bridge.daemon")
+    return pidfile_holds_daemon(
+        _pidfile(config, runtime=runtime), "services.entrypoints.im_bridge.daemon"
+    )
 
 
 # -- composition root --------------------------------------------------------
@@ -253,7 +263,7 @@ def _begin_shutdown(adapters: list[Any]) -> list[BaseException]:
 
 
 async def _stop_resources(
-    core: Any, adapters: list[Any], health: Any, pool: Any
+    core: Any, adapters: list[Any], health: Any, pool: Any, *, config: ConfigBoot, runtime: Path
 ) -> list[BaseException]:
     """Attempt every owned resource once, returning faults for the daemon to expose."""
     errors: list[BaseException] = []
@@ -272,7 +282,7 @@ async def _stop_resources(
             await stop_health_server(health)
         except BaseException as error:
             errors.append(error)
-    for close in (pool.close, _remove_pidfile):
+    for close in (pool.close, partial(_remove_pidfile, config, runtime=runtime)):
         try:
             close()
         except BaseException as error:
@@ -280,14 +290,23 @@ async def _stop_resources(
     return errors
 
 
-async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
+async def run(
+    *,
+    process_config: ConfigBoot,
+    runtime: Path,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+) -> None:
     """Start the daemon: healthz -> pidfile -> load adapters -> serve."""
-    if _is_running():
-        _log.info("[im_bridge] daemon already running (pidfile=%s), exiting", _pidfile())
+    if _is_running(process_config, runtime=runtime):
+        _log.info(
+            "[im_bridge] daemon already running (pidfile=%s), exiting",
+            _pidfile(process_config, runtime=runtime),
+        )
         sys.exit(1)
 
-    _write_pidfile()
-    _log.info("[im_bridge] pidfile written: %s", _pidfile())
+    _write_pidfile(process_config, runtime=runtime)
+    _log.info("[im_bridge] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
     # The notice bridge reads agent_notices directly (R3 door ④ — decoupled
     # from gateway availability, so a paused cluster cannot stall notice
@@ -309,7 +328,7 @@ async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
                     core.outbound_store, core.adapters, enabled=settings.alerts.im_notify_enabled
                 )
                 liveness = Liveness(_LIVENESS_TIMEOUT_S)
-                endpoint = _endpoint()
+                endpoint = _endpoint(process_config, runtime=runtime)
                 await asyncio.to_thread(core.notice_bridge.initialize_poll)
                 health = await start_health_server(
                     "im_bridge",
@@ -339,7 +358,11 @@ async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
         primary = error
     finally:
         # Children have drained; every shared resource is attempted even after a stop fault.
-        cleanup_errors.extend(await _stop_resources(core, adapters, health, db_pool))
+        cleanup_errors.extend(
+            await _stop_resources(
+                core, adapters, health, db_pool, config=process_config, runtime=runtime
+            )
+        )
         _log.info("[im_bridge] daemon stopped")
     if cleanup_errors:
         errors = ([primary] if primary is not None else []) + cleanup_errors
@@ -372,7 +395,7 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="im_bridge")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, local_host=machine.host)
+        return Database(db_config_from_boot(machine_config), gate=gate, local_host=machine.host)
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
@@ -392,7 +415,14 @@ def main() -> None:
     # teardown is skipped by the hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run(database=database, image=image))
+        runner.run(
+            run(
+                process_config=machine_config,
+                runtime=process_home / "run",
+                database=database,
+                image=image,
+            )
+        )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[im_bridge] interrupted")
