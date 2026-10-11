@@ -1,4 +1,4 @@
-"""Tests for base/agents/history/checkpoint_cleanup.py.
+"""Tests for base/agents/history/compact_boundary.py.
 
 These drive the REAL LangGraph AsyncPostgresSaver against the session's test
 Postgres (the same saver prod uses), so the compaction-boundary stamps are
@@ -22,8 +22,8 @@ from langgraph.graph.message import _messages_delta_reducer
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.history.checkpoint_cleanup import mark_compact_boundary
 from base.agents.history.closing_request import ClosingRequest
+from base.agents.history.compact_boundary import mark_compact_boundary
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning

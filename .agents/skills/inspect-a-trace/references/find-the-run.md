@@ -68,7 +68,7 @@ checkpoint of a thread is still readable.
 ## Reading history across compaction segments
 
 Every compaction stamps the thread's newest checkpoint
-`metadata->>'compact_boundary' = true` (`base/agents/history/checkpoint_cleanup.py:mark_compact_boundary`),
+`metadata->>'compact_boundary' = true` (`base/agents/history/compact_boundary.py:mark_compact_boundary`),
 so each past compaction segment ends at exactly one stamped full snapshot. To walk
 an agent's whole past:
 

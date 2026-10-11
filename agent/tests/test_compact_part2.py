@@ -128,7 +128,7 @@ def _fake_llm_seq(*summaries: str) -> Any:
 def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
     # These unit tests have no DB. ops_pool=None is the container-mode value:
     # the post-compact checkpoint trim treats it as a no-op (real-pool trimming is covered by
-    # base/agents/history/tests/test_checkpoint_cleanup.py and the aops_pool compact tests below).
+    # base/agents/history/tests/test_compact_boundary.py and the aops_pool compact tests below).
     ctx = AvaContext(
         ops_pool=None,
         llm=llm,

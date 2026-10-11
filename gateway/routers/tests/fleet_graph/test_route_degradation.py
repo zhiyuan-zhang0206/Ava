@@ -101,7 +101,7 @@ def test_pg_phase_exceeding_route_budget_serves_stale_before_telemetry(
     """A real DB phase beyond the budget returns stale before reading telemetry."""
     agent_id = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
+        "INSERT INTO agents_meta (id, spawner, born_spawner, status) VALUES (%s, 'test', 'test', 'running')",
         (agent_id,),
     )
     db_conn.commit()

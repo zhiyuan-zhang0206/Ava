@@ -629,55 +629,12 @@ def _field_is_sensitive(extra: object) -> bool:
 
     SecretStr values are already masked by pydantic's model_dump, but a
     sensitive field that is NOT a SecretStr (or one that later changes type)
-    would otherwise land in the snapshot verbatim — filter the marker, not the
-    value shape.
+    would otherwise be emitted verbatim — test the marker, not the value shape.
     """
     if not isinstance(extra, dict):
         return False
     extras = cast(dict[str, Any], extra)
     return extras.get("sensitive") is True
-
-
-def _framework_field_is_sensitive(name: str) -> bool:
-    """Framework-field sensitive lookup — FIELD_INFOS maps field name -> FieldInfo."""
-    from base.config import FIELD_INFOS
-
-    info = FIELD_INFOS.get(name)
-    if info is None:
-        return False
-    return _field_is_sensitive(info.json_schema_extra)
-
-
-def effective_config_snapshot(
-    configs: Mapping[str, BaseModel], *, framework_values: Mapping[str, object]
-) -> dict[str, object]:
-    """Full snapshot of current framework + plugin config — used as `restart_completed`
-    inbound payload, so the event trail records the config the new process actually runs with.
-
-    Returns a flat dict (no nested plugin namespace), making it easy to diff against
-    the previous snapshot. Framework fields are at the top level; plugin fields are
-    prefixed with `<plugin>.<field>` to avoid colliding with framework field names
-    (the same-name rejection rule in resolve_overlay_targets prevents collision on
-    the overlay write path, but a snapshot is a superset and must distinguish strictly).
-
-    Fields marked `sensitive=True` are excluded: the snapshot is stored in plain
-    JSON on every restart_completed inbound row (2026-08-08 audit, P2-7), so a
-    sensitive value must not get a second plaintext copy there even though
-    SecretStr masking already redacts the value itself.
-    """
-    out: dict[str, object] = {
-        name: value
-        for name, value in framework_values.items()
-        if not _framework_field_is_sensitive(name)
-    }
-    for plugin, instance in configs.items():
-        fields = type(instance).model_fields
-        for field, value in instance.model_dump(mode="json").items():
-            info = fields[field].json_schema_extra
-            if _field_is_sensitive(info):
-                continue
-            out[f"{plugin}.{field}"] = value
-    return out
 
 
 def registered_plugin_config_names(configs: Mapping[str, BaseModel]) -> tuple[str, ...]:

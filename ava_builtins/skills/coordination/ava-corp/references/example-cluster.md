@@ -53,7 +53,7 @@ CEO #101
 - **Direct communication**: cross-role alignment is direct `send_message` +
   shared memory; the CEO relays nothing.
 - **Deployment discipline**: cluster rollouts are executed by the Cluster
-  Operator alone; no agent runs `ava.self.update()` on its own.
+  Operator alone; no other agent triggers one on its own.
 
 ## Role lifecycle in practice
 
