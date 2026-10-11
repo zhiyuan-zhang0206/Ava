@@ -21,34 +21,23 @@ class NoticePollStore:
     def __init__(self, outbound: IMOutboxStore) -> None:
         self.outbound = outbound
 
-    def initialize_notice_poll(
-        self, legacy_cursor: int | None
-    ) -> tuple[int, int, NoticePollImportReason]:
-        """Import a fixed cutover once; a diagnostic high ID never gates reads."""
-        if legacy_cursor is not None and (type(legacy_cursor) is not int or legacy_cursor < 0):
-            raise ValueError("legacy notice cursor must be a non-negative integer or unknown")
+    def initialize_notice_poll(self) -> None:
+        """Fix the cutover once: notices already committed are never auto-sent."""
         with write_transaction(self.outbound._pool()) as conn:
             maximum = conn.execute("SELECT COALESCE(max(id), 0) FROM agent_notices").fetchone()
             if maximum is None:
                 raise RuntimeError("notice cutover aggregate returned no row")
-            if legacy_cursor is not None:
-                floor, reason = legacy_cursor, NoticePollImportReason.LEGACY_CURSOR
-            elif maximum[0] == 0:
-                floor, reason = 0, NoticePollImportReason.NO_HISTORY
-            else:
-                floor, reason = int(maximum[0]), NoticePollImportReason.LEGACY_HISTORY_UNKNOWN
+            floor = int(maximum[0])
+            reason = (
+                NoticePollImportReason.NO_HISTORY
+                if floor == 0
+                else NoticePollImportReason.LEGACY_HISTORY_UNKNOWN
+            )
             conn.execute(
                 "INSERT INTO im_bridge_notice_poll_state (legacy_floor,import_reason,accepted_notice_id) "
                 "VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
                 (floor, reason.value, floor),
             )
-            row = conn.execute(
-                "SELECT legacy_floor,accepted_notice_id,import_reason FROM im_bridge_notice_poll_state "
-                "WHERE singleton FOR UPDATE"
-            ).fetchone()
-            if row is None:
-                raise RuntimeError("notice cutover disappeared within its initialization")
-            return int(row[0]), int(row[1]), NoticePollImportReason(row[2])
 
     def accept_notice(
         self,

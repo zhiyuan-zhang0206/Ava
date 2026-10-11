@@ -43,8 +43,9 @@ errors propagate; Feishu never advances its cursor or marks a failed message
 seen after a fixed number of errors. Restart retains its durable replay cursor.
 A chat message whose keyed gateway send exhausts its bounded retries is not
 persisted or replayed: the gateway may or may not have accepted it, and the sender is told delivery is unconfirmed. Current
-switch/filter files are strict. The retired notice cursor alone permits the designed one-time
-`LEGACY_HISTORY_UNKNOWN` cutover, retaining possibly sent old notifications.
+switch/filter files are strict. The notice cutover is database state: the first initialization over
+existing notices fixes the floor at the committed maximum
+(`LEGACY_HISTORY_UNKNOWN`), retaining possibly sent old notifications.
 
 Immediate sends suppress resend only for a declared uncertain outcome: a known
 acknowledged prefix or response lost in transport. Unknown program faults remain

@@ -3,8 +3,9 @@
 The platform keeps no offset for the polling path, so a cursor held only in
 memory meant every message sent while the bridge was down was never read: the
 first round after a restart re-seeded at the newest message. The persisted
-cursor lets the next round replay the gap, bounded by the agent side's own
-staleness window, and the gateway dedups each message on its idempotency key.
+cursor lets the next round replay the newest page of the gap, bounded by the
+agent side's own staleness window, and the gateway dedups each message on its
+idempotency key.
 """
 
 from __future__ import annotations
@@ -133,28 +134,26 @@ async def test_cursor_survives_a_second_restart(store: CursorStore) -> None:
     assert second.core.received == []  # om_2 was handled before the first restart ended
 
 
-async def test_replay_pages_back_through_a_gap_larger_than_one_page(store: CursorStore) -> None:
+async def test_restart_reads_one_page_from_the_saved_cursor_and_does_not_page_back(
+    store: CursorStore,
+) -> None:
+    """A gap larger than one page keeps only the newest page: the read after a
+    restart is a single list call, never a walk back to the saved cursor."""
     await _first_run(store, _item("om_1", 5 * _H))
     adapter = await _restarted(
         store,
         _listing(_item("om_4", 1 * _H), _item("om_3", 2 * _H), next_page="t1"),
-        _listing(_item("om_2", 3 * _H), _item("om_1", 5 * _H), next_page="t2"),
+        _listing(_item("om_2", 3 * _H), _item("om_1", 5 * _H)),
     )
-    await adapter._poll_once(_CHAT)
-    assert _texts(adapter) == ["om_2", "om_3", "om_4"]
-    assert adapter._poll_cursor == {_CHAT: "om_4"}
-    assert adapter._rest_client.page_tokens == [None, "t1"]  # stopped at the cursor's page
-
-
-async def test_replay_stops_paging_at_the_replay_window(store: CursorStore) -> None:
-    await _first_run(store, _item("om_1", _window_ms() + 10 * _H))
-    adapter = await _restarted(
-        store,
-        _listing(_item("om_3", 1 * _H), _item("om_2", _window_ms() + 5 * _H), next_page="t1"),
-    )
-    await adapter._poll_once(_CHAT)
-    assert _texts(adapter) == ["om_3"]  # om_2 is past the window and ends the paging
+    assert await adapter._poll_once(_CHAT)
+    assert _texts(adapter) == ["om_3", "om_4"]  # om_2 sat on the unread older page
     assert adapter._rest_client.page_tokens == [None]
+    assert adapter._poll_cursor == {_CHAT: "om_4"}
+    assert _CHAT not in adapter._poll_replay
+    adapter._rest_client.responses = [_listing(_item("om_5", 0), _item("om_4", 1 * _H))]
+    assert await adapter._poll_once(_CHAT)
+    assert _texts(adapter) == ["om_3", "om_4", "om_5"]  # later rounds continue from om_4
+    assert adapter._poll_cursor == {_CHAT: "om_5"}
 
 
 async def test_a_failed_page_fails_the_round_and_keeps_the_replay(store: CursorStore) -> None:
@@ -162,7 +161,7 @@ async def test_a_failed_page_fails_the_round_and_keeps_the_replay(store: CursorS
     failing = SimpleNamespace(
         raw=SimpleNamespace(status_code=503), code=99, msg="denied", data=None
     )
-    adapter = await _restarted(store, _listing(_item("om_3", 1 * _H), next_page="t1"), failing)
+    adapter = await _restarted(store, failing)
     with pytest.raises(RetryableTransportError):
         await adapter._poll_once(_CHAT)
     assert adapter.core.received == []

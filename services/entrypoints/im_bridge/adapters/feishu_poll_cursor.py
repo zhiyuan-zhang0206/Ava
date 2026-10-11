@@ -3,8 +3,9 @@
 The platform keeps no offset for the polling path, so the adapter keeps one:
 the newest handled message id plus its create time, saved after every advance
 (`im_bridge_cursors`, `cursor_store.py`). After a restart the first round of
-each saved chat pages back through the gap instead of re-seeding at the newest
-message. The replay window (the agent side's own stale bound for chat
+each saved chat resumes from the saved position instead of re-seeding at the
+newest message; it reads one page (20), so a gap holding more messages loses
+the older ones. The replay window (the agent side's own stale bound for chat
 inbounds) keeps a long outage from flooding the agent; the gateway dedups each
 message on `idempotency_key`, so a message re-read after a crash between
 delivery and save does not become a second inbound.
@@ -55,27 +56,6 @@ def anchor(items: list[Any]) -> tuple[str | None, int]:
     return newest.message_id, create_ms(newest) or now_ms()
 
 
-def reaches_cursor(
-    pages_newest_first: list[Any],
-    cursor_id: str | None,
-    cursor_ms: int | None,
-    replay_window_s: float,
-) -> bool:
-    """Whether the pages listed so far already hold everything the replay can
-    want: the cursor id itself, a message older than the cursor's time, or one
-    older than the replay window."""
-
-    cutoff = now_ms() - int(replay_window_s * 1000)
-    bound = max(cutoff, cursor_ms) if cursor_ms is not None else cutoff
-    for item in pages_newest_first:
-        created = create_ms(item)
-        if (cursor_id is not None and item.message_id == cursor_id) or (
-            created is not None and created < bound
-        ):
-            return True
-    return False
-
-
 def pending_after(
     items: list[Any],
     cursor_id: str | None,
@@ -110,57 +90,30 @@ def pending_after(
     return fresh, stale
 
 
-async def list_chat(
-    rest_client: Any,
-    chat_id: str,
-    *,
-    deep: bool,
-    replay_window_s: float,
-    cursor_id: str | None = None,
-    cursor_ms: int | None = None,
-) -> list[Any]:
-    """The chat's newest messages, ascending; failed list calls raise.
-
-    One page (20) normally. `deep` (the replay after a restart) pages back
-    until the cursor, or the replay window, is reached: an outage that held
-    more than a page of messages must not lose the older ones. A failed page
-    fails the whole round, which is retried from scratch."""
+async def list_chat(rest_client: Any, chat_id: str) -> list[Any]:
+    """The chat's newest page of messages (20), ascending; failed list calls raise."""
 
     from lark_oapi.api.im.v1 import ListMessageRequest
 
-    items: list[Any] = []
-    token: str | None = None
-    while True:
-        builder = (
-            ListMessageRequest.builder()
-            .container_id_type("chat")
-            .container_id(chat_id)
-            .page_size(20)
-            .sort_type("ByCreateTimeDesc")
-        )
-        if token:
-            builder = builder.page_token(token)
-        try:
-            response = await asyncio.to_thread(rest_client.im.v1.message.list, builder.build())
-        except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
-            raise
-        except (requests.ConnectionError, requests.Timeout) as exc:
-            raise RetryableTransportError(
-                f"Feishu list request failed: {type(exc).__name__}"
-            ) from None
-        if response.raw is not None and response.raw.status_code != 200:
-            raise_http_failure(response.raw.status_code, "Feishu list request failed")
-        if response.code != 0:
-            raise RuntimeError(f"Feishu list rejected: code={response.code}")
-        data = response.data
-        items += list((data.items or []) if data is not None else [])
-        token = getattr(data, "page_token", None)
-        if not (
-            deep
-            and getattr(data, "has_more", False)
-            and token
-            and not reaches_cursor(items, cursor_id, cursor_ms, replay_window_s)
-        ):
-            break
+    request = (
+        ListMessageRequest.builder()
+        .container_id_type("chat")
+        .container_id(chat_id)
+        .page_size(20)
+        .sort_type("ByCreateTimeDesc")
+        .build()
+    )
+    try:
+        response = await asyncio.to_thread(rest_client.im.v1.message.list, request)
+    except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
+        raise
+    except (requests.ConnectionError, requests.Timeout) as exc:
+        raise RetryableTransportError(f"Feishu list request failed: {type(exc).__name__}") from None
+    if response.raw is not None and response.raw.status_code != 200:
+        raise_http_failure(response.raw.status_code, "Feishu list request failed")
+    if response.code != 0:
+        raise RuntimeError(f"Feishu list rejected: code={response.code}")
+    data = response.data
+    items: list[Any] = list((data.items or []) if data is not None else [])
     items.reverse()
     return items
