@@ -8,7 +8,6 @@ to the host's timezone would pass or fail by which machine ran it.
 
 from __future__ import annotations
 
-import gzip
 import os
 import subprocess
 import sys
@@ -547,11 +546,9 @@ def test_run_backup_real_dump_and_prune(
     # backup_keep pre-seeded + 1 new -> the oldest pre-seed pruned, KEEP remain.
     assert len(backup._managed_dumps(bdir)) == settings.services.backup_keep
     assert not (bdir / "test-20260601T100000Z.dump").exists()
-    # The fresh dump is restorable input: decrypt, then list its TOC directly
-    # (current artifacts are raw custom dumps — no gzip layer).
+    # The fresh dump is restorable input: decrypt, then list its TOC directly.
     restored = bdir / "listed.dump"
     cast(Any, backup).decrypt_artifact(path, restored)
-    backup.gunzip_if_needed(restored)  # no-op on the new format; proves the contract
     assert restored.read_bytes().startswith(b"PGDMP"), "decrypted artifact is not a custom dump"
     listing = subprocess.run(  # noqa: S603
         [str(backup.pg_tool("pg_restore")), "--list", str(restored)],
@@ -687,8 +684,7 @@ def test_encrypted_artifact_decrypts_to_original_dump(
     """The published artifact reverses exactly to pg_dump's custom-format bytes.
 
     This fails if the key-file derivation, cipher invocation, or artifact name
-    changes incompatibly with the restore procedure. The artifact carries no
-    gzip layer — `gunzip_if_needed` must leave it untouched.
+    changes incompatibly with the restore procedure.
     """
     original_dump = b"custom-format-pg-dump\x00contents"
     real_run = subprocess.run
@@ -741,26 +737,7 @@ def test_encrypted_artifact_decrypts_to_original_dump(
         check=False,
     )
     assert decrypted.returncode == 0, decrypted.stderr.decode()
-    backup.gunzip_if_needed(custom_dump)
     assert custom_dump.read_bytes() == original_dump
-
-
-def test_gunzip_if_needed_decompresses_legacy_artifact_layer(
-    bdir: Path,
-) -> None:
-    """A legacy `.dump.gz.enc` artifact decrypts to gzip bytes; the helper
-    strips that layer in place so the restore procedure stays uniform."""
-    raw = b"custom-format-pg-dump\x00contents"
-    layered = bdir / "legacy.dump"
-    layered.write_bytes(gzip.compress(raw))
-    backup.gunzip_if_needed(layered)
-    assert layered.read_bytes() == raw
-    assert layered.stat().st_mode & 0o777 == 0o600  # never widened by umask
-    # A current-format dump (no gzip magic) passes through untouched.
-    plain = bdir / "current.dump"
-    plain.write_bytes(raw)
-    backup.gunzip_if_needed(plain)
-    assert plain.read_bytes() == raw
 
 
 def test_run_backup_forwards_requested_timeout(
@@ -795,4 +772,4 @@ def test_run_backup_forwards_requested_timeout(
         credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
 
-    assert timeouts == [123.0, 123.0]  # pg_dump + encryption — the gzip stage is gone
+    assert timeouts == [123.0, 123.0]  # pg_dump + encryption
