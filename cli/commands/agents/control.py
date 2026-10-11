@@ -12,12 +12,6 @@ from base.api_contracts.idempotency import keyed_headers
 
 _TIMEOUT_S = 15.0
 
-# The billing batch performs N launch-and-confirm cycles across home machines;
-# 10 minutes bounds a fleet-scale recovery (23 agents in the 2026-09-18
-# incident, dispatch concurrency 6) while still failing a wedged gateway well
-# inside an operator's attention span.
-_BATCH_TIMEOUT_S = 600.0
-
 
 class ProvenanceError(ValueError):
     """A provenance requirement failed; the CLI reports it instead of a traceback.

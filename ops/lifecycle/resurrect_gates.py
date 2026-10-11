@@ -2,9 +2,10 @@
 
 The `ops.lifecycle` door re-exports these gates. Each function answers
 one question about agents_meta / inbound_messages state — may an automatic
-wake proceed? — and each is its own durable policy: wake suppression (repeated
-resurrect failures), the recovery breaker (consecutive permanent provider
-rejections), and the system-notice source (notifications never resurrect).
+wake proceed? — and each is its own durable policy: the recovery breaker
+(consecutive permanent provider rejections) and the system-notice source
+(notifications never resurrect); a successful resurrection also clears any
+recorded wake suppression.
 Read failures propagate: a failed read must never degrade into a wake the
 policy forbids.
 """
@@ -12,17 +13,6 @@ policy forbids.
 from base.agents import AgentNotFound
 from base.agents.incarnation.lifecycle_acceptance import is_system_notice_source
 from base.db import Database
-
-
-def wake_suppression_active(db: Database, agent_id: int) -> bool:
-    with db.connect() as conn:
-        row = conn.execute(
-            "SELECT wake_suppressed_until >= now() FROM agents_meta WHERE id=%s",
-            (agent_id,),
-        ).fetchone()
-    if row is None:
-        raise AgentNotFound(f"agent {agent_id} does not exist")
-    return row[0] is True
 
 
 def recovery_halted(db: Database, agent_id: int) -> bool:

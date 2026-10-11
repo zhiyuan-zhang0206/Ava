@@ -90,7 +90,6 @@ def test_liveness_retry_recovers_before_reporting_outage(
 
     monkeypatch.setattr(cluster_health.time, "sleep", _no_sleep)
     monkeypatch.setattr(cluster_health, "_agent_population", lambda _min: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cluster_health, "_crash_loop_detection", lambda _m, _w: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(cluster_health, "_schema_health", lambda: True)
     monkeypatch.setattr(cluster_health, "_service_probes", list)
     monkeypatch.setattr(cluster_health, "_redis_bridge_probe", lambda: None)
@@ -157,7 +156,6 @@ def _no_init(**_kwargs: object) -> None:
 def _all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
     monkeypatch.setattr(cluster_health, "_agent_population", lambda _min: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cluster_health, "_crash_loop_detection", lambda _m, _w: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(cluster_health, "_schema_health", lambda: True)
     monkeypatch.setattr(cluster_health, "_service_probes", list)
     monkeypatch.setattr(cluster_health, "_redis_bridge_probe", lambda: None)
@@ -738,61 +736,25 @@ def test_redis_bridge_failure_signals_without_arming_rollback(
     assert any("Redis bridge" in str(signal["message"]) for signal in _signals)
 
 
-# ── crash-loop detection: category=audit only (W9 fix) ──────────────────────
+# ── resurrect audit rows are no health signal ────────────────────────────────
 
 
-def _record_resurrect(
-    db: psycopg.Connection, agent_id: int, *, minutes_ago: float, table: str = "audit_events"
-) -> None:
-    if table == "audit_events":
-        db.execute(
-            "INSERT INTO audit_events (event_uid, ts, agent_id, machine, process, event_name, "
-            "level, source) VALUES (%s, now() - (%s * interval '1 minute'), %s, 'm', 'p', "
-            "'resurrect', 'info', 'test')",
-            (uuid4().int % (1 << 62), minutes_ago, agent_id),
-        )
-    else:  # the telemetry mirror of the same fact must not count
-        db.execute(
-            "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
-            "category, event_name, level, source) VALUES (%s, now() - (%s * interval '1 minute'), "
-            "%s, 'm', 'c', 'p', 'telemetry', 'resurrect', 'info', 'test')",
-            (uuid4().int % (1 << 62), minutes_ago, agent_id),
-        )
-    db.commit()
-
-
-def test_crash_loop_counts_the_audit_resurrect_rows_of_the_window(
+def test_resurrect_audit_rows_do_not_make_the_probe_unhealthy(
     db_conn: psycopg.Connection,
+    _all_checks_pass: None,
+    _home: Path,
+    _signals: list[dict[str, object]],
 ) -> None:
-    """Only `audit_events` resurrect rows inside the window count (W9 A.25): the telemetry
-    mirror of the fact and an older audit row must not trigger a crash-loop alert."""
-    for _ in range(2):
-        _record_resurrect(db_conn, 1, minutes_ago=10)
-    _record_resurrect(db_conn, 1, minutes_ago=300)  # outside the window
-    _record_resurrect(db_conn, 1, minutes_ago=5, table="telemetry_events")
+    """The probe no longer counts `resurrect` audit events: after the automatic
+    crash resurrection was removed they only record explicit resurrects and new
+    messages to a terminated agent, so a burst of them is not a crash loop."""
+    for _ in range(10):
+        db_conn.execute(
+            "INSERT INTO audit_events (event_uid, ts, agent_id, machine, process, event_name, "
+            "level, source) VALUES (%s, now(), 1, 'm', 'p', 'resurrect', 'info', 'test')",
+            (uuid4().int % (1 << 62),),
+        )
+    db_conn.commit()
 
-    # At the threshold it is still healthy.
-    assert cluster_health._crash_loop_detection(max_restarts=2, window_minutes=60) is True
-
-    # A third audit resurrect in the window exceeds the threshold -> unhealthy.
-    _record_resurrect(db_conn, 1, minutes_ago=3)
-    assert cluster_health._crash_loop_detection(max_restarts=2, window_minutes=60) is False
-
-
-def test_crash_loop_is_judged_per_agent(db_conn: psycopg.Connection) -> None:
-    for agent_id in (1, 2, 3):
-        for _ in range(2):
-            _record_resurrect(db_conn, agent_id, minutes_ago=10)
-
-    assert cluster_health._crash_loop_detection(max_restarts=2, window_minutes=60) is True
-
-
-def test_crash_loop_is_healthy_when_the_database_cannot_be_read(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def unreachable(**_kwargs: object) -> object:
-        raise OSError("database unreachable")
-
-    patch_database(monkeypatch, connect=unreachable)
-
-    assert cluster_health._crash_loop_detection(max_restarts=0, window_minutes=60) is True
+    assert cluster_health.run_health_probe() == 0
+    assert _signals == []

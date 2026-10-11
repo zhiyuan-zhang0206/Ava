@@ -323,19 +323,6 @@ class DaemonSettings(
         },
     )
 
-    auto_resurrect_max_attempts: int = Field(
-        default=3,
-        alias="AVA_AUTO_RESURRECT_MAX_ATTEMPTS",
-        description="Maximum unconsumed kind='resurrect' lifecycle inbounds before system-initiated recovery from the crash/wedged controllers, delivery path, or delivery watchdog stops auto-resurrecting an agent; a successful boot consumes them, so this bounds consecutive failed recovery attempts while manual resurrect remains exempt.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     wedged_agent_inbound_age_seconds: float = Field(
         default=2400.0,
         alias="AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS",

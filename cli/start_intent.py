@@ -74,7 +74,6 @@ def run_start(
                 disabled_services=tuple(args.disable_service),
                 only_services=tuple(args.only_service),
                 all_services=args.all_services,
-                persist_services=args.persist_services,
                 runtime=runtime,
                 retained_children=retained_children,
             )

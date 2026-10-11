@@ -567,7 +567,7 @@ def _kill_test_poolers(*pids: int | None) -> None:
 def test_real_start_retains_pooler_with_held_client(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A compensating normal start cannot force a pooler past its held drain."""
+    """A normal start cannot force a pooler past its held drain."""
     import psycopg
 
     port, role, secret, pid = _launch_incident_shape_pooler(home, monkeypatch)

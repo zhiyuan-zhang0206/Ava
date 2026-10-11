@@ -1,6 +1,6 @@
 """Observe cluster health from the CLI or an OS-scheduled probe.
 
-Checks cover gateway liveness, agent population, crash loops, schema, selected
+Checks cover gateway liveness, agent population, schema, selected
 services, Redis relay, disk usage, WAL archiving, editable-install records, source integrity,
 and provider account health. Any failed check returns unhealthy.
 
@@ -21,7 +21,6 @@ import shutil
 import sys
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -35,12 +34,6 @@ from cli.commands.cluster._provider_guard import run_provider_guard
 # Default thresholds. Overridable via CLI flags; the cron wrapper's
 # defaults are set at registration time.
 DEFAULT_AGENT_MIN = 1
-DEFAULT_CRASH_LOOP_MAX_RESTARTS = 5
-# Crash-loop window: restarts within the last 10 minutes count toward the
-# loop (with DEFAULT_CRASH_LOOP_MAX_RESTARTS above); wide enough for a
-# flapping daemon to trip, narrow enough that old restarts age out
-# (task #3696 exception inventory).
-DEFAULT_CRASH_LOOP_WINDOW_MINUTES = 10
 _LIVENESS_ATTEMPTS = 3
 _LIVENESS_RETRY_INTERVAL_S = 30.0
 
@@ -200,37 +193,6 @@ def _alert_only_failure(check: str, message: str) -> int:
     return 1
 
 
-def _crash_loop_detection(max_restarts: int, window_minutes: int) -> bool:
-    """Check that no agent has restarted more than `max_restarts` times in
-    the last `window_minutes` minutes. Returns True if healthy (no crash loop
-    detected), False if any agent exceeds the threshold.
-
-    A crash-looping agent is one whose process dies and is resurrected
-    repeatedly in a short window — the signature of a bad prompt / skill /
-    code change that the update flow did not catch.
-
-    Counts the audit `resurrect` rows of `audit_events` per agent. The CLI never imports
-    gateway code (layering) — this is a straight SQL read."""
-    from base.db import Database
-
-    end = datetime.now(UTC)
-    start = end - timedelta(minutes=window_minutes)
-    try:
-        with Database.from_settings().connect(autocommit=True) as conn:
-            rows = conn.execute(
-                "SELECT agent_id, count(*) FROM audit_events "
-                "WHERE event_name = 'resurrect' AND ts > %s AND ts <= %s GROUP BY agent_id",
-                (start, end),
-            ).fetchall()
-        # Any agent over the threshold is a crash loop.
-        return not any(count > max_restarts for _agent, count in rows)
-    except (psycopg.Error, OSError):
-        # Database unreachable — can't check crash loops. Return True (healthy) to
-        # avoid a false positive on this secondary signal; the gateway liveness
-        # and agent population checks are the primary signals.
-        return True
-
-
 def _schema_health() -> bool:
     """Check that the applied schema version matches the required version.
 
@@ -238,7 +200,7 @@ def _schema_health() -> bool:
     runs at start. A schema/code skew (CodeBehindSchema — code lacks applied
     migrations — or SchemaVersionMismatch — DB lacks code's migrations) is
     unhealthy. A DB that cannot be reached is NOT treated as a schema failure:
-    like the crash-loop check's DB-unreachable branch, the connection is the
+    the connection is the
     precondition for reading the applied set, and a transient pgbouncer blip
     must not fire a false schema alert while code and DB are actually in sync
     (2026-08-03: probe alerted "applied version behind required" on a
@@ -441,9 +403,6 @@ def _run_source_tree_check() -> int | None:
 def run_health_probe(
     *,
     agent_min: int | None = None,
-    crash_loop_max_restarts: int = DEFAULT_CRASH_LOOP_MAX_RESTARTS,
-    crash_loop_window_minutes: int = DEFAULT_CRASH_LOOP_WINDOW_MINUTES,
-    check_crash_loops: bool = True,
     check_schema: bool = True,
 ) -> int:
     """Return 0 for healthy, 1 for unhealthy, and 2 for a checkout refusal.
@@ -465,9 +424,6 @@ def run_health_probe(
     telemetry.init_telemetry(process="cli-health-probe")
     rc = _observe_cluster_health(
         agent_min=agent_min,
-        crash_loop_max_restarts=crash_loop_max_restarts,
-        crash_loop_window_minutes=crash_loop_window_minutes,
-        check_crash_loops=check_crash_loops,
         check_schema=check_schema,
     )
     _report_ran(unhealthy_checks=rc)
@@ -477,9 +433,6 @@ def run_health_probe(
 def _observe_cluster_health(
     *,
     agent_min: int | None,
-    crash_loop_max_restarts: int,
-    crash_loop_window_minutes: int,
-    check_crash_loops: bool,
     check_schema: bool,
 ) -> int:
     """Observe one health round and report the first failed check."""
@@ -516,20 +469,7 @@ def _observe_cluster_health(
         )
     print(f"  ✓ agent population (>= {agent_min})")
 
-    # 3. Crash-loop detection (secondary signal)
-    if check_crash_loops:
-        if not _crash_loop_detection(crash_loop_max_restarts, crash_loop_window_minutes):
-            return _unhealthy(
-                "crash_loop",
-                f"FAIL: crash-loop detected — agent(s) restarted > {crash_loop_max_restarts} "
-                f"times in {crash_loop_window_minutes} min",
-            )
-        print(
-            f"  ✓ crash-loop check (<= {crash_loop_max_restarts} restarts / "
-            f"{crash_loop_window_minutes} min)"
-        )
-
-    # 4. Schema health
+    # 3. Schema health
     if check_schema:
         if not _schema_health():
             return _unhealthy(
@@ -609,16 +549,10 @@ def _check_alert_only_health() -> int:
 def cmd_health_probe(
     *,
     agent_min: int | None = None,
-    crash_loop_max_restarts: int = DEFAULT_CRASH_LOOP_MAX_RESTARTS,
-    crash_loop_window_minutes: int = DEFAULT_CRASH_LOOP_WINDOW_MINUTES,
-    check_crash_loops: bool = True,
     check_schema: bool = True,
 ) -> int:
     """Report cluster health through exit status, diagnostics, and `health_probe_failing` events."""
     return run_health_probe(
         agent_min=agent_min,
-        crash_loop_max_restarts=crash_loop_max_restarts,
-        crash_loop_window_minutes=crash_loop_window_minutes,
-        check_crash_loops=check_crash_loops,
         check_schema=check_schema,
     )

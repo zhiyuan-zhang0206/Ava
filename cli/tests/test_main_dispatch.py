@@ -376,7 +376,7 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
     assert rc == 7
     ns = captured["args"]
     assert ns.only_service == ["gateway", "frontend"]
-    assert ns.disable_service == [] and ns.all_services is False and ns.persist_services is True
+    assert ns.disable_service == [] and ns.all_services is False
 
 
 def test_init_subcommand_binds_its_handler_and_takes_the_identity_flags() -> None:

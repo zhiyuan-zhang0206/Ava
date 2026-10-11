@@ -3421,7 +3421,7 @@ groups:
           description: >-
             The cluster health probe has reported check {{ $labels.attributes_check }} as failing on every
             run for at least 3 minutes (the normal-recovery budget for a node restart, rollout, watchdog
-            self-heal or network blip). Checks: gateway_liveness, agent_population, crash_loop, schema,
+            self-heal or network blip). Checks: gateway_liveness, agent_population, schema,
             service_probe, disk_usage, walg_archive, editable_install, source_tree, provider_balance,
             provider_blocked_agents. The event carries the failure text (attributes.message) and class
             (attributes.failure_class = code | environment | maintenance | alert-only) - read the latest
