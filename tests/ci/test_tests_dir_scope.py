@@ -10,7 +10,6 @@ against its behavior at the top-level `tests/`.
 
 from __future__ import annotations
 
-import importlib
 import re
 import textwrap
 from pathlib import Path
@@ -63,7 +62,8 @@ def test_a_path_outside_the_repo_is_never_a_test(tmp_path: Path) -> None:
 def test_async_lint_exempts_a_package_tests_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lint = importlib.import_module("scripts.lint.async_no_sync_blocking")
+    from scripts.lint import async_no_sync_blocking as lint
+
     monkeypatch.setattr(lint, "_ROOT", tmp_path)
     monkeypatch.setattr(lint, "_DEFINITION_DIRS", ("base",))
     monkeypatch.setattr(lint, "_REPO_BLOCKING_HELPERS", set[str]())
@@ -82,7 +82,8 @@ def test_async_lint_helper_names_are_not_kept_alive_by_a_test(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A test that defines its own `sync_op` must not keep a retired helper's entry alive."""
-    lint = importlib.import_module("scripts.lint.async_no_sync_blocking")
+    from scripts.lint import async_no_sync_blocking as lint
+
     monkeypatch.setattr(lint, "_ROOT", tmp_path)
     monkeypatch.setattr(lint, "_DEFINITION_DIRS", ("base",))
     monkeypatch.setattr(lint, "_REPO_BLOCKING_HELPERS", {"sync_op"})
@@ -95,7 +96,8 @@ def test_async_lint_helper_names_are_not_kept_alive_by_a_test(
 def test_plugin_wrap_lint_exempts_a_plugins_own_tests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lint = importlib.import_module("scripts.lint.plugins.no_plugin_wrap")
+    from scripts.lint.plugins import no_plugin_wrap as lint
+
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     body = "import ava\n\nava.files.read = lambda: None\n"
     stub = _write(tmp_path, "ava_builtins/plugins/p/tests/test_plugin.py", body)
@@ -109,7 +111,8 @@ def test_plugin_wrap_lint_exempts_a_plugins_own_tests(
 def test_ava_root_scope_lint_exempts_the_supervisors_own_tests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lint = importlib.import_module("scripts.lint.ava_root_scope")
+    from scripts.lint import ava_root_scope as lint
+
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     proof = _write(
         tmp_path, "services/supervision/ava_root/tests/test_edge.py", 'NAME = "systemd"\n'
@@ -127,7 +130,8 @@ def test_ava_root_scope_lint_exempts_the_supervisors_own_tests(
 def test_fixture_scope_lint_default_scan_reaches_a_package_tests_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    lint = importlib.import_module("scripts.lint.fixture_scope")
+    from scripts.lint import fixture_scope as lint
+
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     _write(
         tmp_path,
@@ -158,7 +162,8 @@ def test_fixture_scope_lint_default_scan_reaches_a_package_tests_directory(
 def test_fixture_scope_lint_package_scope_needs_an_init_in_a_package_tests_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    lint = importlib.import_module("scripts.lint.fixture_scope")
+    from scripts.lint import fixture_scope as lint
+
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     _write(
         tmp_path,
@@ -184,7 +189,8 @@ def test_fixture_scope_lint_package_scope_needs_an_init_in_a_package_tests_direc
 def test_fixture_scope_lint_ignores_a_module_that_is_not_a_test(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lint = importlib.import_module("scripts.lint.fixture_scope")
+    from scripts.lint import fixture_scope as lint
+
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     _write(
         tmp_path,
@@ -217,7 +223,8 @@ def test_time_bomb_lint_default_scan_reaches_a_package_tests_directory(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Rules 2 and 3 read test files: the default scan must find the ones inside packages."""
-    lint = importlib.import_module("scripts.lint.diagnostics.time_bomb")
+    from scripts.lint.diagnostics import time_bomb as lint
+
     _time_bomb_root(tmp_path)
     _write(tmp_path, "tests/test_window.py", 'since = "2026-09-06"\n')
     assert lint.main([], repo_root=tmp_path) == 1
@@ -230,7 +237,8 @@ def test_time_bomb_lint_default_scan_reaches_a_package_tests_directory(
 
 
 def test_time_bomb_lint_rule_3_does_not_govern_production_modules(tmp_path: Path) -> None:
-    lint = importlib.import_module("scripts.lint.diagnostics.time_bomb")
+    from scripts.lint.diagnostics import time_bomb as lint
+
     _time_bomb_root(tmp_path)
     _write(tmp_path, "base/packages/window.py", 'since = "2026-09-06"\n')
     assert lint.main([], repo_root=tmp_path) == 0
@@ -242,7 +250,8 @@ def test_no_os_environ_default_scan_reaches_tests_in_dirs_it_never_scanned(
 ) -> None:
     """Rule 2 (setenv on a Settings-managed alias) read `tests/cli` and `tests/ops`; the
     same tests inside `cli/`, `ops/` and `ava_builtins/` must stay read."""
-    lint = importlib.import_module("scripts.lint.no_os_environ")
+    from scripts.lint import no_os_environ as lint
+
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     monkeypatch.setattr(lint, "_settings_managed_aliases", lambda: frozenset({"AVA_DB_URL"}))
     body = """
@@ -259,7 +268,8 @@ def test_no_os_environ_default_scan_still_reads_only_tests_in_those_dirs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The extra roots are read for test files only: Rule 1 does not start covering them."""
-    lint = importlib.import_module("scripts.lint.no_os_environ")
+    from scripts.lint import no_os_environ as lint
+
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     monkeypatch.setattr(lint, "_settings_managed_aliases", lambda: frozenset({"AVA_DB_URL"}))
     for name in (*lint_common.FRAMEWORK_DIRS, "tests"):

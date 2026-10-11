@@ -1,13 +1,13 @@
 """Keep structure/codegen coverage and conservative CI selection in sync."""
 
 import ast
-import builtins
 import io
 import json
 import os
 import re
 import shlex
 import subprocess
+import sys
 from contextlib import contextmanager, nullcontext, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -591,17 +591,10 @@ def test_failure_after_skip_output_is_written_still_runs_freshness() -> None:
 
 
 def test_selector_import_failure_defaults_to_run() -> None:
-    original = builtins.__import__
-
-    def importing(name, *args, **kwargs):
-        if name == "yaml":
-            raise ImportError("yaml unavailable")
-        return original(name, *args, **kwargs)
-
-    with patch("builtins.__import__", side_effect=importing):
+    with patch.dict(sys.modules, {"yaml": None}):
         output, log, _ = select("pull_request", ("base/agents/observation/roster.py",))
     assert output == "run=true\n"
-    assert "::warning::Codegen selector failed (ImportError)" in log
+    assert "::warning::Codegen selector failed (ModuleNotFoundError)" in log
 
 
 def test_prepush_migration_keeps_direct_ci_owners(tmp_path: Path) -> None:

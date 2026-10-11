@@ -225,11 +225,7 @@ def spawn_child(
     env.pop("AVA_PERMISSIONS_HELPER_PID", None)
     log_file = log_path.open("wb")
     proc = subprocess.Popen(  # fixed interpreter + in-repo entry, no shell
-        [
-            sys.executable,
-            "-c",
-            "from tests.components.services.daemon_shutdown_test_support import run_child; run_child()",
-        ],
+        [sys.executable, "-m", "tests.components.services.daemon_shutdown_test_support"],
         cwd=_REPO_ROOT,
         env=env,
         stdout=log_file,
@@ -238,3 +234,7 @@ def spawn_child(
     child = Child(proc=proc, markers_path=markers_path, log_path=log_path, log_file=log_file)
     child.wait_marker("ready")
     return child
+
+
+if __name__ == "__main__":
+    run_child()
