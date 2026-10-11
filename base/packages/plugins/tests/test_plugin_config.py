@@ -33,7 +33,6 @@ from base.packages.plugins.config_registration import (
     get_plugin_config,
     is_per_agent_field,
     merge_disk_image_schema,
-    read_authority_config,
     read_config_image,
     resolve_overlay_targets,
     validate_config_overlay,
@@ -54,7 +53,7 @@ def test_authority_path_and_reader_do_not_create_a_missing_home(
     monkeypatch.setenv("AVA_HOME", str(home))
     image = disk_image_path("fixture")
     assert image == home / "configs" / "fixture" / "config.json"
-    assert read_authority_config("fixture", _FixtureConfig, image).flag is True
+    assert read_config_image(_FixtureConfig, image).flag is True
     assert not home.exists()
 
 

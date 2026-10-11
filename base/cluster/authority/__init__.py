@@ -59,9 +59,6 @@ from base.cluster.authority.groups import (
     ensure_groups as ensure_groups,
 )
 from base.cluster.authority.groups import (
-    retire_legacy_logins as retire_legacy_logins,
-)
-from base.cluster.authority.groups import (
     vacuum_or_fail as vacuum_or_fail,
 )
 from base.cluster.authority.invariant import (

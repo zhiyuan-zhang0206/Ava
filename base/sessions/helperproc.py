@@ -105,7 +105,7 @@ def _record_reapable(record: SessionRecord) -> tuple[bool, str]:
         return False, "pid could not be inspected"
     if record.identifies(record.pid) is False:
         return True, "pid was reused by another process"
-    return False, "live pid did not satisfy the legacy identity check"
+    return False, "live pid did not satisfy the identity check"
 
 
 def spawn_via_helper(

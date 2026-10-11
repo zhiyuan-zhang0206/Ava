@@ -156,24 +156,13 @@ def test_business_gate_tracks_the_journal_without_posture_or_time() -> None:
         pause_owner.begin_maintenance("migration", WHEN)
 
 
-def _retired_updater_record(state: str, holder: str) -> None:
-    """The plain record (no maintenance hold) the retired updater's stop op wrote."""
-    record = {"state": state, "holder": holder, "acquired_at": WHEN.isoformat()}
+def test_business_gate_refuses_holdless_and_invalid_pause_records() -> None:
+    record = {"state": "paused", "holder": "incomplete", "acquired_at": WHEN.isoformat()}
     pause_owner.state_path().write_text(json.dumps(record))
-
-
-def test_business_gate_refuses_incomplete_and_invalid_pause_records() -> None:
-    _retired_updater_record("paused", "incomplete")
+    assert pause_owner.read().status == "invalid"
     assert admission.business_paused()
     pause_owner.state_path().write_text("invalid")
     assert admission.business_paused()
-
-
-def test_resumed_tombstone_cannot_reopen_without_a_new_generation() -> None:
-    _retired_updater_record("resumed", "completed")
-    with pytest.raises(RuntimeError, match="already resumed"):
-        pause_owner.begin_maintenance("completed", WHEN)
-    assert pause_owner.read().status == "resumed"
 
 
 def test_business_gate_refuses_unreadable_state(monkeypatch: pytest.MonkeyPatch) -> None:

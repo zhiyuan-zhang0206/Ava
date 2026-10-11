@@ -752,24 +752,8 @@ def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
         raise InvalidConfigData(f"invalid service plugin config {plugin!r}: {exc}") from exc
 
 
-def read_authority_config[C: BaseModel](plugin: str, cls: type[C], config_path: Path) -> C:
-    """Read the sole local authority image; pending legacy imports fail before defaults."""
-    from base.host.env.bootstrap import legacy_plugin_config_values
-
-    aliases = tuple(
-        _schema_extra(info)["env_var"]
-        for info in cls.model_fields.values()
-        if "env_var" in _schema_extra(info)
-    )
-    if legacy_plugin_config_values(aliases):
-        raise InvalidConfigData(
-            f"plugin {plugin!r} has unimported legacy config; run ava plugins update"
-        )
-    return read_config_image(cls, config_path)
-
-
 def read_plugin_config[C: BaseModel](plugin: str, cls: type[C], config_path: Path) -> C:
     """Resolve local host authority and the current gateway cluster projection."""
     from base.packages.plugins.config_view import with_cluster_policy
 
-    return with_cluster_policy(plugin, read_authority_config(plugin, cls, config_path))
+    return with_cluster_policy(plugin, read_config_image(cls, config_path))

@@ -43,15 +43,15 @@ def _patch_fleet_config(
         assert name == "ava_fleet" and model is FleetConfig
         return config if delivered else None
 
-    def authority(name: str, model: type[FleetConfig], path: Path) -> FleetConfig:
-        assert (name, model, path) == ("ava_fleet", FleetConfig, Path("/fleet-image.json"))
+    def read_image(model: type[FleetConfig], path: Path) -> FleetConfig:
+        assert (model, path) == (FleetConfig, Path("/fleet-image.json"))
         return config
 
     def image_path(_name: str) -> Path:
         return Path("/fleet-image.json")
 
     monkeypatch.setattr(daemon, "read_service_config", service)
-    monkeypatch.setattr(daemon, "read_authority_config", authority)
+    monkeypatch.setattr(daemon, "read_config_image", read_image)
     monkeypatch.setattr(daemon, "disk_image_path", image_path)
 
 
