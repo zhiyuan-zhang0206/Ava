@@ -10,10 +10,12 @@ from uuid import UUID
 
 import pytest
 
+from base.agents.context.clients import DatabaseFactory
 from base.agents.impersonation.status import ImpersonationStatus
 from base.events.live import redis_listener
 from cli.commands.agents import impersonation_adapters as adapters
 from cli.commands.agents import impersonation_relay as relay
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 LEASE_ID = UUID("767fb040-aa54-42ae-b2c8-594039fbbf46")
 
@@ -180,7 +182,9 @@ def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
     monkeypatch.setattr("base.agents.impersonation.relay_heartbeat", beat)
 
 
-def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_command_passes_remote_to_steer(
+    monkeypatch: pytest.MonkeyPatch, operator_database: DatabaseFactory
+) -> None:
     from cli.commands.agents import impersonation
     from cli.parsers import build_parser
 
@@ -226,6 +230,7 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
         delivered.append((UUID(thread_id), endpoint))
 
     monkeypatch.setattr(adapters, "live_submit", deliver)
+    args.database_factory = operator_database
     assert args.func(args) == 0
     assert delivered == [(THREAD_ID, remote)]
     assert listener.closed
@@ -235,6 +240,7 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
 def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
     monkeypatch: pytest.MonkeyPatch,
     refuse: bool,
+    operator_database: DatabaseFactory,
 ) -> None:
     """Bound host context and leave failed messages for the native handoff."""
     from cli.commands.agents import impersonation
@@ -283,6 +289,7 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
 
     monkeypatch.setattr(adapters, "live_submit", deliver)
     args.codex_remote = "unix:///tmp/ava-codex.sock"
+    args.database_factory = operator_database
     assert args.func(args) == (1 if refuse else 0)
     if refuse:
         assert 5 in inbox.messages

@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import plistlib
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from base.config import ConfigBoot
+from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
 from cli.commands.converge import redis_bridge as bridge
 from cli.commands.converge.spec import ConvergeCtx
 from services.redis_bridge import relay
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 class _StopTestError(RuntimeError):
@@ -188,6 +193,8 @@ def test_unchanged_loaded_job_is_not_restarted(
 def test_converge_retires_stale_bridge_when_it_is_no_longer_required(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     home = tmp_path / "home"
     installed = home / "redis-bridge" / "relay.py"
@@ -213,7 +220,14 @@ def test_converge_retires_stale_bridge_when_it_is_no_longer_required(
     monkeypatch.setattr(bridge, "_bridge_config", _not_required)
     monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
     monkeypatch.setattr(bridge, "_launchctl", _launchctl)
-    ctx = ConvergeCtx(repo=tmp_path / "repo", ava_home=home, roles=None, config=ConfigBoot())
+    ctx = ConvergeCtx(
+        repo=tmp_path / "repo",
+        ava_home=home,
+        roles=None,
+        config=ConfigBoot(),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
 
     bridge.ensure_redis_bridge(ctx)
 
@@ -366,9 +380,16 @@ def test_bridge_step_is_gateway_prod_host_only() -> None:
 def test_ensure_bridge_uses_resolved_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     ctx = ConvergeCtx(
-        repo=tmp_path / "repo", ava_home=tmp_path / "home", roles=None, config=ConfigBoot()
+        repo=tmp_path / "repo",
+        ava_home=tmp_path / "home",
+        roles=None,
+        config=ConfigBoot(),
+        database_factory=operator_database,
+        producer=operator_pipeline,
     )
     config = bridge.RedisBridgeConfig("10.64.0.7", 16380)
     calls: list[tuple[Path, Path, bridge.RedisBridgeConfig]] = []

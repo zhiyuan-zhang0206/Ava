@@ -20,6 +20,7 @@ import pytest
 from agent.process_boot import land_cluster_extensions
 from base import db, paths
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import registry as reg
 
 _SKILL_MD = """---
@@ -40,7 +41,12 @@ def _write_skill(root: Path, name: str) -> Path:
 
 
 def test_boot_lands_a_skill_this_machine_never_installed(
-    tmp_path: Path, unit_home: Path, db_conn: psycopg.Connection, database: Database
+    tmp_path: Path,
+    unit_home: Path,
+    db_conn: psycopg.Connection,
+    database: Database,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The offline window, closed with no operator in the loop.
 
@@ -51,7 +57,11 @@ def test_boot_lands_a_skill_this_machine_never_installed(
     _ = db_conn  # per-test truncate
     src = _write_skill(tmp_path / "src" / "boot-demo", "boot-demo")
     reg.register_tree(
-        db.pool(), root=src, name="boot-demo", kind="skill", source="local:some-other-machine"
+        db.pool(gate=database_gate),
+        root=src,
+        name="boot-demo",
+        kind="skill",
+        source="local:some-other-machine",
     )
     assert not (unit_home / "skills" / "boot-demo").exists(), (
         "this machine must start without it, or the test proves nothing"

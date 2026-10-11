@@ -9,14 +9,16 @@ any database work.
 from __future__ import annotations
 
 import threading
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
 
 from base.db.tests.fakes import patch_database
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _seed_checkpoint_versions(conn: psycopg.Connection) -> None:
@@ -129,7 +131,7 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
-    migration_phase: list[str],
+    migration_phase: list[str], operator_database: Callable[[], Any]
 ) -> None:
     """A locally owned plane migrates as the admin acting as the owner, then
     every capability shares the read-only post-migration checkpoint gate."""
@@ -137,7 +139,7 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
     authority = pg_admin.local_owner_authority()
-    applied = cmd_migrations_apply()
+    applied = cmd_migrations_apply(database_factory=operator_database)
 
     assert migration_phase == [
         "dependency",
@@ -150,7 +152,9 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
 
 
 def test_foreign_connected_postgres_refuses_before_migration_ddl(
-    migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
+    migration_phase: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     from base.cluster import ownership
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
@@ -160,12 +164,14 @@ def test_foreign_connected_postgres_refuses_before_migration_ddl(
 
     monkeypatch.setattr(ownership, "require_postgres_connection", refuse)
     with pytest.raises(RuntimeError, match="foreign connected backend"):
-        cmd_migrations_apply()
+        cmd_migrations_apply(database_factory=operator_database)
     assert "ava" not in migration_phase
 
 
 def test_admin_session_without_owner_role_refuses_before_migration_ddl(
-    migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
+    migration_phase: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """A dial that dropped the startup role (a pooler) would create
     superuser-owned objects; the owner check refuses before any DDL."""
@@ -182,12 +188,14 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
 
     monkeypatch.setattr(pg_admin.psycopg, "connect", superuser_dial)
     with pytest.raises(RuntimeError, match="did not assume schema owner"):
-        cmd_migrations_apply()
+        cmd_migrations_apply(database_factory=operator_database)
     assert "ava" not in migration_phase
 
 
 def test_remote_managed_migration_preserves_explicit_provider_authority(
-    migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
+    migration_phase: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     from base.config import settings
     from base.db import pg_admin
@@ -198,7 +206,7 @@ def test_remote_managed_migration_preserves_explicit_provider_authority(
     monkeypatch.setattr(
         pg_admin, "local_owner_authority", lambda: pytest.fail("remote plane has no admin")
     )
-    assert cmd_migrations_apply() == ["20260823T000000_example"]
+    assert cmd_migrations_apply(database_factory=operator_database) == ["20260823T000000_example"]
     assert migration_phase == [
         "dependency",
         "connect:{'direct': True, 'unbounded': True}",
@@ -238,6 +246,7 @@ def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyP
 def test_real_start_phase_converges_ava_then_is_idempotent(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """Real PG proves both migration domains are exact on repeated starts."""
     from base.deploy.schema.migrations import required_migration_set
@@ -247,18 +256,19 @@ def test_real_start_phase_converges_ava_then_is_idempotent(
     db_conn.execute("DELETE FROM machine_units")
     _seed_checkpoint_versions(db_conn)
 
-    cmd_migrations_apply()
+    cmd_migrations_apply(database_factory=operator_database)
 
     ava_rows = db_conn.execute("SELECT name FROM schema_migrations").fetchall()
     assert {row[0] for row in ava_rows} == required_migration_set()
     checkpoint_rows = db_conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
     assert {row[0] for row in checkpoint_rows} == set(range(10))
-    assert cmd_migrations_apply() == []
+    assert cmd_migrations_apply(database_factory=operator_database) == []
 
 
 def test_dependency_drift_fails_before_any_database_change(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """An unmirrored upstream v10 cannot strand update recovery on new schema.
 
@@ -276,14 +286,14 @@ def test_dependency_drift_fails_before_any_database_change(
     _bind_private_database(db_conn, monkeypatch)
     db_conn.execute("DELETE FROM machine_units")
     _seed_checkpoint_versions(db_conn)
-    cmd_migrations_apply()
+    cmd_migrations_apply(database_factory=operator_database)
     ava_before = db_conn.execute("SELECT name FROM schema_migrations").fetchall()
     checkpoint_before = db_conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
 
     monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1"])
 
     with pytest.raises(CheckpointDependencyDriftError, match="Ava timestamp migration"):
-        cmd_migrations_apply()
+        cmd_migrations_apply(database_factory=operator_database)
 
     assert db_conn.execute("SELECT name FROM schema_migrations").fetchall() == ava_before
     assert db_conn.execute("SELECT v FROM checkpoint_migrations").fetchall() == checkpoint_before

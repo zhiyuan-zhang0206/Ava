@@ -33,6 +33,7 @@ from base.agents.observation.relay_supervision import RelaySupervision
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller
@@ -153,6 +154,7 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     *,
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Actual graph fencing persists through delivery faults; only authority end resumes it."""
     from base.agents.impersonation import history as history
@@ -164,6 +166,7 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
         automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
+        database_gate=database_gate,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -253,6 +256,7 @@ async def test_unreadable_executor_preserves_authority_across_native_wakes(
     *,
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Repeated unreadable process evidence cannot spend TTL or consume queued input."""
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
@@ -262,6 +266,7 @@ async def test_unreadable_executor_preserves_authority_across_native_wakes(
         automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
+        database_gate=database_gate,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     await graph.ainvoke(
@@ -337,6 +342,7 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
     *,
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A newly admitted runtime reads the durable takeover before doing native work."""
     from dataclasses import replace
@@ -350,6 +356,7 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
         automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
+        database_gate=database_gate,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
@@ -451,6 +458,7 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     *,
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Delivery exhaustion limits pushes, but does not revoke a valid controller's receipt."""
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
@@ -460,6 +468,7 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
         automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
+        database_gate=database_gate,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
@@ -533,6 +542,7 @@ async def test_end_note_resumes_an_empty_queue(
     *,
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A release with nothing queued must still run the end note's first turn.
 
@@ -550,6 +560,7 @@ async def test_end_note_resumes_an_empty_queue(
         automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
+        database_gate=database_gate,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -632,6 +643,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     *,
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Task #5010: an ACK acknowledges the message, not the work — input the executor
     received and never finished survives expiry into the record and the resume note."""
@@ -644,6 +656,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
         automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
+        database_gate=database_gate,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     monkeypatch.setattr(history, "workspace_dir", Mock(return_value=tmp_path))

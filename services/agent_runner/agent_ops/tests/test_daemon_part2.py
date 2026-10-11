@@ -19,11 +19,7 @@ from pathlib import Path
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.db import Database
 from ops.rpc_schemas import LaunchAgentRequest
-
-_db = Database.from_settings
-
 
 _REPO = Path(__file__).resolve().parents[4]
 

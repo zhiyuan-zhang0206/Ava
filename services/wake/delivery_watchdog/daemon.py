@@ -5,11 +5,13 @@ import logging
 import signal
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.cluster.machine import validate_machine_name
 from base.config import settings
 from base.daemon import round_loop
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -18,8 +20,12 @@ from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
-from base.log import init_gateway_process
+from base.log.process import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry.emitter import build_pipeline
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.wake.delivery_watchdog.dead_letter import (
     dead_letter_stale_claimed as dead_letter_stale_claimed,
@@ -238,7 +244,7 @@ async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
         )
 
 
-async def run() -> None:
+async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
     """Start the daemon: pidfile -> healthz server -> connect DB -> loops."""
     if _is_running():
         _log.info("[delivery] daemon already running (pidfile=%s), exiting", _pidfile())
@@ -249,12 +255,14 @@ async def run() -> None:
 
     liveness = LivenessGroup()
     endpoint = _endpoint()
-    health = await start_health_server("delivery_watchdog", endpoint.health_port, liveness=liveness)
+    health = await start_health_server(
+        "delivery_watchdog", endpoint.health_port, liveness=liveness, image=image
+    )
     _log.info("[delivery] healthz listening on :%s", endpoint.health_port)
 
     # Four loops share the pool; each borrows a connection only for the length
     # of one short statement batch.
-    db = Database.from_settings()
+    db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
     try:
         scan = liveness.register("scan", _SCAN_LIVENESS_TIMEOUT_S)
@@ -270,9 +278,22 @@ def main() -> None:
     """Entry point: init logger + run asyncio loop."""
     from base.deploy.schema.migrations import assert_schema_current
 
+    image = LoadedCommit.capture()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="delivery_watchdog")
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="delivery_watchdog")
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate)
+
+    pipeline = build_pipeline(database=database)
+    init_gateway_process(
+        name="delivery_watchdog",
+        producer=lambda: pipeline,
+        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        image=image,
+    )
     install_graceful_shutdown("delivery_watchdog")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
@@ -282,7 +303,7 @@ def main() -> None:
     # teardown is skipped by the hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(run(database=database, image=image))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[delivery] interrupted, shutting down")
@@ -301,4 +322,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
     main()

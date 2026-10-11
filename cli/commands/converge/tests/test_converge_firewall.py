@@ -17,6 +17,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -26,10 +27,26 @@ import cli.commands.converge.host as cv
 from base.config import ConfigBoot
 from base.host import macos_firewall as fw
 from base.host.macos_firewall import FirewallAudit, FirewallVerdict
+from base.telemetry import EventPipeline
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
-def _ctx(home: Path, roles: frozenset[str] | None) -> cv.ConvergeCtx:
-    return cv.ConvergeCtx(repo=Path("/repo"), ava_home=home, roles=roles, config=ConfigBoot())  # type: ignore[arg-type]
+def _ctx(
+    home: Path,
+    roles: frozenset[str] | None,
+    *,
+    operator_database: Callable[[], Any],
+    producer: Callable[[], EventPipeline],
+) -> cv.ConvergeCtx:
+    return cv.ConvergeCtx(
+        repo=Path("/repo"),
+        ava_home=home,
+        roles=roles,
+        config=ConfigBoot(),
+        database_factory=operator_database,
+        producer=producer,
+    )  # type: ignore[arg-type]
 
 
 def test_step_is_registered_in_converge_for_both_capabilities() -> None:
@@ -113,6 +130,8 @@ def test_quiet_on_every_host_that_cannot_have_the_defect(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     verdict: FirewallVerdict,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """Silence is the contract for a healthy host: converge output an operator
     learns to skim is worthless for finding the one host that is broken."""
@@ -120,7 +139,11 @@ def test_quiet_on_every_host_that_cannot_have_the_defect(
     _stub_rules(monkeypatch, {})  # host-independent: CI has no socketfilterfw
     monkeypatch.setattr(fw, "manifest_paths", lambda: ())
     _stub_mutation_result(monkeypatch, False)
-    cfw.ensure_firewall_allowlist(_ctx(tmp_path, cv.ALL_ROLES))
+    cfw.ensure_firewall_allowlist(
+        _ctx(
+            tmp_path, cv.ALL_ROLES, operator_database=operator_database, producer=operator_pipeline
+        )
+    )
     assert capsys.readouterr().err == ""
 
 
@@ -149,7 +172,11 @@ def _skip_verify_waits(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_failed_direct_and_sudo_repairs_print_exact_commands_and_do_not_raise(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """Direct mutation and the old-macOS fallback both fail, so the historical
     manual commands are printed without raising or blocking recovery.
@@ -168,7 +195,14 @@ def test_failed_direct_and_sudo_repairs_print_exact_commands_and_do_not_raise(
         return type("R", (), {"returncode": 1})()
 
     monkeypatch.setattr(fw, "run_bounded", fail)
-    cfw.ensure_firewall_allowlist(_ctx(tmp_path, frozenset({"gateway"})))  # no raise
+    cfw.ensure_firewall_allowlist(
+        _ctx(
+            tmp_path,
+            frozenset({"gateway"}),
+            operator_database=operator_database,
+            producer=operator_pipeline,
+        )
+    )  # no raise
     err = capsys.readouterr().err
     assert "1 of 1 managed binaries have no ALF allow rule" in err
     assert str(missing) in err
@@ -185,7 +219,11 @@ def test_failed_direct_and_sudo_repairs_print_exact_commands_and_do_not_raise(
 
 
 def test_grant_installed_repairs_silently(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """With the one-time grant, the missing rule is fixed in place: one line, no
     error block, no commands to paste. The claim is only made after a re-read of
@@ -210,14 +248,25 @@ def test_grant_installed_repairs_silently(
     _stub_mutation(monkeypatch, mutate)
     _skip_verify_waits(monkeypatch)
     monkeypatch.setattr(fw, "manifest_paths", lambda: ())
-    cfw.ensure_firewall_allowlist(_ctx(tmp_path, frozenset({"gateway"})))
+    cfw.ensure_firewall_allowlist(
+        _ctx(
+            tmp_path,
+            frozenset({"gateway"}),
+            operator_database=operator_database,
+            producer=operator_pipeline,
+        )
+    )
     err = capsys.readouterr().err
     assert "allowed 1 binaries" in err
     assert "--add" not in err  # no manual commands on the repaired path
 
 
 def test_stale_rules_are_pruned_when_grant_installed(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """A version bump left an orphaned rule; with the grant it is removed."""
     _stub_audit(monkeypatch, FirewallAudit(FirewallVerdict.ALLOWED, "all allow-listed"))
@@ -229,13 +278,21 @@ def test_stale_rules_are_pruned_when_grant_installed(
         lambda _rules: (Path("/opt/homebrew/Cellar/node/25.6.1/bin/node"),),  # pyright: ignore[reportUnknownArgumentType]
     )
     _stub_mutation_result(monkeypatch, True)
-    cfw.ensure_firewall_allowlist(_ctx(tmp_path, cv.ALL_ROLES))
+    cfw.ensure_firewall_allowlist(
+        _ctx(
+            tmp_path, cv.ALL_ROLES, operator_database=operator_database, producer=operator_pipeline
+        )
+    )
     err = capsys.readouterr().err
     assert "removed 1 stale allow rules" in err
 
 
 def test_prune_runs_before_repair_so_replacement_rules_persist(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """macOS 15's daemon drops an add whose bundle identifier already has a
     rule, so a stale rule must be pruned before the replacement version is
@@ -271,7 +328,11 @@ def test_prune_runs_before_repair_so_replacement_rules_persist(
         return True
 
     _stub_mutation(monkeypatch, mutate)
-    cfw.ensure_firewall_allowlist(_ctx(tmp_path, cv.ALL_ROLES))
+    cfw.ensure_firewall_allowlist(
+        _ctx(
+            tmp_path, cv.ALL_ROLES, operator_database=operator_database, producer=operator_pipeline
+        )
+    )
     assert order[0] == ("--remove", str(stale))  # prune frees the identifier first
     err = capsys.readouterr().err
     assert "allowed 1 binaries" in err  # the add persisted only because prune ran first
@@ -279,18 +340,29 @@ def test_prune_runs_before_repair_so_replacement_rules_persist(
 
 
 def test_unreadable_says_so_instead_of_claiming_healthy(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """Silence would assert a clean bill of health the step did not establish."""
     _stub_audit(monkeypatch, FirewallAudit(FirewallVerdict.UNREADABLE, "could not read the state"))
-    cfw.ensure_firewall_allowlist(_ctx(tmp_path, cv.ALL_ROLES))
+    cfw.ensure_firewall_allowlist(
+        _ctx(
+            tmp_path, cv.ALL_ROLES, operator_database=operator_database, producer=operator_pipeline
+        )
+    )
     err = capsys.readouterr().err
     assert "could not read the state" in err
     assert "--add" not in err  # no repair is offered for an unknown state
 
 
 def test_unconfigured_unit_audits_the_interpreter(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """`roles is None` is a fresh install — no capabilities, but still an interpreter."""
     seen: list[frozenset[str]] = []
@@ -302,7 +374,9 @@ def test_unconfigured_unit_audits_the_interpreter(
     _stub_rules(monkeypatch, {})
     monkeypatch.setattr(fw, "manifest_paths", lambda: ())
     _stub_mutation_result(monkeypatch, False)
-    cfw.ensure_firewall_allowlist(_ctx(tmp_path, None))
+    cfw.ensure_firewall_allowlist(
+        _ctx(tmp_path, None, operator_database=operator_database, producer=operator_pipeline)
+    )
     assert seen == [frozenset()]
 
 

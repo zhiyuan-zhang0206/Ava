@@ -12,6 +12,7 @@ def snapshot_process_config() -> ConfigBoot:
     Delivery belongs to this bootstrap call. Later operation-time changes must
     target the returned owner; there is no synchronization with legacy settings.
     """
+    authority = settings.env_boot
     values = {name: get_field(name) for name in field_names()}
     explicit = {
         domain: set(getattr(settings, domain).model_fields_set)
@@ -20,6 +21,8 @@ def snapshot_process_config() -> ConfigBoot:
     owner = ConfigBoot()
     with patch.dict(os.environ):
         model = owner.ensure_eager()
+    owner.env_boot = authority
+    model.env_boot = authority
     for name, value in values.items():
         owner.set_field(name, value)
     for domain, fields in explicit.items():

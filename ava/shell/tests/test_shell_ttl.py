@@ -1,16 +1,30 @@
 """Explicit TTL tracking for persistent shell sessions."""
 
 import contextlib
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
 
 import ava
+from base import telemetry
+from base.db import Database
 
 pytestmark = [
     pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
+
+
+@pytest.fixture
+def event_pipeline(database: Database) -> Iterator[telemetry.EventPipeline]:
+    """Own the process writer used by the operation and its mirror barrier."""
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+    try:
+        telemetry.init_telemetry(process="test-sdk-operation", pipeline=pipeline)
+        yield pipeline
+    finally:
+        pipeline.stop(timeout=2)
 
 
 def _deadline(conn: psycopg.Connection, agent_id: int, session_id: int) -> datetime | None:
@@ -147,13 +161,13 @@ def test_renew_extends_deadline_from_now(db_conn: psycopg.Connection, _agent_row
             ava.shell.sessions.kill(session_id)
 
 
+@pytest.mark.usefixtures("event_pipeline")
 def test_renew_event_carries_int_ttl(db_conn: psycopg.Connection, _agent_row: int) -> None:
     """The emitted `ttl_s` is cast to int (task #4011): the metric kind rides
     the runtime value type, so a float ttl from a caller would mint a
     histogram family beside the counter one."""
     import json
 
-    from base import telemetry
     from base.paths import logs_dir
 
     session_id = ava.shell.sessions.new("test-renew-cast", ttl=120)

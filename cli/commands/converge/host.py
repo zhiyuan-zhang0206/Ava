@@ -12,11 +12,13 @@ without mutating its image.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
+from base.agents.context.clients import DatabaseFactory
 from base.cluster import is_default_home
 from base.cluster.machine import MachineRoles
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.host.converge.accessibility import (
     clear_status as clear_accessibility_status,
@@ -28,6 +30,7 @@ from base.host.converge.browser_deps import browser_deps_notice, browser_deps_wa
 from base.host.converge.screen_capture import clear_status, write_status
 from base.host.env.dotenv_boot import resolve_ava_home
 from base.host.system.probes import browser_incapability
+from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.converge._brew_pin import ensure_brew_pin
 from cli.commands.converge._frontend_env import ensure_no_frontend_env_overrides
@@ -110,7 +113,7 @@ def _converge_skills_step(ctx: ConvergeCtx) -> None:
         print(f"  ! skills: {warning}", file=sys.stderr)
 
 
-def _ensure_browser(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+def _ensure_browser(ctx: ConvergeCtx) -> None:
     """Preflight the shared headed Chrome.
 
     chrome's MCP config ships in `<repo>/ava_builtins/mcps/chrome/.mcp.json` (a built-in
@@ -118,7 +121,7 @@ def _ensure_browser(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     on an incapable machine emit a prominent actionable warning instead of
     failing so the rest of converge (and ava start) proceeds.
     """
-    if not settings.services.browser_enabled:
+    if not ctx.read_config().view.services.browser_enabled:
         return
     reason = browser_incapability()
     if reason is not None:
@@ -139,11 +142,11 @@ def _ensure_browser(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     ensure_browser_profile(interactive=sys.stdin.isatty() and sys.stdout.isatty())
 
 
-def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
     """Require the stable signed ancestor before starting a macOS root."""
     if sys.platform != "darwin":
         return
-    if not settings.services.permissions_helper_enabled:
+    if not ctx.read_config().view.services.permissions_helper_enabled:
         raise RuntimeError("macOS root supervision requires the permissions helper")
     from base.host.system.probes import permissions_helper_incapability
 
@@ -170,7 +173,7 @@ def _ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
     """
     if ctx.roles and "gateway" in ctx.roles:
         return
-    backend = settings.general.cross_machine_transfer_backend
+    backend = ctx.read_config().view.general.cross_machine_transfer_backend
     if backend == "none":
         return
     from base.host.converge.google_drive import candidate_drive_dirs, find_writable_google_drive
@@ -205,9 +208,9 @@ def _ensure_github_pr(ctx: ConvergeCtx) -> None:
     """
     if ctx.roles and "gateway" in ctx.roles:
         return
-    if settings.general.memory_keep_local:
+    if ctx.read_config().view.general.memory_keep_local:
         return
-    if not settings.general.require_github_pr:
+    if not ctx.read_config().view.general.require_github_pr:
         return
     from base.deploy.git.github_pr import github_pr_blocker
 
@@ -221,7 +224,7 @@ def _ensure_github_pr(ctx: ConvergeCtx) -> None:
         )
 
 
-def _ensure_screen_capture(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+def _ensure_screen_capture(ctx: ConvergeCtx) -> None:
     """Preflight OS-level screen capture on agent-runner hosts.
 
     Asks the permissions helper — the process that actually performs
@@ -234,7 +237,7 @@ def _ensure_screen_capture(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     from base.host.system.probes import permissions_helper_incapability
 
     if (
-        not settings.services.permissions_helper_enabled
+        not ctx.read_config().view.services.permissions_helper_enabled
         or permissions_helper_incapability() is not None
     ):
         clear_status()
@@ -252,7 +255,7 @@ def _ensure_screen_capture(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     print(f"  ! {status.headline}: {status.diagnostic}", file=sys.stderr)
 
 
-def _ensure_accessibility(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+def _ensure_accessibility(ctx: ConvergeCtx) -> None:
     """Preflight Accessibility on agent-runner hosts.
 
     Accessibility gates the helper's synthetic clicks and keystrokes; macOS
@@ -263,7 +266,7 @@ def _ensure_accessibility(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     from base.host.system.probes import permissions_helper_incapability
 
     if (
-        not settings.services.permissions_helper_enabled
+        not ctx.read_config().view.services.permissions_helper_enabled
         or permissions_helper_incapability() is not None
     ):
         clear_accessibility_status()
@@ -496,6 +499,8 @@ def converge_host(
     ava_home: Path | None = None,
     steps: tuple[ConvergeStep, ...] = CONVERGE_STEPS,
     services: frozenset[str] | None = None,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
 ) -> None:
     """Run the applicable converge steps in order; idempotent, fail-fast.
 
@@ -508,7 +513,13 @@ def converge_host(
     resolved_home = ava_home if ava_home is not None else resolve_ava_home()
     selected = _desired_service_names(roles) if services is None else services
     ctx = ConvergeCtx(
-        repo=repo, ava_home=resolved_home, roles=roles, config=ConfigBoot(), services=selected
+        repo=repo,
+        ava_home=resolved_home,
+        roles=roles,
+        config=ConfigBoot(),
+        database_factory=database_factory,
+        services=selected,
+        producer=producer,
     )
 
     # Host-global steps belong to the host's prod install (the default home
@@ -564,7 +575,12 @@ def _desired_service_names(roles: MachineRoles | None) -> frozenset[str]:
     )
 
 
-def cmd_converge(*, operation: PauseOwnerSnapshot | None = None) -> int:
+def cmd_converge(
+    *,
+    operation: PauseOwnerSnapshot | None = None,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
+) -> int:
     """`ava converge` — bring this host to the state the current code expects (idempotent)."""
     from base.deploy.maintenance import admission
     from base.native_process.os_platform import raise_fd_limit
@@ -576,7 +592,7 @@ def cmd_converge(*, operation: PauseOwnerSnapshot | None = None) -> int:
     roles = _repo._roles_or_none()
     print(f"[ava converge] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}")
 
-    converge_host(repo, roles)
+    converge_host(repo, roles, database_factory=database_factory, producer=producer)
     # After the steps, not inside them: standalone converge runs against a
     # cluster that is already up, which is the precondition this needs and which
     # a CONVERGE_STEPS entry would not have on the `ava start` path.
@@ -585,6 +601,6 @@ def cmd_converge(*, operation: PauseOwnerSnapshot | None = None) -> int:
         materialize_cluster_extensions,
     )
 
-    adopt_local_extensions()
-    materialize_cluster_extensions()
+    adopt_local_extensions(database_factory=database_factory)
+    materialize_cluster_extensions(database_factory=database_factory)
     return 0

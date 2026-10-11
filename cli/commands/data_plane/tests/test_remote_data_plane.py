@@ -1,25 +1,34 @@
 """Remote data-plane stop, status and leftover-local-instance diagnostics."""
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 
+from base.agents.context.clients import DatabaseFactory
 from base.config import settings
+from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup as dp
 from cli.commands.data_plane import cluster_instance as ci
 from tests.factories.data_plane import remote_cluster_record
 from tests.factories.data_plane import remote_urls as remote_urls
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 # ─── ava stop: nothing to tear down locally ──────────────────────────────────
 
 
 def test_stop_remote_is_a_noop_with_message(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     def _no_subprocess(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("no local subprocess may run against a remote data plane")
 
     monkeypatch.setattr(ci.subprocess, "run", _no_subprocess)
 
-    rc = ci.stop_cluster_instance()
+    rc = ci.stop_cluster_instance(producer=operator_pipeline)
 
     assert rc == 0
     out = capsys.readouterr().out
@@ -31,13 +40,19 @@ def test_stop_remote_is_a_noop_with_message(
 
 
 def test_status_remote_probes_urls_and_skips_pgbouncer_line(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
-    monkeypatch.setattr(dp, "remote_pg_reachable", lambda: (True, "postgres (10.9.8.7:5432)"))
+    def _remote_postgres(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
+        assert database_factory is operator_database
+        return (True, "postgres (10.9.8.7:5432)")
+
+    monkeypatch.setattr(dp, "remote_pg_reachable", _remote_postgres)
     monkeypatch.setattr(dp, "remote_redis_reachable", lambda: (True, "redis (10.9.8.7:6380)"))
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
 
-    ci.print_data_plane_status()
+    ci.print_data_plane_status(database_factory=operator_database)
 
     out = capsys.readouterr().out
     assert "remote-managed" in out
@@ -47,23 +62,31 @@ def test_status_remote_probes_urls_and_skips_pgbouncer_line(
 
 
 def test_status_remote_reports_unreachable_component(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
-    monkeypatch.setattr(dp, "remote_pg_reachable", lambda: (True, "postgres (10.9.8.7:5432)"))
+    def _remote_postgres(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
+        assert database_factory is operator_database
+        return (True, "postgres (10.9.8.7:5432)")
+
+    monkeypatch.setattr(dp, "remote_pg_reachable", _remote_postgres)
     monkeypatch.setattr(
         dp,
         "remote_redis_reachable",
         lambda: (False, "redis (10.9.8.7:6380) connect failed: timeout"),
     )
 
-    ci.print_data_plane_status()
+    ci.print_data_plane_status(database_factory=operator_database)
 
     out = capsys.readouterr().out
     assert "✗ redis (10.9.8.7:6380) connect failed: timeout" in out
 
 
 def test_stop_remote_warns_about_orphaned_local_instance(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """A cluster that switched local→remote may still have its old local
     instance running; `ava stop` no longer manages it, so it must print a
@@ -78,7 +101,7 @@ def test_stop_remote_warns_about_orphaned_local_instance(
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
     monkeypatch.setattr(dp, "_local_listener", lambda port: port == 18012)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = ci.stop_cluster_instance()
+    rc = ci.stop_cluster_instance(producer=operator_pipeline)
 
     assert rc == 0
     captured = capsys.readouterr()

@@ -60,6 +60,27 @@ finally:
     assert child.returncode == 0, child.stderr
 
 
+def test_emit_before_init_reports_missing_owner_without_constructing_a_writer() -> None:
+    code = """
+import threading
+import sys
+from base import telemetry
+from base.log import logger
+logger.add(sys.stderr, enqueue=False)
+def forbidden_thread(*args, **kwargs):
+    raise AssertionError("emit must not construct a writer")
+threading.Thread = forbidden_thread
+telemetry.emit("log", "log", attributes={"cold": True})
+assert telemetry.flush().status is telemetry.DrainStatus.COMPLETED
+"""
+    child = proc.run_bounded(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=10
+    )
+    assert child.returncode == 0, child.stderr
+    assert "requires an initialized process pipeline or producer" in child.stderr
+    assert "emit must not construct a writer" not in child.stderr
+
+
 def test_process_binding_rejects_replacing_a_live_owner() -> None:
     code = """
 from base import telemetry
@@ -101,6 +122,7 @@ def test_full_queue_stop_is_finite_and_closes_admission() -> None:
         assert pipe._queue.full()
         started = time.monotonic()
         assert pipe.stop(timeout=0.03).status is telemetry.DrainStatus.UNFINISHED
+        assert not pipe.stopped
         assert time.monotonic() - started < 0.5
         pipe.enqueue(event(3))
         assert pipe._queue.qsize() == 1
@@ -333,3 +355,57 @@ else:
     assert child.returncode == 0, child.stderr
     assert "Traceback (most recent call last)" in child.stderr
     assert "RuntimeError: zero-sink worker defect" in child.stderr
+
+
+def test_binding_reuses_only_joined_successful_owner() -> None:
+    code = """
+import threading
+from base import telemetry
+first = telemetry.EventPipeline(writer=lambda batch: None)
+second = telemetry.EventPipeline(writer=lambda batch: None)
+try:
+    telemetry.init_telemetry(process="first", pipeline=first)
+    assert not first.stopped
+    assert first.stop(timeout=1).status is telemetry.DrainStatus.COMPLETED
+    assert first.stopped
+    telemetry.init_telemetry(process="second", pipeline=second)
+    assert telemetry.process_name() == "second"
+    assert telemetry.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
+finally:
+    first.stop(timeout=1)
+    second.stop(timeout=1)
+"""
+    child = proc.run_bounded(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=10
+    )
+    assert child.returncode == 0, child.stderr
+
+
+def test_binding_collects_original_failed_owner_before_replacement() -> None:
+    code = """
+from base import telemetry
+error = ValueError("original writer failure")
+def fail(batch):
+    raise error
+first = telemetry.EventPipeline(writer=fail, batch_size=1)
+second = telemetry.EventPipeline(writer=lambda batch: None)
+telemetry.init_telemetry(process="first", pipeline=first)
+telemetry.emit("log", "log")
+try:
+    first.stop(timeout=1)
+except ValueError as caught:
+    assert caught is error
+assert first.stopped
+try:
+    telemetry.init_telemetry(process="second", pipeline=second)
+except ValueError as caught:
+    assert caught is error
+else:
+    raise AssertionError("a failed writer was silently replaced")
+assert telemetry.process_name() == "first"
+second.stop(timeout=1)
+"""
+    child = proc.run_bounded(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=10
+    )
+    assert child.returncode == 0, child.stderr

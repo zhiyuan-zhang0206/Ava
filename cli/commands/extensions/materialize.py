@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import sys
 
+from base.agents.context.clients import DatabaseFactory
 
-def materialize_cluster_extensions() -> None:
+
+def materialize_cluster_extensions(*, database_factory: DatabaseFactory) -> None:
     """Land the cluster's installed skills onto this machine.
 
     Adds the names that arrived by `ava skill install` on any machine of the
@@ -43,7 +45,6 @@ def materialize_cluster_extensions() -> None:
     up.
     """
     from base import paths
-    from base.db import Database
     from base.host.converge.preserve_report import report_converge_preserve
     from base.packages.extensions import materialize
 
@@ -51,7 +52,7 @@ def materialize_cluster_extensions() -> None:
         # The pool opens eagerly and owns worker threads; close it here rather
         # than letting ConnectionPool.__del__ run at interpreter exit (it then
         # joins its own worker and prints "cannot join current thread" noise).
-        with Database.from_settings().pool() as pool, pool.connection() as conn:
+        with database_factory().pool() as pool, pool.connection() as conn:
             result = materialize.materialize_skills(conn, dest_root=paths.skills_dir())
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: cluster registry unreachable ({exc}); skipping", file=sys.stderr)
@@ -71,7 +72,7 @@ def materialize_cluster_extensions() -> None:
         print(f"  ! extensions: {name} has no stored content — reinstall it", file=sys.stderr)
 
 
-def adopt_local_extensions() -> None:
+def adopt_local_extensions(*, database_factory: DatabaseFactory) -> None:
     """Upload this machine's pre-registry skill installs into the cluster.
 
     Runs BEFORE `materialize_cluster_extensions` on the same converge. Either
@@ -86,11 +87,10 @@ def adopt_local_extensions() -> None:
     the operator's terminal — it is the only outcome here that needs a person.
     """
     from base import paths
-    from base.db import Database
     from base.packages.extensions import adopt
 
     try:
-        with Database.from_settings().pool() as pool:
+        with database_factory().pool() as pool:
             result = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: could not adopt local installs ({exc}); skipping", file=sys.stderr)

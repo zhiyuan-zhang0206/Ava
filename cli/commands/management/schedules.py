@@ -29,6 +29,8 @@ from typing import Any
 
 import httpx
 
+from base.agents.context.clients import DatabaseFactory
+
 _TIMEOUT_S = 15.0
 
 
@@ -350,7 +352,7 @@ def cmd_schedules_runs(identifier: str, limit: int) -> int:
 # ── helpers ──
 
 
-def cmd_schedules_provision() -> int:
+def cmd_schedules_provision(*, database_factory: DatabaseFactory) -> int:
     """`ava schedules provision` — bring the built-in schedules in line with this
     checkout's schedules/manifest.json: create the missing ones (product schedules —
     self-evolution, memory — enabled; cluster-operator schedules — e.g.
@@ -365,9 +367,8 @@ def cmd_schedules_provision() -> int:
     existing schedule are never modified, and a schedule that is not in the manifest
     (an agent-created one) is never read."""
     from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
-    from base.db import Database
 
-    with Database.from_settings().write_transaction() as conn:
+    with database_factory().write_transaction() as conn:
         result = provision_builtin_schedules(conn)
     if result.created:
         print(f"provisioned built-in schedules: {', '.join(result.created)}")
@@ -533,4 +534,4 @@ def h_schedules_runs(args: argparse.Namespace) -> int:
 
 
 def h_schedules_provision(_args: argparse.Namespace) -> int:
-    return cmd_schedules_provision()
+    return cmd_schedules_provision(database_factory=_args.database_factory)

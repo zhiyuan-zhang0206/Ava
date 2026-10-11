@@ -13,6 +13,7 @@ import psycopg
 import pytest
 
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
@@ -485,12 +486,15 @@ def test_poll_reads_directly_from_db(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     import asyncio
 
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     bridge, adapter, pool = _direct_bridge(db_conn, tmp_path, monkeypatch)
     nid = _seed_notice(db_conn, agent_id, "direct db notice")  # after the cutover is fixed
     try:
@@ -520,12 +524,15 @@ def test_list_queue_reads_directly_from_db(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     import asyncio
 
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _seed_notice(db_conn, agent_id, "queue item")
     bridge, adapter, pool = _direct_bridge(db_conn, tmp_path, monkeypatch)
     try:
@@ -543,12 +550,15 @@ def test_list_queue_limit_follows_config(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The queue listing cap is cluster config, resolved per call: a shortened
     limit pushes only that many notices (task #3696)."""
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     for i in range(3):
         _seed_notice(db_conn, agent_id, f"queue item {i}")
     bridge, adapter, pool = _direct_bridge(
@@ -569,13 +579,16 @@ def test_unaccepted_notices_caps_at_display_default(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """One source for the live-read cap: the DB-direct twin resolves the same
     display.notices_open_default_limit the gateway endpoint applies (task
     #3696)."""
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     bridge, _adapter, pool = _direct_bridge(
         db_conn, tmp_path, monkeypatch, notices_open_default_limit=2
     )

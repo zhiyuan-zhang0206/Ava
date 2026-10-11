@@ -4,13 +4,13 @@ loguru's `diagnose` defaults to True. With it on, `logger.exception(...)` inline
 every local variable of the failing traceback's frames into the sink's rendered
 output — an independent review reproduced this concretely by recovering a
 `psycopg.connect` DSN's password from a `logger.exception`-logged connection
-failure. Every sink in `base/log/__init__.py` and `base/log/sinks.py` goes through
+failure. Every sink in `base/log/process.py` and `base/log/sinks.py` goes through
 `base.log.sinks.add_sink`, which passes `diagnose=False` (see
 scripts/lint/diagnostics/logger_add_diagnose.py, which guards this repo-wide).
 
 These tests exercise the actual production sink constructor —
 `base.log.sinks._add_file_sink`, the file sink every `init_*` entry point in
-`base/log/__init__.py` installs identically — rather than reimplementing sink
+`base/log/process.py` installs identically — rather than reimplementing sink
 construction, so a regression in the real code path is what fails this test.
 """
 

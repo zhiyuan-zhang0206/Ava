@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,10 @@ import pytest
 
 from base.config import settings
 from base.db import Database, pg_admin
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_settings
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import file_lock
 from services.backup.walg import state, tick
 from services.backup.walg.state import RunRecord
@@ -42,6 +47,17 @@ class Clock:
     def __call__(self) -> datetime:
         value, self._now = self._now, self._now + timedelta(minutes=1)
         return value
+
+
+def _database_factory() -> Callable[[str], Database]:
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="backup-test")
+
+    def for_url(url: str) -> Database:
+        return Database(replace(db_config_from_settings(), db_url=url), gate=gate)
+
+    return for_url
 
 
 def _accepts(_target: tick.PgTarget) -> bool:
@@ -91,11 +107,13 @@ def _confirm_log() -> str:
 
 def _run(clock: Clock | None = None) -> tuple[int, list[str]]:
     lines: list[str] = []
+    database_for_url = _database_factory()
     code = tick.run_tick(
-        Database.from_settings(),
+        database_for_url(settings.data_plane.db_url),
         lines.append,
         now=clock or Clock(),
         path_reader=lambda: settings.walg.walg_config_file,
+        database_for_url=database_for_url,
     )
     return code, lines
 
@@ -530,6 +548,7 @@ class FakeDrill:
         now: Any,
         *,
         path_reader: Callable[[], Path | None],
+        database_for_url: Callable[[str], Database],
     ) -> state.DrillRecord:
         self.wal_g_calls_before.append(self.sandbox.calls())
         self.backups.append(backup.name)
@@ -619,7 +638,10 @@ def test_drill_now_runs_the_drill_and_records_it(sandbox: Sandbox, due_drill: Fa
     lines: list[str] = []
 
     code = tick.run_drill_now(
-        lines.append, now=Clock(), path_reader=lambda: settings.walg.walg_config_file
+        lines.append,
+        now=Clock(),
+        path_reader=lambda: settings.walg.walg_config_file,
+        database_for_url=_database_factory(),
     )
 
     assert code == 0
@@ -634,7 +656,10 @@ def test_drill_now_exits_non_zero_when_the_drill_fails(
 
     assert (
         tick.run_drill_now(
-            lambda _line: None, now=Clock(), path_reader=lambda: settings.walg.walg_config_file
+            lambda _line: None,
+            now=Clock(),
+            path_reader=lambda: settings.walg.walg_config_file,
+            database_for_url=_database_factory(),
         )
         == 1
     )
@@ -648,7 +673,10 @@ def test_drill_now_refuses_without_a_backup(sandbox: Sandbox, due_drill: FakeDri
 
     assert (
         tick.run_drill_now(
-            lines.append, now=Clock(), path_reader=lambda: settings.walg.walg_config_file
+            lines.append,
+            now=Clock(),
+            path_reader=lambda: settings.walg.walg_config_file,
+            database_for_url=_database_factory(),
         )
         == 1
     )
@@ -663,7 +691,10 @@ def test_drill_now_needs_postgres_and_the_run_lock(
     monkeypatch.setattr(tick, "postgres_accepts_connections", _refuses)
     assert (
         tick.run_drill_now(
-            lines.append, now=Clock(), path_reader=lambda: settings.walg.walg_config_file
+            lines.append,
+            now=Clock(),
+            path_reader=lambda: settings.walg.walg_config_file,
+            database_for_url=_database_factory(),
         )
         == 1
     )
@@ -674,7 +705,10 @@ def test_drill_now_needs_postgres_and_the_run_lock(
     with file_lock(state.lock_path(), timeout_s=0):
         assert (
             tick.run_drill_now(
-                lines.append, now=Clock(), path_reader=lambda: settings.walg.walg_config_file
+                lines.append,
+                now=Clock(),
+                path_reader=lambda: settings.walg.walg_config_file,
+                database_for_url=_database_factory(),
             )
             == 1
         )
@@ -688,5 +722,12 @@ def test_drill_now_while_wal_g_is_off_says_so(
     make_sandbox(tmp_path, monkeypatch, enabled=False)
     lines: list[str] = []
 
-    assert tick.run_drill_now(lines.append, path_reader=lambda: settings.walg.walg_config_file) == 1
+    assert (
+        tick.run_drill_now(
+            lines.append,
+            path_reader=lambda: settings.walg.walg_config_file,
+            database_for_url=_database_factory(),
+        )
+        == 1
+    )
     assert "WAL-G is off" in lines[0]

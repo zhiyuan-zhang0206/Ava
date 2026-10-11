@@ -8,6 +8,7 @@ from pydantic import SecretStr
 
 from base.config import ConfigBoot
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from services.derived.memory_indexer import daemon
 from services.derived.memory_indexer.config import MemoryIndexerInputs
 from services.derived.memory_indexer.tests.test_memory_indexer import _FakeProvider
@@ -64,7 +65,7 @@ def test_inputs_observe_updates_without_crossing_owners() -> None:
 
 
 async def test_retry_constructs_selected_backend_with_required_uri_reader(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     requests: list[str] = []
     client_class = httpx.Client
@@ -80,7 +81,7 @@ async def test_retry_constructs_selected_backend_with_required_uri_reader(
 
     monkeypatch.setattr(httpx, "Client", client)
     backend = await daemon._connect_backend_with_retry(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         _FakeProvider(),
         name="numpy",
         uri_reader=lambda: "http://selected-memory",

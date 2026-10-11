@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 
 from base.api_contracts.idempotency import keyed_headers
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
@@ -155,6 +156,8 @@ class TestSystemNote:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         """A reassignment cannot land after validation but before task-note enqueueing."""
         from base.db import connect, pool
@@ -207,7 +210,7 @@ class TestSystemNote:
 
         def reassign() -> None:
             try:
-                with connect() as conn, conn.cursor() as cur:
+                with connect(gate=database_gate) as conn, conn.cursor() as cur:
                     reassign_started.set()
                     cur.execute(
                         "UPDATE agent_tasks SET owner = %s WHERE id = %s",
@@ -218,7 +221,7 @@ class TestSystemNote:
             finally:
                 reassign_finished.set()
 
-        with pool(max_size=1) as note_pool:
+        with pool(max_size=1, gate=database_gate) as note_pool:
             enqueue_thread, reassign_thread = (
                 threading.Thread(target=enqueue, args=(note_pool,), daemon=True),
                 threading.Thread(target=reassign, daemon=True),
