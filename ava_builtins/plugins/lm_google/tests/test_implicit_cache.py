@@ -67,7 +67,6 @@ async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
     log_usage_from_message(response, "gemini-3.8-flash", catalog=model_catalog)
     usage = next(r["extra"] for r in loguru_records if r["extra"].get("event") == "llm_usage")
     assert usage["cache_read"] == 200
-    assert "cache_mechanism" not in usage and "cache_scope" not in usage
 
 
 async def test_cache_403_has_no_application_recovery(

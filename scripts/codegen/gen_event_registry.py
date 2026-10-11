@@ -219,19 +219,13 @@ pure filtering burden for metrics/rollup. **Governance**: downgrade the DB sink
   **merged**: the label display name is unified as `llm_provider_error`, one event
   name.
 
-### 7.4 [Resolved] Historical event_names with no producer
+### 7.4 [Resolved] skill_invoked parse/injection noise
 
-`report_activity` (5,274 rows) and `report_breached` (14 rows) have no producer left
-in code; both are declared `retired`. Only pre-retirement rows carry them.
+`skill_invoked` is only produced when the SKILL.md body is first consumed
+(`help()` / `__doc__`), so the loaded semantics = the body was actually read;
+`invocation_depth` is always `loaded`.
 
-### 7.5 [Resolved] skill_invoked parse/injection noise
-
-Both historical sources eliminated: `invocation_depth=prompt_injected` is no longer
-written; node parsing no longer records it since 2026-08-06 — the event is only
-produced when the SKILL.md body is first consumed (`help()` / `__doc__`), so the
-loaded semantics = the body was actually read.
-
-### 7.6 [Settled] Final event_name-category caliber (2026-08-05, tracker #762/#763)
+### 7.5 [Settled] Final event_name-category caliber (2026-08-05, tracker #762/#763)
 
 The `EVENTS` registry in `base/events/contract.py` (R2-C) is the final caliber for
 event_name and category; `_TELEMETRY_KINDS` in
@@ -241,8 +235,6 @@ event_name and category; `_TELEMETRY_KINDS` in
   label-fallback event_names, so live data landed in log (30d). Now whitelisted +
   historical rows (~103k) backfilled to telemetry by migration
   `20260805T083741_kind-category-final`.
-- **`agent_restarted` → telemetry** (#763): whitelisted in W8; live and migration
-  agree.
 - **Historical/dead event_names stay log**: `claim`, `code(cancelled)`,
   `exec(interrupt)`, `stream_corrupted_retry`,
   `stream_corrupted_or_stalled_retry`, `watcher_resume_recovery`,

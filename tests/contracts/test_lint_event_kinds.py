@@ -35,13 +35,10 @@ _REPO = Path(__file__).resolve().parents[2]
 _REGISTRY = _REPO / "base" / "events" / "registry.md"
 
 # Kinds whose production site has no static `event=` literal, so scan_kinds
-# cannot see them, carry their emission site on the declaration (`EventSpec.site`);
-# retired process-runner kinds are marked `retired` — their contracts stay readable
-# for existing DB/OTLP history, and they are not live producers or permission to
-# emit new process-runner events. Removing a kind from the code means removing the
-# declaration (the reverse gate flags an orphaned entry).
+# cannot see them, carry their emission site on the declaration (`EventSpec.site`).
+# Removing a kind from the code means removing the declaration (the reverse gate
+# flags an orphaned entry).
 _SQL_OR_DYNAMIC_KINDS = frozenset(name for name, spec in EVENTS.items() if spec.site)
-_RETIRED_PROCESS_KINDS = frozenset(name for name, spec in EVENTS.items() if spec.retired)
 
 
 def _code_kinds() -> tuple[set[str], set[str], set[str]]:
@@ -84,8 +81,6 @@ def test_registered_telemetry_events_have_producers() -> None:
     for a kind nobody emits."""
     event_kinds, label_kinds, event_type_kinds = _code_kinds()
     produced = event_kinds | label_kinds | event_type_kinds | _SQL_OR_DYNAMIC_KINDS
-    assert not (_RETIRED_PROCESS_KINDS & produced), "retired process events have a new producer"
-    produced |= _RETIRED_PROCESS_KINDS
     orphaned = sorted(telemetry_events() - produced)
     assert not orphaned, (
         "EVENTS telemetry kind(s) with no producer in code: "

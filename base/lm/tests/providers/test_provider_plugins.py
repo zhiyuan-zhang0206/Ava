@@ -387,7 +387,6 @@ def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None])
     assert catalog.knowledge_cutoffs["testp-1"] == "2026-01"
     assert provider_key_of_model("testp-1", catalog=catalog) == "testp"
     assert "testp-1" in catalog.prices
-    assert next(iter(pricing.RETIRED_MODEL_PRICING)) not in catalog.prices
 
     llm = build_chat_model(
         "testp-1", catalog=catalog, llm_override="", overrides=ModelOverrides.from_pins({})
