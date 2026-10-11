@@ -348,7 +348,7 @@ def test_no_call_is_made_outside_an_agent_turn(monkeypatch: pytest.MonkeyPatch) 
 def test_the_shipped_defaults_name_a_catalog_decision_model(model_catalog: ModelCatalog) -> None:
     assert settings.web.web_fetch_injection_check_enabled is True
     assert settings.web.web_fetch_injection_model in model_catalog.decision_models
-    assert settings.web.web_fetch_injection_threshold == 0.5
+    assert settings.web.web_fetch_injection_threshold == 0.4
 
 
 def test_an_error_that_is_not_a_decision_failure_is_not_swallowed(
