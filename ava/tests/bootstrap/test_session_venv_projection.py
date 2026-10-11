@@ -13,6 +13,8 @@ from ava.shell import sessions
 from ava.shell.tests.support import FakeDatabase
 from base.host.env import bootstrap, dotenv_boot
 
+_CHILD = Path(__file__).with_name("child_sdk_probes.py")
+
 
 class _CapturingBackend:
     """Minimal session backend that records the environment handed to a shell."""
@@ -272,16 +274,8 @@ def test_unprojected_agent_child_still_hits_owner_url_guard(
     )
     for key in ("AVA_DB_URL", "AVA_REDIS_URL", "AVA_CLUSTER_SECRET", "VIRTUAL_ENV"):
         env.pop(key, None)
-    child = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from base.config import settings\n"
-            "try:\n"
-            "    settings.data_plane.db_url\n"
-            "except Exception as exc:\n"
-            "    print(type(exc).__name__, 'agent-profile processes must receive a runner-class' in str(exc))\n",
-        ],
+    child = subprocess.run(  # noqa: S603 — fixed interpreter and child script
+        [sys.executable, str(_CHILD), "agent_profile_owner_url_guard"],
         env=env,
         cwd=Path(__file__).resolve().parents[3],
         capture_output=True,

@@ -573,7 +573,8 @@ def test_set_cwd_with_skills_stores_project_skills_note(tmp_path: Path):
         "---\nname: demo-proj\ndescription: a project-local demo\n---\nbody",
         encoding="utf-8",
     )
-    subprocess = __import__("subprocess")
+    import subprocess
+
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
 
     ava.state = _make_state_with_cwd(str(tmp_path))

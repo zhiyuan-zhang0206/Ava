@@ -759,7 +759,7 @@ def _is_daemon_cmdline_cases() -> list[tuple[list[str], bool]]:
         # Same wrapper through `sh -c` (posixproc launches `sh -c "bash -lc ..."`).
         (["/bin/sh", "-c", "bash -lc 'cd /root && .venv/bin/python -m ava.mcps._daemon'"], False),
         # The module name as a plain argument (not after -m) is not a daemon.
-        (["python", "-c", "import ava.mcps._daemon"], False),
+        (["python", "-c", "print('ava.mcps._daemon')"], False),
         (["python", "ava.mcps._daemon"], False),
         # Unrelated process.
         (["python", "-m", "something.else"], False),

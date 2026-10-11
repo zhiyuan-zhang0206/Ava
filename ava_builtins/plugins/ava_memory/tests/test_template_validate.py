@@ -4,22 +4,17 @@ One crafted bundle trips each check; the expected messages pin the validator's b
 functions can be restructured without changing what it reports.
 """
 
-import importlib.util
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-_VALIDATE = Path(__file__).resolve().parents[1] / "template" / "validate.py"
+from ava_builtins.plugins.ava_memory.template import validate
 
 
 def _validator() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("_template_validate", _VALIDATE)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return validate
 
 
 def w(root: Path, rel: str, text: str) -> None:

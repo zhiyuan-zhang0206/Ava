@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import builtins
 import errno
 import json
 import socket
+import sys
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -65,18 +65,9 @@ def test_required_dependency_failure_does_not_become_an_empty_retry_policy(
     from mcp import MCPError
     from mcp.types import CONNECTION_CLOSED
 
-    original_import = builtins.__import__
-    error = ImportError("required MCP types cannot load")
-
-    def blocked_import(name: str, *args: Any, **kwargs: Any) -> Any:
-        if name == "mcp.types":
-            raise error
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", blocked_import)
-    with pytest.raises(ImportError, match="required MCP types cannot load") as raised:
+    monkeypatch.setitem(sys.modules, "mcp.types", None)
+    with pytest.raises(ImportError, match=r"mcp\.types"):
         is_transport_error(MCPError(CONNECTION_CLOSED, "Connection closed"))
-    assert raised.value is error
 
 
 @pytest.mark.parametrize("code", [errno.EPIPE, errno.ECONNRESET, errno.ECONNREFUSED])
