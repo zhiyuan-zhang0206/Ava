@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_CHILD = str(Path(__file__).with_name("_boot_lite_child.py"))
 
 # The real merged pin map of a `deepseek-v4-flash` exec child (task #3621
 # BLK-1): what `AVA_AGENT_CONFIG_OVERLAY` carries in production.
@@ -68,10 +69,10 @@ def _clean_env(**overrides: str) -> dict[str, str]:
 
 
 def _spawn(
-    code: str, *, env: dict[str, str] | None = None, timeout: float = 180
+    *argv: str, env: dict[str, str] | None = None, timeout: float = 180
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 — fixed argv, sys.executable owns the child
-        [sys.executable, "-B", "-c", code],
+        [sys.executable, "-B", *argv],
         check=False,
         cwd=_REPO_ROOT,
         env=_clean_env(**(env or {})),
@@ -82,12 +83,7 @@ def _spawn(
 
 
 def test_default_boot_is_lite_and_pydantic_settings_free() -> None:
-    proc = _spawn(
-        "import sys, base.config as c\n"
-        "st = c._boot_state()\n"
-        "mods = sorted(m for m in sys.modules if m.startswith('base.config'))\n"
-        "print('BOOT', st['mode'], st['upgrades'], 'pydantic_settings' in sys.modules, mods)\n"
-    )
+    proc = _spawn(_CHILD, "default_boot_is_lite_and_pydantic_settings_free")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("BOOT lite 0 False"), proc.stdout
     assert set(proc.stdout.partition("[")[2].rstrip("]\n").replace("'", "").split(", ")) <= (
@@ -138,13 +134,9 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
         ),
         encoding="utf-8",
     )
-    driver = (
-        "import runpy, sys\n"
-        "sys.argv = ['agent.execution.child']\n"
-        "runpy.run_module('agent.execution.child', run_name='__main__')\n"
-    )
     proc = _spawn(
-        driver,
+        "-m",
+        "agent.execution.child",
         env={
             "AVA_PROCESS_PROFILE": "agent",
             "AVA_AGENT_CONFIG_OVERLAY": json.dumps(_PINMAP),
@@ -166,9 +158,8 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
 
 def test_eager_escape_boots_full_at_import() -> None:
     proc = _spawn(
-        "import base.config as c\n"
-        "print('EAGER', c._boot_state()['mode'], type(c.settings).__name__, "
-        "c.settings.lm.llm_model)\n",
+        _CHILD,
+        "eager_escape_boots_full_at_import",
         env={"AVA_CONFIG_BOOT": "eager"},
     )
     assert proc.returncode == 0, proc.stderr
@@ -177,9 +168,8 @@ def test_eager_escape_boots_full_at_import() -> None:
 
 def test_config_fetch_skip_wins_over_eager() -> None:
     proc = _spawn(
-        "import base.config as c\n"
-        "st = c._boot_state()\n"
-        "print('SKIPWIN', st['mode'], st['prepared'])\n",
+        _CHILD,
+        "config_fetch_skip_wins_over_eager",
         env={"AVA_CONFIG_BOOT": "eager", "AVA_CONFIG_FETCH": "skip"},
     )
     assert proc.returncode == 0, proc.stderr
@@ -198,8 +188,8 @@ def test_dotenv_boot_mode_is_not_honored(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     proc = _spawn(
-        "import os, base.config as c\n"
-        "print('DOTENV', c._boot_state()['mode'], os.environ.get('AVA_CONFIG_BOOT'))\n",
+        _CHILD,
+        "dotenv_boot_mode_is_not_honored",
         env={"AVA_HOME": str(tmp_path)},
     )
     assert proc.returncode == 0, proc.stderr
@@ -211,50 +201,27 @@ def test_required_fields_fail_fast_for_a_local_source(tmp_path: Path) -> None:
     no-default fields; the unit's own `.env` must carry the serve flag (the env
     authority pass drops inherited machine-identity keys)."""
     (tmp_path / ".env").write_text("AVA_MACHINE_SERVE_GATEWAY=true\n", encoding="utf-8")
-    proc = _spawn("import base.config\n", env={"AVA_HOME": str(tmp_path)})
+    proc = _spawn(_CHILD, "import_config", env={"AVA_HOME": str(tmp_path)})
     assert proc.returncode != 0
     assert "required config missing" in proc.stderr and "AVA_DB_URL" in proc.stderr, proc.stderr
 
 
 def test_overlay_writes_stay_pending_and_never_upgrade() -> None:
-    proc = _spawn(
-        "import base.config as c\n"
-        "c.set_field('llm_model', 'overlay-model')\n"
-        "c.set_field('exec_timeout_seconds', 123.0)\n"  # table-external key
-        "st = c._boot_state()\n"
-        "print('PENDING', c.settings.lm.llm_model, c.settings.sandbox.exec_timeout_seconds,\n"
-        "      st['upgrades'], st['pending_count'])\n"
-    )
+    proc = _spawn(_CHILD, "overlay_writes_stay_pending_and_never_upgrade")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("PENDING overlay-model 123.0 0 "), proc.stdout
 
 
 def test_overlay_replays_in_order_on_upgrade() -> None:
-    proc = _spawn(
-        "import base.config as c\n"
-        "c.set_field('llm_model', 'replayed')\n"
-        "c.set_field('exec_timeout_seconds', 7.5)\n"
-        "c.ensure_eager()\n"
-        "st = c._boot_state()\n"
-        "print('REPLAY', c.settings.lm.llm_model, c.settings.sandbox.exec_timeout_seconds,\n"
-        "      st['mode'], st['upgrades'], st['pending_count'])\n"
-    )
+    proc = _spawn(_CHILD, "overlay_replays_in_order_on_upgrade")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("REPLAY replayed 7.5 full 1 0"), proc.stdout
 
 
 def test_overlay_unknown_and_out_of_profile_keys_fail_fast() -> None:
     proc = _spawn(
-        "import base.config as c\n"
-        "try:\n"
-        "    c.set_field('definitely_not_a_field', 1)\n"
-        "except KeyError:\n"
-        "    unknown = 'KeyError'\n"
-        "try:\n"
-        "    c.set_field('telegram_bot_token', 'x')\n"  # telegram domain, excluded from agent
-        "except AttributeError as exc:\n"
-        "    excluded = 'AttributeError' if 'profile' in str(exc) else str(exc)\n"
-        "print('BADKEYS', unknown, excluded, c._boot_state()['upgrades'])\n",
+        _CHILD,
+        "overlay_unknown_and_out_of_profile_keys_fail_fast",
         env={"AVA_PROCESS_PROFILE": "agent"},
     )
     assert proc.returncode == 0, proc.stderr
@@ -264,13 +231,7 @@ def test_overlay_unknown_and_out_of_profile_keys_fail_fast() -> None:
 def test_lite_reads_see_environment_changes_live() -> None:
     """The documented lite invariant (W5-e): lite reads resolve `os.environ` at
     read time — unlike the eager construction's boot snapshot."""
-    proc = _spawn(
-        "import os, base.config as c\n"
-        "first = c.settings.lm.llm_model\n"
-        "os.environ['AVA_MODEL'] = 'changed-later'\n"
-        "second = c.settings.lm.llm_model\n"
-        "print('LIVE', first, second, c._boot_state()['upgrades'])\n"
-    )
+    proc = _spawn(_CHILD, "lite_reads_see_environment_changes_live")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("LIVE ") and proc.stdout.rstrip().endswith(" 0"), proc.stdout
     assert "changed-later" in proc.stdout
@@ -298,8 +259,12 @@ def test_first_error_follows_construction_order(tmp_path: Path) -> None:
             "AVA_TIMEZONE=Bogus/Zone",  # general domain, later
         ],
     )
-    lite = _spawn("import base.config\n", env=lite_env)
-    eager = _spawn("import base.config\n", env={**lite_env, "AVA_CONFIG_BOOT": "eager"})
+    lite = _spawn(_CHILD, "import_config", env=lite_env)
+    eager = _spawn(
+        _CHILD,
+        "import_config",
+        env={**lite_env, "AVA_CONFIG_BOOT": "eager"},
+    )
     for proc in (lite, eager):
         assert proc.returncode != 0
         assert "AVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS" in proc.stderr
@@ -315,9 +280,11 @@ def test_first_error_follows_construction_order(tmp_path: Path) -> None:
         ],
     )
     non_lite_eager = _spawn(
-        "import base.config\n", env={**non_lite_env, "AVA_CONFIG_BOOT": "eager"}
+        _CHILD,
+        "import_config",
+        env={**non_lite_env, "AVA_CONFIG_BOOT": "eager"},
     )
-    non_lite_lite = _spawn("import base.config as c\nc.ensure_eager()\n", env=non_lite_env)
+    non_lite_lite = _spawn(_CHILD, "import_then_ensure_eager", env=non_lite_env)
     for proc in (non_lite_eager, non_lite_lite):
         assert proc.returncode != 0
         assert "AVA_EXEC_TIMEOUT_SECONDS" in proc.stderr
@@ -328,23 +295,7 @@ def test_concurrent_first_touch_upgrades_once() -> None:
     """The upgrade is single-lock idempotent; readers that arrive while another
     thread's build is in flight wait for it (bounded) and still get the value,
     and every read after the join is correct."""
-    proc = _spawn(
-        "import threading\n"
-        "import base.config as c\n"
-        "errors = []\n"
-        "values = []\n"
-        "def touch():\n"
-        "    try:\n"
-        "        values.append(c.settings.sandbox.exec_timeout_seconds)\n"
-        "    except Exception as exc:  # noqa: BLE001\n"
-        "        errors.append(str(exc))\n"
-        "threads = [threading.Thread(target=touch) for _ in range(8)]\n"
-        "[t.start() for t in threads]\n"
-        "[t.join() for t in threads]\n"
-        "after = c.settings.sandbox.exec_timeout_seconds\n"
-        "print('CONC', c._boot_state()['upgrades'], len(errors), len(values),\n"
-        "      all(value == after for value in values))\n"
-    )
+    proc = _spawn(_CHILD, "concurrent_first_touch_upgrades_once")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("CONC 1 0 8 True"), proc.stdout
 
@@ -353,39 +304,7 @@ def test_inflight_build_read_waits_then_serves_the_full_value() -> None:
     """A read that lands while another thread's eager build is in flight waits
     for the build instead of failing, and is served the full value once the
     build installs (task #4069: the window used to hard-fail the reader)."""
-    proc = _spawn(
-        "import threading\n"
-        "import base.config as c\n"
-        "import base.config._full as full\n"
-        "real = full.build\n"
-        "entered = threading.Event()\n"
-        "release = threading.Event()\n"
-        "def gated(*, env_boot):\n"
-        "    entered.set()\n"
-        "    if not release.wait(30):\n"
-        "        raise RuntimeError('gate not released')\n"
-        "    return real(env_boot=env_boot)\n"
-        "full.build = gated\n"
-        "out = {}\n"
-        "def read(tag):\n"
-        "    try:\n"
-        "        out[tag] = c.settings.web.web_jina_reader_base\n"
-        "    except Exception as exc:  # noqa: BLE001\n"
-        "        out[tag] = f'ERR {type(exc).__name__}: {exc}'\n"
-        "t1 = threading.Thread(target=read, args=('a',))\n"
-        "t1.start()\n"
-        "assert entered.wait(30), 'build never started'\n"
-        "t2 = threading.Thread(target=read, args=('b',))\n"
-        "t2.start()\n"
-        "t2.join(0.5)\n"
-        "held = t2.is_alive()\n"
-        "release.set()\n"
-        "t1.join(30)\n"
-        "t2.join(30)\n"
-        "same = out.get('a') == out.get('b')\n"
-        "served = str(out.get('b', '')).startswith('https://')\n"
-        "print('WAIT', c._boot_state()['upgrades'], held, same, served)\n"
-    )
+    proc = _spawn(_CHILD, "inflight_build_read_waits_then_serves_the_full_value")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("WAIT 1 True True True"), proc.stdout
 
@@ -394,40 +313,7 @@ def test_inflight_build_read_timeout_raises_retryable() -> None:
     """When the in-flight build overruns the bounded wait, the reader raises
     ConfigBuildWaitTimeoutError (clearly retryable) instead of hanging forever, and
     the in-flight build still completes for the thread that owns it."""
-    proc = _spawn(
-        "import threading\n"
-        "import base.config as c\n"
-        "import base.config._lite as lite\n"
-        "import base.config._full as full\n"
-        "lite._BUILD_WAIT_TIMEOUT_SECONDS = 0.3\n"
-        "real = full.build\n"
-        "entered = threading.Event()\n"
-        "release = threading.Event()\n"
-        "def gated(*, env_boot):\n"
-        "    entered.set()\n"
-        "    if not release.wait(30):\n"
-        "        raise RuntimeError('gate not released')\n"
-        "    return real(env_boot=env_boot)\n"
-        "full.build = gated\n"
-        "out = {}\n"
-        "def read(tag):\n"
-        "    try:\n"
-        "        out[tag] = c.settings.web.web_jina_reader_base\n"
-        "    except Exception as exc:  # noqa: BLE001\n"
-        "        out[tag] = f'{type(exc).__name__}: {exc}'\n"
-        "t1 = threading.Thread(target=read, args=('a',))\n"
-        "t1.start()\n"
-        "assert entered.wait(30), 'build never started'\n"
-        "t2 = threading.Thread(target=read, args=('b',))\n"
-        "t2.start()\n"
-        "t2.join(5)\n"
-        "release.set()\n"
-        "t1.join(30)\n"
-        "b = str(out.get('b', ''))\n"
-        "print('TMOUT', c._boot_state()['upgrades'],\n"
-        "      str(out.get('a', '')).startswith('https://'),\n"
-        "      b.startswith('ConfigBuildWaitTimeoutError'), 'retry' in b)\n"
-    )
+    proc = _spawn(_CHILD, "inflight_build_read_timeout_raises_retryable")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("TMOUT 1 True True True"), proc.stdout
 
@@ -436,34 +322,7 @@ def test_inflight_build_same_thread_read_does_not_self_wait() -> None:
     """The building thread must never wait on its own build: a read it makes
     mid-build keeps the documented window behavior (raise), completes at once,
     and the build itself still succeeds."""
-    proc = _spawn(
-        "import threading\n"
-        "import base.config as c\n"
-        "import base.config._full as full\n"
-        "real = full.build\n"
-        "entered = threading.Event()\n"
-        "release = threading.Event()\n"
-        "inside = {}\n"
-        "def gated(*, env_boot):\n"
-        "    entered.set()\n"
-        "    try:\n"
-        "        c.settings.web.web_jina_reader_base\n"
-        "        inside['result'] = 'READ-OK'\n"
-        "    except Exception as exc:  # noqa: BLE001\n"
-        "        inside['result'] = f'{type(exc).__name__}: {exc}'\n"
-        "    if not release.wait(30):\n"
-        "        raise RuntimeError('gate not released')\n"
-        "    return real(env_boot=env_boot)\n"
-        "full.build = gated\n"
-        "t = threading.Thread(target=lambda: c.settings.sandbox.exec_timeout_seconds)\n"
-        "t.start()\n"
-        "assert entered.wait(30), 'build never started'\n"
-        "release.set()\n"
-        "t.join(30)\n"
-        "result = str(inside.get('result', '?'))\n"
-        "print('SELF', c._boot_state()['upgrades'],\n"
-        "      result.startswith('AttributeError: config boot-lite:'), 'in flight' in result)\n"
-    )
+    proc = _spawn(_CHILD, "inflight_build_same_thread_read_does_not_self_wait")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("SELF 1 True True"), proc.stdout
 
@@ -472,39 +331,7 @@ def test_inflight_build_get_field_waits_then_serves() -> None:
     """The `get_field` face takes the same bounded wait: a reflective read that
     lands while another thread's build is in flight waits for it and is served
     the full value (formalized from the task #4069 QA probe)."""
-    proc = _spawn(
-        "import threading\n"
-        "import base.config as c\n"
-        "import base.config._full as full\n"
-        "real = full.build\n"
-        "entered = threading.Event()\n"
-        "release = threading.Event()\n"
-        "def gated(*, env_boot):\n"
-        "    entered.set()\n"
-        "    if not release.wait(30):\n"
-        "        raise RuntimeError('gate not released')\n"
-        "    return real(env_boot=env_boot)\n"
-        "full.build = gated\n"
-        "out = {}\n"
-        "def read(tag):\n"
-        "    try:\n"
-        "        out[tag] = c.get_field('web_jina_reader_base')\n"
-        "    except Exception as exc:  # noqa: BLE001\n"
-        "        out[tag] = f'ERR {type(exc).__name__}: {exc}'\n"
-        "t1 = threading.Thread(target=read, args=('a',))\n"
-        "t1.start()\n"
-        "assert entered.wait(30), 'build never started'\n"
-        "t2 = threading.Thread(target=read, args=('b',))\n"
-        "t2.start()\n"
-        "t2.join(0.5)\n"
-        "held = t2.is_alive()\n"
-        "release.set()\n"
-        "t1.join(30)\n"
-        "t2.join(30)\n"
-        "same = out.get('a') == out.get('b')\n"
-        "served = str(out.get('b', '')).startswith('https://')\n"
-        "print('GETFL', c._boot_state()['upgrades'], held, same, served)\n"
-    )
+    proc = _spawn(_CHILD, "inflight_build_get_field_waits_then_serves")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("GETFL 1 True True True"), proc.stdout
 
@@ -514,42 +341,7 @@ def test_inflight_build_get_field_timeout_raises_retryable() -> None:
     view faces: the reflective reader raises ConfigBuildWaitTimeoutError and a
     later retry serves the full value (formalized from the task #4069 QA
     probe)."""
-    proc = _spawn(
-        "import threading\n"
-        "import base.config as c\n"
-        "import base.config._lite as lite\n"
-        "import base.config._full as full\n"
-        "lite._BUILD_WAIT_TIMEOUT_SECONDS = 0.3\n"
-        "real = full.build\n"
-        "entered = threading.Event()\n"
-        "release = threading.Event()\n"
-        "def gated(*, env_boot):\n"
-        "    entered.set()\n"
-        "    if not release.wait(30):\n"
-        "        raise RuntimeError('gate not released')\n"
-        "    return real(env_boot=env_boot)\n"
-        "full.build = gated\n"
-        "out = {}\n"
-        "def read(tag):\n"
-        "    try:\n"
-        "        out[tag] = c.get_field('web_jina_reader_base')\n"
-        "    except Exception as exc:  # noqa: BLE001\n"
-        "        out[tag] = f'{type(exc).__name__}: {exc}'\n"
-        "t1 = threading.Thread(target=read, args=('a',))\n"
-        "t1.start()\n"
-        "assert entered.wait(30), 'build never started'\n"
-        "t2 = threading.Thread(target=read, args=('b',))\n"
-        "t2.start()\n"
-        "t2.join(5)\n"
-        "release.set()\n"
-        "t1.join(30)\n"
-        "b = str(out.get('b', ''))\n"
-        "retry = c.get_field('web_jina_reader_base')\n"
-        "print('GETFLT', c._boot_state()['upgrades'],\n"
-        "      str(out.get('a', '')).startswith('https://'),\n"
-        "      b.startswith('ConfigBuildWaitTimeoutError'), 'retry' in b,\n"
-        "      str(retry).startswith('https://'))\n"
-    )
+    proc = _spawn(_CHILD, "inflight_build_get_field_timeout_raises_retryable")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("GETFLT 1 True True True True"), proc.stdout
 
@@ -559,43 +351,7 @@ def test_pre_install_build_death_revives_on_waiting_reader() -> None:
     path: the builder sees its real error, the waiter re-runs the build itself
     and is served, and exactly one successful install is counted (formalized
     from the task #4069 QA probe)."""
-    proc = _spawn(
-        "import threading\n"
-        "import base.config as c\n"
-        "import base.config._full as full\n"
-        "real = full.build\n"
-        "entered = threading.Event()\n"
-        "release = threading.Event()\n"
-        "calls = []\n"
-        "def gated(*, env_boot):\n"
-        "    calls.append(1)\n"
-        "    if len(calls) == 1:\n"
-        "        entered.set()\n"
-        "        if not release.wait(30):\n"
-        "            raise RuntimeError('gate not released')\n"
-        "        raise RuntimeError('first build died before install')\n"
-        "    return real(env_boot=env_boot)\n"
-        "full.build = gated\n"
-        "out = {}\n"
-        "def read(tag):\n"
-        "    try:\n"
-        "        out[tag] = c.settings.web.web_jina_reader_base\n"
-        "    except Exception as exc:  # noqa: BLE001\n"
-        "        out[tag] = f'{type(exc).__name__}: {exc}'\n"
-        "t1 = threading.Thread(target=read, args=('a',))\n"
-        "t1.start()\n"
-        "assert entered.wait(30), 'build never started'\n"
-        "t2 = threading.Thread(target=read, args=('b',))\n"
-        "t2.start()\n"
-        "t2.join(0.5)\n"
-        "held = t2.is_alive()\n"
-        "release.set()\n"
-        "t1.join(30)\n"
-        "t2.join(30)\n"
-        "print('DEATH', c._boot_state()['upgrades'], held,\n"
-        "      str(out.get('a', '')).startswith('RuntimeError:'),\n"
-        "      str(out.get('b', '')).startswith('https://'))\n"
-    )
+    proc = _spawn(_CHILD, "pre_install_build_death_revives_on_waiting_reader")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("DEATH 1 True True True"), proc.stdout
 
@@ -603,12 +359,7 @@ def test_pre_install_build_death_revives_on_waiting_reader() -> None:
 def test_config_build_wait_timeout_is_exported() -> None:
     """The retryable exception is importable from the public facade (the catch
     shape callers may rely on)."""
-    proc = _spawn(
-        "import base.config as c\n"
-        "from base.config import ConfigBuildWaitTimeoutError\n"
-        "print('EXPORT', c.ConfigBuildWaitTimeoutError is ConfigBuildWaitTimeoutError,\n"
-        "      isinstance(ConfigBuildWaitTimeoutError('x'), AttributeError))\n"
-    )
+    proc = _spawn(_CHILD, "config_build_wait_timeout_is_exported")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("EXPORT True True"), proc.stdout
 
@@ -616,53 +367,22 @@ def test_config_build_wait_timeout_is_exported() -> None:
 def test_facade_settings_rebinds_to_the_singleton_after_upgrade() -> None:
     """The upgrade-time binding contract: pre-upgrade holders keep a working
     view; the facade name `settings` becomes the constructed singleton."""
-    proc = _spawn(
-        "import base.config as c\n"
-        "view = c.settings\n"
-        "before = c.settings.lm.llm_model\n"
-        "c.ensure_eager()\n"
-        "singleton = c.settings\n"
-        "print('REBIND', type(view).__name__, type(singleton).__name__,\n"
-        "      singleton is view, view.lm.llm_model == singleton.lm.llm_model == before)\n"
-    )
+    proc = _spawn(_CHILD, "facade_settings_rebinds_to_the_singleton_after_upgrade")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("REBIND _SettingsView Settings False True"), proc.stdout
 
 
 def test_current_facade_resolves_after_upgrade() -> None:
     """The lite and eager config surfaces preserve Settings identity."""
-    proc = _spawn(
-        "import pickle\n"
-        "import base.config as c\n"
-        "lite_served = ['load_ava_env', 'config_source_is_local', 'should_fetch_from_gateway',\n"
-        "              'CONFIG_FETCH_ENV', 'CONFIG_FETCH_SKIP', 'refresh_data_plane_settings',\n"
-        "              '_FIELDS', 'FIELD_INFOS']\n"
-        "served_ok = all(hasattr(c, n) for n in lite_served) and c._boot_state()['mode'] == 'lite'\n"
-        "from base.config import _full\n"
-        "missing = [n for n in _full._facade_exports() if not hasattr(c, n)]\n"
-        "pinned = c.Settings.__module__\n"
-        "same = pickle.loads(pickle.dumps(c.Settings)) is c.Settings\n"
-        "print('FACADE', served_ok, missing, pinned, same, c._boot_state()['mode'])\n"
-    )
+    proc = _spawn(_CHILD, "current_facade_resolves_after_upgrade")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("FACADE True [] base.config True full"), proc.stdout
 
 
 def test_forked_child_keeps_full_state() -> None:
     proc = _spawn(
-        "import os\n"
-        "import base.config as c\n"
-        "c.settings.lm.llm_model\n"
-        "r, w = os.pipe()\n"
-        "pid = os.fork()\n"
-        "if pid == 0:\n"
-        "    ok = c._boot_state()['mode'] == 'full' and bool(c.settings.lm.llm_model)\n"
-        "    os.write(w, b'1' if ok else b'0')\n"
-        "    os._exit(0)\n"
-        "os.close(w)\n"
-        "out = os.read(r, 1)\n"
-        "os.waitpid(pid, 0)\n"
-        "print('FORK', out.decode())\n",
+        _CHILD,
+        "forked_child_keeps_full_state",
         env={"AVA_CONFIG_BOOT": "eager"},
     )
     assert proc.returncode == 0, proc.stderr
@@ -675,16 +395,8 @@ def test_bad_non_lite_field_does_not_block_lite_scripts(tmp_path: Path) -> None:
     surface upgrades and raises exactly as eager would."""
     (tmp_path / ".env").write_text("AVA_EXEC_TIMEOUT_SECONDS=not-a-number\n", encoding="utf-8")
     proc = _spawn(
-        "import base.config as c\n"
-        "alias = c.field_alias('llm_model')\n"
-        "value = c.settings.lm.llm_model\n"
-        "st = c._boot_state()\n"
-        "try:\n"
-        "    c.settings.sandbox.exec_timeout_seconds\n"
-        "    raised = 'no'\n"
-        "except ValueError:\n"
-        "    raised = 'yes'\n"
-        "print('SCRIPT', alias, value, st['upgrades'], raised)\n",
+        _CHILD,
+        "bad_non_lite_field_does_not_block_lite_scripts",
         env={"AVA_HOME": str(tmp_path)},
     )
     assert proc.returncode == 0, proc.stderr
@@ -699,42 +411,7 @@ def test_field_faces_serve_while_another_thread_builds() -> None:
     delivery_outbox keyed-send path used to get a spurious ImportError from
     the global `is_upgrading()` gate; these faces never depend on the
     upgrade)."""
-    proc = _spawn(
-        "import threading\n"
-        "import base.config as c\n"
-        "import base.config._full as full\n"
-        "real = full.build\n"
-        "entered = threading.Event()\n"
-        "release = threading.Event()\n"
-        "def gated(*, env_boot):\n"
-        "    entered.set()\n"
-        "    if not release.wait(30):\n"
-        "        raise RuntimeError('gate not released')\n"
-        "    return real(env_boot=env_boot)\n"
-        "full.build = gated\n"
-        "out = {}\n"
-        "def read(tag):\n"
-        "    try:\n"
-        "        out[tag] = c.settings.web.web_jina_reader_base\n"
-        "    except Exception as exc:  # noqa: BLE001\n"
-        "        out[tag] = f'ERR {type(exc).__name__}: {exc}'\n"
-        "t = threading.Thread(target=read, args=('build',))\n"
-        "t.start()\n"
-        "assert entered.wait(30), 'build never started'\n"
-        "try:\n"
-        "    from base.config import _FIELDS, FIELD_INFOS\n"
-        "    from base.config import CONFIG_UNCHANGED_SENTINEL, ConfigFieldMeta\n"
-        "    faces = 'ok' if (len(_FIELDS) > 0 and len(FIELD_INFOS) > 0\n"
-        "                     and CONFIG_UNCHANGED_SENTINEL is not None\n"
-        "                     and ConfigFieldMeta is not None) else 'empty'\n"
-        "except Exception as exc:  # noqa: BLE001\n"
-        "    faces = f'{type(exc).__name__}: {exc}'\n"
-        "held = t.is_alive()\n"
-        "upgrades = c._boot_state()['upgrades']\n"
-        "release.set()\n"
-        "t.join(30)\n"
-        "print('FACES', faces, held, upgrades, c._boot_state()['mode'])\n"
-    )
+    proc = _spawn(_CHILD, "field_faces_serve_while_another_thread_builds")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("FACES ok True 0 full"), proc.stdout
 
@@ -745,52 +422,6 @@ def test_module_attribute_read_waits_then_serves() -> None:
     during another thread's in-flight build, waits for it, and is served the
     installed value — while the building thread's own re-entrant read keeps
     the documented window error instead of self-waiting (task #4964)."""
-    proc = _spawn(
-        "import threading\n"
-        "import base.config as c\n"
-        "import base.config._full as full\n"
-        "real = full.build\n"
-        "entered = threading.Event()\n"
-        "release = threading.Event()\n"
-        "inside = {}\n"
-        "def gated(*, env_boot):\n"
-        "    entered.set()\n"
-        "    try:\n"
-        "        getattr(c, 'Settings')\n"
-        "        inside['reentrant'] = 'READ-OK'\n"
-        "    except Exception as exc:  # noqa: BLE001\n"
-        "        inside['reentrant'] = f'{type(exc).__name__}: {exc}'\n"
-        "    if not release.wait(30):\n"
-        "        raise RuntimeError('gate not released')\n"
-        "    return real(env_boot=env_boot)\n"
-        "full.build = gated\n"
-        "out = {}\n"
-        "def read(tag):\n"
-        "    try:\n"
-        "        out[tag] = c.settings.web.web_jina_reader_base\n"
-        "    except Exception as exc:  # noqa: BLE001\n"
-        "        out[tag] = f'ERR {type(exc).__name__}: {exc}'\n"
-        "t1 = threading.Thread(target=read, args=('build',))\n"
-        "t1.start()\n"
-        "assert entered.wait(30), 'build never started'\n"
-        "def read_attr(tag):\n"
-        "    try:\n"
-        "        out[tag] = c.Settings\n"
-        "    except Exception as exc:  # noqa: BLE001\n"
-        "        out[tag] = f'ERR {type(exc).__name__}: {exc}'\n"
-        "t2 = threading.Thread(target=read_attr, args=('waiter',))\n"
-        "t2.start()\n"
-        "t2.join(0.5)\n"
-        "held = t2.is_alive()\n"
-        "release.set()\n"
-        "t1.join(30)\n"
-        "t2.join(30)\n"
-        "served = getattr(out.get('waiter'), '__name__', '') == 'Settings'\n"
-        "same = out.get('waiter') is c.Settings\n"
-        "reentrant = str(inside.get('reentrant', '?'))\n"
-        "print('ATTR', c._boot_state()['upgrades'], held, served, same,\n"
-        "      reentrant.startswith('AttributeError: config boot-lite:'),\n"
-        "      'in flight' in reentrant)\n"
-    )
+    proc = _spawn(_CHILD, "module_attribute_read_waits_then_serves")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("ATTR 1 True True True True True"), proc.stdout
