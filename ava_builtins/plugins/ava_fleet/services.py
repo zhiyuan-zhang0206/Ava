@@ -24,7 +24,7 @@ from functools import partial
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.cluster.machine import MachineRole
-from base.packages.plugins.config_registration import disk_image_path, read_authority_config
+from base.packages.plugins.config_registration import disk_image_path, read_config_image
 from ops.roster import healthz_daemon
 from ops.roster.service_spec import ServiceSpec
 
@@ -37,14 +37,14 @@ _GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
 def _task_maintenance_gate(config: FleetConfig) -> str | None:
     """Gate reason for task-maintenance, or None when it will start.
 
-    This is the daemon's host-owned on/off, with a cluster-wide business effect — `AVA_TASK_MAINTENANCE_ENABLED`, an
+    This is the daemon's host-owned on/off, with a cluster-wide business effect — Fleet `task_maintenance_enabled`, an
     explicit host plugin field (scope=host), read deterministically at
     daemon-start and unaffected by any per-agent config overlay. Owned by the
     plugin (not `ops.spec._gate_reason`) so the fleet-domain toggle travels with
     the fleet service, and it — not the plugin's agent-facing enable-state — is
     what decides whether task-maintenance runs."""
     if not config.task_maintenance_enabled:
-        return "disabled (AVA_TASK_MAINTENANCE_ENABLED off)"
+        return "disabled (Fleet task_maintenance_enabled off)"
     return None
 
 
@@ -58,7 +58,7 @@ def services() -> tuple[ServiceSpec, ...]:
     source checkout the service starts in) — no `uv run` wrapper.
     """
     config_path = disk_image_path("ava_fleet")
-    config = read_authority_config("ava_fleet", FleetConfig, config_path)
+    config = read_config_image(FleetConfig, config_path)
     return (
         healthz_daemon(
             "task-maintenance",

@@ -67,7 +67,6 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
     monkeypatch.setattr(module.ava.agents, "send_message", forbidden)
     monkeypatch.setattr(module.ava, "loaded_code_image", forbidden)
     monkeypatch.setattr("schedules.entry.Database.from_settings", forbidden)
-    monkeypatch.setattr(module, "catch_up", forbidden)
     monkeypatch.setattr(module, "fire_slot_once", forbidden)
     monkeypatch.setattr(module, "ava_home", forbidden)
     monkeypatch.setattr("base.db.connect", forbidden)

@@ -44,7 +44,6 @@ import psutil
 
 from base.log import logger
 from base.native_process import pid_starttime_ticks
-from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.native_process.ownership import stable_create_time
 from base.paths import logs_dir, run_dir
 from base.sessions.record import SessionRecord
@@ -126,9 +125,8 @@ def _process_for_record(rec: SessionRecord) -> psutil.Process | None:
             return None
         if rec.starttime is not None:
             return proc if rec.identifies(rec.pid) is True else None
-        # The stable start time defeats pid recycling for legacy records and
-        # platforms without Linux's clock-stable `/proc/<pid>/stat` field 22;
-        # the tolerance covers pre-stable-key records written by older code.
+        # Platforms without Linux's clock-stable `/proc/<pid>/stat` field 22
+        # identify the process by its creation time within a tolerance.
         if abs(stable_create_time(proc) - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
             return None
     except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -198,7 +196,6 @@ def new_session(
         env=env,
         stdin=subprocess.DEVNULL,
         capture_output=True,
-        creationflags=CREATE_NO_WINDOW,
         text=True,
         timeout=_SPAWN_HELPER_TIMEOUT_S,
         check=False,
@@ -262,15 +259,15 @@ def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool
             if _read_record(name) != expected:
                 return False
             if expected.starttime is not None:
-                # WSL btime can move the epoch birth of this same process. The
+                # A btime step can move the epoch birth of this same process. The
                 # recorded /proc ticks are authoritative, including this final
                 # check; unavailable or changed ticks must still refuse delivery.
                 if expected.identifies(proc.pid) is not True:
                     return False
             # Start-time fallback: keep the record-resolution tolerance — a
-            # reading may drift for legacy records written before the stable
-            # key (whole-second wall-clock corrections), so a drifted reading
-            # must not refuse the process `_process_for_record` just resolved.
+            # reading may drift (whole-second wall-clock corrections), so a
+            # drifted reading must not refuse the process `_process_for_record`
+            # just resolved.
             elif abs(stable_create_time(proc) - expected.create_time) > _CREATE_TIME_TOLERANCE_S:
                 return False
         # Signal only this captured process object, never resolve the name a
@@ -470,7 +467,7 @@ def _record_reapable(rec: SessionRecord) -> tuple[bool, str, int | None]:
     recycled pid proves the LEADER is gone, not that its group is empty, and
     checking reuse first would reap exactly the records whose surviving
     descendants are the orphans #2123 preserves. A recycled pid whose
-    recorded group is empty (or absent — a legacy record) is still reaped by
+    recorded group is empty (or absent) is still reaped by
     the reuse criterion below.
 
     Returns:
@@ -498,7 +495,7 @@ def _record_reapable(rec: SessionRecord) -> tuple[bool, str, int | None]:
         return False, "pid could not be inspected", None
     if rec.identifies(rec.pid) is False:
         return True, "pid was reused by another process", None
-    return False, "live pid did not satisfy the legacy identity check", None
+    return False, "live pid did not satisfy the identity check", None
 
 
 def list_sessions(prefix: str = "") -> list[str]:
@@ -532,7 +529,7 @@ def list_sessions(prefix: str = "") -> list[str]:
                 )
                 # Only the occupied-group case is listed: it carries the
                 # durable ownership proof a stop must converge. A live pid
-                # with an uncertain legacy identity stays invisible — nothing
+                # with an uncertain identity stays invisible — nothing
                 # provable may be claimed from it. The group occupancy was
                 # already read inside _record_reapable; never scan it again
                 # per listing (task #2898).

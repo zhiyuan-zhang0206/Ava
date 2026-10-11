@@ -86,7 +86,7 @@ from ops.rpc_schemas import (
     OpStatus,
     is_op_kind,
 )
-from services.agent_runner.agent_ops import boot, health, outbox_flusher
+from services.agent_runner.agent_ops import boot, health
 from services.agent_runner.agent_ops import maintenance as maintenance_activity
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -280,7 +280,7 @@ async def _dispatch(
 
     try:
         match kind:
-            case "spawn-launch-v2":
+            case "spawn-launch":
                 db, bus = boot.ops_handles(database=database)
                 spawned = await lifecycle.launch_agent_op(
                     db, bus, LaunchAgentRequest.model_validate(payload), pool, catalog=catalog
@@ -289,7 +289,7 @@ async def _dispatch(
                 # withdrawn model was rewritten (task #4306) — the common wire
                 # shape stays {"id": ...}.
                 return OpStatus.COMPLETED, spawned.model_dump(mode="json", exclude_none=True)
-            case "launch-reconcile-v1":
+            case "launch-reconcile":
                 from ops.lifecycle.launch_reconcile import reconcile_launch_op
 
                 db, bus = boot.ops_handles(database=database)
@@ -422,7 +422,7 @@ async def _dispatch_idempotent_pass(
     if (
         kind == "lifecycle"
         and isinstance(payload.get("path"), str)
-        and re.fullmatch(r"/api/agents/[1-9][0-9]*/restart-work-v1", payload["path"])
+        and re.fullmatch(r"/api/agents/[1-9][0-9]*/restart-work", payload["path"])
     ):
         try:
             operation = NativeRestartOperation.model_validate(payload.get("body"))
@@ -627,14 +627,7 @@ async def _main(*, database: Callable[[], Database], image: LoadedCommit) -> Non
 
     pool = boot.open_db_pool(database=database)
     executor = _op_thread_pool()
-    db, bus = boot.ops_handles(database=database)
-    # Redeliver recorded delivery failures whenever the data plane allows
-    # (task #3757): a resident loop that outlives every sender process, owned with
-    # the server by the TaskGroup below.
     liveness = LivenessGroup()
-    outbox_progress = liveness.register(
-        "delivery-outbox", outbox_flusher.INITIAL_LIVENESS_TIMEOUT_S
-    )
 
     try:
         # Every /ops dial presents a machine API token of this generation; an
@@ -682,13 +675,8 @@ async def _main(*, database: Callable[[], Database], image: LoadedCommit) -> Non
         )
         boot.register_boot(database=database)
         try:
-            # One TaskGroup owns the server and the outbox loop: a loop that raises
-            # cancels the server and ends the process, and the supervisor restarts it.
-            async with server, asyncio.TaskGroup() as resident:
-                resident.create_task(server.serve_forever())
-                resident.create_task(
-                    outbox_flusher.outbox_loop(pool, db, bus, outbox_progress, authority=authority)
-                )
+            async with server:
+                await server.serve_forever()
         finally:
             await stop_health_server(server)
             _remove_pidfile()

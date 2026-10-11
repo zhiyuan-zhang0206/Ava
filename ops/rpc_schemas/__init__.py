@@ -1,17 +1,4 @@
-"""Gateway <-> agent-runner RPC-shared schemas — the cross-process wire
-contract. These types are produced/consumed on BOTH sides of the ops RPC
-(the gateway HTTP surface AND the agent-runner ops handlers in ops/ +
-services/), so by the import layering (base < ops < gateway) they live in
-the ops layer: gateway imports them downward, and ops/services never have to
-reach up into gateway.
-
-This package door holds the op envelope and per-kind payload/result models.
-Focused exchanges live in its submodules — the terminate exchange (request /
-response / open-task hint) in `terminate`, the shared content guardrail in
-`content`, the chat request models in `messages`, platform completion metadata
-in `completion`, and the billing batch-recovery exchange in `billing_recovery`;
-the door re-exports the models its importers use.
-"""
+"""Typed RPC envelopes and supported lifecycle/agent result models."""
 
 from datetime import datetime
 from enum import StrEnum
@@ -27,27 +14,17 @@ from pydantic import (
 )
 
 from base.agents import (
-    CrashRecoveryResult,
     RestartResult,
     ResurrectResult,
     ShellKillMode,
 )
-from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
+from base.agents.messages.caller_identity import CallerIdentity, is_caller_source
+from base.agents.messages.envelope import validate_source
 from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
 from base.api_contracts.op_envelope import OpEnvelope as OpEnvelope
 
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
-from ops.rpc_schemas.billing_recovery import BillingBalanceReport as BillingBalanceReport
-from ops.rpc_schemas.billing_recovery import BillingHaltedAliveRow as BillingHaltedAliveRow
-from ops.rpc_schemas.billing_recovery import (
-    BillingResurrectAgentOutcome as BillingResurrectAgentOutcome,
-)
-from ops.rpc_schemas.billing_recovery import (
-    BillingResurrectAgentResponse as BillingResurrectAgentResponse,
-)
-from ops.rpc_schemas.billing_recovery import BillingResurrectRequest as BillingResurrectRequest
-from ops.rpc_schemas.billing_recovery import BillingResurrectResponse as BillingResurrectResponse
 from ops.rpc_schemas.content import UserContent
 from ops.rpc_schemas.launch_retry import (
     LaunchReconciled as LaunchReconciled,
@@ -135,7 +112,7 @@ class SpawnAgentRequest(BaseModel):
         # Same legal set as the claim-side wrap — single-sourced via
         # base.agents.messages.envelope.validate_source.
         if self.prompt_source is not None:
-            validate_writable_source(self.prompt_source)
+            validate_source(self.prompt_source)
         return self
 
 
@@ -182,7 +159,7 @@ class ResurrectAgentRequest(BaseModel):
     """Resurrect agent request body.
 
     The public `POST /api/agents/{id}/resurrect` endpoint uses this for an
-    explicit lifecycle wake with no work guard. The internal versioned
+    explicit lifecycle wake with no work guard. The internal
     pending-work path also carries it alongside the exact chat or compact
     request id and kind; controller recovery calls the lower lifecycle helper
     with its own exact death claim.
@@ -218,7 +195,7 @@ class ResurrectAgentRequest(BaseModel):
     @field_validator("resurrected_by")
     @classmethod
     def _check_envelope_source(cls, v: str) -> str:
-        validate_writable_source(v)
+        validate_source(v)
         return v
 
 
@@ -242,7 +219,10 @@ class RestartAgentRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _check_source(cls, value: str) -> str:
-        reject_unnegotiated_caller(value)
+        # Lifecycle sources are opaque audit labels, except a declared external
+        # agent, which must be well-formed.
+        if is_caller_source(value):
+            CallerIdentity.from_source(value)
         return value
 
     @model_validator(mode="after")
@@ -289,27 +269,6 @@ class ResurrectAgentResponse(BaseModel):
     """
 
     status: ResurrectResult
-
-
-class RecoverCrashMarkedResponse(BaseModel):
-    """`recover-crash-marked-v2` response — the home runner's adjudication of
-    harvesting a crash-marked idling corpse whose chat has stalled pending
-    (the delivery watchdog's stalled-recovery request, task #3618).
-
-    `harvested`: the row matched every settle guard and was flipped to the
-        reaper's terminal shape (terminated, termination_source='reaper';
-        the crash marker is kept, so the relaxed reaper trigger can resume
-        the leftover work on the home machine's next beat).
-    `already_terminated`: the row is already terminated — an idempotent
-        repeat of a completed harvest.
-    `refused`: an adjudication guard failed (fail-closed); `reason` names it
-        ('not_marked', 'not_settled:<status>', 'wrong_machine',
-        'lease_alive', 'wake_suppressed', or the active wake-suppression
-        reason — 'permanent_provider_reject' when the recovery breaker
-        halted the agent)."""
-
-    status: CrashRecoveryResult
-    reason: str | None = None
 
 
 class ShellInfo(BaseModel):
@@ -374,8 +333,8 @@ class SessionInfo(BaseModel):
 # The op vocabulary — the discriminator the daemon's `_dispatch` switches on;
 # lives here (not cluster_rpc.py) beside its models; `ops.cluster.rpc` re-exports it.
 OpKind = Literal[
-    "spawn-launch-v2",
-    "launch-reconcile-v1",
+    "spawn-launch",
+    "launch-reconcile",
     "lifecycle",
     "status_probe",
     "config_read",
@@ -423,7 +382,7 @@ class OpFailure(BaseModel):
     reason: str | None = None
 
 
-# ── per-OpKind request payloads (spawn-launch-v2 uses LaunchAgentRequest above;
+# ── per-OpKind request payloads (spawn-launch uses LaunchAgentRequest above;
 # SpawnAgentRequest is the REST body, not an op payload) ──
 
 

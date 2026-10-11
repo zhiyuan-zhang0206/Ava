@@ -64,8 +64,6 @@ from gateway.http.auth.request_principal import (
     request_key,
 )
 from ops.rpc_schemas import (
-    BillingResurrectRequest,
-    BillingResurrectResponse,
     OpenTaskRow,
     OpenTasksHint,
     RestartAgentRequest,
@@ -267,39 +265,12 @@ async def post_agent_resurrect(
     """
     forwarded = await forward_to_home_machine(
         agent_id,
-        f"/api/agents/{agent_id}/resurrect-explicit-v2",
+        f"/api/agents/{agent_id}/resurrect-explicit",
         body.model_dump(),
         db=request.app.state.db,
         pool=request.app.state.db_pool,
     )
     return ResurrectAgentResponse.model_validate(forwarded)
-
-
-@router.post("/api/agents/resurrect-billing")
-async def post_agents_resurrect_billing(
-    request: Request,
-    body: BillingResurrectRequest = Body(default_factory=BillingResurrectRequest),  # noqa: B008
-) -> BillingResurrectResponse:
-    """Billing batch recovery — the explicit, operator-triggered entry (task #3919).
-
-    `execute=false` (the default) is a strictly read-only preview: the
-    billing-class halt candidates, the halted-but-alive survey (report-only),
-    and the provider balance readout, nothing written. `execute=true` re-checks the provider balance (the run refuses
-    below the configured floor) and then resurrects each candidate on its home
-    machine through the versioned `resurrect-billing-v1` op, which enforces the
-    billing-halt whitelist under the metadata row lock.
-    Idempotent: the candidate set self-clears after a run, a repeated run is an
-    audited no-op, and a concurrent second run is refused by the run-level
-    advisory lock.
-    """
-    from ops.lifecycle.billing_recovery import run_billing_recovery
-
-    return await run_billing_recovery(
-        execute=body.execute,
-        pool=request.app.state.db_pool,
-        db=request.app.state.db,
-        bus=request.app.state.bus,
-    )
 
 
 @router.post("/api/agents/{agent_id}/restart")
@@ -380,7 +351,7 @@ def _native_control_key(request: Request) -> str:
 async def native_restart(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: NativeRestartRequest, request: Request
 ) -> NativeRestartAcceptance:
-    """Accept the original ACTIVE restart once through its versioned executor."""
+    """Accept the original ACTIVE restart once through its dedicated executor."""
     key = _native_control_key(request)
     try:
         previous = await asyncio.to_thread(
@@ -393,7 +364,7 @@ async def native_restart(
     operation = NativeRestartOperation(operation_key=key, request=body)
     reply = await forward_to_home_machine(
         agent_id,
-        f"/api/agents/{agent_id}/restart-work-v1",
+        f"/api/agents/{agent_id}/restart-work",
         operation.model_dump(mode="json"),
         db=request.app.state.db,
         pool=request.app.state.db_pool,

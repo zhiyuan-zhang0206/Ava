@@ -594,7 +594,7 @@ def test_non_telemetry_events_produce_no_metrics(otlp_backend) -> None:
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
             _event(event_name="exec", category="log", attributes={"n": 3, "ok": True}),
-            _event(event_name="process_exit", category="audit", attributes={"code": 0}),
+            _event(event_name="status_change", category="audit", attributes={"code": 0}),
         ]
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]

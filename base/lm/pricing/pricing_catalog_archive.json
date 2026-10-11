@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-10-08-cache-writes",
+  "catalog_version": "2026-10-11-decision-models",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -1809,6 +1809,52 @@
                 "output": "2.50",
                 "cache_write_5m": "0.625",
                 "cache_write_1h": "1.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "jev-1.13.0": {
+      "vendor": "typesafe",
+      "source_url": "https://docs.typesafe.ai/models",
+      "source_checked_at": "2026-10-11",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.042",
+                "cache_read": "0.042",
+                "output": "0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-6-luna-decisions": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/guides/decisions",
+      "source_checked_at": "2026-10-11",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.10",
+                "cache_read": "0.10",
+                "output": "0"
               },
               "utc_daily_overrides": []
             }

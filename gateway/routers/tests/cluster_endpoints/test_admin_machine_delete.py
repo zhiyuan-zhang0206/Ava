@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -89,7 +87,7 @@ class TestAgentMachineList:
         # machines run agents).
         from ops.cluster import rpc as cluster_rpc
 
-        set_machine_identity(role="agent-runner", name="wsl-test")
+        set_machine_identity(role="agent-runner", name="runner-test")
 
         async def _fake_dispatch(
             *,
@@ -102,11 +100,11 @@ class TestAgentMachineList:
             idempotency_key=None,
         ):  # type: ignore[no-untyped-def]
             assert kind == "status_probe"
-            assert ops_url == "http://wsl-test:18121"
+            assert ops_url == "http://runner-test:18121"
             # The ops server echoes its own machine_name; the gateway verifies it
             # matches the probed row, so the stub must self-report the same name.
             return {
-                "machine_name": "wsl-test",
+                "machine_name": "runner-test",
                 "serve_gateway": False,
                 "serve_agent_runner": True,
                 "paused": False,
@@ -117,8 +115,8 @@ class TestAgentMachineList:
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "INSERT INTO machines (name, role, gateway_url, description) "
-                "VALUES ('wsl-test', ARRAY['agent-runner'], "
-                "'http://wsl-test:18121', 'voice IO + browser')"
+                "VALUES ('runner-test', ARRAY['agent-runner'], "
+                "'http://runner-test:18121', 'voice IO + browser')"
             )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         with TestClient(app) as client:
@@ -127,7 +125,7 @@ class TestAgentMachineList:
         body = r.json()
         assert body == [
             {
-                "name": "wsl-test",
+                "name": "runner-test",
                 "description": "voice IO + browser",
                 "live": True,
                 "is_staging": False,
@@ -152,7 +150,7 @@ class TestAgentMachineList:
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "INSERT INTO machines (name, role, gateway_url) "
-                "VALUES ('wsl-test', ARRAY['agent-runner'], 'http://wsl-test:18121')"
+                "VALUES ('runner-test', ARRAY['agent-runner'], 'http://runner-test:18121')"
             )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         now = datetime.now(UTC)
@@ -160,10 +158,10 @@ class TestAgentMachineList:
         async def _fake_gather(_db: object, rows, local_name, **_kw):  # type: ignore[no-untyped-def]
             return [
                 MachineStatus(
-                    name="wsl-test",
+                    name="runner-test",
                     serve_gateway=False,
                     serve_agent_runner=True,
-                    gateway_url="http://wsl-test:18121",
+                    gateway_url="http://runner-test:18121",
                     up_since_at=now,
                     online=True,
                     paused=None,
@@ -177,7 +175,7 @@ class TestAgentMachineList:
         assert response.status_code == 200
         assert response.json() == [
             {
-                "name": "wsl-test",
+                "name": "runner-test",
                 "description": None,
                 "live": False,
                 "is_staging": False,
@@ -206,7 +204,7 @@ class TestAgentMachineList:
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "INSERT INTO machines (name, role, gateway_url) "
                 "VALUES ('control-test', ARRAY['gateway'], 'https://example.com'), "
-                "('wsl-test', ARRAY['agent-runner'], NULL)"
+                "('runner-test', ARRAY['agent-runner'], NULL)"
             )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
 
@@ -226,7 +224,7 @@ class TestAgentMachineList:
                     stopped_at=None,
                 ),
                 MachineStatus(
-                    name="wsl-test",
+                    name="runner-test",
                     serve_gateway=False,
                     serve_agent_runner=True,
                     gateway_url="",
@@ -245,7 +243,7 @@ class TestAgentMachineList:
         body = r.json()
         assert body == [
             {
-                "name": "wsl-test",
+                "name": "runner-test",
                 "description": "voice IO + browser",
                 "live": True,
                 "is_staging": False,
@@ -464,14 +462,6 @@ class TestMachinePauseResume:
         assert status == "terminated"
         assert source == "user"
         assert old_chat_id < fence_id == terminate_id
-
-        from psycopg_pool import ConnectionPool
-
-        from base.config import settings
-        from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
-
-        with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool:
-            assert select_terminated_owners_with_pending(cast(ConnectionPool, pool), 86400.0) == []
 
     def test_pause_unknown_machine_404(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
         set_machine_identity(role="gateway", name="test-host")

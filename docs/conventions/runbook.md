@@ -507,186 +507,18 @@ itself (its own public key in its own `authorized_keys`):
   version, and those processes exit when they next touch the database
   ([code version gate](#code-version-gate)).
 
-### Release steps: adding the `ttl-reaper` and `schedule-manager` port slots (one-time)
-
-The release that moves the TTL reaper and the schedule manager out of the gateway
-process into their own `ttl-reaper` and `schedule-manager` services adds two slots to
-the fixed port table (`ttl_reaper` 8121, `schedule_manager` 8122), so every gateway
-home's start intent needs those keys before any command of the new code (see the rule
-above). A runner-only home has no reservation and needs nothing; a home's `.env` needs
-nothing either, the unset `AVA_<NAME>_HEALTH_PORT` binds the table's number. The step is
-idempotent (it adds a key only when absent), so a home that already ran it, or that ran
-the PITR step below in the same window, is unchanged by a second run.
-
-1. **Between `down` and `up`, on every gateway home**, add the slots. The file is
-   compact JSON with sorted keys, mode 0600:
-
-   ```bash
-   python3 - <<'EOF'
-   import json, os, pathlib
-   home = pathlib.Path(os.environ.get("AVA_HOME") or pathlib.Path.home() / ".ava")
-   path = home / "start-intent.json"
-   data = json.loads(path.read_text())
-   for slot, port in (("ttl_reaper", 8121), ("schedule_manager", 8122)):
-       data["record"]["ports"].setdefault(slot, port)
-   staged = path.with_name(path.name + ".staged")
-   staged.write_text(json.dumps(data, sort_keys=True) + "\n")
-   staged.chmod(0o600)
-   staged.replace(path)
-   EOF
-   ```
-2. **After `up`**, the migrations (`maintenance_state`, the schedule-manager columns and
-   `schedule_sync_requests`) have been applied by the gateway's cold start and the units
-   are running: `ava status` lists `ttl-reaper` and `schedule-manager` ready, and
-   `curl -s localhost:8121/healthz` / `localhost:8122/healthz` answer with their names and
-   all loops alive. The gateway no longer runs a reaper or a schedule manager of its own.
-   Schedule sessions are not restarted by the rollout: the new service re-adopts the live
-   ones (a gateway-less window only delays launches and sync requests).
-
-### Release steps: retiring the PITR stack (one-time)
-
-The release that deletes the self-written PITR stack
-([decision](../decisions/data/backup/2026-10-02-delete-the-self-written-pitr-stack.md)) needs
-three manual steps per gateway home, because the upgrade cannot do them itself.
-The last commit that still carries the stack is the tag `pitr-stack-final`. The
-daily dump, its off-site publish and the weekly restore drill import none of the
-deleted code.
-
-1. **Before `down`, with the old code running.**
-   - `SHOW archive_mode;` must read `off` and `SHOW archive_command;` must be
-     empty (`pg_stat_archiver.archived_count` zero). A home that reads `on`
-     first resets `archive_mode`, `archive_command`, `archive_timeout` and
-     `wal_compression` with `ALTER SYSTEM RESET` and restarts Postgres: the
-     uploader that drained the archive spool is gone, and a spool at its hard
-     bound makes `pg_wal` grow until the disk is full.
-   - Record the off-site destination: `AVA_PITR_OSS_ENDPOINT` and
-     `AVA_PITR_OSS_BUCKET` from `ava config get`, and the path in
-     `AVA_PITR_OSS_CREDENTIALS_FILE` (masked there; it is the 0600 file the old
-     configuration pointed at).
-   - Unset every writable retired key while the old code still knows it; after
-     the upgrade official config can no longer touch it:
-
-     ```bash
-     ava config unset AVA_PITR_ENABLED AVA_PITR_BASE_BACKUP_ENABLED \
-       AVA_PITR_RESTORE_PROOF_ENABLED AVA_PITR_RETENTION_PLANNER_ENABLED \
-       AVA_PITR_RETENTION_DELETE_ARMED AVA_PITR_RETENTION_DELETE_APPROVED_DIGEST \
-       AVA_PITR_STORE_BACKEND AVA_PITR_BAIDU_TOKEN_FILE AVA_PITR_OSS_ENDPOINT \
-       AVA_PITR_OSS_BUCKET AVA_PITR_OSS_CREDENTIALS_FILE \
-       AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE AVA_PITR_OSS_DELETE_CREDENTIALS_FILE
-     ```
-
-     The off-site leg of the daily dump is idle from here until step 3; the
-     local dump is unaffected. The other `AVA_PITR_*` keys are deploy-provisioned
-     and read-only (`ava config` refuses them). They stay in the `.env`, inert:
-     every settings model ignores a key it does not declare. Do not edit the
-     `.env` by hand to remove them.
-2. **Between `down` and `up`, on every gateway home** (a runner-only home has no
-   reservation and needs nothing): delete the four retired port slots from the
-   start intent in this one step, the two PITR slots (`pitr_uploader`,
-   `pitr_base_backup`) and the two watchdog slots (`gateway_watchdog` 8119,
-   `agent_runner_watchdog` 8120; no daemon binds or reads them). New code
-   refuses a reservation whose slots differ from the fixed port table, so this
-   is a state-file rewrite that comes before any command of the new code (see
-   the rule above). The file is compact JSON with sorted keys, mode 0600:
-
-   ```bash
-   python3 - <<'EOF'
-   import json, os, pathlib
-   home = pathlib.Path(os.environ.get("AVA_HOME") or pathlib.Path.home() / ".ava")
-   path = home / "start-intent.json"
-   data = json.loads(path.read_text())
-   for slot in ("pitr_uploader", "pitr_base_backup", "gateway_watchdog", "agent_runner_watchdog"):
-       data["record"]["ports"].pop(slot, None)
-   staged = path.with_name(path.name + ".staged")
-   staged.write_text(json.dumps(data, sort_keys=True) + "\n")
-   staged.chmod(0o600)
-   staged.replace(path)
-   EOF
-   ```
-3. **After `up`.** Set the off-site destination under its new names, then apply
-   the restart hint `ava config set` prints so `pg-backup` reads them:
-
-   ```bash
-   ava config set AVA_BACKUP_OFFSITE_ENDPOINT=<endpoint> AVA_BACKUP_OFFSITE_BUCKET=<bucket> \
-     AVA_BACKUP_OFFSITE_CREDENTIALS_FILE=<credentials file>
-   ```
-
-   Judge the next dump by its destination, not by silence: `ava-logical/<that
-   dump's file name>` exists in the bucket with the size of the local
-   `.dump.enc`, and the log carries `[backup] off-site published`. Also check
-   `pg_backup` health, its recent successful-run logs, and that
-   `$AVA_HOME/run/ava-root/manifests.json` no longer lists `pitr-*` services.
-
-Everything else the stack left is inert and removed only with separate
-approval: `$AVA_HOME/physical-backup/` and `$AVA_HOME/runtime/pg-archive/`
-on disk, a `REPLICATION` role and the `replication` rows it needed in
-`pg_hba.conf` (rewritten on every start, so the rows disappear by themselves),
-and the remote objects and lifecycle rule of the retired physical chain.
-
-### Release steps: retiring the `milvus` port slot (one-time)
-
-The release that deletes the milvus memory-search backend drops the `milvus` slot (19530)
-from the fixed port table, so every gateway home's start intent must lose that key before
-any command of the new code (see the rule above). A runner-only home has no reservation
-and needs nothing. The step is idempotent (it pops a key only when present).
-
-1. **Between `down` and `up`, on every gateway home**, drop the slot. The file is compact
-   JSON with sorted keys, mode 0600:
-
-   ```bash
-   python3 - <<'EOF'
-   import json, os, pathlib
-   home = pathlib.Path(os.environ.get("AVA_HOME") or pathlib.Path.home() / ".ava")
-   path = home / "start-intent.json"
-   data = json.loads(path.read_text())
-   data["record"]["ports"].pop("milvus", None)
-   staged = path.with_name(path.name + ".staged")
-   staged.write_text(json.dumps(data, sort_keys=True) + "\n")
-   staged.chmod(0o600)
-   staged.replace(path)
-   EOF
-   ```
-2. **Nothing else is required.** `AVA_MILVUS_PORT` / `AVA_MILVUS_URI` are retired settings
-   ([decision](../decisions/data/memory/2026-10-03-memory-search-drop-milvus.md)): their `.env` lines are
-   removed by the 2026-10-03 env sweep, and a leftover `.env` line is ignored — every
-   settings model ignores a key it does not declare. A `~/.ava/milvus-data/` directory, if
-   the home ever ran milvus, is dead data and may be deleted.
-
 ### WAL-G archiving
 
 See [component operations](../../services/backup/walg/docs/operations.md).
 
-### Agent recovery after a provider billing stoppage
+### Agent continuation after a provider error
 
-A provider balance exhaustion (e.g. DeepSeek HTTP 402) classifies as a
-permanent rejection; two consecutive ones open the recovery breaker
-(`permanent_reject_streak >= 2`, reason `billing`) and the corpse reaper
-terminates the victims. Recovery after a top-up is one explicit command:
-
-```bash
-ava agents resurrect-billing            # strictly read-only preview
-ava agents resurrect-billing --execute  # balance gate -> resurrect each candidate on its home machine
-```
-
-The preview itself is the identification tool: it lists the billing-class halt
-victims (terminated, streak at the halt threshold, reason `billing`, and not
-`user` / `integrity`-terminated), the halted-but-alive rows
-(report-only — no action is needed; the halt clears on their next successful
-turn), and the live provider balance readout. `--execute` refuses (exit 1)
-unless the balance endpoint reports the account available above
-`AVA_BILLING_RECOVERY_MIN_BALANCE` (default 1.0); a probe failure refuses too —
-fix the account or the `AVA_BILLING_RECOVERY_*` config and rerun. The run is
-idempotent: the candidate set self-clears, a rerun is an audited no-op, and a
-concurrent second run is refused by the run-level single-flight lock.
-
-Boundaries: `user` / `integrity`-terminated rows and halted-but-alive agents
-are never actioned — the latter recover on their next inbound; the former stay
-a per-agent human decision (`ava agents resurrect <id>`). Audit lands on the `billing_resurrect` event
-(balance readout + candidate / resurrected / refused / deferred / failed sets)
-plus `billing_resurrect_run` telemetry; each resurrected agent's own
-`resurrect` event carries `via='billing_recovery'`. Rationale and rejected
-alternatives: [billing batch resurrect decision](../decisions/agents/lifecycle/2026-09-18-billing-batch-resurrect.md).
-
+One permanent provider rejection suppresses background wakes. Fix the provider
+account or configuration, then send the affected agent a fresh message. An
+explicit `ava agents resurrect <id>` is also available when the row is terminated.
+There is no balance-gated billing batch command or permanent-error restart loop.
+Unknown code execution is never automatically replayed. Interrupted strong
+cancel, compact or restart receipts may remain held and require inspection.
 
 ## Private-network deployment (phone / multi-device access)
 
@@ -810,6 +642,7 @@ whether a restart is required — see
 | `MOONSHOT_API_KEY` | platform.moonshot.cn -> API keys |
 | `MIMO_API_KEY` | this provider's own developer console |
 | `DASHSCOPE_API_KEY` | bailian.console.aliyun.com -> API-KEY |
+| `TYPESAFE_API_KEY` | TypeSafe console -> API keys (Jev decision models) |
 | `BRAVE_API_KEY` | api-dashboard.search.brave.com |
 | `JINA_API_KEY` | jina.ai -> API keys |
 | `WANDB_API_KEY` | wandb.ai -> Settings -> API keys |

@@ -2,7 +2,6 @@
 
 import signal
 import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -216,7 +215,6 @@ def _assert_warm_pg_repeat(
     assert pg.receipt_path(data).read_bytes() == persisted
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="owned POSIX PostgreSQL")
 def test_real_owned_postgres_resume_and_fast_stop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -329,7 +327,6 @@ def test_pgdata_symlink_cannot_adopt_another_homes_receipt(
     assert hba.read_text() == "foreign authority\n"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="owned POSIX PostgreSQL")
 def test_real_stopped_postmaster_cannot_pass_warm_readiness(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -355,7 +352,6 @@ def test_real_stopped_postmaster_cannot_pass_warm_readiness(
         pg.stop(data, timeout=10, retained_children=retained_children)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="owned POSIX PostgreSQL")
 def test_real_interrupted_admission_completes_same_postmaster(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

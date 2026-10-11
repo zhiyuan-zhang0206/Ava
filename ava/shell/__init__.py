@@ -1,7 +1,7 @@
 """Shell operations: one-shot run, background run with completion notice,
 and persistent sessions."""
 
-__all_for_ava__ = ["run", "run_background", "sessions"]
+__all_for_ava__ = ["BackgroundRun", "run", "run_background", "sessions"]
 
 import contextlib
 import os
@@ -13,7 +13,6 @@ from ava.sdk_surface import agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from base.log import logger
-from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import workspace_dir
 
 from . import background
@@ -104,7 +103,6 @@ def run(
         text=True,
         timeout=timeout,
         check=False,
-        creationflags=CREATE_NO_WINDOW,
     )
     # The command itself is deliberately not part of `source`: it routinely
     # carries credentials (a curl with an Authorization header), and the
@@ -119,8 +117,8 @@ def run(
 
 
 class BackgroundRun(NamedTuple):
-    """Handle returned by `run_background`: the session the command runs in and
-    the log file its output streams to."""
+    """A background command: the session it runs in and the log file its output
+    streams to."""
 
     session_id: int
     output_path: str

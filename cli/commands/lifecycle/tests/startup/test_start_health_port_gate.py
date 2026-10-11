@@ -2,13 +2,12 @@
 
 The defect these cover (issue #977): a health port was treated as a per-CLUSTER
 fact, but the collision domain is one MACHINE's localhost namespace. Two
-agent-runners of the SAME cluster on one machine — a WSL2 distro plus the native
-Windows install, whose loopback WSL2 republishes into — were therefore handed
-identical ports by construction. The Windows watchdog probed its own port, was
-answered by the Linux unit's daemon, and logged 402 identity mismatches in an
-afternoon, each ending "manual intervention needed".
+agent-runners of the SAME cluster on one machine sharing a loopback namespace
+were therefore handed identical ports by construction. One unit's watchdog
+probed its own port, was answered by the other unit's daemon, and logged
+identity mismatches, each ending "manual intervention needed".
 
-No arithmetic scheme closes that: a later WSL2 install can bind anything.
+No arithmetic scheme closes that: a later install can bind anything.
 Detection is the mechanism that does not require everyone to have agreed in
 advance, so the start asks each port who is there while it is still cheap to stop.
 
@@ -77,7 +76,7 @@ def _other_endpoint_spec(service: str, url: str) -> ServiceSpec:
 
 _FOREIGN = (
     "identity mismatch on http://localhost:8103/healthz: home='/home/ava/.ava' != "
-    "'C:\\\\Users\\\\ava\\\\.ava' — another unit's daemon holds this port"
+    "'/home/other/.ava' — another unit's daemon holds this port"
 )
 
 
@@ -203,7 +202,7 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequ
 def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> list[str]:
     launched: list[str] = []
     monkeypatch.setattr(
-        "cli.commands._repo._services_for_roles_annotated",
+        "ops.spec.services_for_capabilities_annotated",
         lambda _r: tuple((s, None) for s in specs),  # pyright: ignore[reportUnknownArgumentType] — roster test double
     )
     monkeypatch.setattr(

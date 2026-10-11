@@ -1,7 +1,7 @@
 """The decomposition must not move the wire: env aliases, the flat metadata
 surface, and the per-agent overlay payload shape are all frozen. These pin the
 round-trip explicitly so a future sub-model edit that renamed an alias, nested a
-key, or reshaped the restart_completed snapshot fails loudly here.
+key, or reshaped the flat value surface fails loudly here.
 """
 
 from __future__ import annotations
@@ -49,12 +49,12 @@ def test_env_alias_surface_is_flat_and_frozen() -> None:
     # Critical aliases across every domain are byte-identical to before the split.
     for name, alias in _FROZEN_ALIASES.items():
         assert amap[name] == alias, f"{name}: alias drifted to {amap[name]!r}"
-    # The split is invisible to `.env`: the flat_dump / snapshot tests below prove
+    # The split is invisible to `.env`: the flat_dump test below proves
     # no domain KEY (lm / data_plane / …) reaches the value surface either.
 
 
 def test_flat_dump_keys_are_leaf_names_no_domain_nesting(authority: ConfigAuthority) -> None:
-    """`flat_dump()` (backing the config-overlay snapshot) is keyed by leaf field
+    """`flat_dump()` is keyed by leaf field
     NAME with no `lm`/`data_plane`/... domain nesting — the shape the old flat
     `settings.model_dump()` produced."""
     dump = config.flat_dump(authority, mode="json")
@@ -65,32 +65,6 @@ def test_flat_dump_keys_are_leaf_names_no_domain_nesting(authority: ConfigAuthor
     # spot-check fields from different domains sit at the top level
     for name in ("db_url", "llm_model", "exec_timeout_seconds", "gateway_port"):
         assert name in dump
-
-
-def test_effective_config_snapshot_is_flat_framework_keys(authority: ConfigAuthority) -> None:
-    """The `restart_completed` payload carries framework fields at the top
-    level by name (no domain nesting) — the event-trail shape is byte-stable across
-    the decomposition. Plugin fields are the only prefixed keys (`<plugin>.<field>`).
-
-    Sensitive fields (`json_schema_extra={"sensitive": True}` — db_url, the
-    lm api keys, ...) are deliberately excluded: the snapshot is stored as
-    plain JSON on every restart_completed row (2026-08-08 audit, P2-7), so a
-    sensitive value must not get a second plaintext copy there."""
-    from base.packages.plugins.config_registration import (
-        _framework_field_is_sensitive,
-        effective_config_snapshot,
-    )
-
-    # No plugins bound -> pure framework snapshot.
-    snap = effective_config_snapshot({}, framework_values=authority.flat_dump())
-
-    assert {
-        name for name in config.field_names() if not _framework_field_is_sensitive(name)
-    } <= set(snap)
-    assert not any(_framework_field_is_sensitive(name) for name in snap)
-    # a non-sensitive data_plane field is present flat, not as `data_plane.<field>`
-    assert "gateway_url" in snap and "data_plane.gateway_url" not in snap
-    assert "data_plane" not in snap
 
 
 @pytest.mark.usefixtures("served_gateway_home")

@@ -5,121 +5,47 @@ description: The agent host schedules and drives isolated graph turns.
 tags: []
 ---
 
-# Agent Turn Loop
+# Hosted agent loop
 
-`services/agent_runner/agent_host/daemon.py` owns the process; `AgentHost` owns local agent
-turns. `TurnScheduler` serializes each agent while allowing bounded concurrency
-between agents. A wake with no work creates no model call; idle ends the task.
-The daemon's background TaskGroup runs memory-guard initialization and its loop
-from `services/agent_runner/agent_host/exec_memory_guard.py`, passing the host
-logger to the guard owner. Its OS pressure source and domain discovery remain
-unchanged.
+Each execution machine runs its own agent host. The shared host owns unique
+agent admission and runs serialized turns. The LLM graph claims input, calls the
+model, executes code in a local child process, then returns to claim. An idle
+agent occupies no resident turn task. Filesystem and command execution remain
+on the agent's home machine; no failure path relocates them.
 
-The pending scan admits new recovery turns through two gates:
-`AVA_HOST_RECOVERY_WAKE_BATCH` limits starts per scan and
-`AVA_HOST_RECOVERY_WAKE_INFLIGHT` limits scan-started recovery turns still in
-flight (both default to 4). Only a recovery turn started by that scan spends an
-in-flight slot. Direct pub/sub wakes, force-cancel re-wakes with no task, and
-turn-level stale-cancellation re-wakes do not spend one. Ordinary work, including
-impersonation, and held maintenance wakes are exempt. The slot is released when
-that recovery turn's own task ends. Only a replacement started by the pre-start
-reaper from the same unconsumed wake inherits its slot. Other same-agent
-successors, including a direct wake that starts during cancellation unwind,
-run without occupying that slot.
-Scan reconciliation waits for a queued pre-start reap to settle before releasing
-its slot.
+A fresh wake starts halted at claim, so only new inbound or explicit control
+can start work. A current healthy turn can continue ordinary graph steps until
+idle or lifecycle exit. Every admitted invocation runs once. Database phases
+have finite deadlines; failed result or checkpoint saving does not re-enter the
+graph. Claimed interrupted chat is consumed with unknown outcome rather than
+redelivered. Dangling tool calls are repaired with an `unknown` execution status.
 
-`AgentHost._invoke_until_done()` invokes the same checkpoint thread until idle
-or a native lifecycle command ends the turn. Each invocation has its own trace.
-The host passes its catalog and model override through `runtime.build_runtime`
-to the model boot owner. `AvaContext` carries the admitted incarnation, native
-work and hosted resources separately from SDK identity and accounting. Compact
-continuations retain those same references while receiving that catalog.
-Normal return flushes the final checkpoint before lifecycle application; a
-failed flush cannot acknowledge a maintenance drain. A completed graph result
-and its flush/trace phase remain in the original single-flight continuation.
-Database recovery finishes that result's idle settlement or lifecycle application
-before another invocation can claim newly queued work; it retains the original
-trace context. This is an in-process settlement boundary, not a durable work
-identity or a strong cancel execution receipt. Lifecycle settlement freezes
-the original command ID and fences application to it. If commit loses its
-response and releases ownership, the original target-bound applied receipt
-(and observed termination) proves the outcome; mutable status does not.
+Cancellation reaches the owned task. Known resource cleanup has a finite wait;
+unresolved work retains its identity fence and requires process shutdown.
+A host that fails database ownership renewal on three consecutive beats exits.
+Crash reaping records termination and diagnostics without producing a recovery
+chat. Watchdog force/resurrect and persistent terminated-owner retries are absent.
 
-The final durable checkpoint is linked to the still-current turn trace, including
-when N-step buffering delayed its write. Node-exit aggregates flush at invocation
-return. Expected provider or compaction failures persist halted state and report
-an error without discarding conversation history.
+Ordinary new chat still wakes a terminated agent on its home machine. Normal
+heartbeat is new input for a runnable agent. A permanent provider error stops
+background wakes after one rejection; new chat or explicit operator action may
+try after the cause is fixed. There is no billing recovery tool or SDK outbox.
 
-Database connection loss keeps the original single-flight task waiting with
-bounded, cancellable backoff and a total ladder budget
-(`AVA_HOST_DB_RECOVERY_BUDGET_SECONDS`): when the budget is spent the turn exits
-through the crash path and the next wake retries.
-Recovery revalidates the exact incarnation, flushes
-retained writes, reconciles claimed input and repairs dangling tool pairs before
-continuing — each stage under its own 120s `database_phase` bound (issue #1972),
-never one aggregate deadline across the chain, so a healthy stage is not starved
-by the combined time of the stages before it. It creates no inbound, model call
-or maintenance acknowledgement; ownership loss stops the old continuation.
-An abort awaiting its halted/breaker write remains pending across a database
-outage; recovery retries that write instead of invoking the model again.
-Database-only invocation boundaries have a retry deadline; it does not bound
-model inference, code execution or the overall graceful drain. Recovery has
-separate, expiring evidence tied to its original task and incarnation, so local
-and gateway stall detectors can distinguish database waiting from a stuck turn
-without changing the actual node-progress clock.
-
-Runtime construction binds agent identity and both config layers before model
-creation and startup reconciliation. Cache eviction removes model/runtime
-objects, not agent identity, history or database ownership. A failed or cancelled
-turn drops its runtime so the next admission re-runs reconciliation; an aborted
-turn (expected provider/compaction failure) keeps its runtime and reconciles its
-claimed inbounds at the settlement boundary itself
-(`host_abort_reconcile_enabled`), so no row waits for a boot that may not come.
-One admission shares a bounded reconstruction entry between startup tool repair
-and graph invocation. The key is the exact thread, namespace and checkpoint;
-only a copied message list is reused, while checkpoint metadata and pending
-writes are reread. Saver writes and flushes invalidate the entry before and
-after completion, including writes from another task. Nested database recovery
-receives the parent entry explicitly, and admission exit discards it.
-`TurnCheckpoints` passes a scoped saver view and LangGraph's public graph copy
-through admission, startup repair, compact/restart continuation, ordinary
-invocation and settlement. The view shares the original write/flush owner,
-connection, serializer and N-step buffers; it binds the scope only to reads.
-Unbound reads and other admissions cannot discover or reuse that entry.
-`HistoryPostgresSaver` and `HistoryAsyncPostgresSaver` own the pinned pagination
-fix and reset-aware message suffix reads. Their construction validates the
-checkpoint-postgres extension seam; importing history changes no upstream class
-or shared serializer.
-A turn that dies again under its own crash mark has spent its grace: the
-settlement boundary terminates that corpse on the spot with the reaper's own
-termination and events (`hosted_recrash_prompt_reap_enabled`), instead of
-letting a zombie keep claiming and re-dying while the window runs out. Every
-reaper termination also commits the death's recovery wake — one marked
-system chat plus the guarded resurrect attempt
-(`hosted_crash_recovery_wake_enabled`) — so a crash death with no arriving
-work resumes near-field instead of waiting for the next scheduled wake
-(task #4039).
+Strong native controls retain exact-target acceptance and normal original
+completion. Interrupted cancel/compact/restart can stay held for inspection;
+a later generation never automatically reconstructs their successful receipts.
 
 ## Entry points
 
-Hosted admission records a coarse, durable `last_admission_outcome` and
-`last_admission_at` on the agent row. Refusals distinguish maintenance hold,
-resource evidence, and an unresolved guarded-update refusal; the guard code never invents which predicate failed. The observation
-is stamped only if the row still matches the attempted status and no later
-admission superseded it. Successful admission stamps `admitted` in the same
-transaction as the owner/lease update. These observations explain an unstarted
-turn; they do not change wake, claim, or recovery behavior.
-
-- `services/agent_runner/agent_host/daemon.py:run` — host startup, health and ownership renewal
-- `services/agent_runner/agent_host/dispatcher.py:TurnScheduler` — wake scheduling and single-flight
-- `services/agent_runner/agent_host/host.py:AgentHost.run_turn` — admission and settlement
-- `services/agent_runner/agent_host/stall_guard.py:run_invocation_with_stall_guard` — shared invocation guard
-- `services/agent_runner/agent_host/db_recovery.py:recover_database` — retain and recover an interrupted turn
+- `services/agent_runner/agent_host/daemon.py` — startup, health and finite DB renewal.
+- `services/agent_runner/agent_host/dispatcher.py` — wake scheduling and single-flight.
+- `services/agent_runner/agent_host/host.py` — admission, one-shot work and settlement.
+- `services/agent_runner/agent_host/invocation/native_work.py` — fresh-input boundary.
+- `services/agent_runner/agent_host/db_recovery.py` — database-only deadline.
 
 ## Related contracts
 
-- [[agent/startup/docs/startup.ava.okf.md]] — host and per-agent initialization
-- [[agent/ownership/docs/ownership.ava.okf.md]] — incarnation ownership
-- [[lifecycle.ava.okf.md]] — native control and checkpoint ordering
-- [[agent/docs/sessions.ava.okf.md]] — persistent shells
+- [[agent/startup/docs/startup.ava.okf.md]]
+- [[agent/ownership/docs/ownership.ava.okf.md]]
+- [[lifecycle.ava.okf.md]]
+- [[base/agents/incarnation/docs/native-work-cancel.ava.okf.md]]

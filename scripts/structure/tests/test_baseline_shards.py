@@ -180,7 +180,7 @@ def test_read_at_returns_an_empty_dict_for_a_committed_readme_only_directory(
     assert baseline_shards.read_at(tmp_path, "HEAD") == {}
 
 
-def test_read_at_returns_none_before_the_shard_directory_ever_existed(
+def test_read_at_fails_when_the_revision_has_no_shard_directory(
     tmp_path: pathlib.Path,
 ) -> None:
     _git(tmp_path, "init", "--quiet", "--initial-branch=main")
@@ -188,7 +188,10 @@ def test_read_at_returns_none_before_the_shard_directory_ever_existed(
     _git(tmp_path, "add", "README.md")
     _git(tmp_path, "commit", "--quiet", "-m", "Before the shard scheme existed")
 
-    assert baseline_shards.read_at(tmp_path, "HEAD") is None
+    with pytest.raises(ValueError, match="baseline directory missing"):
+        baseline_shards.read_at(tmp_path, "HEAD")
+    with pytest.raises(ValueError, match="baseline directory missing"):
+        baseline_shards.read_rules_at(tmp_path, "HEAD")
 
 
 def test_committed_empty_tree_is_a_real_empty_baseline(tmp_path: pathlib.Path) -> None:

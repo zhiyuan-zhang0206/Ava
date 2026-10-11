@@ -47,7 +47,6 @@ from base.log import prepare_process_logging
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import gateway_memory_dir
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.emitter import build_pipeline
@@ -482,7 +481,6 @@ def _refresh_gateway_checkout() -> None:
         before = subprocess.check_output(  # noqa: S603 — argv is a static literal
             ["git", "-C", str(cwd), "rev-parse", "HEAD"],
             text=True,
-            creationflags=CREATE_NO_WINDOW,
         ).strip()
         head = pull_main()
     except Exception as exc:

@@ -353,7 +353,7 @@ def test_ownership_renewal_timeout_precedes_next_liveness_beat() -> None:
     assert 0 < host_daemon._OWNERSHIP_RENEW_TIMEOUT_S < host_daemon._LIVENESS_BEAT_STEP_S
 
 
-async def test_ownership_renewal_timeout_logs_warning_without_traceback(
+async def test_ownership_renewal_timeout_logs_failure_with_traceback(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -399,10 +399,10 @@ async def test_ownership_renewal_timeout_logs_warning_without_traceback(
         )
 
     [record] = [
-        record for record in caplog.records if "ownership renewal timed out" in record.getMessage()
+        record for record in caplog.records if "database renewal failed" in record.getMessage()
     ]
-    assert record.levelno == logging.WARNING
-    assert record.exc_info is None
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is not None
 
 
 async def test_agent_host_beats_liveness_before_renewing_ownership(
@@ -570,7 +570,7 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
         assert beat_counts[:2] == [1, 2]
         assert renew_calls >= 1
         failures = [
-            record for record in caplog.records if "ownership renewal failed" in record.getMessage()
+            record for record in caplog.records if "database renewal failed" in record.getMessage()
         ]
         assert failures
         assert all(record.levelno == logging.ERROR for record in failures)
@@ -582,15 +582,13 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
 
 
 @pytest.mark.parametrize("error_type", [RuntimeError, psycopg.ProgrammingError])
-async def test_unknown_renewal_error_is_retained_until_owner_join(
+async def test_unknown_renewal_error_exits_its_task_group(
     monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
 ) -> None:
     error = error_type("renewal defect")
-    entered = asyncio.Event()
 
     class BrokenHost:
         async def renew_ownership(self) -> None:
-            entered.set()
             raise error
 
     class FakeLiveness:
@@ -598,22 +596,19 @@ async def test_unknown_renewal_error_is_retained_until_owner_join(
             pass
 
     monkeypatch.setattr(maintenance_admission, "quiesced", lambda: False)
-    tasks, beat = await host_daemon._start_ownership_beat(
-        cast(host_daemon.Liveness, FakeLiveness()),
-        cast(host_daemon.AgentHost, BrokenHost()),
-        cast(host_daemon.TurnScheduler, object()),
-        "runner-a",
-        EventBus.from_settings(),
-        read_alert_seconds=lambda: 30.0,
-    )
-    try:
-        await asyncio.wait_for(entered.wait(), timeout=1.0)
-        completed, _ = await asyncio.wait({beat}, timeout=0.1)
-        assert completed == {beat}, "unknown renewal errors must stop instead of retrying"
-    finally:
-        with pytest.raises(error_type) as caught:
-            await host_daemon._close_ownership_beat(beat, tasks)
-        assert caught.value is error
+    with pytest.raises(ExceptionGroup) as caught:
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(
+                host_daemon._ownership_beat_completion(
+                    cast(host_daemon.Liveness, FakeLiveness()),
+                    cast(host_daemon.AgentHost, BrokenHost()),
+                    cast(host_daemon.TurnScheduler, object()),
+                    "runner-a",
+                    EventBus.from_settings(),
+                    read_alert_seconds=lambda: 30.0,
+                )
+            )
+    assert caught.value.exceptions == (error,)
 
 
 @pytest.mark.parametrize("error_type", [RuntimeError, ResponseError])
@@ -632,3 +627,45 @@ async def test_unknown_progress_error_is_not_a_recoverable_outage(
             EventBus.from_settings(), "runner-a", set(), DatabaseWaits(), TurnProgress()
         )
     assert caught.value is error
+
+
+async def test_three_database_renewal_failures_exit_host_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+
+    class BrokenHost:
+        admission = _FakeAdmission()
+        database_waits = DatabaseWaits()
+        turn_progress = TurnProgress()
+
+        async def renew_ownership(self) -> None:
+            calls.append(1)
+            raise psycopg.OperationalError("offline")
+
+    class FakeLiveness:
+        def beat(self) -> None:
+            pass
+
+    class FakeScheduler:
+        active_agents = frozenset[int]()
+
+    async def publish(*_args: object) -> bool:
+        return True
+
+    monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.001)
+    monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", publish)
+    monkeypatch.setattr(maintenance_admission, "quiesced", lambda: False)
+    with pytest.raises(psycopg.OperationalError, match="offline"):
+        await asyncio.wait_for(
+            host_daemon._beat_forever(
+                cast(host_daemon.Liveness, FakeLiveness()),
+                cast(host_daemon.AgentHost, BrokenHost()),
+                cast(host_daemon.TurnScheduler, FakeScheduler()),
+                "runner-a",
+                EventBus.from_settings(),
+                read_alert_seconds=lambda: 30.0,
+            ),
+            1.0,
+        )
+    assert len(calls) == 3

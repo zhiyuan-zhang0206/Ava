@@ -26,7 +26,7 @@ from services.agent_runner.agent_host.tests.runtime.hosted_resources import host
 
 
 @pytest.mark.parametrize("first", ["cancel", "restart"])
-@pytest.mark.parametrize("fault_site", ["after_ack", "before_flush"])
+@pytest.mark.parametrize("fault_site", ["none", "after_ack", "before_flush"])
 async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -89,6 +89,14 @@ async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
                     cancelled = await cancel()
                 queued = _insert(db_conn, initial.agent_id)
                 release.set()
+                if fault_site != "none":
+                    with pytest.raises(psycopg.OperationalError):
+                        await asyncio.wait_for(running, 10)
+                    assert calls == 1
+                    assert db_conn.execute(
+                        "SELECT status FROM inbound_messages WHERE id=%s", (queued,)
+                    ).fetchone() == ("pending",)
+                    return
                 outcome = await asyncio.wait_for(running, 10)
                 progress = await asyncio.to_thread(
                     native_restart_progress, pool, initial.agent_id, accepted.command_id
@@ -98,7 +106,7 @@ async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
             if not running.done():
                 running.cancel()
             await asyncio.gather(running, return_exceptions=True)
-        assert faults.injected and calls == 1
+        assert not faults.injected and calls == 1
         assert not outcome.exited and not outcome.native_held
         assert progress is not None and progress.outcome == "applied"
         assert db_conn.execute(
@@ -184,7 +192,8 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
                 )
                 queued = _insert(db_conn, initial.agent_id)
                 release.set()
-                outcome = await asyncio.wait_for(running, 10)
+                with pytest.raises(psycopg.OperationalError):
+                    await asyncio.wait_for(running, 10)
                 progress = await asyncio.to_thread(
                     native_restart_progress, pool, initial.agent_id, accepted.command_id
                 )
@@ -194,9 +203,12 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
                 running.cancel()
             await asyncio.gather(running, return_exceptions=True)
         assert injected and calls == 1
-        assert not outcome.exited and not outcome.crashed
         assert progress is not None and progress.outcome == (
-            "observed" if site == "after_observe_cleanup" else "applied"
+            "observed"
+            if site == "after_observe_cleanup"
+            else "accepted"
+            if site == "before_apply"
+            else "applied"
         )
         assert db_conn.execute(
             "SELECT status FROM inbound_messages WHERE id=%s", (queued,)

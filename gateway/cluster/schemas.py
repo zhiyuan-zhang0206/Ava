@@ -364,8 +364,7 @@ class LlmBucket(BaseModel):
     """One bucket's LLM call profile. Latency percentiles are over rows that
     carry `latency_ms` (pre-instrumentation rows are NULL and ignored);
     `tps` = Σ(in+out+reasoning) tokens / Σ latency seconds (NULL when no
-    latency data). `errors` counts llm_provider_error / stream_stalled_retry /
-    llm_turn_aborted events."""
+    latency data). `errors` counts llm_provider_error and llm_turn_aborted events."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -403,13 +402,11 @@ class LlmReport(BaseModel):
 
 
 class RestartBucket(BaseModel):
-    """One bucket's process-restart counts: agent processes (agent_restarted)
-    and gateway-side services (service_started)."""
+    """One bucket's service start count (service_started)."""
 
     model_config = ConfigDict(frozen=True)
 
     bucket: int
-    agent_restarts: int = Field(ge=0)
     service_starts: int = Field(ge=0)
 
 
@@ -425,20 +422,9 @@ class ServiceRestartRow(BaseModel):
     last_start: str | None  # ISO-8601 UTC
 
 
-class AgentRestartRow(BaseModel):
-    """One agent's restart count within the window."""
-
-    model_config = ConfigDict(frozen=True)
-
-    agent_id: int
-    label: str | None
-    restarts: int = Field(ge=0)
-
-
 class RestartTotals(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    agent_restarts: int = Field(ge=0)
     service_starts: int = Field(ge=0)
 
 
@@ -447,7 +433,6 @@ class RestartReport(BaseModel):
 
     series: list[RestartBucket]
     services: list[ServiceRestartRow]
-    agents: list[AgentRestartRow]
     totals: RestartTotals
 
 

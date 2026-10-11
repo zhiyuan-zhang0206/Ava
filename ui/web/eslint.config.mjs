@@ -43,7 +43,6 @@ const SENTENCE_CASE_ALLOW = [
   "ID",
   "CI",
   "PR",
-  "WSL",
   "SSE",
   "JSON",
   "HTTP",

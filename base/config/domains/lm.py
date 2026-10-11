@@ -40,14 +40,9 @@ class LmSettings(EnvSettings):
     )
 
     labeler_model: str = Field(
-        # The flash tier is the only DeepSeek tier left after the V4 Pro
-        # withdrawal (user order 2026-09-10; the surviving tier is served as
-        # `deepseek-flash` — the V4 ids are retired, 2026-09-20 user report).
-        # The pro-over-flash pick here was a measurement against the pre-V4.1
-        # Flash backend (issue #178: flash *executed* machine-authored briefs
-        # instead of summarizing them, 15 of 56 attempts) — re-measure if
-        # label quality regresses. Staying inside DeepSeek keeps the
-        # gateway's required-key surface unchanged.
+        # The flash tier is the only DeepSeek tier, served as `deepseek-flash`.
+        # Staying inside DeepSeek keeps the gateway's required-key surface
+        # unchanged; re-measure label quality if it regresses.
         default="deepseek-flash",
         alias="AVA_LABELER_MODEL",
         description=(
@@ -91,22 +86,6 @@ class LmSettings(EnvSettings):
             # the labeler daemon) — its model key must survive the gateway
             # profile pop.
             "capability": "gateway",
-            "scope": "cluster-pinned",
-        },
-    )
-
-    llm_non_streaming_fallback_timeout_seconds: float = Field(
-        default=600.0,
-        alias="AVA_LLM_NON_STREAMING_FALLBACK_TIMEOUT_SECONDS",
-        description=(
-            "Total timeout (seconds) for the non-streaming fallback after a "
-            "corrupted stream. 600s leaves headroom for a slow thinking-model "
-            "single response."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
             "scope": "cluster-pinned",
         },
     )
@@ -306,100 +285,6 @@ class LmSettings(EnvSettings):
         default=480.0,
         alias="AVA_LLM_RETRY_MAX_INTERVAL_SECONDS",
         description="Cap on the LLM retry backoff interval (seconds).",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    llm_retry_max_consecutive_same_error: int = Field(
-        default=3,
-        alias="AVA_LLM_RETRY_MAX_CONSECUTIVE_SAME_ERROR",
-        description=(
-            "Fail fast after this many consecutive retries with the same exception "
-            "type — a deterministic error won't be fixed by retrying. 0 disables "
-            "(always exhaust retries)."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    llm_stall_retry_initial_interval_seconds: float = Field(
-        default=300.0,
-        gt=0,
-        alias="AVA_LLM_STALL_RETRY_INITIAL_INTERVAL_SECONDS",
-        description=(
-            "First wait (seconds) before retrying an LLM call that ended in two "
-            "adjacent stalls (stream segment + non-streaming fallback). Starts at "
-            "5 minutes on purpose: a stalled provider is degraded, so an immediate "
-            "retry re-stalls — the wait rides out the short queue depressions. "
-            "Doubles per consecutive pair up to llm_stall_retry_max_interval_seconds."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    llm_stall_retry_max_interval_seconds: float = Field(
-        default=1800.0,
-        gt=0,
-        alias="AVA_LLM_STALL_RETRY_MAX_INTERVAL_SECONDS",
-        description=(
-            "Cap (seconds) on the stalled-call retry wait. 30 minutes: beyond it "
-            "the longer wait stops improving recovery odds while pushing the next "
-            "attempt further out, and — with the ±jitter below — one wait plus one "
-            "bounded attempt must stay under the hosted no-progress stall guard "
-            "(AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS, default 2400s)."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    llm_stall_retry_max_consecutive: int = Field(
-        default=4,
-        ge=0,
-        alias="AVA_LLM_STALL_RETRY_MAX_CONSECUTIVE",
-        description=(
-            "Consecutive two-adjacent-stall terminations retried on the delayed "
-            "schedule before the turn gives up and falls back to the regular wake "
-            "path. 4 pairs cover ~5+10+20+30 = 65 minutes while the observed stall "
-            "waves ran ~2.5-3h — past this coverage an in-turn hold is worse than "
-            "settling to idle and letting the next wake retry. 0 disables the "
-            "delayed schedule (pair errors then retry like any transient)."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    llm_stall_retry_jitter_fraction: float = Field(
-        default=0.25,
-        ge=0.0,
-        lt=1.0,
-        alias="AVA_LLM_STALL_RETRY_JITTER_FRACTION",
-        description=(
-            "Multiplicative jitter (± this fraction) on each stalled-call retry "
-            "wait. The 2026-09-14/15 wave hit 36 agents on 3 machines within 10s — "
-            "without jitter the fleet's delayed retries re-synchronize into a fresh "
-            "burst; ±25% spreads them (band chosen in the incident review). 0 keeps "
-            "the schedule deterministic (not recommended for a shared provider)."
-        ),
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,

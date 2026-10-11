@@ -314,9 +314,7 @@ def insert_inbound_message_in_transaction(
     """
     _reject_reserved_payload(payload)
     from base.agents.messages.caller_identity import caller_payload
-    from base.agents.messages.envelope import reject_unnegotiated_caller
 
-    reject_unnegotiated_caller(source)
     payload = caller_payload(source, payload)
     source_verified_by = provenance.source_verified_by if provenance is not None else None
     source_transport = provenance.source_transport if provenance is not None else None
@@ -376,11 +374,10 @@ def insert_spawn_prompt_in_transaction(
     """
     from base.agents.impersonation.manifest import record_central_event
     from base.agents.messages.caller_identity import caller_payload
-    from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
+    from base.agents.messages.envelope import validate_source
     from base.telemetry.audit_events import prepare_event_log, record_audit
 
-    validate_writable_source(source)
-    reject_unnegotiated_caller(source)
+    validate_source(source)
     payload = caller_payload(source, None)
     cur.execute(
         "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "

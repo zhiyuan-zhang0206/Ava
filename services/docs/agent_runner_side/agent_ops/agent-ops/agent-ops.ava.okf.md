@@ -13,7 +13,7 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 **Role affiliation**: agent-runner side (gateway does not run; instead it runs `gateway.ops_*` in-process) — `ServiceSpec.capabilities=_AGENT_RUNNER` in `ops/spec.py`.
 
 ## Core Responsibilities
-- **Inbound HTTP endpoint**: binds `0.0.0.0:<ops_port>`, serves `POST /ops`; `GET /healthz` (watchdog health check) on the same port, via localhost without auth. The health envelope reports active-op age and informational worker saturation; an operation held longer than 20 minutes (the no-progress bound plus margin) returns 503 so the watchdog restarts the daemon.
+- **Inbound HTTP endpoint**: binds `0.0.0.0:<ops_port>`, serves `POST /ops`; `GET /healthz` (watchdog health check) on the same port, via localhost without auth. The health envelope reports active-op age and informational worker saturation; an operation held longer than 11 minutes (the no-progress bound plus margin) returns 503 so the watchdog restarts the daemon.
 - **Bearer-authenticated when configured** (`services/agent_runner/agent_ops/_boot._ops_acceptance`): every `/ops` carries a machine API token of this unit's write generation — the gateway's gateway-class token, or a runner-class token from the unit's own processes — verified against digests only (a remote unit's capability carries the gateway token's digest, never the token or the human secret); a single-machine gateway dials its own `/ops` the same way. An open cluster (empty secret; a capability without API admission) is the deliberate no-auth, loopback-only posture. The acceptance set is read once, at daemon boot: a revoked generation stays refused only because its one revocation path, the release fence, runs with root and the ops daemon already stopped ([[base/cluster/authority/docs/api-tokens.ava.okf.md|API tokens]]).
 - **Activity ownership**: each daemon invocation owns its active-op map, concurrency semaphore, request tokens and worker futures. Handlers and health share those values explicitly; a new invocation starts empty. Completion or failure removes active entries. Cancelling an awaiter keeps its worker retained and counted until completion.
 - **In-process execution**: `ops_concurrency` bounds requests in the daemon; each invocation passes its DB pool and executor to request and worker arms.
@@ -26,7 +26,7 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
   admission or idempotency storage. Retired updater RPCs fail without effects,
   even when a caller presents an old successful idempotency key. The daemon
   accepts no bootstrap mode; unknown argv refuses before ordinary imports.
-- **work kinds**: `spawn-launch|spawn-launch-v2` / `lifecycle` / `status_probe` / `config_read|write` / `inventory_read|write` / `agent_skill_view`. The command-view read uses this runner's converged load dir plus the agent checkpoint's `ava_code__cwd` project roots, and scopes skill-as-command entries through that agent's persisted `config_overlay > birth_config` narrowing; provider cleanup is unconditional so one request cannot leak project skills into the next. Its result also carries this runner's sorted enabled MCP server names as phase-2 groundwork, with no gateway or frontend consumer yet.
+- **work kinds**: `spawn-launch` / `lifecycle` / `status_probe` / `config_read|write` / `inventory_read|write` / `agent_skill_view`. The command-view read uses this runner's converged load dir plus the agent checkpoint's `ava_code__cwd` project roots, and scopes skill-as-command entries through that agent's persisted `config_overlay > birth_config` narrowing; provider cleanup is unconditional so one request cannot leak project skills into the next. Its result also carries this runner's sorted enabled MCP server names as phase-2 groundwork, with no gateway or frontend consumer yet.
 - **Singleton**: pidfile ensures only one instance per agent-runner; before start, `assert_schema_current` (refuses service if DB is ahead).
 - **Boot self-registration**: the public `boot.register_boot` refreshes this unit's serving liveness after health starts. It retains its non-fatal registration behavior; see [[services/agent_runner/agent_ops/docs/process-composition.ava.okf.md]].
 
@@ -45,9 +45,13 @@ The wire contract — `OpEnvelope`/`OpResponse` envelopes, the `OpKind` literal,
 and the per-kind payload/result models the daemon validates before dispatch —
 is specified in [[services/docs/agent_runner_side/agent_ops/agent-ops/wire-layer.ava.okf.md]].
 
-## Resident Loops
+## Message delivery
 
-The ops server and the **delivery-outbox redelivery loop** (`services/agent_runner/agent_ops/outbox_flusher.py`) run under one `TaskGroup` in `_main`: a loop that raises cancels the server and ends the process, and the supervisor restarts the unit. The loop re-commits this machine's `$AVA_HOME/state/delivery-outbox/` records (chat sends that exhausted their retries) through the canonical chat-inbound path, one round per `AVA_DELIVERY_OUTBOX_FLUSH_INTERVAL_SECONDS`, skipping rounds while the unit is quiesced. Record state (attempts, backoff position, abandonment) lives in the record file, so a restart resumes every cooldown. The loop reports progress per record to `/healthz` (`loops.delivery-outbox`); a pass that handles no record for four flush intervals plus a minute reads as wedged.
+SDK and CLI message sends retry transient transport failures with the same
+idempotency key for a finite number of attempts. The final failure is returned
+to the caller. Agent-ops serves HTTP without a resident delivery-outbox flusher.
+Existing `$AVA_HOME/state/delivery-outbox/` JSON records are retained on disk for
+inspection; upgrading neither replays nor deletes them.
 
 ## Key Dependencies
 - [[gateway-cli.ava.okf.md]] — Gateway issues ops commands to agent-runner via this service
@@ -64,10 +68,3 @@ in [[services/agent_runner/agent_ops/docs/process-composition.ava.okf.md]].
 ## Notes
 - Unlike Gateway's `/api/*` endpoints — agent-ops is the inbound ops port on the agent-runner side.
 - Binding and auth are consistent per host, no single-vs-multi-host branching; LAN reachable but without secret it won't work.
-
-### Deferred delivery journal state
-
-`base/agents/messages/delivery_outbox.py:DeliveryOutboxState` owns the durable
-`pending` / `abandoned` disposition. Reads restore enum members; writes retain
-plain JSON strings. A corrupt or unknown state remains unreadable and retained
-for inspection without preventing healthy entries from being flushed.

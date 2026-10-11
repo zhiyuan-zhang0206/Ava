@@ -1,40 +1,18 @@
-"""Heartbeat circuit breaker + overflow self-rescue tests (Task #1928).
-
-Locks the two framework-side fixes for the 3962 context-overflow incident (80
-heartbeat cycles against a permanent context-overflow 400, no self-rescue):
-
-1. **breaker open** — a `FatalProviderError` (permanent provider rejection)
-   opens the `circuit` channel; heartbeat check-ins are then consumed without
-   routing to the doomed LLM call (`_handle_heartbeat`), the claim node parks
-   idle instead of continue-looping (`circuit.parks_idle`), and for the
-   `context_overflow` reason any wake forces a compaction instead
-   (`decide` → `emergency_compact_summary`).
-2. **overflow self-rescue** — `emergency_compact_summary` tries a real
-   compaction, then falls back to the no-LLM minimal compact when the
-   compaction request itself is permanently rejected; the breaker closes on
-   the first successful LLM call (`llm_node`).
-"""
+"""Permanent failures park background work; fresh input can request another try."""
 
 import json
 from datetime import UTC, datetime
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import psycopg
 import pytest
-from langchain_core.exceptions import ModelAPIError
 from langchain_core.messages import HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
-from agent.hooks.compact import (
-    _EMERGENCY_COMPACT_MARKER,
-    CompactionFailedError,
-    compose_summary_message,
-)
 from agent.state import AgentState, CircuitState
-from agent.tests.claim.claim_status_support import _compact_tail, _pair_compact_cycles
 from agent.tests.claim.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
@@ -49,7 +27,6 @@ from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from services.agent_runner.agent_host.tests.circuit_breaker.provider_failures import (
     LONG_SUMMARY,
-    FakeProviderStatusError,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.units import spawn_agent
@@ -287,7 +264,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     assert blocked_history not in rows[0][1]
 
 
-async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
+async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancestor(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -295,7 +272,7 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Forced compaction is a healthy recovery path, not an ancestor escalation."""
+    """A permanent overflow rejection also halts unattended retries."""
     ancestor_id = spawn_agent(
         spawner="user",
         catalog=model_catalog,
@@ -339,7 +316,7 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (ancestor_id,))
-        assert cur.fetchone() == (0,)
+        assert cur.fetchone() == (1,)
 
 
 async def test_fatal_llm_stream_error_does_not_open_breaker(
@@ -384,126 +361,17 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker(
 # ── heartbeat gating (claim node) ──
 
 
-async def test_heartbeat_while_breaker_open_forces_compact(
+@pytest.mark.parametrize("reason", ["billing", "context_overflow"])
+async def test_heartbeat_while_breaker_open_parks(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    reason: str,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Breaker open with context_overflow + heartbeat wake → the check-in note
-    is NOT appended (no doomed call), and the wake routes into a compaction
-    whose tail is the generated summary — the overflow self-rescue.
-
-    Task #3323: the rescue also emits its live run pair (compact_started with
-    mode=auto, compact_finished success — same compact_id) and the summary
-    carries the durable ava_compact_id anchor."""
-    tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
-    )
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
-
-    state = _overflow_state(breaker_reason="context_overflow")
-    fake_llm = _fake_llm(LONG_SUMMARY)
-    publisher = MagicMock()
-    cmd = await claim_node(
-        state,
-        _make_runtime(
-            ops_pool=aops_pool, llm=fake_llm, event_publisher=publisher, database_gate=database_gate
-        ),
-        _config(tid),
-    )
-
-    fake_llm.bind_tools.return_value.ainvoke.assert_called_once()  # the compaction call
-    tail = _compact_tail(cmd.update)
-    assert len(tail) == 1, "forced compact tail must be the summary alone — no heartbeat note"  # pyright: ignore[reportUnknownArgumentType]
-    assert tail[0].content == compose_summary_message(LONG_SUMMARY)  # pyright: ignore[reportUnknownMemberType]
-    assert cmd.update["compact"].version == 1  # pyright: ignore[reportOptionalSubscript, reportUnknownArgumentType, reportUnknownMemberType]
-    [(started, finished)] = _pair_compact_cycles(publisher)
-    assert started["mode"] == "auto"  # overflow rescue — no explicit request
-    assert finished["status"] == "success"
-    assert tail[0].additional_kwargs["ava_compact_id"] == started["compact_id"]  # pyright: ignore[reportUnknownMemberType]
-
-
-async def test_heartbeat_while_breaker_open_compaction_failure_emits_terminal(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-) -> None:
-    """Task #3323: when the overflow rescue itself exhausts its transient
-    retries (CompactionFailedError), the run still reaches its terminal
-    signal (failure) before the error propagates — no hanging ticking block."""
-    tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
-    )
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
-
-    state = _overflow_state(breaker_reason="context_overflow")
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=ModelAPIError("provider 502"))
-    publisher = MagicMock()
-
-    with pytest.raises(CompactionFailedError, match="no usable summary"):
-        await claim_node(
-            state,
-            _make_runtime(
-                ops_pool=aops_pool, llm=llm, event_publisher=publisher, database_gate=database_gate
-            ),
-            _config(tid),
-        )
-
-    [(started, finished)] = _pair_compact_cycles(publisher)
-    assert started["mode"] == "auto"
-    assert finished["status"] == "failure"
-
-
-async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-) -> None:
-    """The 3962 shape: the compaction request itself is rejected (context over
-    the effective input ceiling) — the wake must still be rescued by the
-    no-LLM minimal compact instead of looping forever."""
-    tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
-    )
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
-
-    state = _overflow_state(breaker_reason="context_overflow")
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(
-        side_effect=FakeProviderStatusError(
-            400,
-            {"error": {"type": "invalid_request_error", "message": "maximum context length"}},
-        )
-    )
-    cmd = await claim_node(
-        state,
-        _make_runtime(ops_pool=aops_pool, llm=llm, database_gate=database_gate),
-        _config(tid),
-    )
-
-    tail = _compact_tail(cmd.update)
-    assert _EMERGENCY_COMPACT_MARKER in tail[0].content  # pyright: ignore[reportUnknownMemberType]
-
-
-async def test_heartbeat_while_breaker_open_non_overflow_parks(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-) -> None:
-    """Breaker open with a non-overflow reason (billing): the heartbeat is
+    """Every permanent rejection blocks background model requests: the heartbeat is
     consumed without a note and parks at claim — no LLM call, no compact, no
     doomed re-fire."""
     tid = spawn_agent(
@@ -511,7 +379,7 @@ async def test_heartbeat_while_breaker_open_non_overflow_parks(
     )
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
-    state = _overflow_state(breaker_reason="billing")
+    state = _overflow_state(breaker_reason=reason)
     fake_llm = _fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         state,
@@ -565,14 +433,16 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
 
 
-async def test_claim_parks_idle_while_non_overflow_breaker_open(
+@pytest.mark.parametrize("reason", ["billing", "context_overflow"])
+async def test_claim_parks_idle_while_breaker_open(
     aops_pool: AsyncConnectionPool,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    reason: str,
     database_gate: ProcessDbGate,
 ) -> None:
-    """The claim no-batch branch parks a non-overflow open breaker: a
+    """The claim no-batch branch parks every open breaker: a
     self-initiated continue-loop (the next graph invocation after the turn
     boundary) must not re-fire the doomed call. Hosted mode surfaces the park
     as END+turn_idle without blocking on the inbound wait."""
@@ -582,7 +452,7 @@ async def test_claim_parks_idle_while_non_overflow_breaker_open(
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
         halted=False,
-        circuit=CircuitState(open=True, reason="billing", opened_at="2026-08-29T00:00:00+00:00"),
+        circuit=CircuitState(open=True, reason=reason, opened_at="2026-08-29T00:00:00+00:00"),
     )
     cmd = await claim_node(
         state,
@@ -648,9 +518,6 @@ async def test_heartbeat_normal_when_breaker_closed(
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert "Heartbeat." in msgs[0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     assert cmd.goto == "before_llm"
-
-
-# ── emergency_compact_summary (unit) ──
 
 
 # ── breaker close (llm node) ──
@@ -734,7 +601,7 @@ def _ancestor_halt_notes(db_conn: psycopg.Connection, ancestor_id: int) -> list[
             (ancestor_id,),
         ).fetchall()
     ]
-    return [note for note in reports if "reason=permanent_provider_reject" in note]
+    return [note for note in reports if "blocked after a permanent provider rejection" in note]
 
 
 def _recovery_halt_errors(publisher: _RecordingPublisher) -> list[dict[str, Any]]:

@@ -5,7 +5,7 @@ checkout is at right now, ``running_sha`` what ``ava start`` last started on
 (`base.deploy.git.running_sha`). Neither answers "what is this daemon executing?" — a
 bookmark can be rewritten while an already-live process keeps its old code, so
 a daemon can sit on code from days ago while every bookmark reads as current.
-That is not hypothetical: on 2026-07-26 a Windows unit's ops daemon served a
+That is not hypothetical: on 2026-07-26 a unit's ops daemon served a
 capability set it had cached at boot for two days after the file it derives
 from changed, and three separate signals agreed it was aligned.
 
@@ -21,8 +21,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.native_process.os_platform import CREATE_NO_WINDOW
-
 _SOURCE_ROOT = Path(__file__).resolve().parents[2]
 _GIT_TIMEOUT_S = 10
 
@@ -36,7 +34,6 @@ def capture_commit(source_root: Path) -> str | None:
             capture_output=True,
             text=True,
             check=False,
-            creationflags=CREATE_NO_WINDOW,
             timeout=_GIT_TIMEOUT_S,
         )
     except (OSError, subprocess.SubprocessError):

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
-import textwrap
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -109,7 +107,7 @@ def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
     with pytest.raises(OSError, match="power loss"):
         identity.prepare_identity(inputs)
     minted = passphrase.pinned(inputs.home)
-    assert minted is not None and minted != passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE
+    assert minted is not None and minted != passphrase.derive("")
     assert passphrase.pin_path(inputs.home).stat().st_mode & 0o777 == 0o600
     monkeypatch.setattr(identity, "upsert_env", upsert)
     identity.resume_claim(inputs.home)
@@ -221,90 +219,6 @@ def test_the_rollout_step_makes_an_old_intent_readable_idempotently(
         assert not path.with_name(path.name + ".tmp").exists()
         data = identity.read_intent(inputs.home)
         assert data == {k: v for k, v in born_before.items() if k != "worktree"}
-
-
-def _runbook_port_slot_step() -> str:
-    """The python snippet the runbook gives for dropping the retired port slots."""
-    runbook = (
-        Path(__file__).resolve().parents[3] / "docs" / "conventions" / "runbook.md"
-    ).read_text()
-    blocks = re.findall(r"```bash\n(.*?)\n\s*```", runbook, flags=re.DOTALL)
-    (step,) = [b for b in blocks if "start-intent.json" in b and "pitr_uploader" in b]
-    return textwrap.dedent(step)
-
-
-def test_the_runbook_step_drops_the_retired_port_slots_idempotently(
-    inputs: identity.IdentityInput,
-) -> None:
-    """A home born with the PITR slots and the two watchdog slots is refused by new
-    code, every one of them named, until the runbook's rollout step has run; the
-    step, run verbatim from the runbook, makes the intent readable again, leaves it
-    private and does nothing the second time."""
-    retired = {
-        "pitr_uploader": 8117,
-        "pitr_base_backup": 8118,
-        "gateway_watchdog": 8119,
-        "agent_runner_watchdog": 8120,
-    }
-    identity.prepare_identity(inputs)
-    path = inputs.home / identity.INTENT_NAME
-    data = json.loads(path.read_text())
-    data["record"]["ports"] |= retired
-    path.write_text(json.dumps(data, sort_keys=True) + "\n")
-    path.chmod(0o600)
-    with pytest.raises(
-        RuntimeError,
-        match=r"unexpected \['agent_runner_watchdog', 'gateway_watchdog', "
-        r"'pitr_base_backup', 'pitr_uploader'\]",
-    ):
-        identity.read_intent(inputs.home)
-
-    for _ in range(2):  # the second run changes nothing
-        subprocess.run(  # noqa: S603 — the runbook's own snippet
-            ["bash", "-c", _runbook_port_slot_step()],
-            env={"PATH": os.environ["PATH"], "AVA_HOME": str(inputs.home)},
-            check=True,
-            capture_output=True,
-        )
-        assert path.stat().st_mode & 0o777 == 0o600
-        assert not list(inputs.home.glob("start-intent.json.*"))
-        read = identity.read_intent(inputs.home)
-        assert read is not None and read["record"]["ports"] == cluster.get_record(inputs.home).ports  # pyright: ignore[reportOptionalMemberAccess]
-        assert not set(retired) & set(read["record"]["ports"])
-
-
-def test_the_runbook_step_drops_the_milvus_port_slot_idempotently(
-    inputs: identity.IdentityInput,
-) -> None:
-    """A gateway home born before the milvus slot was retired is refused by new code,
-    the slot named, until the runbook's rollout step has run; the step, run verbatim
-    from the runbook, makes the intent readable again, leaves it private and does
-    nothing the second time."""
-    identity.prepare_identity(inputs)
-    path = inputs.home / identity.INTENT_NAME
-    data = json.loads(path.read_text())
-    data["record"]["ports"]["milvus"] = 19530
-    path.write_text(json.dumps(data, sort_keys=True) + "\n")
-    path.chmod(0o600)
-    with pytest.raises(RuntimeError, match=r"unexpected \['milvus'\]"):
-        identity.read_intent(inputs.home)
-
-    runbook = (
-        Path(__file__).resolve().parents[3] / "docs" / "conventions" / "runbook.md"
-    ).read_text()
-    blocks = re.findall(r"```bash\n(.*?)\n\s*```", runbook, flags=re.DOTALL)
-    (step,) = [b for b in blocks if "start-intent.json" in b and 'pop("milvus"' in b]
-    for _ in range(2):  # the second run changes nothing
-        subprocess.run(  # noqa: S603 — the runbook's own snippet
-            ["bash", "-c", textwrap.dedent(step)],
-            env={"PATH": os.environ["PATH"], "AVA_HOME": str(inputs.home)},
-            check=True,
-            capture_output=True,
-        )
-        assert path.stat().st_mode & 0o777 == 0o600
-        assert not list(inputs.home.glob("start-intent.json.*"))
-        read = identity.read_intent(inputs.home)
-        assert read is not None and "milvus" not in read["record"]["ports"]
 
 
 def test_configured_home_missing_its_intent_is_not_reborn(inputs: identity.IdentityInput) -> None:

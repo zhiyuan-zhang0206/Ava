@@ -15,11 +15,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
+from base.cluster import session_name
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
-from cli.commands._repo import _repo_root, session_name
+from cli.commands._repo import _repo_root
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import force_close_terminals
 from cli.start_runtime import StartRuntime
@@ -348,13 +349,7 @@ def _release_self_heal_pause(*, database_factory: DatabaseFactory) -> None:
     if (
         held is not None
         and held.maintenance is not None
-        and held.maintenance.phase
-        in (
-            MaintenancePhase.STOPPING,
-            MaintenancePhase.STOPPED,
-            MaintenancePhase.STARTING,
-            MaintenancePhase.READY,
-        )
+        and held.maintenance.phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED)
     ):
         print("  · services partially stopped; holding agents until ava start passes readiness")
         return

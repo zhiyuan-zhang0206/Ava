@@ -202,7 +202,7 @@ async def _run_turn_whose_tail_flush_hits_a_database_outage(
             await host.run_turn(agent)
 
 
-async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
+async def test_prior_tail_flush_outage_blocks_automatic_maintenance_retry(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -223,41 +223,16 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
         acquired_at=WHEN,
     )
     await _run_turn_whose_tail_flush_hits_a_database_outage(host, agent, monkeypatch)
-    # A database-outage flush failure is crash-equivalent: recorded as an
-    # undelivered receipt, never latched as a blocking failure. The tail must
-    # stay durable — never silently cleared or dropped — and the drain must
-    # not certify before a successful re-flush; for delta threads the flush
-    # itself is a no-op (#3180), and what this pins is the deferral path and
-    # its failure handling.
     current = admission.require_operation("failed-flush", WHEN)
     assert current.maintenance is not None
-    assert current.maintenance.failures == {}
-    assert current.maintenance.undelivered == {agent: "OperationalError"}
-    assert current.maintenance.drained == ()
+    assert current.maintenance.failures == {agent: "OperationalError"}
+    assert current.maintenance.undelivered == {} and current.maintenance.drained == ()
+    await _assert_tail_still_durable(aops_pool, config, tail)
+    assert await host.pending_inbound_wakes(300) == []
+    await host.run_turn(agent)
+    assert admission.require_operation("failed-flush", WHEN).maintenance == current.maintenance
     assert db_conn.execute(
         "SELECT status,claimed_at,applied_at FROM inbound_messages WHERE id=%s",
         (hold.commands[agent],),
     ).fetchone() == ("pending", None, None)
-    await _assert_tail_still_durable(aops_pool, config, tail)
-    # Restoring the channel re-drives the receipt through the held-control
-    # path: the wake scan keeps the agent woken (no failure fence), the held
-    # controls re-flush the buffered tail BEFORE claiming the restart, and
-    # only the resulting applied command certifies the drain.
-    assert [wake.agent_id for wake in await host.pending_inbound_wakes(300)] == [agent]
-    await host.run_turn(agent)
-    current = admission.require_operation("failed-flush", WHEN)
-    assert current.maintenance is not None
-    assert current.maintenance.undelivered == {agent: "OperationalError"}
-    assert current.maintenance.drained == (agent,)
-    cohort.verify_drained(db_conn, current.maintenance)
-    assert await host.pending_inbound_wakes(300) == []
-    assert db_conn.execute(
-        "SELECT status,applied_at IS NOT NULL,observed_at FROM inbound_messages WHERE id=%s",
-        (hold.commands[agent],),
-    ).fetchone() == ("claimed", True, None)
-    assert db_conn.execute(
-        "SELECT runtime_owner,runtime_generation,incarnation_resources FROM agents_meta WHERE id=%s",
-        (agent,),
-    ).fetchone() == (None, None, None)
-    await _assert_tail_still_durable(aops_pool, config, tail)
     assert calls == ["save", "fail"]

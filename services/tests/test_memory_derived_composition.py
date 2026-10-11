@@ -28,9 +28,7 @@ def _owned_config_environment() -> Iterator[None]:
         with patch.dict(os.environ):
             yield
     finally:
-        tzset = getattr(time, "tzset", None)
-        if tzset is not None:
-            tzset()
+        time.tzset()
 
 
 class _Runner:

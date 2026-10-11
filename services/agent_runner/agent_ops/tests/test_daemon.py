@@ -41,7 +41,7 @@ def _stub_pool() -> ConnectionPool:
 
 
 def test_ops_components_degrade_after_no_progress_bound_plus_margin() -> None:
-    """The health response degrades 5 minutes after rollout progress stops."""
+    """The health response degrades 5 minutes after the no-progress bound."""
     now = 10_000.0
     wedge_after_s = NO_PROGRESS_TIMEOUT_S + 300.0
     still_safe = health.ops_components(
@@ -106,7 +106,7 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
 
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_launch)
     status, result = await daemon._dispatch(
-        "spawn-launch-v2",
+        "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         active_ops={},
         workers=set(),
@@ -714,7 +714,7 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
         assert probe_pool is pool
         assert image is ops_image
         return ClusterStatus(
-            machine_name="win",
+            machine_name="runner-a",
             serve_gateway=False,
             serve_agent_runner=True,
             paused=False,

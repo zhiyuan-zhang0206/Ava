@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 import { formatShort } from "@/lib/format/time";
+import { externalAgentName, EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
 import { cn } from "@/lib/format/utils";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
@@ -429,8 +430,11 @@ export function RunTimelineRows({
     note: t("blockNote"),
   };
   const unitLabel = (unit: Pick<RunTimelineUnit, "kind" | "source">) => classLabel[blockClass(unit)];
-  const sourceLabel = (source: string) =>
-    source.startsWith("agent:") ? t("sourceFromAgent", { id: source.slice("agent:".length) }) : source;
+  const sourceLabel = (source: string) => {
+    if (source.startsWith("agent:")) return t("sourceFromAgent", { id: source.slice("agent:".length) });
+    if (source.startsWith(EXTERNAL_AGENT_PREFIX)) return t("sourceFromExternalAgent", { name: externalAgentName(source) });
+    return source;
+  };
   const sources =
     highlight !== null && (highlight.cls === "human" || highlight.cls === "agent")
       ? [...new Set(agents.flatMap((agent) => inboundSources(agent.data.units, highlight.cls as "human" | "agent")))].sort()

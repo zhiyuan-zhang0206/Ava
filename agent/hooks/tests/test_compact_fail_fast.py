@@ -16,11 +16,9 @@ from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 
 
-@pytest.mark.parametrize("emergency", [False, True])
 @pytest.mark.parametrize("provider_cause", [False, True])
 async def test_compaction_programming_error_stops_once_without_history_change(
     monkeypatch: pytest.MonkeyPatch,
-    emergency: bool,
     provider_cause: bool,
     model_catalog: ModelCatalog,
 ) -> None:
@@ -46,34 +44,23 @@ async def test_compaction_programming_error_stops_once_without_history_change(
 
     monkeypatch.setattr(compact, "generate_summary", broken_summary)
     with pytest.raises(TypeError) as raised:
-        if emergency:
-            await compact.emergency_compact_summary(
-                messages,
-                llm,
-                AgentSlices.resolve(
-                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-                ),
-                catalog=model_catalog,
-            )
-        else:
-            await compact._auto_compact_summary(
-                messages,
-                llm,
-                content_count=1,
-                slices=AgentSlices.resolve(
-                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-                ),
-                catalog=model_catalog,
-            )
+        await compact._auto_compact_summary(
+            messages,
+            llm,
+            content_count=1,
+            slices=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
+            catalog=model_catalog,
+        )
     assert raised.value is error
     assert len(calls) == 1
     assert messages == original
 
 
-@pytest.mark.parametrize("emergency", [False, True])
 @pytest.mark.parametrize("first_summary", ["", "short"])
 async def test_compaction_keeps_explicit_empty_and_short_summary_recovery(
-    monkeypatch: pytest.MonkeyPatch, emergency: bool, first_summary: str
+    monkeypatch: pytest.MonkeyPatch, first_summary: str
 ) -> None:
     messages: list[AnyMessage] = [HumanMessage(content="Original history")]
     expected = "summary " * compact.COMPACT_MIN_SUMMARY_CHARS
@@ -88,14 +75,9 @@ async def test_compaction_keeps_explicit_empty_and_short_summary_recovery(
     slices = AgentSlices.resolve(
         default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
     )
-    if emergency:
-        result = await compact.emergency_compact_summary(
-            messages, llm, slices, catalog=build_model_catalog()
-        )
-    else:
-        result = await compact._auto_compact_summary(
-            messages, llm, 1, slices, catalog=build_model_catalog()
-        )
+    result = await compact._auto_compact_summary(
+        messages, llm, 1, slices, catalog=build_model_catalog()
+    )
     assert result == expected
     assert invocation.await_count == 2
     assert messages == [HumanMessage(content="Original history")]

@@ -83,23 +83,6 @@ def test_collect_ownership_warnings_skips_a_missing_source_tree(
     assert _ownership.collect_ownership_warnings(ctx) == []
 
 
-def test_collect_ownership_warnings_skips_non_posix_backends(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-) -> None:
-    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
-
-    class Backend:
-        def is_posix(self) -> bool:
-            return False
-
-    monkeypatch.setattr(_ownership, "get_backend", Backend)
-
-    assert _ownership.collect_ownership_warnings(ctx) == []
-
-
 def test_ownership_preflight_prints_and_logs_without_blocking(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

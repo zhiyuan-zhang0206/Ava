@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import time
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -104,7 +103,6 @@ def _assert_escalation_event(
     assert events[0][1]["producer"] is operator_pipeline
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="owned POSIX PostgreSQL")
 def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

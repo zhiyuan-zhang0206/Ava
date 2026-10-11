@@ -51,6 +51,7 @@
   "human": "Human",
   "system": "System",
   "agent": "Agent {id}",
+  "externalAgent": "External agent {name}",
   "agentChat": "Ava ▸{suffix}",
   "compactSummarySingular": "compact summary",
   "compactSummariesPlural": "compact summaries",

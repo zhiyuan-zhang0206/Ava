@@ -10,7 +10,7 @@ import pytest
 from psycopg import sql
 from psycopg.rows import dict_row
 
-from base.telemetry.alerts import AlertKey, notify_group_text, stamp_notified, upsert_alert
+from base.telemetry.alerts import AlertKey, notify_group_text, upsert_alert
 from base.telemetry.alerts.shadow import AlertShadowBatch
 
 
@@ -47,7 +47,12 @@ def ingest(
         if fail == "after_freeze":
             raise RuntimeError("injected after freeze")
         if mark_legacy_notified:
-            stamp_notified(conn, keys)
+            for fp, starts_at in keys:
+                conn.execute(
+                    "UPDATE alerts SET notified_at = now()"
+                    " WHERE fingerprint = %s AND starts_at = %s AND notified_at IS NULL",
+                    (fp, starts_at),
+                )
 
 
 def facts(conn: psycopg.Connection) -> list[dict[str, Any]]:

@@ -16,11 +16,10 @@ kinds return a failed result, including retired updater requests with historical
 idempotency keys. There is no updater/bootstrap wire mode or restricted child
 proxy.
 
-Agent creation wakes use only `spawn-launch-v2`. `LaunchAgentRequest` requires
+Agent creation wakes use only `spawn-launch`. `LaunchAgentRequest` requires
 the committed UUID `launch_attempt_id`; the runner validates the idling row's
 attempt and placement before publishing a repeatable wake. Prompt, source and
 label are committed by the gateway and are forbidden in the launch payload.
-The retired `spawn-launch` kind has no handler or wire registration.
 
 Agent launch and lifecycle operations run asynchronously. Blocking maintenance,
 configuration, inventory and shell operations run through
@@ -29,8 +28,7 @@ Each handler validates its request model and serializes its result model as JSON
 Configuration and inventory writes retain their shared read-modify-write lock.
 
 `LifecyclePayload.trigger_inbound_id` and `trigger_inbound_kind` bind pending-work
-resurrection to the durable trigger. Versioned lifecycle paths reject unknown or
-retired actions rather than silently dropping their guards. `OpFailure` carries
+resurrection to the durable trigger. Lifecycle paths reject unknown actions rather than silently dropping their guards. `OpFailure` carries
 `error`, `detail` and the optional `AvaAgentError` reason, allowing the gateway to
 reconstruct the same business failure.
 

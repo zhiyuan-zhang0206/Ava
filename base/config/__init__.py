@@ -252,7 +252,7 @@ def per_agent_field_names() -> set[str]:
 #
 # User ruling 2026-08-27: the timezone is a cluster-level setting; every agent
 # runner pulls it from the gateway and must NOT fall back to its own machine's
-# OS timezone (a WSL runner whose OS zone was never switched exposed the
+# OS timezone (a runner whose OS zone was never switched exposed the
 # mismatch). ``AVA_TIMEZONE`` (scope ``cluster-pinned``) already travels
 # gateway -> runner: a pure agent-runner fetches it from ``GET /api/bootstrap``
 # at every process start and the gateway unit keeps it in its own ``.env``, so
@@ -283,8 +283,8 @@ def host_tz_name() -> str:
     """This host's IANA timezone name, for paths that need an explicit name
     but have no authoritative cluster timezone (settings-lite cron).
 
-    Resolves the ``/etc/localtime`` symlink (POSIX); falls back to ``UTC``
-    where there is none (Windows) or the link is not a zoneinfo path. The
+    Resolves the ``/etc/localtime`` symlink; falls back to ``UTC``
+    where there is none or the link is not a zoneinfo path. The
     name is only ever used as a wall-clock display zone for a lite process —
     the cluster clock is authoritative whenever it exists.
     """
@@ -299,7 +299,7 @@ def host_tz_name() -> str:
 
 
 def apply_cluster_timezone() -> None:
-    """Apply the cluster timezone to this process's wall clock (POSIX).
+    """Apply the cluster timezone to this process's wall clock.
 
     Sets ``os.environ["TZ"]`` and calls ``time.tzset()`` when the process
     holds an authoritative ``AVA_TIMEZONE`` (the gateway unit's ``.env``, a
@@ -309,16 +309,12 @@ def apply_cluster_timezone() -> None:
     children inheriting the env — follows the cluster clock. Before this
     hook existed, those reads used the host's OS zone, so a runner whose OS
     zone differs from the cluster's rendered machine-local wall clocks in
-    logs and displays (2026-08-27 WSL mismatch, Task #1758).
+    logs and displays (2026-08-27 mismatch, Task #1758).
 
     A process WITHOUT an authoritative value (settings-lite maintenance
     verbs, a bare checkout, CI) is left untouched: there is no cluster clock
     to apply, and forcing the field default ``America/Los_Angeles`` onto it
     would be wrong.
-
-    No-op on Windows beyond exporting ``TZ`` for children: ``tzset`` does not
-    exist there, and the explicit ``Clock.zone()`` reads cover the display
-    paths instead.
     """
     from base.host.env.dotenv_boot import apply_process_timezone
 
@@ -374,7 +370,7 @@ def __getattr__(name: str) -> Any:
     the same surfaces. Gating them on the process-global build flag turned a
     concurrent `from base.config import _FIELDS` into a spurious ImportError
     whenever any other thread's ~1s build was in flight (task #4964: the
-    delivery_outbox keyed send lost its idempotency key). First access is
+    a keyed message send lost its idempotency key). First access is
     not free: it imports the registry stack (~220 modules including
     `pydantic_settings`), while the boot state stays lite and the upgrade
     counter does not move."""

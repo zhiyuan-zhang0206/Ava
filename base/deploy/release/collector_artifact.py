@@ -26,7 +26,6 @@ _OTELCOL_CONTRIB_SHA256: dict[str, str] = {
     "darwin_amd64": "91a6e7a0f5e1981986c897db4535de5ba8d7fc45d4205809aecb9ebebf68c71c",
     "linux_amd64": "fcc063749f730f8c21fe29f2d340ff174f5f1c5885bd3156fb6c985a3036fcc3",
     "linux_arm64": "ecf6a917e2b53beb1703b19a84bc4e112a2fcaba549639cf6b0ba58446bfd7d2",
-    "windows_amd64": "b371829181e89947a1a6570b8b6c38c20d85e2d215b76bf042f89b365b9e5c3d",
 }
 
 _DOWNLOAD_URL = (
@@ -71,7 +70,7 @@ def platform_tag() -> str | None:
     """The release asset tag for this machine, or None when unsupported.
 
     Tags follow the release assets: darwin_arm64 / darwin_amd64 / linux_amd64 /
-    linux_arm64 / windows_amd64. Anything else (linux_386, windows_arm64, ...)
+    linux_arm64. Anything else (linux_386, ...)
     has no pinned binary — the sidecar is skipped and OTLP export auto-disables
     at the agent preflight.
     """
@@ -83,13 +82,11 @@ def platform_tag() -> str | None:
         return f"darwin_{arch}"
     if platform.system() == "Linux":
         return f"linux_{arch}"
-    if platform.system() == "Windows":
-        return "windows_amd64" if arch == "amd64" else None
     return None
 
 
 def binary_name() -> str:
-    return "otelcol-contrib.exe" if platform.system() == "Windows" else "otelcol-contrib"
+    return "otelcol-contrib"
 
 
 def _stream_download(url: str, dest: Path) -> None:
@@ -184,8 +181,7 @@ def download_and_verify(tag: str, dest_dir: Path) -> None:
         extracted = Path(tmp) / members[0].name
         dest = dest_dir / binary_name()
         shutil.move(str(extracted), dest)
-        if platform.system() != "Windows":
-            dest.chmod(0o755)
+        dest.chmod(0o755)
     (dest_dir / VERSION_MARKER).write_text(OTELCOL_CONTRIB_VERSION + "\n", encoding="utf-8")
 
 

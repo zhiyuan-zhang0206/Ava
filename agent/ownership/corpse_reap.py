@@ -1,43 +1,13 @@
-"""The hosted corpse reaper: terminate crash-dead rows the mark names, and
-commit each death's recovery wake.
-
-One death buys one grace window (`CORPSE_REAP_GRACE_S`) — the beat reaper's
-pass terminates marked idling corpses once it elapses (task #2609). The
-prompt reap is the same termination moved up to the first re-crash: a mark
-whose retry died again has spent its grace, and waiting out the rest only
-lets a zombie claim and re-die (task #3616, the #3602 window). Both paths
-share the termination shape and its events; only the trigger differs.
-
-Termination also commits the death's recovery wake (task #4039): with no
-arriving work a terminated corpse has no wake left — reminder-class wakes
-are ignored for terminated owners — so the 2026-09-15 stall wave left one
-crashed agent dead for ~11 hours. Each reaped agent gets one durable
-system-source chat carrying the `hosted_turn_recovery` marker (the
-recovery-class exemption from the system-notice ruling, task #3687),
-INSERTed in the same transaction that terminates it, so a committed reap
-can never exist without its wake. The guarded resurrect attempt that
-consumes the wake lives one layer up
-(`services.agent_runner.agent_host.recovery.crash` — the agent layer does not reach the
-ops layer); every attempt a refusal, a race, or a process death drops is
-retried by the delivery watchdog's terminated-owner resurrection retry
-until the chat's stale age gate dead-letters it.
-
-Split out of `agent.ownership.hosted` when the recrash reap pushed that
-module at the 800-line budget ceiling.
-"""
+"""Mark crashed hosted agents terminated and publish failure diagnostics."""
 
 from __future__ import annotations
 
-import json
-from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import NamedTuple
 from uuid import UUID
 
-import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from base import telemetry
-from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from base.db.transaction import async_write_transaction
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from base.events.live.announce import publish_agent_updated
@@ -48,41 +18,9 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
 class ReapedCorpse(NamedTuple):
-    """One committed termination, with the recovery wake it queued (`None`
-    when the recovery-wake switch is off)."""
+    """One committed termination; no recovery input is created."""
 
     agent_id: int
-    recovery_wake_id: int | None
-
-
-CRASH_RECOVERY_WAKE_TEXT = (
-    "Your previous hosted turn crashed and was reaped by the system. "
-    "Continue from the latest checkpoint."
-)
-
-
-async def _queue_recovery_wake(conn: psycopg.AsyncConnection[Any], agent_id: int) -> int:
-    """INSERT the death's recovery chat, inside the reap transaction.
-
-    The same durable wake the delivery watchdog queues for a wedged turn
-    (task #1712): a system-source chat whose payload carries
-    `HOSTED_TURN_RECOVERY_MARKER` — without the marker the system-notice
-    ruling (task #3687) would classify it a notification that never
-    resurrects, and both resurrection channels would skip it."""
-    row = await (
-        await conn.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-            "VALUES (%s, %s, 'chat', 'system', %s::jsonb) RETURNING id",
-            (
-                agent_id,
-                CRASH_RECOVERY_WAKE_TEXT,
-                json.dumps({HOSTED_TURN_RECOVERY_MARKER: True}),
-            ),
-        )
-    ).fetchone()
-    if row is None:  # pragma: no cover - RETURNING always yields a row
-        raise RuntimeError("recovery wake INSERT returned no row")
-    return int(row[0])
 
 
 async def reap_crash_corpses(
@@ -91,7 +29,6 @@ async def reap_crash_corpses(
     owner: UUID,
     *,
     bus: EventBus,
-    wake_enabled: Callable[[], bool],
 ) -> list[ReapedCorpse]:
     """Terminate crash-marked idling corpses whose grace window has elapsed.
 
@@ -103,8 +40,8 @@ async def reap_crash_corpses(
     the generation that died; a row woken in the grace window either completes
     a turn (clears the mark) or parks and keeps it.
 
-    Returns the reaped agents with their committed recovery wakes; their
-    mounted frontends are refreshed best-effort after the durable flip.
+    Returns the reaped agents; mounted frontends are refreshed best-effort
+    after the durable flip.
 
     Owner scope is lease-qualified, not owner-only: a host restart mints a
     fresh owner UUID, so a corpse marked under a predecessor instance would
@@ -116,8 +53,7 @@ async def reap_crash_corpses(
         rows = await (
             await conn.execute(
                 "UPDATE agents_meta SET status = 'terminated', "
-                "termination_source = 'reaper', lease_expires_at = NULL, "
-                "runtime_protocol_version = 0 "
+                "termination_source = 'reaper', lease_expires_at = NULL "
                 "WHERE machine = %s AND runtime_kind = 'hosted' AND status = 'idling' "
                 "AND last_turn_fatal_at IS NOT NULL "
                 "AND last_turn_fatal_at <= now() - make_interval(secs => %s) "
@@ -140,7 +76,6 @@ async def reap_crash_corpses(
             reaped.append(
                 ReapedCorpse(
                     agent_id,
-                    await _queue_wake_if_enabled(conn, agent_id, wake_enabled=wake_enabled),
                 )
             )
     for event in recorded:
@@ -151,27 +86,8 @@ async def reap_crash_corpses(
             event="corpse_reaper_terminated",
             n=len(reaped),
         )
-        await _log_queued_wakes(reaped)
     await _publish_reaped_corpses(bus, [corpse.agent_id for corpse in reaped])
     return reaped
-
-
-async def _queue_wake_if_enabled(
-    conn: psycopg.AsyncConnection[Any], agent_id: int, *, wake_enabled: Callable[[], bool]
-) -> int | None:
-    if not wake_enabled():
-        return None
-    return await _queue_recovery_wake(conn, agent_id)
-
-
-async def _log_queued_wakes(reaped: list[ReapedCorpse]) -> None:
-    queued = sum(1 for corpse in reaped if corpse.recovery_wake_id is not None)
-    if queued:
-        logger.info(
-            "corpse reaper: queued {n} crash recovery wake(s)",
-            event="crash_recovery_wake_queued",
-            n=queued,
-        )
 
 
 async def _publish_reaped_corpses(bus: EventBus, reaped: list[int]) -> None:
@@ -198,7 +114,6 @@ async def reap_recrashed_corpse(
     incarnation: RuntimeIncarnation,
     *,
     bus: EventBus,
-    wake_enabled: Callable[[], bool],
 ) -> list[ReapedCorpse]:
     """Terminate the corpse this incarnation just re-crashed (task #3616).
 
@@ -221,8 +136,7 @@ async def reap_recrashed_corpse(
         rows = await (
             await conn.execute(
                 "UPDATE agents_meta SET status = 'terminated', "
-                "termination_source = 'reaper', lease_expires_at = NULL, "
-                "runtime_protocol_version = 0 "
+                "termination_source = 'reaper', lease_expires_at = NULL "
                 "WHERE id = %s AND status = 'idling' AND runtime_kind = 'hosted' "
                 "AND last_turn_fatal_at IS NOT NULL "
                 "AND runtime_generation = %s AND runtime_owner = %s "
@@ -248,7 +162,6 @@ async def reap_recrashed_corpse(
             reaped.append(
                 ReapedCorpse(
                     agent_id,
-                    await _queue_wake_if_enabled(conn, agent_id, wake_enabled=wake_enabled),
                 )
             )
     for event in recorded:
@@ -260,6 +173,5 @@ async def reap_recrashed_corpse(
             n=len(reaped),
             crash_count=RECRASH_CONFIRMED_CRASHES,
         )
-        await _log_queued_wakes(reaped)
     await _publish_reaped_corpses(bus, [corpse.agent_id for corpse in reaped])
     return reaped

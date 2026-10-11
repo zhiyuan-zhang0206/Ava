@@ -150,12 +150,11 @@ metadata or a `_DeltaSnapshot` value), with a snapshot-point regression test.
 - **R4 — the boundary anchor stays.** The compact-boundary checkpoint stays as the segment
   anchor (no deletion at boundaries).
 
-**Active deletion paths today.** The only deletion machinery is `_TRIM_SQL`
-(`base/agents/history/checkpoint_cleanup.py`), reachable from the reaper and compaction and gated on
-both (reaper default off; delta threads exempt). `blob_vacuum` is not deletion (dead-tuple
-reclaim). `prune()` / `delete_thread` have zero non-test callers.
+**Active deletion paths today.** None: the keep-latest-K trim and its reaper were removed
+(checkpoints are never deleted). `blob_vacuum` is not deletion (dead-tuple reclaim).
+`prune()` / `delete_thread` have zero non-test callers.
 
-The module's safety invariant still stands as the reason for the exemption: keep-latest-K
+The safety invariant still stands as the reason deletion stays disabled: keep-latest-K
 trimming is correct only while every channel stores a self-contained full value — delta
 channels violate that, which is exactly why they carry the explicit predicate above.
 
@@ -268,9 +267,8 @@ Failure modes and interactions (required evidence for a go/no-go):
 
 1. **Retention severs the chain, silently.** Blunt keep-latest-3 emulation (delete older
    checkpoints and their writes) on the delta thread: `state.messages` reconstructs
-   **240 -> 4 messages**, no error raised. This is the same hazard the repo's
-   `base/agents/history/checkpoint_cleanup.py` invariant and langgraph `BaseCheckpointSaver.prune`'s
-   warning describe. Resolution under this design: deletion is disabled outright (R1-R4,
+   **240 -> 4 messages**, no error raised. This is the same hazard langgraph
+   `BaseCheckpointSaver.prune`'s warning describes. Resolution under this design: deletion is disabled outright (R1-R4,
    Section 1.4) — ancestor chains are never severed, so no retention snapshot-forcing step
    (the earlier T3) is needed — and the trim predicate keeps an explicit delta-thread
    exemption so any re-enabled cleanup cannot eat a delta chain.

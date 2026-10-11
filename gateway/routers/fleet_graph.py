@@ -253,7 +253,7 @@ def _fetch_pg_graph(
             "    t.label, "
             "    a.status, "
             "    a.liveness_state, "
-            "    COALESCE(a.born_spawner, a.spawner), "
+            "    a.born_spawner, "
             "    a.machine "
             "FROM agents_meta a "
             "JOIN agents t ON t.id = a.id " + not_terminated + " ORDER BY a.id"

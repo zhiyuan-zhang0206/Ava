@@ -14,7 +14,6 @@ from base.db import pool as db_pool
 from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.routers import tasks
-from services.wake.delivery_watchdog.resurrect_retry import select_terminated_owners_with_pending
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.pin_agent import pin_agent
 
@@ -51,7 +50,6 @@ def test_sdk_commit_survives_producer_loss(
     assert notes[0][1]["delivery_resurrect"] is True
     note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
-    assert select_terminated_owners_with_pending(note_pool, 86400) == [(owner, notes[0][0])]
 
 
 def test_gateway_enqueue_failure_rolls_back_assignment(
@@ -120,4 +118,3 @@ def test_aba_assignment_supersedes_old_directions(
     assert all(note[3]["delivery_result"]["outcome"] == "superseded" for note in notes[:2])
     note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
-    assert select_terminated_owners_with_pending(note_pool, 86400) == [(owner_a, notes[-1][0])]

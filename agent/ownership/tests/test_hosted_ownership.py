@@ -24,7 +24,6 @@ from base.agents.incarnation.resources import (
     ResourceProcess,
     decode_resources,
 )
-from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -42,14 +41,6 @@ def _agent(conn: psycopg.Connection) -> int:
     return agent_id
 
 
-def _version(conn: psycopg.Connection, agent_id: int) -> int:
-    row = conn.execute(
-        "SELECT runtime_protocol_version FROM agents_meta WHERE id = %s", (agent_id,)
-    ).fetchone()
-    assert row is not None
-    return int(row[0])
-
-
 async def test_hosted_incarnation_survives_idle_and_next_turn(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -61,11 +52,7 @@ async def test_hosted_incarnation_survives_idle_and_next_turn(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert first is not None
-    # A legacy admission (no current publication) advertises protocol zero,
-    # and settling neither invents nor clears an advertisement (task #4122).
-    assert _version(db_conn, agent_id) == 0
     assert await settle_hosted_runtime(aops_pool, first, bus=event_bus, resources=None)
-    assert _version(db_conn, agent_id) == 0
     second = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
@@ -202,8 +189,7 @@ async def test_admission_does_not_lock_deployment_state(
     database: Database,
 ) -> None:
     """A concurrently held row lock on the deployment singleton does not stall a
-    hosted birth: admission reads and locks nothing but the agent's own row, and
-    advertises protocol zero."""
+    hosted birth: admission reads and locks nothing but the agent's own row."""
     agent_id, owner = _agent(db_conn), uuid4()
     try:
         db_conn.execute("SELECT id FROM deployment_state WHERE id = 1 FOR UPDATE")
@@ -214,29 +200,8 @@ async def test_admission_does_not_lock_deployment_state(
             10,
         )
         assert admitted is not None
-        assert _version(db_conn, agent_id) == 0
     finally:
         db_conn.rollback()
-
-
-async def test_settle_retains_a_granted_advertisement(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    """An ordinary settle keeps a protocol advertisement already granted (task #4122)."""
-    agent_id, owner = _agent(db_conn), uuid4()
-    admitted = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
-    )
-    assert admitted is not None
-    db_conn.execute(
-        "UPDATE agents_meta SET runtime_protocol_version = 1 WHERE id = %s", (agent_id,)
-    )
-    db_conn.commit()
-    assert await settle_hosted_runtime(aops_pool, admitted, bus=event_bus, resources=None)
-    assert _version(db_conn, agent_id) == 1
 
 
 async def test_owner_beat_renews_idle_but_not_other_owner(
@@ -260,9 +225,8 @@ async def test_owner_beat_renews_idle_but_not_other_owner(
     db_conn.commit()
     await renew_hosted_owner(aops_pool, "host-test", owner)
     assert db_conn.execute(
-        "SELECT lease_expires_at > now(), runtime_protocol_version FROM agents_meta WHERE id = %s",
-        (agent_id,),
-    ).fetchone() == (True, 0)
+        "SELECT lease_expires_at > now() FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone() == (True,)
 
 
 # ── corpse marker: stamp / settle / reap / renew ─────────────────────────────
@@ -417,13 +381,7 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     db_conn.commit()
 
     published.clear()  # settle publishes on every flip; keep only reap's
-    reaped = await reap_crash_corpses(
-        aops_pool,
-        "host-test",
-        owner,
-        bus=event_bus,
-        wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
-    )
+    reaped = await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus)
     assert sorted(corpse.agent_id for corpse in reaped) == sorted([past_grace, abandoned_corpse])
 
     for corpse in reaped:
@@ -452,16 +410,7 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     )
     assert sorted(published) == sorted([past_grace, abandoned_corpse])
     # A second pass finds nothing new (the corpses are terminated).
-    assert (
-        await reap_crash_corpses(
-            aops_pool,
-            "host-test",
-            owner,
-            bus=event_bus,
-            wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
-        )
-        == []
-    )
+    assert await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus) == []
 
 
 async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
@@ -493,26 +442,11 @@ async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
     ).fetchone() == (None,)
 
     # Within the grace window the row is dead-but-waiting, not terminated.
-    assert (
-        await reap_crash_corpses(
-            aops_pool,
-            "host-test",
-            owner,
-            bus=event_bus,
-            wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
-        )
-        == []
-    )
+    assert await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus) == []
 
     # Past the grace window the reaper terminates it with the reaper stamp.
     _set_marker(db_conn, agent_id, minutes_ago=16)
-    reaped = await reap_crash_corpses(
-        aops_pool,
-        "host-test",
-        owner,
-        bus=event_bus,
-        wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
-    )
+    reaped = await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus)
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
     row = db_conn.execute(
         "SELECT status, termination_source FROM agents_meta WHERE id = %s", (agent_id,)
@@ -553,59 +487,3 @@ async def test_renew_hosted_owner_skips_crash_marked_rows(
     assert db_conn.execute(
         "SELECT lease_expires_at > now() FROM agents_meta WHERE id = %s", (live,)
     ).fetchone() == (True,)
-
-
-async def test_recovery_wake_gate_reads_two_independent_live_config_owners(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    from base.config import ConfigBoot
-
-    first, second = ConfigBoot(), ConfigBoot()
-    first.set_field("hosted_crash_recovery_wake_enabled", False)
-    second.set_field("hosted_crash_recovery_wake_enabled", True)
-    owner = uuid4()
-    queued: list[str] = []
-
-    async def reap(config: ConfigBoot, name: str) -> int | None:
-        agent_id = _agent(db_conn)
-        incarnation = await admit_hosted_runtime(
-            aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
-        )
-        assert incarnation is not None
-        assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
-        _set_marker(db_conn, agent_id, minutes_ago=30)
-        reaped = await reap_crash_corpses(
-            aops_pool,
-            "host-test",
-            owner,
-            bus=event_bus,
-            wake_enabled=lambda: config.view.daemon.hosted_crash_recovery_wake_enabled,
-        )
-        assert len(reaped) == 1 and reaped[0].agent_id == agent_id
-        wake_id = reaped[0].recovery_wake_id
-        rows = db_conn.execute(
-            "SELECT id, source, payload FROM inbound_messages WHERE agent_id = %s",
-            (agent_id,),
-        ).fetchall()
-        if wake_id is None:
-            assert rows == []
-        else:
-            assert len(rows) == 1 and rows[0][0] == wake_id
-            assert rows[0][1] == "system"
-            assert rows[0][2]["hosted_turn_recovery"] is True
-            queued.append(name)
-        assert db_conn.execute(
-            "SELECT status, termination_source FROM agents_meta WHERE id = %s", (agent_id,)
-        ).fetchone() == ("terminated", "reaper")
-        return wake_id
-
-    assert await reap(first, "first") is None
-    assert await reap(second, "second") is not None
-    first.set_field("hosted_crash_recovery_wake_enabled", True)
-    second.set_field("hosted_crash_recovery_wake_enabled", False)
-    assert await reap(first, "first") is not None
-    assert await reap(second, "second") is None
-    assert queued == ["second", "first"]

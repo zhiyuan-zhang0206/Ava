@@ -173,7 +173,7 @@ def test_unsupported_old_runner_has_no_fallback_and_keeps_acceptance(
     first = submit(client, agent_id, prior)
     assert first.status_code == 200, first.text
     assert submit(client, agent_id, prior).json() == first.json()
-    assert [c["kind"] for c in calls] == ["launch-reconcile-v1", "launch-reconcile-v1"]
+    assert [c["kind"] for c in calls] == ["launch-reconcile", "launch-reconcile"]
 
 
 @pytest.mark.parametrize("changed", ["admitted", "terminated", "new-attempt", "machine", "deleted"])

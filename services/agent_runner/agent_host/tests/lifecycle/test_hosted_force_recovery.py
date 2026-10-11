@@ -17,7 +17,6 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.ownership import hosted
 from agent.tests.claim.test_inbound_ownership import agent_row
-from base.agents.incarnation import exec_request_evidence
 from base.agents.incarnation.exec_request_evidence import Verdict
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.config import settings
@@ -304,68 +303,6 @@ def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "base.agents.incarnation.exec_request_evidence.psutil.process_iter", _no_process_iteration
     )
-
-
-async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recovers(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    database: Database,
-    *,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-) -> None:
-    """The 6285 shape: a zero-byte remnant no longer defers boot recovery."""
-
-    agent_id = agent_row(db_conn)
-    old_host = AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        checkpointer=Mock(),
-        graph=Mock(),
-        machine="claim-test",
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(gate=database_gate),
-        catalog=model_catalog,
-    )
-    assert (
-        await hosted.admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
-        )
-        is not None
-    )
-    with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command, _cutoff = await asyncio.to_thread(
-            _force_terminate_transaction, agent_id, pool, source="user"
-        )
-    bound = exec_request_evidence._unreadable_expiry_age_s()
-    request = _unreadable_envelope(tmp_path, agent_id, age_s=bound + 60)
-    quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr(
-        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
-    )
-    monkeypatch.setattr(
-        "base.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
-        lambda: quarantine,
-    )
-    _hide_machine_processes(monkeypatch)
-
-    recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
-
-    assert recovered == [agent_id] and deferred == {}
-    assert not request.exists()
-    (moved,) = quarantine.glob(f"*/{agent_id}/{request.name}")
-    assert moved.read_bytes() == b""
-    receipt = json.loads((moved.parent / "receipt.json").read_text())
-    assert receipt["reason"] == "hosted boot recovery"
-    assert receipt["entries"][0]["verdict"] == "disposable"
-    assert db_conn.execute(
-        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
-    ).fetchone() == ("done", True)
-    assert db_conn.execute(
-        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (None,)
 
 
 async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(

@@ -1,7 +1,7 @@
 """Validation for deploy/lgtm/config/grafana/provisioning/alerting/rules.yml — the Grafana alert rules.
 
 The two rule groups moved from the retired Postgres events read path to the
-LGTM read side (Task #1224): R1-R3, R5-R7 query Loki (the events stream as
+LGTM read side (Task #1224): R1-R2, R5-R7 query Loki (the events stream as
 OTLP logs under {service_name="unknown_service"} with event_name/agent_id
 promoted to stream labels since the 2026-08-23 cutover (Task #1467); event
 filters live in the stream selector, `| json` flattens each line for the
@@ -49,7 +49,6 @@ _EXPECTED_UIDS = {
     "ava-ops-llm-rate-limit",
     "ava-ops-sse-drop-backlog",
     "ava-ops-telemetry-queue-loss",
-    "ava-ops-agent-restart-spike",
     "ava-ops-llm-latency-p95",
     "ava-ops-delivery-stalled-backlog",
     "ava-ops-events-freshness",
@@ -117,7 +116,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [52, 12]
+    assert [len(group["rules"]) for group in groups] == [51, 12]
     return groups
 
 
@@ -244,7 +243,6 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
     ("uid", "event_filter"),
     [
         ("ava-ops-sse-drop-backlog", 'event_name=~"sse_drop|event_log_drop"'),
-        ("ava-ops-agent-restart-spike", 'event_name="agent_restarted"'),
         ("ava-ops-delivery-stalled-backlog", 'event_name="delivery_stalled"'),
         ("ava-ops-trace-disk-watermark", 'event_name="trace"'),
         ("ava-ops-llm-rate-limit", 'event_name="llm_provider_error"'),

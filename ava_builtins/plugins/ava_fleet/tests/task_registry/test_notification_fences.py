@@ -20,7 +20,6 @@ from base.lm.catalog import ModelCatalog
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
-from services.wake.delivery_watchdog.resurrect_retry import select_terminated_owners_with_pending
 from tests.components.ops.resurrection_support import status, terminated
 from tests.fixtures.pin_agent import pin_agent
 
@@ -51,7 +50,9 @@ def test_reassigned_task_refuses_delayed_home_wake(
     )
     note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
-    selected = select_terminated_owners_with_pending(note_pool, 86400)
+    selected = db_conn.execute(
+        "SELECT agent_id,id FROM inbound_messages WHERE agent_id=%s AND status='pending'", (owner,)
+    ).fetchall()
     assert len(selected) == 1
     # Model a producer not using the notification helper, while the old row
     # remains pending. The final home-side transaction must re-check ownership.
@@ -67,7 +68,6 @@ def test_reassigned_task_refuses_delayed_home_wake(
             trigger_inbound_kind=InboundKind.SYSTEM_NOTE,
         )
     assert status(db_conn, owner)[0] == "terminated"
-    assert select_terminated_owners_with_pending(note_pool, 86400) == []
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect'", (owner,)
     ).fetchone() == (0,)
@@ -89,7 +89,6 @@ def test_assignment_deadline_has_inspectable_failure(
     db_conn.commit()
     note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
-    assert select_terminated_owners_with_pending(note_pool, 86400) == []
     assert dead_letter_stale_pending_terminated(note_pool, 86400) == 1
     row = db_conn.execute(
         "SELECT status,payload FROM inbound_messages WHERE agent_id=%s", (owner,)
@@ -127,4 +126,3 @@ def test_reminder_policy_never_resurrects_terminated_owner(
     db_conn.commit()
     note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
-    assert select_terminated_owners_with_pending(note_pool, 86400) == []

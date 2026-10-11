@@ -148,6 +148,4 @@ def test_timezone_notes_follow_two_explicit_live_clock_roots() -> None:
             assert "America/New_York" in str(first_note.content)
             assert "Asia/Shanghai" in str(second_note.content)
     finally:
-        tzset = getattr(time, "tzset", None)
-        if tzset is not None:
-            tzset()
+        time.tzset()

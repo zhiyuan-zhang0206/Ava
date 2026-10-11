@@ -88,8 +88,7 @@ _LITE_VERBS = frozenset(
         # `restart` is deliberately NOT here: its preflight registers this
         # machine in the central DB and its start leg needs the cluster config
         # regardless, so on a pure runner a lite restart could only ever hit
-        # the never-dialed placeholder DB URL (PlaceholderDbUrlError, observed on
-        # the fleet Windows box). With the gateway down, restart now fails at
+        # the never-dialed placeholder DB URL (PlaceholderDbUrlError). With the gateway down, restart now fails at
         # the fetch with the actionable BootstrapFetchError — `stop` stays lite
         # and remains the recovery verb.
         "status",
@@ -245,16 +244,6 @@ def main(
     rc = require_own_checkout(args_in, Path(__file__).resolve().parents[1])
     if rc is not None:
         return rc
-    # `ava boot` is what the OS boot job runs on the platforms whose scheduler
-    # cannot retry a failed job for us (Linux cron `@reboot`, Windows ONLOGON):
-    # `ava start` re-run while the machine is still coming up. Dispatched here,
-    # before the settings-gated import, so it can retry a start that failed for
-    # ANY reason — a settings error included. See base/host/system/boot_policy.py.
-    if args_in and args_in[0] == "boot":
-        from cli.boot_retry import run_boot
-
-        return run_boot(args_in[1:])
-
     _opt_into_lite_config(args_in)
 
     children = [] if retained_children is None else retained_children
@@ -280,7 +269,7 @@ def main(
         return _print_settings_load_failure(exc)
     except BootstrapFetchError as exc:
         # A pure agent-runner whose gateway is unreachable (or which was never
-        # enrolled) fails fast with an actionable message; `ava boot` retries.
+        # enrolled) fails fast with an actionable message.
         print(f"✗ ava: {exc}", file=sys.stderr)
         return 1
     finally:

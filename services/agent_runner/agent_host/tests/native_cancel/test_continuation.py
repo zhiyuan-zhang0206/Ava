@@ -28,7 +28,6 @@ from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import host as host_owner
 from services.agent_runner.agent_host import invocation as invocation_owner
 from services.agent_runner.agent_host.invocation import native_work as work_owner
-from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
@@ -93,7 +92,7 @@ def _install_faults(patch: pytest.MonkeyPatch, agent: int, site: str) -> _Faults
 @pytest.mark.parametrize(
     "site", ["graph_result", "before_flush", "after_flush", "before_ack", "after_ack"]
 )
-async def test_original_invocation_settles_once_after_database_fault(
+async def test_original_invocation_stops_once_after_database_fault(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -165,31 +164,18 @@ async def test_original_invocation_settles_once_after_database_fault(
                 assert repeated == accepted
             queued = _insert(db_conn, agent)
             release.set()
-            outcome = await asyncio.wait_for(running, 15)
+            with pytest.raises(psycopg.OperationalError):
+                await asyncio.wait_for(running, 15)
         finally:
             release.set()
             if not running.done():
                 running.cancel()
             await asyncio.gather(running, return_exceptions=True)
-        await close_hosted_turn(
-            aops_pool,
-            aops_pool,
-            ctx.require_db(),
-            ctx.require_bus(),
-            saver,
-            incarnation,
-            outcome,
-            resources=None,
-            wake_enabled=configured_policy().recovery_wake_enabled,
-            prompt_reap_enabled=configured_policy().recrash_reap_enabled,
-            reconcile_inputs=configured_policy().reconcile_inputs,
-        )
         assert faults.injected
         assert faults.invocations == 1
-        assert not outcome.crashed and not outcome.native_held
         assert db_conn.execute(
             "SELECT outcome FROM native_cancel_commands WHERE id=%s", (accepted.command_id,)
-        ).fetchone() == ("applied",)
+        ).fetchone() == (("applied",) if site == "after_ack" else ("accepted",))
         assert db_conn.execute(
             "SELECT native_work_id FROM agents_meta WHERE id=%s", (agent,)
         ).fetchone() == (target.work_id,)
@@ -198,4 +184,4 @@ async def test_original_invocation_settles_once_after_database_fault(
         ).fetchone() == ("pending",)
         assert db_conn.execute(
             "SELECT status FROM inbound_messages WHERE id=%s", (first,)
-        ).fetchone() == ("done",)
+        ).fetchone() == ("claimed",)

@@ -50,7 +50,10 @@ async def test_force_observation_waits_for_actual_projection_continuation(
 
     async def pause(*args: Any, **kwargs: Any) -> Any:
         entered.set()
-        await release.wait()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            await release.wait()
         return await actual_update(*args, **kwargs)
 
     host = AgentHost(
@@ -122,10 +125,10 @@ async def test_force_observation_waits_for_actual_projection_continuation(
             expected_from="idling",
         )
         assert successor is not None
-        assert await recover_native_cancel(aops_pool, saver, graph, successor, resources=None)
+        assert not await recover_native_cancel(aops_pool, successor)
         assert db_conn.execute(
             "SELECT outcome FROM native_cancel_commands WHERE work_id=%s", (target.work_id,)
-        ).fetchone() == ("applied",)
+        ).fetchone() == ("uncertain",)
     finally:
         release.set()
         if not running.done():

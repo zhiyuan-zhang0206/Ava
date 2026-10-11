@@ -1,9 +1,8 @@
-"""Editable install cases: guard editable install recovers a half uninstall."""
+"""Explicit editable-install write windows preserve protected records."""
 
 from __future__ import annotations
 
 import json
-import os
 import stat
 from pathlib import Path
 
@@ -13,77 +12,6 @@ from base.deploy.release import editable_install
 from base.deploy.release.tests.test_editable_install import _write_direct_url, _write_pth
 
 
-def test_guard_editable_install_recovers_a_half_uninstall(tmp_path: Path) -> None:
-    """The exec boundary repairs a pointer uv removed before it can import Ava."""
-    source_root = tmp_path / "prod" / "source"
-    direct_url = _write_direct_url(source_root, source_root.as_uri())
-    pth = direct_url.parent.parent / editable_install.EDITABLE_PTH_NAME
-
-    violations = editable_install.guard_editable_install(source_root)
-
-    assert len(violations) == 1
-    assert "half-uninstalled" in violations[0]
-    assert pth.read_text() == str(source_root)
-
-
-def test_guard_editable_install_repairs_with_registered_real_emitter(tmp_path: Path) -> None:
-    """The exec guard must repair through the real telemetry contract wiring."""
-    source_root = tmp_path / "prod" / "source"
-    deleted_worktree = tmp_path / "deleted-worktree"
-    pth = _write_pth(source_root, deleted_worktree)
-    direct_url = _write_direct_url(source_root, deleted_worktree.as_uri())
-
-    violations = editable_install.guard_editable_install(source_root)
-
-    assert len(violations) == 2
-    assert pth.read_text() == str(source_root)
-    assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
-
-
-def test_guard_editable_install_repairs_when_telemetry_emit_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Telemetry drift must not block the repair that restores exec imports."""
-    source_root = tmp_path / "prod" / "source"
-    deleted_worktree = tmp_path / "deleted-worktree"
-    pth = _write_pth(source_root, deleted_worktree)
-    direct_url = _write_direct_url(source_root, deleted_worktree.as_uri())
-
-    def raise_exec_guard_emit(*args: object, **_kwargs: object) -> None:
-        if args[1] == "exec_editable_install_poisoned":
-            raise ValueError("unregistered telemetry event")
-
-    monkeypatch.setattr("base.telemetry.emit", raise_exec_guard_emit)
-
-    violations = editable_install.guard_editable_install(source_root)
-
-    assert len(violations) == 2
-    assert pth.read_text() == str(source_root)
-    assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
-
-
-def test_guard_editable_install_leaves_healthy_records_byte_identical(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A clean per-exec check has no repair side effect or telemetry noise."""
-    source_root = tmp_path / "prod" / "source"
-    source_root.mkdir(parents=True)
-    pth = _write_pth(source_root, source_root)
-    direct_url = _write_direct_url(source_root, source_root.as_uri())
-    before = {pth: pth.read_bytes(), direct_url: direct_url.read_bytes()}
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def record_emit(*args: object, **kwargs: object) -> None:
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr("base.telemetry.emit", record_emit)
-
-    assert editable_install.guard_editable_install(source_root) == ()
-    assert {path: path.read_bytes() for path in before} == before
-    assert emitted == []
-
-
-@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
 def test_editable_pth_write_window_allows_atomic_replacement_and_restores_modes(
     tmp_path: Path,
 ) -> None:
@@ -110,7 +38,6 @@ def test_editable_pth_write_window_allows_atomic_replacement_and_restores_modes(
     assert stat.S_IMODE(pth.stat().st_mode) == 0o444
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
 def test_editable_pth_write_window_opens_hardened_dist_info_directory(
     tmp_path: Path,
 ) -> None:
@@ -148,7 +75,6 @@ def test_editable_pth_write_window_opens_hardened_dist_info_directory(
     assert stat.S_IMODE(dist_info.stat().st_mode) == 0o555
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
 def test_protected_paths_survive_a_sync_that_deleted_the_records(tmp_path: Path) -> None:
     """A partial sync cannot hide its protected directories by deleting records."""
     source_root = tmp_path / "prod" / "source"
@@ -170,7 +96,6 @@ def test_write_window_skips_path_that_disappears_before_entry(tmp_path: Path) ->
         pass
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
 def test_repair_editable_install_opens_protected_site_packages_directory(
     tmp_path: Path,
 ) -> None:
@@ -188,7 +113,6 @@ def test_repair_editable_install_opens_protected_site_packages_directory(
     assert stat.S_IMODE(site_packages.stat().st_mode) == 0o555
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
 def test_repair_half_uninstall_opens_protected_site_packages_directory(
     tmp_path: Path,
 ) -> None:

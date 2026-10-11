@@ -71,7 +71,7 @@ const STATUS_OK: SystemStatus = {
       },
       {
         // offline: a failed probe clears HEAD, so head_sha is null
-        name: "wsl",
+        name: "runner-a",
         serve_gateway: false,
         serve_agent_runner: true,
         serve_observability_station: false,
@@ -187,7 +187,7 @@ describe("StatusPage Services and Gateway sections", () => {
     expect(card.textContent).toMatch(/healthy/);
     // Both agent-runners are table rows.
     const table = screen.getByTestId("agent-runners-card");
-    expect(table.textContent).toMatch(/wsl/);
+    expect(table.textContent).toMatch(/runner-a/);
     expect(table.textContent).toMatch(/test-host-2/);
     expect(document.getElementById("status-services")?.contains(table)).toBe(true);
     expect(document.getElementById("status-gateway")?.contains(card)).toBe(true);
@@ -196,7 +196,7 @@ describe("StatusPage Services and Gateway sections", () => {
   it("staging machines carry a staging badge but stay roster-visible", async () => {
     const staged = structuredClone(STATUS_OK);
     staged.cluster.machines = staged.cluster.machines.map((m) =>
-      m.name === "wsl" ? { ...m, is_staging: true } : m,
+      m.name === "runner-a" ? { ...m, is_staging: true } : m,
     );
     vi.spyOn(api, "getSystemStatus").mockResolvedValue(staged);
 
@@ -204,7 +204,7 @@ describe("StatusPage Services and Gateway sections", () => {
     await waitFor(() => screen.getByTestId("agent-runners-card"));
     const table = screen.getByTestId("agent-runners-card");
     // the staging runner is still listed (visible), with its badge
-    expect(table.textContent).toMatch(/wsl/);
+    expect(table.textContent).toMatch(/runner-a/);
     expect(table.textContent).toMatch(/staging/);
     // the non-staging runners carry no badge
     const nonStaged = screen.getByTestId("gateway-card-test-host").textContent;
@@ -216,7 +216,7 @@ describe("StatusPage Services and Gateway sections", () => {
     await waitFor(() => screen.getByTestId("agent-runners-card"));
     const table = screen.getByTestId("agent-runners-card");
     expect(table.textContent).toMatch(/online/);
-    // wsl is offline with no stopped_at → a crash, not a deliberate stop.
+    // runner-a is offline with no stopped_at → a crash, not a deliberate stop.
     expect(table.textContent).toMatch(/offline/);
     expect(screen.queryByText("stopped")).toBeNull();
   });
@@ -227,7 +227,7 @@ describe("StatusPage Services and Gateway sections", () => {
       cluster: {
         ...STATUS_OK.cluster,
         machines: STATUS_OK.cluster.machines.map((machine) =>
-          machine.name === "wsl" ? { ...machine, online: true, paused: null } : machine,
+          machine.name === "runner-a" ? { ...machine, online: true, paused: null } : machine,
         ),
       },
     });
@@ -376,7 +376,7 @@ describe("StatusPage Services and Gateway sections", () => {
         current_serve_observability_station: false,
         machines: [
           { ...STATUS_OK.cluster.machines[0], name: "test-host", serve_gateway: true, serve_agent_runner: true },
-          { ...STATUS_OK.cluster.machines[1], name: "wsl", serve_gateway: false, serve_agent_runner: true },
+          { ...STATUS_OK.cluster.machines[1], name: "runner-a", serve_gateway: false, serve_agent_runner: true },
         ],
       },
     });

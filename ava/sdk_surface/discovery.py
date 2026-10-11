@@ -12,7 +12,7 @@ import ast as _ast
 import inspect
 from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, ForwardRef
 
 from .const import is_documented_const
 
@@ -361,8 +361,14 @@ def _annotation_field(name: str, ann: Any) -> tuple[str, _Constant]:
     """A declared field as a `_Constant` child. `inspect.get_annotations`
     returns only the class's own annotations, in definition order. Under
     `from __future__ import annotations` they are strings; otherwise real
-    types — take the display name either way."""
-    type_str = ann if isinstance(ann, str) else getattr(ann, "__name__", str(ann))
+    types — take the display name either way. A `NamedTuple` turns its string
+    annotations into `ForwardRef`s, so unwrap those to the source text."""
+    if isinstance(ann, ForwardRef):
+        type_str = ann.__forward_arg__
+    elif isinstance(ann, str):
+        type_str = ann
+    else:
+        type_str = getattr(ann, "__name__", str(ann))
     return (name, _Constant(type_str=type_str, doc=""))
 
 

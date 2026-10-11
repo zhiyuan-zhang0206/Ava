@@ -62,7 +62,7 @@ def snapshot_dependencies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> HostDeployState:
     """Keep the snapshot focused on DB bundling and resource sampling."""
-    state = HostDeployState(machine="win", posture="paused", updated_at=datetime.now(UTC))
+    state = HostDeployState(machine="runner-a", posture="paused", updated_at=datetime.now(UTC))
 
     def _dead_pidfile(_path: str) -> tuple[bool, int | None]:
         return False, None
@@ -82,7 +82,7 @@ def snapshot_dependencies(
     monkeypatch.setattr(cluster_status, "_count_local_agents", _no_agents)
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", _applied)
     monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: {"baseline"})
-    monkeypatch.setattr(cluster_status, "machine_name", lambda: "win")
+    monkeypatch.setattr(cluster_status, "machine_name", lambda: "runner-a")
     monkeypatch.setattr(cluster_status, "is_gateway", lambda: False)
     monkeypatch.setattr(cluster_status, "is_agent_runner", lambda: True)
     monkeypatch.setattr(cluster_status, "is_observability_station", lambda: False)
@@ -483,7 +483,7 @@ def test_status_snapshot_paused_reason_names_the_first_true_clause(
     del snapshot_dependencies
     state: HostDeployState | None = None
     if posture is not None:
-        state = HostDeployState(machine="win", posture=posture, updated_at=datetime.now(UTC))
+        state = HostDeployState(machine="runner-a", posture=posture, updated_at=datetime.now(UTC))
     pool = _Pool(object())
 
     def _read_state(

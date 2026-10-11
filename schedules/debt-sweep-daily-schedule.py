@@ -30,7 +30,7 @@ from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from base.native_process.loaded_commit import LoadedCommit
 from base.cluster.machines import machine_name
-from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
+from schedules.catchup import cluster_timezone, fire_slot_once
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import schedule_entry
 from base.log.process import init_gateway_process
@@ -274,7 +274,6 @@ def _dry_run(repo: Path) -> None:
 def _main_loop(*, inputs: ScheduleInputs) -> None:
     db = inputs.database()
     fire = partial(_fire, producer=inputs.producer, image=inputs.image)
-    catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=fire)
     last_run_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)

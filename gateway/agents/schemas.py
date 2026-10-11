@@ -19,7 +19,7 @@ from pydantic import (
 )
 
 from base.agents import AgentStatus
-from base.agents.messages.envelope import validate_writable_source
+from base.agents.messages.envelope import validate_source
 from base.agents.messages.kwargs import NoteTag
 from base.agents.observation.snapshot import AgentSnapshot
 from base.agents.tasks.priority import Priority
@@ -117,7 +117,7 @@ class SystemNoteIn(BaseModel):
     @field_validator("source")
     @classmethod
     def _check_envelope_source(cls, v: str) -> str:
-        validate_writable_source(v)
+        validate_source(v)
         return v
 
     @model_validator(mode="after")
@@ -291,10 +291,11 @@ class TraceCheckpointMessagesResponse(BaseModel):
 
     Spans are metadata-only (trace v2): this endpoint is how content comes
     back. `pruned` distinguishes the two absence shapes:
-    - pruned=true, checkpoint_id=None — the trace's checkpoint was dropped by
-      compact/checkpoint trim (retention is the latest K checkpoints), so the
-      content is gone; the span metadata in the mirror still exists. The
-      frontend renders this as "trimmed" rather than an error.
+    - pruned=true, checkpoint_id=None — no checkpoint carries this trace id
+      (the link predates the feature, or the turn committed no checkpoint), so
+      there is no content to return; the span metadata in the mirror still
+      exists. Checkpoints are never deleted. Callers render this as absent
+      content rather than an error.
     - pruned=false — the checkpoint exists; messages is its `messages` channel
       (the full conversation at that point, system prompt included).
 

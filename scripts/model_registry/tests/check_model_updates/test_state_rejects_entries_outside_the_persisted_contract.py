@@ -168,8 +168,8 @@ def test_persistent_status_change_announces_once_and_recovery_announces_too(
 def test_legacy_state_upgrade_baselines_the_loaded_status(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A state file written before `announced` existed (like the live one on
-    wsl, left in error by the 2026-09-16 proxy outage) baselines on the status
+    """A state file written before `announced` existed (like a live one
+    left in error by the 2026-09-16 proxy outage) baselines on the status
     it was left in: the upgrade itself announces nothing, and a resolution
     still walks the two-round window."""
     tracker = _load_script()

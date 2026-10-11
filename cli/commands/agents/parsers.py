@@ -96,12 +96,6 @@ def _h_agents_resurrect(args: argparse.Namespace) -> int:
         return 2
 
 
-def _h_agents_resurrect_billing(args: argparse.Namespace) -> int:
-    from cli.commands.agents.control import cmd_agents_resurrect_billing
-
-    return cmd_agents_resurrect_billing(execute=args.execute)
-
-
 def _h_agents_terminate(args: argparse.Namespace) -> int:
     from cli.commands.agents.control import ProvenanceError, cmd_agents_terminate
 
@@ -188,7 +182,8 @@ def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         required=True,
         type=_validated_source,
         help="provenance of the message (required). 'user' sends as the human operator; "
-        "'shell:N' / 'watcher:N' mark a machine notice; 'schedule:N' a gateway schedule",
+        "'external_agent:NAME[:INSTANCE]' declares you as an external agent distinct from the user "
+        "(self-asserted); 'shell:N' / 'watcher:N' mark a machine notice; 'schedule:N' a gateway schedule",
     )
     agents_send_p.add_argument(
         "--tail-file",
@@ -222,22 +217,6 @@ def _add_compact_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     )
     agents_compact_p.add_argument("agent_id", type=int, help="agent id to compact")
     agents_compact_p.set_defaults(func=_h_agents_compact)
-
-
-def _add_resurrect_billing_parser(
-    sub: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> None:
-    agents_resurrect_billing_p = sub.add_parser(
-        "resurrect-billing",
-        help="batch-resurrect the billing-class halt victims once the provider balance recovered "
-        "(dry-run unless --execute)",
-    )
-    agents_resurrect_billing_p.add_argument(
-        "--execute",
-        action="store_true",
-        help="perform the batch; without it only the read-only preview is printed",
-    )
-    agents_resurrect_billing_p.set_defaults(func=_h_agents_resurrect_billing)
 
 
 def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -282,8 +261,6 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     )
     agents_resurrect_p.add_argument("agent_id", type=int, help="agent id to resurrect")
     agents_resurrect_p.set_defaults(func=_h_agents_resurrect)
-
-    _add_resurrect_billing_parser(agents_sub)
 
     agents_terminate_p = agents_sub.add_parser(
         "terminate", help="stop the agent gracefully (it exits after its current turn)"

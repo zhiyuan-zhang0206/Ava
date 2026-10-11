@@ -1,8 +1,7 @@
 # Dev setup
 
 Generic dev procedures that sit on top of [`runbook.md`](runbook.md): the
-platform-specific traps (WSL2's private-network identity), the first-time
-agent-runner enrollment flow, and development in a worktree. The
+first-time agent-runner enrollment flow and development in a worktree. The
 runbook stays role-agnostic; this doc covers the per-developer setup steps.
 
 A specific deployment's concrete machine roster, SSH access pattern, cloud-host
@@ -18,21 +17,6 @@ Every tool's cache lives under `.cache/<tool>/` (`.cache/pytest`,
 `.cache/ruff`, `.cache/import-linter`, ...), ignored by the single root
 `/.cache/` line in `.gitignore`. Configure a newly added tool the same way
 instead of letting it drop a cache dir at the repo root.
-
-## WSL2 needs its own private-network identity
-
-Runbook §"WSL agent-runner host bring-up notes" point 3 mentions "WSL2 IP
-drift"; the trap underneath is that WSL2 does **not** share the Windows
-host's private-network client identity (VPN overlay, LAN, whatever the
-deployment uses). Querying the private-network IP from WSL with no
-in-distro client joined returns the Windows host's address (e.g. a
-`100.x`-style CGNAT address), which WSL itself cannot reach. Install and
-join your private-network client inside the distro itself, following that
-client's own setup docs.
-
-After that the distro gets its own identity and IP on the private network.
-Choose the gateway URL and this host's reachable address before first start.
-Repeated start does not change the recorded identity; conflicting inputs refuse.
 
 ## Joining a runner
 
