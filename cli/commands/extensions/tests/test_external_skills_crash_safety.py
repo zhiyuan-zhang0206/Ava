@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 from collections.abc import Callable
 from pathlib import Path
@@ -80,9 +81,20 @@ def _residues(client: Path) -> list[Path]:
     return list((client / "skills").glob(f".{SKILL}.ava-*"))
 
 
-def test_restart_reconciles_stage_published_before_post_write(
+def _remove_by_hand(client: Path, context: ConvergeCtx) -> None:
+    """What the warning tells a person to do: drop the Ava residue and the ledger."""
+    for residue in _residues(client):
+        shutil.rmtree(residue)
+    ledger_root = context.ava_home / "configs" / "external-agent-skills"
+    for stage in ledger_root.glob(".codex-stage-*"):
+        shutil.rmtree(stage)
+    (ledger_root / "codex.json").unlink()
+
+
+def test_interrupted_stage_publication_is_reported_and_never_resumed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -111,27 +123,32 @@ def test_restart_reconciles_stage_published_before_post_write(
 
     assert interrupted
     assert _ledger(context)["transaction"]["stage_state"] == "publishing"
-    target.mkdir()
-    (target / "user.txt").write_text("late user target\n")
     monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
+    ledger_before = _ledger(context)
+    residues_before = sorted(_residues(client))
+    capsys.readouterr()
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
-    assert (target / "user.txt").read_text() == "late user target\n"
-    assert _ledger(context)["installed"] is None
-    (target / "user.txt").unlink()
-    target.rmdir()
+    # Nothing is finished, rolled back or retried: the skill is reported and skipped.
+    assert "not resumed" in capsys.readouterr().err
+    assert not target.exists()
+    assert _ledger(context) == ledger_before
+    assert sorted(_residues(client)) == residues_before
+
+    # The exit is a person's: with the residue and ledger removed, converge installs afresh.
+    _remove_by_hand(client, context)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
     assert (target / "SKILL.md").read_text() == "operator v1\n"
     assert _ledger(context)["transaction"] is None
     assert _residues(client) == []
-    assert not list((context.ava_home / "configs" / "external-agent-skills").glob(".codex-stage-*"))
 
 
-def test_restart_reconciles_claim_before_post_write_and_preserves_late_target(
+def test_interrupted_target_claim_is_reported_and_leaves_a_late_target_alone(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -145,7 +162,6 @@ def test_restart_reconciles_claim_before_post_write_and_preserves_late_target(
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = _target(client)
-    installed_before = _ledger(context)["installed"]
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
     interrupted = False
@@ -166,13 +182,18 @@ def test_restart_reconciles_claim_before_post_write_and_preserves_late_target(
     target.mkdir()
     (target / "user.txt").write_text("late user target\n")
     monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
+    ledger_before = _ledger(context)
+    residues_before = sorted(_residues(client))
+    capsys.readouterr()
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
+    assert "not resumed" in capsys.readouterr().err
     assert (target / "user.txt").read_text() == "late user target\n"
-    ledger = _ledger(context)
-    assert ledger["installed"] == installed_before
-    assert ledger["transaction"]["claim_state"] == "claiming"
+    assert _ledger(context) == ledger_before
+    assert sorted(_residues(client)) == residues_before
+
+    _remove_by_hand(client, context)
     (target / "user.txt").unlink()
     target.rmdir()
     bridge.converge_external_agent_skill(context, host_home=client.parent)

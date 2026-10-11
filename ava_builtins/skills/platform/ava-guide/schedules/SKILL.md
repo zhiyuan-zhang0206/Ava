@@ -15,8 +15,8 @@ DSL).
 ## 0. Built-in schedules already exist
 
 Ava provisions a set of built-in schedules on every gateway boot from
-`schedules/manifest.json` (product schedules — self-evolution, memory —
-enabled; cluster-operator schedules — e.g. trace-ship-tempo — disabled). Do
+`schedules/manifest.json` (product schedules — self-evolution, memory — enabled;
+the manifest also supports cluster-operator schedules, which start disabled). Do
 not create a schedule whose name is in the manifest: the API refuses it (409).
 Extend the manifest + template instead if the need is a general Ava capability;
 write a user-specific schedule (like quant-daily-check) via the normal flow.
