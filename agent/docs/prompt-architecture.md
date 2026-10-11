@@ -98,8 +98,8 @@ Capabilities rather than standing as its own section.
 - **Core CodeAct batching** — `agent/graph/prompt/_codeact.py:_codeact_section` (registered by `system_prompt.py`),
   **on by default** via `settings.agent.prompt_codeact_enabled` (env
   `AVA_SYSTEM_PROMPT_CODEACT`): pack several operations into one `execute_code`
-  call when no intermediate review is needed. Split for decisions, approval
-  and execution/output limits. The user ruling on 2026-10-07 changed the
+  call when no intermediate review is needed. The prompt states no separate
+  split rule; that condition already implies it. The user ruling on 2026-10-07 changed the
   repository default to on; cluster settings and per-agent overlays can disable it.
 - **Core capabilities index** — `agent/graph/prompt/capabilities.py:capabilities_section`:
   always-on name + one-line description of the capabilities the agent already
