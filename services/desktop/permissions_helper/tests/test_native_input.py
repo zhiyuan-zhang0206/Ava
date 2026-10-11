@@ -30,6 +30,7 @@ def test_native_input_events_validation_and_release(tmp_path: Path) -> None:
         "func dispatch(" + source.split("func dispatch(", 1)[1].split("// MARK: - Panel mode", 1)[0]
     )
     stubs = """
+var stubCalls = 0
 var trusted = true
 func axTrustedOrPrompt() -> Bool { trusted }
 func AXIsProcessTrusted() -> Bool { trusted }
@@ -63,9 +64,12 @@ func requestHelperShutdown(runDir: String) throws -> [String: Any] { [:] }
         "sessionHas",
         "signalSession",
     ]:
-        stubs += f"func {name}(_ req: [String: Any]) throws -> [String: Any] {{ [:] }}\n"
+        stubs += (
+            f"func {name}(_ req: [String: Any]) throws -> [String: Any] "
+            "{ stubCalls += 1; return [:] }\n"
+        )
     for name in ["listApps", "sessionInfo", "frontmostApp"]:
-        stubs += f"func {name}() -> [String: Any] {{ [:] }}\n"
+        stubs += f"func {name}() -> [String: Any] {{ stubCalls += 1; return [:] }}\n"
     harness = r"""
 import Foundation
 import CoreGraphics
@@ -78,6 +82,16 @@ enum Thread {
 var posted: [CGEvent] = []
 var created = 0
 var failAt = 0
+var reads = 0
+var cursorFailAt = 0
+var cursorReadFails = false
+var cursorScript: [CGPoint] = []
+var cursorDefault = CGPoint(x: -8, y: 9)
+var mainOrigin = CGPoint.zero
+func CGMainDisplayID() -> CGDirectDisplayID { 1 }
+func CGDisplayBounds(_ id: CGDirectDisplayID) -> CGRect {
+    CGRect(origin: mainOrigin, size: CGSize(width: 1000, height: 800))
+}
 class CGEvent {
     var type: CGEventType = .null
     var flags: CGEventFlags = []
@@ -91,6 +105,12 @@ class CGEvent {
         created += 1
         if created == failAt { return nil }
     }
+    /// A cursor read: scripted, never counted as an allocation.
+    init?(cursorRead: Void) {
+        reads += 1
+        if cursorReadFails || reads == cursorFailAt { return nil }
+        location = cursorScript.isEmpty ? cursorDefault : cursorScript.removeFirst()
+    }
     convenience init?(mouseEventSource: Any?, mouseType: CGEventType,
                      mouseCursorPosition: CGPoint, mouseButton: CGMouseButton) {
         self.init(); type = mouseType; location = mouseCursorPosition; button = mouseButton
@@ -103,11 +123,15 @@ class CGEvent {
         self.init(); type = .scrollWheel; wheels = [wheel1, wheel2, wheel3]
         precondition(wheelCount == 2 && units == .pixel)
     }
-    convenience init?(source: Any?) { self.init() }
+    convenience init?(source: Any?) { self.init(cursorRead: ()) }
     func setIntegerValueField(_ field: CGEventField, value: Int64) { clickState = value }
     func post(tap: CGEventTapLocation) { posted.append(self) }
 }
-func reset() { posted = []; created = 0; failAt = 0; Thread.waits = [] }
+func reset() {
+    posted = []; created = 0; failAt = 0; Thread.waits = []
+    reads = 0; cursorFailAt = 0; cursorReadFails = false; cursorScript = []
+    cursorDefault = CGPoint(x: -8, y: 9); stubCalls = 0
+}
 """
     checks = r"""
 let request: [String: Any] = ["x": -10, "y": 20, "button": "right", "click_count": 3,
@@ -119,7 +143,9 @@ precondition(posted.map { $0.type } == [.flagsChanged, .flagsChanged, .mouseMove
 precondition(posted[3].clickState == 1 && posted[5].clickState == 2 && posted[7].clickState == 3)
 precondition(posted[2].location.x == -10 && posted[2].button == .right)
 precondition(posted[3].flags == [.maskShift, .maskCommand] && posted.last!.flags.isEmpty)
-precondition(Thread.waits == [0.025, 0.075, 0.025, 0.075, 0.025])
+// Holds and gaps are slept in short slices so the corner fail-safe can interrupt them.
+precondition(abs(Thread.waits.reduce(0, +) - 0.225) < 1e-9)
+precondition(Thread.waits.allSatisfy { $0 <= failsafeSliceSeconds + 1e-12 })
 let allocations = created
 for failure in 1...allocations {
     reset(); failAt = failure
@@ -131,7 +157,8 @@ precondition(posted.map { $0.type } == [.mouseMoved, .otherMouseDown, .otherMous
 reset(); _ = try key(["code": 0, "modifiers": ["ctrl", "alt"], "duration_ms": 100])
 precondition(posted.map { $0.type } == [.flagsChanged, .flagsChanged, .keyDown, .keyUp, .flagsChanged, .flagsChanged])
 precondition(posted[2].flags == [.maskControl, .maskAlternate] && posted.last!.flags.isEmpty)
-precondition(Thread.waits == [0.1])
+precondition(abs(Thread.waits.reduce(0, +) - 0.1) < 1e-9)
+precondition(Thread.waits.allSatisfy { $0 <= failsafeSliceSeconds + 1e-12 })
 let keyAllocations = created
 for failure in 1...keyAllocations {
     reset(); failAt = failure
@@ -177,6 +204,84 @@ precondition(dispatch(["id": 1, "method": "cursor_position"])["ok"] as? Bool == 
 trusted = true; reset()
 precondition(dispatch(["id": 1, "method": "click", "x": 1, "y": 2, "button": "right"])["ok"] as? Bool == true)
 precondition(posted.map { $0.type } == [.mouseMoved, .rightMouseDown, .rightMouseUp])
+func parkedAt(_ x: Double, _ y: Double) -> Bool {
+    cursorScript = [CGPoint(x: x, y: y)]
+    do { try cornerFailsafe(); return false } catch is UserAbort { return true } catch { fatalError("\(error)") }
+}
+reset()
+precondition(parkedAt(0, 0) && parkedAt(0.5, 0.9))
+precondition(!parkedAt(1, 0) && !parkedAt(0, 1) && !parkedAt(500, 400))
+// A secondary display up-left of the main one must not trip the quadrant.
+precondition(!parkedAt(-1, -1) && !parkedAt(-400, -300) && !parkedAt(-1, 0))
+mainOrigin = CGPoint(x: 10, y: 20)
+precondition(parkedAt(10, 20) && !parkedAt(0, 0))
+mainOrigin = .zero
+cursorReadFails = true
+do { try cornerFailsafe(); fatalError("unreadable cursor accepted") }
+catch OpError.bad(let message) { precondition(message.contains("corner fail-safe")) }
+cursorReadFails = false
+
+// Dispatch: every desktop-changing method is refused in the corner with no side effect.
+reset(); cursorDefault = CGPoint(x: 0, y: 0)
+for method in ["click", "move", "scroll", "key", "type", "drag", "focus_app", "ax_act"] {
+    let response = dispatch(["id": 1, "method": method, "x": 1, "y": 2, "dy": 3, "code": 0])
+    precondition(response["ok"] as? Bool == false)
+    precondition(response["error_code"] as? String == "user_abort")
+    precondition((response["error"] as? String)?.contains("top-left corner") == true)
+    precondition(posted.isEmpty && created == 0 && stubCalls == 0)
+}
+// Observation stays available while the pointer is parked.
+for method in ["cursor_position", "screen_size", "ax_tree", "ax_window_info", "list_apps",
+               "list_windows", "window_info", "session_info", "frontmost_app", "ping",
+               "screencapture_window", "screencapture_region"] {
+    let before = stubCalls
+    let response = dispatch(["id": 1, "method": method])
+    precondition(response["ok"] as? Bool == true, "\(method) blocked")
+    precondition(response["error_code"] == nil)
+    precondition(method == "cursor_position" || method == "ping" || stubCalls == before + 1)
+}
+precondition(posted.isEmpty)
+// Leaving the corner lifts the refusal; nothing refused earlier is replayed.
+cursorDefault = CGPoint(x: 300, y: 300)
+precondition(dispatch(["id": 1, "method": "click", "x": 1, "y": 2])["ok"] as? Bool == true)
+precondition(posted.map { $0.type } == [.mouseMoved, .leftMouseDown, .leftMouseUp])
+// An unreadable cursor is a visible failure, not a silent pass.
+reset(); cursorReadFails = true
+let unreadable = dispatch(["id": 1, "method": "click", "x": 1, "y": 2])
+precondition(unreadable["ok"] as? Bool == false && unreadable["error_code"] == nil)
+precondition((unreadable["error"] as? String)?.contains("corner fail-safe") == true)
+precondition(posted.isEmpty && created == 0)
+let ping = dispatch(["id": 1, "method": "ping"])["result"] as! [String: Any]
+precondition(ping["corner_failsafe_v1"] as? Bool == true)
+
+// A long press stopped mid-hold: the button is released where the pointer is parked
+// (never back at the click point, which would complete the click), and nothing else posts.
+reset(); cursorDefault = CGPoint(x: 300, y: 300)
+cursorScript = [CGPoint(x: 300, y: 300), CGPoint(x: 0, y: 0)]
+do { _ = try click(["x": 40, "y": 50, "duration_ms": 100, "modifiers": ["shift"]]); fatalError("hold not stopped") }
+catch is UserAbort { }
+precondition(posted.map { $0.type } == [.flagsChanged, .mouseMoved, .leftMouseDown, .leftMouseUp, .flagsChanged])
+precondition(posted[2].location == CGPoint(x: 40, y: 50))
+precondition(posted[3].location == CGPoint(x: 0, y: 0))
+precondition(posted.last!.flags.isEmpty)
+precondition(Thread.waits.count == 2)
+// Stopped between two clicks: nothing is held, so no further press is posted.
+reset(); cursorScript = [CGPoint(x: 0, y: 0)]
+do { _ = try click(["x": 40, "y": 50, "click_count": 2]); fatalError("gap not checked") }
+catch is UserAbort { }
+precondition(posted.map { $0.type } == [.mouseMoved, .leftMouseDown, .leftMouseUp])
+// An unreadable cursor mid-hold still releases at the press point and surfaces the failure.
+reset(); cursorFailAt = 2
+do { _ = try click(["x": 40, "y": 50, "duration_ms": 100]); fatalError("read failure hidden") }
+catch OpError.bad(let message) { precondition(message.contains("corner fail-safe")) }
+precondition(posted.map { $0.type } == [.mouseMoved, .leftMouseDown, .leftMouseUp])
+precondition(posted[2].location == CGPoint(x: 40, y: 50))
+// A key hold stopped mid-hold releases the key and its modifiers.
+reset(); cursorScript = [CGPoint(x: 300, y: 300), CGPoint(x: 0, y: 0)]
+do { _ = try key(["code": 0, "modifiers": ["ctrl"], "duration_ms": 100]); fatalError("hold not stopped") }
+catch is UserAbort { }
+precondition(posted.map { $0.type } == [.flagsChanged, .keyDown, .keyUp, .flagsChanged])
+precondition(Thread.waits.count == 2 && posted.last!.flags.isEmpty)
 print("native input contract passed")
 """
     program = tmp_path / "input.swift"

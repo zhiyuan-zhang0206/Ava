@@ -156,6 +156,11 @@ class PermissionsHelperError(RuntimeError):
     """A permissions helper call failed, or the daemon was unreachable."""
 
 
+class UserAbortError(PermissionsHelperError):
+    """The helper refused or stopped a desktop action: the user parked the mouse at the
+    main display's top-left corner. The action must not be retried or replayed."""
+
+
 def connect(path: str) -> socket.socket:
     """Open the helper's Unix socket, retrying briefly while it is absent or refusing."""
     phase = ["socket"]
@@ -247,6 +252,9 @@ def parse_reply(buf: bytes, method: str) -> Any:
     # ok / error / result are contract-guaranteed by the daemon's dispatch; index
     # with [] so a wire-format break blows up here instead of being masked.
     if not resp["ok"]:
+        # `error_code` is optional: only the helper's user-abort stop sets it.
+        if resp.get("error_code") == "user_abort":
+            raise UserAbortError(resp["error"])
         raise PermissionsHelperError(resp["error"])
     return resp["result"]
 
