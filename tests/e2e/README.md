@@ -10,13 +10,15 @@ Design doc: see `docs/superpowers/specs/2026-05-07-e2e-happy-path-design.md`
 What is (and is not) covered, feature by feature, lives in [FEATURES.md](FEATURES.md).
 
 
-SDK creation and budget-handoff scenarios explicitly request the
-`authenticated_gateway` fixture. It gives their test HTTP clients and exec SDK
-children a fresh private bearer; the throwaway gateway verifies it through
-production authentication middleware. Runner/ops retain the direct-process
-harness's open posture because no root launcher or machine-token ledger exists.
-Other scenarios retain their existing gateway posture. Fixture credentials are
-function scoped and restored at teardown; no product admission bypass is added.
+The stack authenticates like a started cluster (`_credentials.py`). `_e2e_process_env`
+gives the e2e home a cluster secret and an active write generation in its private
+ledger (the one `ava start` births at first start). The gateway is delivered its
+gateway-class machine API token, the ops daemon and the agent host the runner-class
+token (agent children inherit it), so the gateway's authenticated `/ops` dials are
+accepted. The test process reaches the gateway with the human secret as a Bearer header
+(the autouse `gateway_client_credentials` fixture, scoped to the gateway's origin) and
+the browser context logs in through `/api/auth/login`. No product admission rule is
+bypassed.
 
 
 ## Running

@@ -119,8 +119,8 @@ def _iphone_context(browser: Browser) -> BrowserContext:
     chromium — the underlying engine differs but the emulated input model
     matches.
 
-    The gateway is unauthenticated (private-network-only), so no auth header is needed
-    whether the target is the deployed bundle or the `frontend_proc` build.
+    The `frontend_proc` build has no backend behind it, so the specs stub `/api/*`
+    (`/api/auth/check` included); a deployed target needs a valid session cookie.
     """
     return browser.new_context(
         user_agent=_IPHONE_14_UA,
