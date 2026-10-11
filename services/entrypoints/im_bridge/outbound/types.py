@@ -124,7 +124,6 @@ class NoticePollDecision(StrEnum):
 
 
 class NoticePollImportReason(StrEnum):
-    LEGACY_CURSOR = "legacy_cursor"
     NO_HISTORY = "no_history"
     LEGACY_HISTORY_UNKNOWN = "legacy_history_unknown"
 
