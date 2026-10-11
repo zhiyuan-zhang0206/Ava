@@ -27,7 +27,7 @@ source's overlay + preset verbatim. See
 The POST receipt adds `accepted=true`, `execution_observed=false`, an observed
 availability reason, and `observed_at`; `id` identifies the committed agent.
 The gateway commits the row, fork marker if present, and first prompt in one
-transaction before forwarding a `spawn-launch-v2` op. The runner validates and
+transaction before forwarding a `spawn-launch` op. The runner validates and
 publishes a repeatable wake; it does not insert a new prompt or terminate the
 row on launch failure. The gateway reads the created row after the ops reply.
 A 201 says the launch request was accepted and the first prompt is pending;
@@ -63,11 +63,9 @@ launches an agent that has since been admitted or terminated. The SDK supplies
 one key per creation call and reuses it for connect-family retries. Automatic
 retry of an ambiguous outcome requires proven gateway capability and remains
 disabled because an older gateway may ignore the key.
-The runner accepts only `spawn-launch-v2`, with a required UUID
+The runner accepts only `spawn-launch`, with a required UUID
 `launch_attempt_id` matching the committed row and local placement. Runner
 launch payloads reject `prompt`, `prompt_source`, `label`, and unknown fields.
-`spawn-launch` is outside the RPC vocabulary and fails before machine lookup,
-maintenance admission or dedupe.
 
 
 Guarded creation: [[gateway/agents/docs/guarded-creation.ava.okf.md]].

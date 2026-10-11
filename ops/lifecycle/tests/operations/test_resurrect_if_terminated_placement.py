@@ -133,7 +133,7 @@ class TestResurrectIfTerminatedPlacement:
         assert len(dispatch_called) == 1
         assert dispatch_called[0]["target_machine"] == "home-a"
         assert dispatch_called[0]["payload"] == {
-            "path": "/api/agents/5/resurrect-if-pending-work-v2",
+            "path": "/api/agents/5/resurrect-if-pending-work",
             "body": {"resurrected_by": "system", "prompt": None},
             "trigger_inbound_id": 88,
             "trigger_inbound_kind": "chat",
@@ -181,7 +181,7 @@ class TestResurrectIfTerminatedPlacement:
         assert captured["target"] == "wsl"
         assert captured["kind"] == "lifecycle"
         assert captured["payload"] == {
-            "path": "/api/agents/7/resurrect-if-pending-work-v2",
+            "path": "/api/agents/7/resurrect-if-pending-work",
             "body": {"resurrected_by": "system", "prompt": None},
             "trigger_inbound_id": 99,
             "trigger_inbound_kind": "chat",

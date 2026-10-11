@@ -48,7 +48,7 @@ async def test_committed_acceptance_response_loss_replays_before_routing(
         calls += 1
         assert db is app.state.db
         assert pool is app.state.db_pool
-        assert path == f"/api/agents/{agent_id}/restart-work-v1"
+        assert path == f"/api/agents/{agent_id}/restart-work"
         operation = NativeRestartOperation.model_validate(packet)
         assert idempotency_key == operation.operation_key
         original = await restart_native_work_op(
@@ -117,5 +117,5 @@ async def test_unknown_executor_wire_fails_closed_without_legacy_fallback(
         headers=_headers(monkeypatch),
     )
     assert response.status_code == 502
-    assert calls == [f"/api/agents/{target.agent_id}/restart-work-v1"]
+    assert calls == [f"/api/agents/{target.agent_id}/restart-work"]
     assert db_conn.execute("SELECT count(*) FROM native_restart_commands").fetchone() == (0,)

@@ -194,7 +194,7 @@ def _prepare_resurrect_attempt(
 ) -> telemetry.Event:
     """Commit resurrection and its optional prompt before waking the host.
 
-    `billing_recovery=True` (the versioned `resurrect-billing-v1` action, task
+    `billing_recovery=True` (the `resurrect-billing` action, task
     #3919) re-checks the billing-victim contract under the same row lock: a
     row that is not a billing-class recovery-breaker halt is refused
     (`ResurrectRefused`) — the batch entry only reinstates the recorded
@@ -356,7 +356,7 @@ def resurrect_agent(
     qualifies: a reaper death is not an operator's decision. The automatic
     trigger additionally requires clear automatic wakes (no suppression window,
     `RECOVERY_BREAKER_CLEAR`); explicit manual resurrection passes no trigger
-    and keeps its unconditional contract. The versioned billing batch-recovery
+    and keeps its unconditional contract. The billing batch-recovery
     action (`billing_recovery=True`) refuses any non-billing-class halt
     (`ResurrectRefused`) and marks the resurrect event payload with
     `via='billing_recovery'`. The host resumes the existing checkpoint after

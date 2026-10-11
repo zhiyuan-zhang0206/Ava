@@ -252,7 +252,7 @@ async def _dispatch(
 
     try:
         match kind:
-            case "spawn-launch-v2":
+            case "spawn-launch":
                 db, bus = _ops_handles()
                 spawned = await lifecycle.launch_agent_op(
                     db, bus, LaunchAgentRequest.model_validate(payload), pool, catalog=catalog
@@ -261,7 +261,7 @@ async def _dispatch(
                 # withdrawn model was rewritten (task #4306) — the common wire
                 # shape stays {"id": ...}.
                 return OpStatus.COMPLETED, spawned.model_dump(mode="json", exclude_none=True)
-            case "launch-reconcile-v1":
+            case "launch-reconcile":
                 from ops.lifecycle.launch_reconcile import reconcile_launch_op
 
                 db, bus = _ops_handles()
@@ -386,7 +386,7 @@ async def _dispatch_idempotent_pass(
     if (
         kind == "lifecycle"
         and isinstance(payload.get("path"), str)
-        and re.fullmatch(r"/api/agents/[1-9][0-9]*/restart-work-v1", payload["path"])
+        and re.fullmatch(r"/api/agents/[1-9][0-9]*/restart-work", payload["path"])
     ):
         try:
             operation = NativeRestartOperation.model_validate(payload.get("body"))

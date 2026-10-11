@@ -5,7 +5,7 @@ provider rejections with no successful turn between them halt every automatic
 recovery path for that agent — event-path resurrect, the delivery watchdog's
 wake re-dispatch and terminated-owner retry, the stalled crash-marked harvest
 op, and the relaxed reaper-marked trigger — until a turn succeeds. A manual
-resurrect (`resurrect-explicit-v2`, no pending-work trigger) stays exempt: it is
+resurrect (`resurrect-explicit`, no pending-work trigger) stays exempt: it is
 the explicit human override.
 
 `agents_meta.permanent_reject_streak` is the durable count and the single

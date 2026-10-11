@@ -267,7 +267,7 @@ async def post_agent_resurrect(
     """
     forwarded = await forward_to_home_machine(
         agent_id,
-        f"/api/agents/{agent_id}/resurrect-explicit-v2",
+        f"/api/agents/{agent_id}/resurrect-explicit",
         body.model_dump(),
         db=request.app.state.db,
         pool=request.app.state.db_pool,
@@ -286,7 +286,7 @@ async def post_agents_resurrect_billing(
     billing-class halt candidates, the halted-but-alive survey (report-only),
     and the provider balance readout, nothing written. `execute=true` re-checks the provider balance (the run refuses
     below the configured floor) and then resurrects each candidate on its home
-    machine through the versioned `resurrect-billing-v1` op, which enforces the
+    machine through the `resurrect-billing` op, which enforces the
     billing-halt whitelist under the metadata row lock.
     Idempotent: the candidate set self-clears after a run, a repeated run is an
     audited no-op, and a concurrent second run is refused by the run-level
@@ -380,7 +380,7 @@ def _native_control_key(request: Request) -> str:
 async def native_restart(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: NativeRestartRequest, request: Request
 ) -> NativeRestartAcceptance:
-    """Accept the original ACTIVE restart once through its versioned executor."""
+    """Accept the original ACTIVE restart once through its dedicated executor."""
     key = _native_control_key(request)
     try:
         previous = await asyncio.to_thread(
@@ -393,7 +393,7 @@ async def native_restart(
     operation = NativeRestartOperation(operation_key=key, request=body)
     reply = await forward_to_home_machine(
         agent_id,
-        f"/api/agents/{agent_id}/restart-work-v1",
+        f"/api/agents/{agent_id}/restart-work",
         operation.model_dump(mode="json"),
         db=request.app.state.db,
         pool=request.app.state.db_pool,

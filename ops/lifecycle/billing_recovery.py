@@ -299,7 +299,7 @@ async def run_billing_recovery(
 async def resurrect_billing_agent_op(
     db: Database, bus: EventBus, agent_id: int
 ) -> BillingResurrectAgentResponse:
-    """The versioned ``resurrect-billing-v1`` action (home runner), also used
+    """The ``resurrect-billing`` action (home runner), also used
     as the in-process fallback when the local ops server is unreachable."""
     from base.agents import MachinePaused, ResurrectAlreadyAlive, ResurrectRefused
     from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
@@ -343,7 +343,7 @@ async def _dispatch_all(
 async def _dispatch_one(
     db: Database, bus: EventBus, candidate: BillingCandidate
 ) -> BillingResurrectAgentOutcome:
-    path = f"/api/agents/{candidate.agent_id}/resurrect-billing-v1"
+    path = f"/api/agents/{candidate.agent_id}/resurrect-billing"
     try:
         forwarded = await _cluster_rpc.dispatch_to_machine(
             db,

@@ -183,7 +183,7 @@ class ResurrectAgentRequest(BaseModel):
     """Resurrect agent request body.
 
     The public `POST /api/agents/{id}/resurrect` endpoint uses this for an
-    explicit lifecycle wake with no work guard. The internal versioned
+    explicit lifecycle wake with no work guard. The internal
     pending-work path also carries it alongside the exact chat or compact
     request id and kind; controller recovery calls the lower lifecycle helper
     with its own exact death claim.
@@ -296,7 +296,7 @@ class ResurrectAgentResponse(BaseModel):
 
 
 class RecoverCrashMarkedResponse(BaseModel):
-    """`recover-crash-marked-v2` response — the home runner's adjudication of
+    """`recover-crash-marked` response — the home runner's adjudication of
     harvesting a crash-marked idling corpse whose chat has stalled pending
     (the delivery watchdog's stalled-recovery request, task #3618).
 
@@ -378,8 +378,8 @@ class SessionInfo(BaseModel):
 # The op vocabulary — the discriminator the daemon's `_dispatch` switches on;
 # lives here (not cluster_rpc.py) beside its models; `ops.cluster.rpc` re-exports it.
 OpKind = Literal[
-    "spawn-launch-v2",
-    "launch-reconcile-v1",
+    "spawn-launch",
+    "launch-reconcile",
     "lifecycle",
     "status_probe",
     "config_read",
@@ -427,7 +427,7 @@ class OpFailure(BaseModel):
     reason: str | None = None
 
 
-# ── per-OpKind request payloads (spawn-launch-v2 uses LaunchAgentRequest above;
+# ── per-OpKind request payloads (spawn-launch uses LaunchAgentRequest above;
 # SpawnAgentRequest is the REST body, not an op payload) ──
 
 

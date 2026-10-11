@@ -34,7 +34,7 @@ accept different lifecycle states.
   commits ([ownership](../../ownership/docs/ownership.ava.okf.md)).
 - A chat stalled `pending` on a crash-marked idling corpse reaches a
   bounded-time recovery decision: the delivery watchdog escalates to the
-  owner's home runner (`recover-crash-marked-v2`), which harvests the corpse
+  owner's home runner (`recover-crash-marked`), which harvests the corpse
   into the reaper's terminal shape (making the relaxed trigger above resume
   the work) or refuses with a reason (task #3618).
 - Host crash recovery reconciles stale owned rows and durable checkpoints;

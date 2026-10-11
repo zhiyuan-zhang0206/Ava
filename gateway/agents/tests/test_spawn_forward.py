@@ -311,7 +311,7 @@ class TestRouting:
 
 
 @pytest.mark.asyncio
-async def test_spawn_forward_classifies_rpc_unreachable_and_uses_versioned_kind(
+async def test_spawn_forward_classifies_rpc_unreachable_and_uses_launch_kind(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from uuid import uuid4
@@ -334,7 +334,7 @@ async def test_spawn_forward_classifies_rpc_unreachable_and_uses_versioned_kind(
             "runner",
             LaunchAgentRequest(agent_id=4, launch_attempt_id=attempt_id),
         )
-    assert seen == [("spawn-launch-v2", {"agent_id": 4, "launch_attempt_id": str(attempt_id)})]
+    assert seen == [("spawn-launch", {"agent_id": 4, "launch_attempt_id": str(attempt_id)})]
     assert raised.value.reason == AvailabilityReason.LAUNCH_UNREACHABLE
 
 

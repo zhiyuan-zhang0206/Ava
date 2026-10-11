@@ -1,8 +1,8 @@
 """Billing batch recovery (task #3919) — whitelist, gates, idempotency.
 
 The explicit post-outage entry: enumerate the billing-class halt victims, check
-the provider balance, resurrect each through the versioned billing-guarded
-action (`resurrect-billing-v1`). Pinned here: the whitelist is exact
+the provider balance, resurrect each through the billing-guarded
+action (`resurrect-billing`). Pinned here: the whitelist is exact
 (non-billing / user- and integrity-terminated / alive rows are never picked up),
 the halted-but-alive survey is exact and report-only (never
 dispatched), dry-run writes nothing, the balance gate fails closed, the

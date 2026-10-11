@@ -1,4 +1,4 @@
-"""Only the versioned restart receipt owns replay after an Ops response is lost."""
+"""Only the guarded restart receipt owns replay after an Ops response is lost."""
 
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -69,7 +69,7 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
     request = NativeRestartRequest(target=target)
     operation = NativeRestartOperation(operation_key="domain-ops", request=request)
     packet = {
-        "path": f"/api/agents/{target.agent_id}/restart-work-v1",
+        "path": f"/api/agents/{target.agent_id}/restart-work",
         "body": operation.model_dump(mode="json"),
     }
     actual = daemon._dispatch

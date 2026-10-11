@@ -105,7 +105,7 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
 
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_launch)
     status, result = await daemon._dispatch(
-        "spawn-launch-v2",
+        "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         active_ops={},
         workers=set(),

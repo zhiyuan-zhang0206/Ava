@@ -454,7 +454,7 @@ def cmd_agents_resurrect_billing(*, execute: bool) -> int:
     prints a strictly read-only preview — the billing-class halt candidates,
     the halted-but-alive survey, and the provider balance readout; with
     `--execute` it runs the batch (balance gate -> per-agent
-    `resurrect-billing-v1` on each home machine) and prints the per-agent
+    `resurrect-billing` on each home machine) and prints the per-agent
     outcome. Refused runs exit 1; previews and runs exit 0.
     """
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
