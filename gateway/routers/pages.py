@@ -1,7 +1,8 @@
 """ava.ui.show / .close page endpoints + the page reverse proxy.
 
 URLs:
-- `/api/agents/{agent_id}/pages` — register / list / close (registry).
+- `/api/agents/{agent_id}/pages` — list (registry); register / close are the keyed
+  `/api/keyed/v1/agents/{agent_id}/pages` routes.
 - `/pages/{agent_id}-{name}/...` — reverse proxy (one page per agent):
   the gateway forwards GETs to the agent's page server (host:port from
   the registry) and returns the content.
@@ -34,10 +35,8 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 from starlette.background import BackgroundTask
 
-from base.agents import AgentStatus
 from base.config import settings
 from base.db import agent_exists
-from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed, PageOpened
 from base.log import logger
@@ -52,15 +51,9 @@ from base.telemetry.alerts import display_language
 from gateway.routers import page_acceptance
 from gateway.schemas.pages import PageCloseRequest, PageRegisterRequest
 from ops.pages import (
-    PagePortConflictError,
-    assert_port_free,
-    close_all_agent_pages_in_transaction,
-    close_page,
     get_open_page_target,
     list_all_open_pages,
     list_open_pages,
-    lock_page_agent,
-    register_page_in_transaction,
 )
 from ops.rpc_schemas import PageRow
 
@@ -219,45 +212,6 @@ async def _publish_page_event(bus: EventBus, event: PageOpened | PageClosed) -> 
     await bus.publish_best_effort(event.model_dump_json(), context="page_event")
 
 
-@router.post("/api/agents/{agent_id}/pages", status_code=201, response_model=PageRow)
-async def post_page_register(agent_id: int, body: PageRegisterRequest, request: Request) -> PageRow:
-    """ava.ui.show / .serve register / update a page — SDK main entry.
-
-    Each agent can have at most one open page. Before registering the new
-    page, any existing open pages for this agent are auto-closed (one
-    agent, one page). The closed pages get individual PageClosed events
-    so the frontend removes them from the popover.
-
-    Returns 409 when the agent is terminated (dead agents do not show UI), or
-    when another live page already holds (host, port) — in the port-conflict
-    case the agent's current page is left open and the response detail names
-    the occupying page.
-    """
-    record, closed_names = await asyncio.to_thread(
-        _register_page_blocking,
-        request.app.state.db_pool,
-        request.app.state.page_host_cache,
-        agent_id,
-        body,
-    )
-    record = _absolutize(request, record)
-    # Publish PageClosed events for any pages that were auto-closed.
-    for name in closed_names:
-        await _publish_page_event(request.app.state.bus, PageClosed(agent_id=agent_id, name=name))
-    await _publish_page_event(
-        request.app.state.bus,
-        PageOpened(
-            agent_id=agent_id,
-            page_id=record.id,
-            name=record.name,
-            port=record.port,
-            title=record.title,
-            url=record.url,
-        ),
-    )
-    return record
-
-
 @router.post("/api/keyed/v1/agents/{agent_id}/pages", status_code=201, response_model=PageRow)
 async def post_guarded_page_register(
     agent_id: int,
@@ -265,7 +219,18 @@ async def post_guarded_page_register(
     request: Request,
     key: Annotated[str, Depends(page_acceptance.operation_key)],
 ) -> PageRow:
-    """Accept one registration atomically; never downgrade this intent to the legacy path."""
+    """ava.ui.show / .serve register a page — SDK main entry.
+
+    Each agent can have at most one open page. Registering atomically closes any
+    existing open page of the agent (the closed pages get individual PageClosed
+    events so the frontend removes them from the popover) and commits the original
+    acceptance, so a replay returns it without a second effect.
+
+    Returns 409 when the agent is terminated (dead agents do not show UI), or
+    when another live page already holds (host, port) — in the port-conflict
+    case the agent's current page is left open and the response detail names
+    the occupying page.
+    """
     result = await asyncio.to_thread(
         page_acceptance.register,
         request.app.state.db_pool,
@@ -309,7 +274,10 @@ async def post_guarded_page_close(
     request: Request,
     key: Annotated[str, Depends(page_acceptance.operation_key)],
 ) -> PageRow:
-    """Close only the observed row; replay returns its historical acceptance."""
+    """ava.ui.close a page — closes only the observed row (`expected_page_id`).
+
+    A newer registration under the same name makes the observation stale (409);
+    replay returns the historical acceptance."""
     result = await asyncio.to_thread(
         page_acceptance.close,
         request.app.state.db_pool,
@@ -322,22 +290,6 @@ async def post_guarded_page_close(
     if result.closed_names:
         await _publish_page_event(request.app.state.bus, PageClosed(agent_id=agent_id, name=name))
     return result.record
-
-
-@router.delete("/api/agents/{agent_id}/pages/{name}")
-async def delete_page(agent_id: int, name: str, request: Request) -> PageRow:
-    """ava.ui.close close a page — CAS open->closed.
-
-    404: agent does not exist / page name does not exist / already closed
-    (single 404 does not distinguish them; caller only cares that "the
-    target page is no longer in open state").
-    """
-    record = await asyncio.to_thread(
-        _close_page_blocking, request.app.state.db_pool, agent_id, name
-    )
-    record = _absolutize(request, record)
-    await _publish_page_event(request.app.state.bus, PageClosed(agent_id=agent_id, name=name))
-    return record
 
 
 @router.get("/api/pages", response_model=list[PageRow])
@@ -630,67 +582,6 @@ def _validate_page_dial_target(
     _validate_nonloopback_page_host(
         pool, host_cache, agent_id, host, status_code=400, connection=connection
     )
-
-
-def _register_page_blocking(
-    pool: ConnectionPool, host_cache: PageHostCache, agent_id: int, body: PageRegisterRequest
-) -> tuple[PageRow, list[str]]:
-    """Sync page-register transaction — via to_thread: agent-exists + status
-    guard, live-port conflict check, auto-close of prior pages, registry
-    INSERT. Returns (record, closed_names).
-
-    Order matters: the live-port check runs BEFORE the auto-close, so a
-    registration refused because another page holds the port leaves the
-    agent's current page untouched. register_page enforces the same rule
-    under the live-port unique index for a registration that races the check.
-    """
-    _validate_page_dial_target(pool, host_cache, agent_id, body.host, body.port)
-    with write_transaction(pool) as conn:
-        lock_page_agent(conn, agent_id)
-        if not agent_exists(conn, agent_id):
-            raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        with conn.cursor() as cur:
-            cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-            row = cur.fetchone()
-        if row is not None and row[0] == AgentStatus.TERMINATED:
-            raise HTTPException(
-                status_code=409,
-                detail=f"agent {agent_id} is terminated, cannot register page",
-            )
-        try:
-            assert_port_free(conn, agent_id, body.host, body.port)
-            # Close any existing open pages for this agent before registering a new one.
-            closed_names = close_all_agent_pages_in_transaction(
-                conn, agent_id, include_expired=True
-            )
-            record = register_page_in_transaction(
-                conn,
-                agent_id,
-                body.name,
-                body.port,
-                body.host,
-                body.title,
-                body.serve_dir,
-                body.ttl_seconds,
-            )
-        except PagePortConflictError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return record, closed_names
-
-
-def _close_page_blocking(pool: ConnectionPool, agent_id: int, name: str) -> PageRow:
-    """Sync page-close CAS — via to_thread (404 guards included)."""
-    with write_transaction(pool) as conn:
-        lock_page_agent(conn, agent_id)
-        if not agent_exists(conn, agent_id):
-            raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        record = close_page(conn, agent_id, name)
-        if record is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"page {name!r} not found or already closed (agent {agent_id})",
-            )
-    return record
 
 
 def _page_target_blocking(pool: ConnectionPool, agent_id: int, name: str) -> tuple[str, int] | None:

@@ -268,14 +268,16 @@ class PageHost:
 
     def close(self, name: str) -> None:
         try:
-            gateway_client.close_page(self.agent_id, name)
+            closed = gateway_client.close_page(self.agent_id, name)
         except Exception as e:
-            # Gateway returns 404 -> httpx.HTTPStatusError. Translate to PageClosed
-            # so callers can distinguish "already gone" from real errors.
+            # An unknown agent answers 404 -> httpx.HTTPStatusError. Translate to
+            # PageClosed so callers can distinguish "already gone" from real errors.
             msg = str(e)
             if "404" in msg:
                 raise PageClosed(f"no open page {name!r} for agent {self.agent_id}") from e
             raise
+        if not closed:
+            raise PageClosed(f"no open page {name!r} for agent {self.agent_id}")
 
 
 def _error_detail(exc: Exception) -> str | None:
