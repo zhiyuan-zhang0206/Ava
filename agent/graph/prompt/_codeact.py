@@ -9,7 +9,7 @@ from base.host.env.agent_slices import AgentSlices
 
 
 def _codeact_section(slices: AgentSlices) -> str:
-    """Opt-in batching guidance; preserve intermediate review when it is needed."""
+    """Opt-in batching guidance for operations that need no intermediate review."""
     if not slices.prompt.prompt_codeact_enabled:
         return ""
     return (
@@ -20,9 +20,5 @@ def _codeact_section(slices: AgentSlices) -> str:
         "- Use ordinary if-else logic for branches whose conditions and "
         "actions are already understood.\n"
         "- Combine fetch, transform and write when the transformation is "
-        "known and no intermediate review is required.\n\n"
-        "Split calls when a result determines the next decision, when you "
-        "need approval, or when execution and output limits would hide "
-        "evidence you need. Batching should reduce unnecessary calls while "
-        "keeping failures and partial effects clear."
+        "known and no intermediate review is required."
     )
