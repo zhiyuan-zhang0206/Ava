@@ -9,6 +9,8 @@ from pydantic import (
     StringConstraints,
 )
 
+from base.api_contracts.memory_search import MemorySearchPurpose
+
 
 class MemorySearchRequest(BaseModel):
     """POST /api/memory/search request — semantic search query."""
@@ -17,6 +19,13 @@ class MemorySearchRequest(BaseModel):
         ..., description="natural-language query"
     )
     k: int = Field(default=5, ge=1, le=100, description="result count")
+    purpose: MemorySearchPurpose = Field(
+        ...,
+        description=(
+            "why the query was issued: 'recall' (passive recall; the query is the recent "
+            "conversation) or 'search' (an agent's own search); selects the relevance question"
+        ),
+    )
 
 
 class MemorySearchResultItem(BaseModel):

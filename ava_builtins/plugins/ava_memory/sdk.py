@@ -90,7 +90,7 @@ def _search(query: str, k: int = 5, *, timeout: float | None = None) -> list[Mem
     query = coerce_str(query, "query")
     k = coerce_typed(k, "k", int)
     timeout = coerce_typed(timeout, "timeout", (int, float), allow_none=True)
-    results = _client.memory_search(query, k, timeout=timeout)
+    results = _client.memory_search(query, k, purpose="search", timeout=timeout)
     return [
         MemoryMatch(_pool_root() / r.path, r.description, list(r.tags), r.score, r.chunk)
         for r in results

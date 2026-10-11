@@ -350,6 +350,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
             ranked = await rerank.rerank(
                 body.query,
                 hits,
+                purpose=body.purpose,
                 model=inputs.rerank_model(),
                 catalog=request.app.state.catalog,
                 k=body.k,

@@ -6546,6 +6546,12 @@ export interface components {
              * @default 5
              */
             k: number;
+            /**
+             * Purpose
+             * @description why the query was issued: 'recall' (passive recall; the query is the recent conversation) or 'search' (an agent's own search); selects the relevance question
+             * @enum {string}
+             */
+            purpose: "recall" | "search";
         };
         /**
          * MemorySearchResponse

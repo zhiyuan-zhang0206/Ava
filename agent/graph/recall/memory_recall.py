@@ -75,7 +75,9 @@ async def _search_or_none(
     import httpx  # deferred: stays off the child boot path
 
     try:
-        return await asyncio.to_thread(gateway_client.memory_search, query, k, context=ctx)
+        return await asyncio.to_thread(
+            gateway_client.memory_search, query, k, purpose="recall", context=ctx
+        )
     except (GatewayUnavailable, IndexerUnavailable) as exc:
         # Recall is an enhancement; a memory-index outage must not crash the
         # turn. Skip this turn and let the next one retry. Debug level because

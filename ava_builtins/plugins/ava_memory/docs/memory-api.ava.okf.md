@@ -48,7 +48,7 @@ Standing guidance descendants should receive.
 
 Search is two stages, both on the gateway: vector search returns the best chunk of the
 closest `memory_rerank_candidates` notes (default 50), then the decision model
-`memory_rerank_model` answers one yes/no relevance question per chunk and the response is
+`memory_rerank_model` answers a yes/no "worth reading for this query" question for each chunk (one request per candidate; `purpose` tells recall from an agent search) and the response is
 ordered by the probability of yes. No text is generated. The gateway response contains only
 `results`, each with a memory-root-relative `path`, frontmatter `description` and `tags`, the
 `score` and the matched `chunk`. The SDK resolves each path against the runner's memory root;

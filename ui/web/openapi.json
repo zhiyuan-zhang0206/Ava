@@ -13634,11 +13634,21 @@
             "title": "K",
             "description": "result count",
             "default": 5
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "recall",
+              "search"
+            ],
+            "title": "Purpose",
+            "description": "why the query was issued: 'recall' (passive recall; the query is the recent conversation) or 'search' (an agent's own search); selects the relevance question"
           }
         },
         "type": "object",
         "required": [
-          "query"
+          "query",
+          "purpose"
         ],
         "title": "MemorySearchRequest",
         "description": "POST /api/memory/search request — semantic search query."

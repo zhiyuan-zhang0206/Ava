@@ -146,16 +146,19 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_recall_inject_threshold: float = Field(
-        # Placeholder pending calibration: the first benchmark of the rerank scores sets this.
-        default=0.7,
+        # Calibrated on the 2026-10-11 benchmark: jev-1.13.0 with the rerank question and state
+        # templates of services/derived/memory_indexer/rerank.py. Scores are only comparable
+        # under that exact model and wording; changing either means recalibrating this value.
+        default=0.80,
         ge=0,
         le=1,
         alias="AVA_MEMORY_RECALL_INJECT_THRESHOLD",
         description=(
             "Minimum relevance score (0..1, the decision model's probability that a "
             "note's best chunk is relevant to the conversation) for passive recall to "
-            "inject a note. A turn where no note reaches it injects nothing. 0.7 is "
-            "provisional, pending calibration against a benchmark."
+            "inject a note. A turn where no note reaches it injects nothing. The default was "
+            "calibrated for the default memory_rerank_model and the ranking prompts; "
+            "recalibrate it when either changes."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -168,7 +171,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_recall_inject_max: int = Field(
-        default=5,
+        default=3,
         ge=0,
         alias="AVA_MEMORY_RECALL_INJECT_MAX",
         description=(

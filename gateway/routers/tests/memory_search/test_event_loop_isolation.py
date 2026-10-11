@@ -78,7 +78,9 @@ class TestEventLoopIsolation:
             outcome: dict[str, object] = {}
 
             def _search() -> None:
-                outcome["resp"] = client.post("/api/memory/search", json={"query": "x", "k": 1})
+                outcome["resp"] = client.post(
+                    "/api/memory/search", json={"query": "x", "k": 1, "purpose": "search"}
+                )
 
             t = threading.Thread(target=_search)
             t.start()

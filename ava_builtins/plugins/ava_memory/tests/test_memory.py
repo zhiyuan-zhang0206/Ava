@@ -65,7 +65,9 @@ def test_search_forwards_query_and_k_to_gateway(monkeypatch: pytest.MonkeyPatch)
 
     captured: dict[str, Any] = {}
 
-    def _fake(query: str, k: int, *, timeout: float | None = None) -> list[dict[str, str]]:
+    def _fake(
+        query: str, k: int, *, purpose: str, timeout: float | None = None
+    ) -> list[dict[str, str]]:
         captured["query"] = query
         captured["k"] = k
         return []
@@ -81,7 +83,9 @@ def test_search_default_k_is_5(monkeypatch: pytest.MonkeyPatch) -> None:
 
     captured: dict[str, Any] = {}
 
-    def _fake(query: str, k: int, *, timeout: float | None = None) -> list[dict[str, str]]:
+    def _fake(
+        query: str, k: int, *, purpose: str, timeout: float | None = None
+    ) -> list[dict[str, str]]:
         captured["k"] = k
         return []
 
@@ -97,7 +101,9 @@ def test_search_defaults_timeout_to_none(monkeypatch: pytest.MonkeyPatch) -> Non
 
     captured: dict[str, Any] = {}
 
-    def _fake(query: str, k: int, *, timeout: float | None = None) -> list[dict[str, str]]:
+    def _fake(
+        query: str, k: int, *, purpose: str, timeout: float | None = None
+    ) -> list[dict[str, str]]:
         captured["timeout"] = timeout
         return []
 
@@ -112,7 +118,9 @@ def test_search_forwards_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 
     captured: dict[str, Any] = {}
 
-    def _fake(query: str, k: int, *, timeout: float | None = None) -> list[dict[str, str]]:
+    def _fake(
+        query: str, k: int, *, purpose: str, timeout: float | None = None
+    ) -> list[dict[str, str]]:
         captured["timeout"] = timeout
         return []
 
@@ -259,7 +267,9 @@ def test_search_default_k_desc(monkeypatch: pytest.MonkeyPatch) -> None:
 
     captured: dict[str, int] = {}
 
-    def _fake(query: str, k: int, *, timeout: float | None = None) -> list[dict[str, str]]:
+    def _fake(
+        query: str, k: int, *, purpose: str, timeout: float | None = None
+    ) -> list[dict[str, str]]:
         captured["k"] = k
         return []
 

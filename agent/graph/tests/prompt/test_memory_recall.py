@@ -110,7 +110,7 @@ async def test_renders_path_score_description_and_matched_passage(
             _result("a.md", score=0.83, description="deploy runbook", chunk="restart the gateway"),
             _result(
                 "sub/b.md",
-                score=0.71,
+                score=0.81,
                 description="gateway ports",
                 chunk="line one\n\nline three",
             ),
@@ -122,7 +122,7 @@ async def test_renders_path_score_description_and_matched_passage(
     assert result is not None
     content = _content(result)
     assert "- a.md (score 0.83): deploy runbook\n  > restart the gateway" in content
-    assert "- sub/b.md (score 0.71): gateway ports\n  > line one\n  >\n  > line three" in content
+    assert "- sub/b.md (score 0.81): gateway ports\n  > line one\n  >\n  > line three" in content
     assert content.index("a.md") < content.index("sub/b.md")
     assert result.paths == {"a.md", "sub/b.md"}
 
@@ -307,6 +307,23 @@ async def test_search_asks_for_the_cap_plus_the_notes_already_injected(
     assert asked == [5, 8]
 
 
+async def test_search_is_issued_for_recall_not_as_an_agent_search(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gateway asks a different relevance question for a conversation than for a query."""
+    purposes: list[str] = []
+
+    def _search(_q: str, _k: int, *, purpose: str, **_kwargs: object) -> list[MemorySearchResult]:
+        purposes.append(purpose)
+        return []
+
+    monkeypatch.setattr(recall.gateway_client, "memory_search", _search)
+
+    await _recall()
+
+    assert purposes == ["recall"]
+
+
 async def test_search_request_never_exceeds_the_gateway_limit(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -317,10 +334,10 @@ async def test_search_request_never_exceeds_the_gateway_limit(
     assert asked == [100]
 
 
-def test_defaults_match_the_documented_provisional_values() -> None:
-    """The threshold is provisional (pending benchmark calibration); the cap is 5."""
-    assert settings.agent.memory_recall_inject_threshold == 0.7
-    assert settings.agent.memory_recall_inject_max == 5
+def test_defaults_are_the_calibrated_values() -> None:
+    """Calibrated by the 2026-10-11 benchmark for the default rerank model and prompts."""
+    assert settings.agent.memory_recall_inject_threshold == 0.80
+    assert settings.agent.memory_recall_inject_max == 3
 
 
 # ── search failure degrades, never propagates ──
@@ -332,7 +349,7 @@ def test_defaults_match_the_documented_provisional_values() -> None:
 
 
 def _raise_on_search(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
-    def _boom(_q: str, _k: int, *, context: AvaContext) -> list[MemorySearchResult]:
+    def _boom(_q: str, _k: int, **_kwargs: object) -> list[MemorySearchResult]:
         raise exc
 
     monkeypatch.setattr(recall.gateway_client, "memory_search", _boom)
@@ -455,7 +472,10 @@ async def test_gateway_search_receives_each_explicit_host_context(
     ]
     seen: list[AvaContext] = []
 
-    def search(_query: str, _k: int, *, context: AvaContext) -> list[MemorySearchResult]:
+    def search(
+        _query: str, _k: int, *, purpose: str, context: AvaContext
+    ) -> list[MemorySearchResult]:
+        del purpose
         seen.append(context)
         return []
 
