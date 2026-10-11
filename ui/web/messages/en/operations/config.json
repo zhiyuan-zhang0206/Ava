@@ -9,7 +9,6 @@
   "notSet": "— not set —",
   "loadingModels": "Loading…",
   "perAgent": "per-agent",
-  "deprecated": "deprecated",
   "editOnCluster": "(edit on Cluster view)",
   "newValue": "New value",
   "saveFailed": "Save failed: {error}",

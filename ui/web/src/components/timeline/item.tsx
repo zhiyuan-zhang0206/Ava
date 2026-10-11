@@ -6,9 +6,9 @@
 // `./card`; ItemView renders only the body for each kind, unpadded, so the card
 // body wrapper controls spacing uniformly.
 //
-// -- Color mapping -- lives entirely in `./card`:messageCardConfig now. ItemView
-// no longer carries any per-kind border / background; it just emits the inner
-// content (markdown / code / envelope / marker payload).
+// -- Color mapping -- lives entirely in `./card`:messageCardConfig. ItemView
+// carries no per-kind border / background; it just emits the inner content
+// (markdown / code / envelope / marker payload).
 //
 // system_marker is the one split kind: the lifecycle / memory / note families
 // render their payload body here (their icon + title + color come from the card),

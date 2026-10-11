@@ -249,10 +249,10 @@ const DesktopLayout = memo(function DesktopLayout({
           </button>
         </div>
       ) : (
-        // The split ratio is EXEMPT from the localStorage→DB migration: it is a
-        // per-viewport layout value persisted by react-resizable-panels through
-        // its own synchronous Storage interface (useDefaultLayout), which does
-        // not bridge to the async user_settings API. Kept per-device by design.
+        // The split ratio is a per-viewport layout value persisted by
+        // react-resizable-panels through its own synchronous Storage interface
+        // (useDefaultLayout), which does not bridge to the async user_settings
+        // API. Kept per-device by design.
         <ResizablePanelGroup
           orientation="horizontal"
           defaultLayout={splitLayout.defaultLayout}

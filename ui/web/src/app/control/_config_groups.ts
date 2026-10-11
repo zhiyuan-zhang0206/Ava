@@ -289,11 +289,6 @@ export function isPerAgent(field: ConfigFieldView): boolean {
   return field.per_agent;
 }
 
-/** Whether the field is flagged deprecated (description convention). */
-export function isDeprecated(field: ConfigFieldView): boolean {
-  return field.description.startsWith("DEPRECATED");
-}
-
 /**
  * Render a config value for display — shared by the editable field rows and the
  * per-model resolution view so one value never reads two ways.

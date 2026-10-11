@@ -24,7 +24,7 @@ import { writeConfigOwners } from "./_owner_writes";
 // each group element id is a nav sub-anchor). Every row shows a sentence-case
 // label derived from the env var (the env var itself rides in the title
 // attribute) plus small tag badges: Runtime / CLI-only (effective
-// editability), the raw scope, per-agent, "Startup: <process>", deprecated.
+// editability), the raw scope, per-agent, "Startup: <process>".
 //
 // Interactions:
 // - bool fields → ON/OFF toggle, click PUTs immediately
@@ -73,7 +73,6 @@ import {
   fieldFilterTags,
   fieldLabel,
   formatConfigValue,
-  isDeprecated,
   isPerAgent,
 } from "../_config_groups";
 import { useSectionVisible } from "../_visibility";
@@ -710,7 +709,6 @@ function ConfigRow({
           <TagBadge>{field.scope}</TagBadge>
           {isPerAgent(field) && <TagBadge>{t("perAgent")}</TagBadge>}
           {field.restart_required && <TagBadge>Startup: {field.restart_required}</TagBadge>}
-          {isDeprecated(field) && <TagBadge>{t("deprecated")}</TagBadge>}
           {remoteReadOnly && (
             <span className="text-[11px] text-muted-foreground italic">
               {t("editOnCluster")}
