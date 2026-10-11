@@ -241,6 +241,99 @@ def test_write_directory_target_raises(tmp_path: Path) -> None:
         ava.files.write(str(d), "x")
 
 
+def _leftovers(directory: Path) -> list[str]:
+    return sorted(entry.name for entry in directory.iterdir())
+
+
+def test_write_replaces_an_existing_file_in_one_step(tmp_path: Path) -> None:
+    """The new content is built beside the target and renamed over it: a reader holding the old
+    file open keeps the old bytes (a new inode took its name) and no temporary file is left."""
+    target = tmp_path / "f.txt"
+    target.write_text("old content")
+    with target.open(encoding="utf-8") as reader:
+        ava.files.write(str(target), "new content")
+        assert reader.read() == "old content"
+    assert target.read_text() == "new content"
+    assert _leftovers(tmp_path) == ["f.txt"]
+
+
+def test_write_failing_midway_keeps_the_old_file_and_leaves_no_temporary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "f.txt"
+    target.write_text("old content")
+
+    def broken_replace(self: Path, _target: object) -> Path:
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(Path, "replace", broken_replace)
+    with pytest.raises(OSError, match="disk went away"):
+        ava.files.write(str(target), "new content")
+    assert target.read_text() == "old content"
+    assert _leftovers(tmp_path) == ["f.txt"]
+
+
+def test_write_failing_while_writing_leaves_no_half_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure after the temporary file exists but before it replaces anything: a new target
+    never appears, with or without a previous version."""
+
+    def exploding_fdopen(fd: int, *_args: object, **_kwargs: object) -> object:
+        os.close(fd)
+        raise OSError("no space left")
+
+    monkeypatch.setattr(os, "fdopen", exploding_fdopen)
+    with pytest.raises(OSError, match="no space left"):
+        ava.files.write(str(tmp_path / "new.txt"), "x" * 1000)
+    assert _leftovers(tmp_path) == []
+
+
+def test_write_keeps_the_permission_bits_of_an_existing_file(tmp_path: Path) -> None:
+    target = tmp_path / "script.sh"
+    target.write_text("#!/bin/sh\n")
+    target.chmod(0o750)
+    ava.files.write(str(target), "#!/bin/sh\necho hi\n")
+    assert target.stat().st_mode & 0o777 == 0o750
+
+
+def test_write_gives_a_new_file_the_mode_of_any_new_file(tmp_path: Path) -> None:
+    reference = tmp_path / "reference.txt"
+    reference.write_text("x")
+    ava.files.write(str(tmp_path / "new.txt"), "x")
+    assert (tmp_path / "new.txt").stat().st_mode & 0o777 == reference.stat().st_mode & 0o777
+
+
+@_skip_if_root
+def test_write_refuses_a_read_only_file_and_leaves_it_alone(tmp_path: Path) -> None:
+    target = tmp_path / "ro.txt"
+    target.write_text("keep")
+    target.chmod(0o444)
+    try:
+        with pytest.raises(PermissionError):
+            ava.files.write(str(target), "overwrite")
+        assert target.read_text() == "keep"
+        assert _leftovers(tmp_path) == ["ro.txt"]
+    finally:
+        target.chmod(0o644)
+
+
+def test_write_through_a_symlink_updates_the_file_it_points_at(tmp_path: Path) -> None:
+    real = tmp_path / "real.txt"
+    real.write_text("old")
+    link = tmp_path / "link.txt"
+    link.symlink_to(real)
+    ava.files.write(str(link), "new")
+    assert link.is_symlink() and real.read_text() == "new"
+    assert _leftovers(tmp_path) == ["link.txt", "real.txt"]
+
+
+def test_write_utf8_content_round_trips(tmp_path: Path) -> None:
+    target = tmp_path / "u.txt"
+    ava.files.write(str(target), "héllo ✓\nline two\n")
+    assert target.read_bytes() == "héllo ✓\nline two\n".encode()
+
+
 def test_delete_directory_target_raises(tmp_path: Path) -> None:
     """`delete(dir)` should not silently delete a dir — but the specific exception IsADirectoryError
     (Linux) vs PermissionError (macOS) is inconsistent across OS (POSIX unlink(2) EISDIR vs EPERM).

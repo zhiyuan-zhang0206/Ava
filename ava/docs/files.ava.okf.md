@@ -14,7 +14,7 @@ Persistent file operation interface for agents. Relative paths resolve to the ag
 ## Core API
 
 - `read(path, start=None, end=None, *, limit=None, with_line_numbers=False) → str` — read a file, supports 1-indexed line ranges. `limit` and `end` are mutually exclusive. Read content passes through injection scanning (clean content returned as-is).
-- `write(path, content)` — overwrite, auto-creates parent directories.
+- `write(path, content)` — overwrite, auto-creates parent directories. The write is atomic: the content goes to a temporary file in the same directory that then replaces the target (permission bits of an existing file are kept, a read-only file is refused), so a concurrent reader never sees a half-written file and a failed write leaves the old file and no temporary behind.
 - `append(path, content)` — append, creates if not exists.
 - `edit(path, old, new, *, replace_all=False)` — exact replacement. `old` defaults to matching once only; `replace_all=True` replaces all occurrences. On no match, error returns a diff hint of the closest match.
 - `delete(path)` — delete file (does not delete directories).
