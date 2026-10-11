@@ -18,13 +18,9 @@ from real incidents; the concrete sizes and dates are illustrative.
   checkpoint threads grow without bound (a real incident: 21GB in ~12h). Orphaned
   dev-cluster homes an older version left behind (a deleted worktree whose
   cluster was never stopped; a worktree no longer owns one).
-- Response: the checkpoint reaper (events-maintenance daemon) owns retention
-  automatically: Rule B hourly trims stale threads (terminated, or inactive
-  >24h) to keep=1; Rule A on the fast loop trims overgrown active threads
-  (>20 ckpts) to keep=5. Compaction-boundary checkpoints are always kept
-  (each past compaction segment stays recoverable). Physical space still
-  needs VACUUM FULL after large trims (a 42GB→27GB trim was recovered this
-  way). Stop a leftover cluster at an orphan home with `AVA_HOME=<home> ava stop -y`
+- Response: checkpoints are never deleted automatically (never-delete ruling);
+  the events-maintenance daemon only samples table sizes and runs the blob
+  vacuum. Reclaiming space is an operator-led capacity decision. Stop a leftover cluster at an orphan home with `AVA_HOME=<home> ava stop -y`
   *then* delete the directory; delete verified-obsolete backups only with
   user approval.
 
@@ -32,8 +28,7 @@ from real incidents; the concrete sizes and dates are illustrative.
 
 - Symptoms: OOM kills, agent processes growing, slow respawns.
 - Checks: RSS per process; the checkpointer's in-memory state; whether a
-  compaction or checkpoint-trim event explains a drop (checkpoint_trim keeps
-  N — cross-thread batch deletes are the anomaly, not the norm).
+  compaction explains a drop.
 - Causes: unbounded checkpoint accumulation (same as disk), a hot loop
   holding state, a leak in a long-lived daemon.
 - Response: attribute the exact consumer and use the smallest authorized
