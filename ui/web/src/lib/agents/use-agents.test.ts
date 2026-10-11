@@ -18,7 +18,7 @@ function row(agent_id: number, status: AgentRow["status"] = "idling"): AgentRow 
   return { agent_id, status, label: `Test #${agent_id}`, spawner: "user", fork_source_agent_id: null,
     pid: agent_id + 100, spawned_at: "2026-05-10T00:00:00Z", started_at: "2026-05-10T00:00:01Z",
     last_active_at: "2026-05-10T00:00:00Z", last_inbound_at: "2026-05-10T00:00:00Z",
-    machine: agent_id === 1 ? "test-host" : "wsl", supports_vision: true, awaiting_response_count: 0,
+    machine: agent_id === 1 ? "test-host" : "runner-a", supports_vision: true, awaiting_response_count: 0,
     highest_notice_priority: null, unread_notice_count: 0, heartbeat_paused_until: null, liveness_state: "online" };
 }
 const MOCK_AGENTS = [row(1, "running"), row(2)];
@@ -145,10 +145,10 @@ describe("useAgents.spawn", () => {
     });
 
     await act(async () => {
-      await result.current.spawn("wsl");
+      await result.current.spawn("runner-a");
     });
 
-    expect(api.spawnAgent).toHaveBeenCalledWith({ machine: "wsl" }, expect.any(String));
+    expect(api.spawnAgent).toHaveBeenCalledWith({ machine: "runner-a" }, expect.any(String));
   });
 
   it("failure → calls showError + returns null + does not change activeId", async () => {
@@ -209,8 +209,8 @@ describe("useAgents.fork", () => {
       returned = await result.current.fork(2);
     });
 
-    // source id=2 in MOCK_AGENTS has machine='wsl' → fork passes it through by default
-    expect(api.spawnAgent).toHaveBeenCalledWith({ fork_from: 2, machine: "wsl" }, expect.any(String));
+    // source id=2 in MOCK_AGENTS has machine='runner-a' → fork passes it through by default
+    expect(api.spawnAgent).toHaveBeenCalledWith({ fork_from: 2, machine: "runner-a" }, expect.any(String));
     expect(returned).toBe(99);
     expect(useStore.getState().activeId).toBe(99);
   });
@@ -251,7 +251,7 @@ describe("useAgents.fork", () => {
 
     expect(api.spawnAgent).toHaveBeenCalledWith({
       fork_from: 2,
-      machine: "wsl",
+      machine: "runner-a",
       prompt: "explore the auth flow",
       prompt_source: "user",
     }, expect.any(String));

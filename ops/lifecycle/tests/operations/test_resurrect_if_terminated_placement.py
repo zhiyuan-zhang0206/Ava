@@ -156,7 +156,7 @@ class TestResurrectIfTerminatedPlacement:
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: next(statuses))
-        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "wsl")
+        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "runner-a")
         monkeypatch.setattr(lifecycle, "machine_name", lambda: "gateway-host")
 
         async def _no_local(
@@ -178,7 +178,7 @@ class TestResurrectIfTerminatedPlacement:
             _db(), event_bus, 7, trigger_inbound_id=99, trigger_inbound_kind=InboundKind.CHAT
         )
         assert status is AgentStatus.IDLING
-        assert captured["target"] == "wsl"
+        assert captured["target"] == "runner-a"
         assert captured["kind"] == "lifecycle"
         assert captured["payload"] == {
             "path": "/api/agents/7/resurrect-if-pending-work",
@@ -195,11 +195,11 @@ class TestResurrectIfTerminatedPlacement:
         from ops.cluster.rpc import ClusterOpUnreachable
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
-        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "wsl")
+        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "runner-a")
         monkeypatch.setattr(lifecycle, "machine_name", lambda: "gateway-host")
 
         async def _unreachable(*_a: object, **_kw: object) -> dict:
-            raise ClusterOpUnreachable("ops server for machine='wsl' unreachable")
+            raise ClusterOpUnreachable("ops server for machine='runner-a' unreachable")
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
 
@@ -218,7 +218,7 @@ class TestResurrectIfTerminatedPlacement:
         from ops.cluster.rpc import ClusterOpFailed
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
-        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "wsl")
+        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "runner-a")
         monkeypatch.setattr(lifecycle, "machine_name", lambda: "gateway-host")
 
         async def _failed(*_a: object, **_kw: object) -> dict:
@@ -240,7 +240,7 @@ class TestResurrectIfTerminatedPlacement:
         from ops.cluster.rpc import ClusterOpFailed
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
-        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "wsl")
+        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "runner-a")
 
         async def refuse(*_args: object, **_kwargs: object) -> dict:
             if remote:
