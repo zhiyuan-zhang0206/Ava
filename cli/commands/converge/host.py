@@ -563,14 +563,14 @@ def _skip_reason(ctx: ConvergeCtx, step: ConvergeStep, *, is_prod_install: bool)
 
 def _desired_service_names(roles: MachineRoles | None) -> frozenset[str]:
     from base.deploy.lifecycle.service_selection import read_selection
-    from cli.commands._repo import _services_for_roles_annotated
+    from ops.spec import services_for_capabilities_annotated
 
     if roles is None:
         return frozenset()
     selection = read_selection()
     return frozenset(
         spec.session
-        for spec, gate in _services_for_roles_annotated(roles)
+        for spec, gate in services_for_capabilities_annotated(roles)
         if gate is None and selection.enabled(spec.session)
     )
 

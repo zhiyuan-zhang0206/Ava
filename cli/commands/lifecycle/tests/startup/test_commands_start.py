@@ -14,12 +14,12 @@ import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 from base.config import settings
 from base.telemetry import EventPipeline
-from cli.commands._repo import ServiceSpec
 from cli.commands._setup import _collect_setup_values as _real_collect_setup_values
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     _hermetic_start as _hermetic_start,
 )
 from cli.tests._commands_helpers import _FakeResult, _git_aware
+from ops.roster.service_spec import ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

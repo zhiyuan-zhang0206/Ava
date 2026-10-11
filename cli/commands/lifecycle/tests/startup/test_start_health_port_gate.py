@@ -202,7 +202,7 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequ
 def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> list[str]:
     launched: list[str] = []
     monkeypatch.setattr(
-        "cli.commands._repo._services_for_roles_annotated",
+        "ops.spec.services_for_capabilities_annotated",
         lambda _r: tuple((s, None) for s in specs),  # pyright: ignore[reportUnknownArgumentType] — roster test double
     )
     monkeypatch.setattr(

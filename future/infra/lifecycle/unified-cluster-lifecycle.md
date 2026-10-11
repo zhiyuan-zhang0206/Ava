@@ -31,8 +31,8 @@ state.
   No install/enroll wrapper or alternative service launcher remains at cutover.
 - One root owns ordinary application services per machine and home. macOS has
   `launchd -> signed helper -> ava-root`; Linux has `systemd/caller -> ava-root`.
-  Windows has its native launcher followed by root. Only macOS uses the helper
-  as an application permission ancestor. Root is not a privileged Unix account.
+  Only macOS uses the helper as an application permission ancestor. Root is not
+  a privileged Unix account.
 - Application replacement and durable resource lifetime are distinct. Database
   processes and deliberately persistent terminals need explicit native custody
   that survives application replacement. An unresponsive process or port alone
@@ -45,9 +45,7 @@ state.
 
 - Finish native root and resource custody on each supported platform. Prove
   deliberate shutdown does not fight OS restart policy, and test owner death,
-  interrupted spawn and unresponsive IPC. Windows terminal birth must originate
-  outside application Jobs through a registered resource owner; ordinary
-  execution cannot use that route as an untracked escape.
+  interrupted spawn and unresponsive IPC.
 
 ## Retired controller storage
 
@@ -193,8 +191,8 @@ A home born before this model is refused; no conversion exists
 
 CI owns deterministic lifecycle, interruption, upgrade and rollback contracts.
 Branch preview owns real topology and workload checks on the exact unmerged
-input using the same lifecycle. Native Windows/Linux CI and macOS execution are
-required for their respective process contracts; mocks cannot certify them.
+input using the same lifecycle. Native Linux CI and macOS execution are required
+for their respective process contracts; mocks cannot certify them.
 Production observation is the final check against real workload behavior.
 
 Quiescing has a bound: allow the initial drain, request the existing cancellation

@@ -182,10 +182,8 @@ def test_status_shows_browser_skip_reason(
     """Issue #1111: an enabled-but-incapable ava-browser is shown WITH its reason
     rather than silently dropped, so `ava status` (the first diagnostic command)
     is not blind to the broken service."""
-    from cli.commands import _repo
-
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(_repo.settings.services, "browser_enabled", True)
+    monkeypatch.setattr(settings.services, "browser_enabled", True)
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: "no display (headless)")
 
     def fake_run(_args, **_kwargs):
