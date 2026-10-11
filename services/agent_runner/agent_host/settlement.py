@@ -86,23 +86,11 @@ async def prompt_reap_after_recrash(
     *,
     enabled: Callable[[], bool],
 ) -> None:
-    """Terminate a corpse whose second crash settled right now (task #3616).
+    """Terminate an exactly matched corpse after a repeated crash.
 
-    The mark's first stamp bought the grace window — the one chance to
-    self-heal. A crash under an existing mark is the retry failing, so the
-    corpse reaper's termination (`agent.ownership.corpse_reap.reap_recrashed_corpse`,
-    same events) runs at once instead of letting a zombie spend the rest of
-    the window claiming and re-dying (the #3602 window). A turn that died
-    FIRST under its mark is not touched: the first grace stays whole.
-
-    Fail-closed: every gap — the gray switch still off, a settle that could
-    not reach idling, a row that moved on since — skips the reap with its
-    reason logged, and the grace-window reap stays the backstop.
-
-    A committed reap's recovery wake is consumed right here (task #4039):
-    the guarded auto-resurrect attempt runs immediately, and the delivery
-    watchdog's terminated-owner retry owns it if the attempt is refused or
-    loses a race with hosted-force quiescence.
+    The existing crash stamp, configured switch and settled incarnation fence
+    must all permit reaping. Publish termination diagnostics without enqueueing
+    new work or restarting the agent.
     """
     stamp = settlement.stamp
     if stamp is None or not stamp.recrash:

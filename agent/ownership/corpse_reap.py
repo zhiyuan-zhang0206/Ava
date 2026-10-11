@@ -18,8 +18,7 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
 class ReapedCorpse(NamedTuple):
-    """One committed termination, with the recovery wake it queued (`None`
-    when the recovery-wake switch is off)."""
+    """One committed termination; no recovery input is created."""
 
     agent_id: int
 
@@ -41,8 +40,8 @@ async def reap_crash_corpses(
     the generation that died; a row woken in the grace window either completes
     a turn (clears the mark) or parks and keeps it.
 
-    Returns the reaped agents with their committed recovery wakes; their
-    mounted frontends are refreshed best-effort after the durable flip.
+    Returns the reaped agents; mounted frontends are refreshed best-effort
+    after the durable flip.
 
     Owner scope is lease-qualified, not owner-only: a host restart mints a
     fresh owner UUID, so a corpse marked under a predecessor instance would
