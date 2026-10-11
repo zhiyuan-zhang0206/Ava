@@ -154,7 +154,6 @@ def test_private_tree_root_file_is_fatal(
     assert "is not a directory" in capsys.readouterr().err
 
 
-@pytest.mark.skipif(os.name == "nt", reason="FIFO nodes are POSIX-only")
 def test_metadata_marker_must_be_a_regular_file(
     home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -166,7 +165,6 @@ def test_metadata_marker_must_be_a_regular_file(
     assert "is not a regular file" in capsys.readouterr().err
 
 
-@pytest.mark.skipif(os.name == "nt", reason="FIFO nodes are POSIX-only")
 def test_non_regular_node_inside_a_tree_is_an_observation(
     home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -263,7 +261,6 @@ def test_missing_venv_interpreter_is_fatal(
     assert "is missing" in err
 
 
-@pytest.mark.skipif(os.name == "nt", reason="exec bits are POSIX-only")
 def test_venv_interpreter_without_exec_bit_is_fatal(
     home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -273,7 +270,6 @@ def test_venv_interpreter_without_exec_bit_is_fatal(
     assert "is not executable" in capsys.readouterr().err
 
 
-@pytest.mark.skipif(os.name == "nt", reason="exec bits are POSIX-only")
 def test_launcher_check_covers_the_ava_entry_point_only_for_the_update_leg(
     home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

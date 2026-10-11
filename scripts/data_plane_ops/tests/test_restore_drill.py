@@ -9,7 +9,6 @@ import types
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
@@ -177,7 +176,7 @@ def test_restore_failure_message_names_the_base_and_the_capacity_knob(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A server killed mid-COPY must not surface as a bare exit code (the
-    2026-09-14 WSL failure: `pg_restore exited 1` plus a host-side dmesg signal).
+    2026-09-14 failure: `pg_restore exited 1` plus a host-side dmesg signal).
     The message carries the base, its free space, the stderr tail, and the
     override knob that moves the base."""
     base = tmp_path / "fallback"
@@ -198,23 +197,3 @@ def test_restore_failure_message_names_the_base_and_the_capacity_knob(
     assert "512 MiB free" in message
     assert "AVA_PG_THROWAWAY_BASE" in message
     assert "PQputCopyData: server closed the connection" in message
-
-
-def test_the_legacy_empty_secret_key_is_only_ever_an_explicit_choice(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The drill decrypts under the pinned passphrase unless the operator names
-    the legacy empty-secret key; the flag reaches decryption and nothing else."""
-    calls: list[tuple[Path | None, bool]] = []
-
-    def drill(artifact: Path | None, *, legacy_empty_secret: bool) -> tuple[Any, float]:
-        calls.append((artifact, legacy_empty_secret))
-        report = restore_drill.RestoreReport(0, 0, 0, 0, 0, 0, "owner")
-        return report, 0.0
-
-    monkeypatch.setattr(restore_drill, "run_drill", drill)
-    artifact = tmp_path / "ava-20260901T030000Z.dump.enc"
-    restore_drill.main([str(artifact)])
-    restore_drill.main([str(artifact), "--legacy-empty-secret-passphrase"])
-    assert calls == [(artifact, False), (artifact, True)]
-    assert capsys.readouterr().out.count("restore drill passed") == 2

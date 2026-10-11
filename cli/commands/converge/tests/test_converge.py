@@ -84,7 +84,6 @@ def test_ensure_ava_home_dirs_recursively_converges_private_data_trees(home, tmp
         assert stat.S_IMODE(target.parent.parent.stat().st_mode) == 0o700
 
 
-@pytest.mark.skipif(os.name == "nt", reason="unix sockets are POSIX-only")
 def test_ensure_ava_home_dirs_survives_a_workspace_socket(tmp_path: Path):
     """A dead workspace socket must not abort the dir-skeleton step.
 

@@ -139,7 +139,6 @@ _HOST_INTEGRATION_STEP_NAMES = frozenset(
         "reap legacy-named sessions",
         "screen capture availability",
         "accessibility availability",
-        "reap stale Windows tasks",
         "health probe cron job",
         "watchdog probe job",
         "hold watchdog job",

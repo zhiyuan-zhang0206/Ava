@@ -53,7 +53,7 @@ unit can perform will ever free that port.
 
 ``home`` is the identity of a **unit**, not of a cluster, and the difference is
 load-bearing: on 2026-07-26 two agent-runners OF THE SAME CLUSTER shared one
-machine's localhost namespace (a WSL2 distro whose loopback Windows can reach),
+machine's localhost namespace (a mirrored loopback),
 so a mismatch here named a same-cluster neighbour. The message says "another
 unit's daemon" for that reason — reading it as "another cluster" sent the first
 diagnosis after port ALLOCATION, which was never the mechanism (issue #977).

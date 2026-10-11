@@ -4,7 +4,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -94,9 +94,7 @@ class CopyProof(VersionedRecord):
     @field_validator("directory")
     @classmethod
     def absolute_directory(cls, value: str) -> str:
-        if any(ord(c) < 32 for c in value) or not (
-            PurePosixPath(value).is_absolute() or PureWindowsPath(value).is_absolute()
-        ):
+        if any(ord(c) < 32 for c in value) or not PurePosixPath(value).is_absolute():
             raise ValueError("copy proof requires an absolute native directory")
         return value
 

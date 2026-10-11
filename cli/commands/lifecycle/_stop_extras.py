@@ -9,7 +9,7 @@ from __future__ import annotations
 
 
 def stop_permissions_helper(*, force: bool = False, timeout_s: float = 30.0) -> None:
-    """Stop this home's macOS helper; the Windows helper is user-wide."""
+    """Stop this home's macOS helper."""
     from base.config import settings
     from base.native_process.os_platform import is_macos
     from base.paths import ava_home

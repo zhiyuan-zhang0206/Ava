@@ -358,7 +358,7 @@ class TestProbeAgentRunner:
         """The probe deadline is `settings.gateway.status_probe_timeout_seconds`,
         not a hardcoded literal — a slow-but-healthy runner must not read
         offline because its snapshot outgrew a fixed 3s budget (task #1200:
-        wsl's status_snapshot measured 3.07-3.27s vs the old 3.0s, flipping
+        a runner's status_snapshot measured 3.07-3.27s vs the old 3.0s, flipping
         it offline while /healthz answered in ~15ms)."""
         from datetime import UTC, datetime
 
