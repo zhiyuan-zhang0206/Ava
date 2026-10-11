@@ -69,11 +69,9 @@ def _ensure_ava_home_dirs(ctx: ConvergeCtx) -> None:
     ensure_private_file(marker)
 
 
-def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:
     """Prepare the selected PostgreSQL 17 runtime and its pgvector extension."""
-    from base.config import settings
-
-    if settings.data_plane.is_remote:
+    if ctx.read_config().view.data_plane.is_remote:
         return
     from base.cluster.dataplane.pg_runtime import ensure_pg_runtime
 

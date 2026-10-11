@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineRoles
 from base.telemetry import EventPipeline
 from cli.commands.converge import health_preflight as _hp
@@ -22,14 +23,8 @@ from cli.tests.bootstrap.command_inputs import command_runtime as command_runtim
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-
-class _FakeDataPlane:
-    db_url = "postgresql://ava:sek@127.0.0.1:5433/ava"
-    redis_url = "redis://:sek@127.0.0.1:6380/0"
-
-
-class _FakeSettings:
-    data_plane = _FakeDataPlane()
+_PG_URL = "postgresql://ava:sek@127.0.0.1:5433/ava"
+_REDIS_URL = "redis://:sek@127.0.0.1:6380/0"
 
 
 def _preflight_ctx(
@@ -40,19 +35,18 @@ def _preflight_ctx(
     producer: Callable[[], EventPipeline],
     command_runtime: CommandRuntime,
 ) -> ConvergeCtx:
+    config = command_runtime.config
+    config.set_field("db_url", _PG_URL)
+    config.set_field("redis_url", _REDIS_URL)
     return ConvergeCtx(
         repo=tmp_path / "repo",
         ava_home=tmp_path / "home",
         roles=roles,
-        config=command_runtime.config,
+        config=config,
         database_factory=operator_database,
         producer=producer,
         machine=command_runtime.machine,
     )
-
-
-def _install_fake_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_hp, "settings", _FakeSettings())
 
 
 def _free_port() -> int:
@@ -187,7 +181,6 @@ def test_data_plane_gateway_cold_start_skipped(
     """Gateway with neither pg nor redis bound → nothing probed, no warnings: the
     start sequence brings the instance up right after converge, so probing now
     would warn on every boot."""
-    _install_fake_settings(monkeypatch)
     ctx = _preflight_ctx(
         tmp_path,
         operator_database=operator_database,
@@ -216,7 +209,6 @@ def test_data_plane_gateway_partial_up_probes(
     """Gateway with one of the two bound → probes, and a failed probe warns."""
     import socket
 
-    _install_fake_settings(monkeypatch)
     ctx = _preflight_ctx(
         tmp_path,
         operator_database=operator_database,
@@ -239,7 +231,7 @@ def test_data_plane_gateway_partial_up_probes(
 
         warnings = _hp._data_plane_warnings(ctx)
         assert any(w.startswith("postgres") and "Connection refused" in w for w in warnings)
-        assert _upstream["redis"] == [_FakeSettings.data_plane.redis_url]
+        assert _upstream["redis"] == [_REDIS_URL]
     finally:
         sock.close()
 
@@ -255,7 +247,6 @@ def test_data_plane_runner_probes_unconditionally(
 ):
     """A runner's plane is remote — an unreachable one is the real signal, so even
     a fully cold host probes (the runner has no local bring-up to fix it)."""
-    _install_fake_settings(monkeypatch)
     ctx = _preflight_ctx(
         tmp_path,
         roles=frozenset({"agent-runner"}),
@@ -265,8 +256,8 @@ def test_data_plane_runner_probes_unconditionally(
     )
 
     assert _hp._data_plane_warnings(ctx) == []  # probes pass → silent
-    assert _upstream["pg"] == [_FakeSettings.data_plane.db_url]
-    assert _upstream["redis"] == [_FakeSettings.data_plane.redis_url]
+    assert _upstream["pg"] == [_PG_URL]
+    assert _upstream["redis"] == [_REDIS_URL]
 
 
 def test_data_plane_unconfigured_skipped(
@@ -287,8 +278,34 @@ def test_data_plane_unconfigured_skipped(
         command_runtime=command_runtime,
     )
 
+    was_prepared = ctx.config.prepared
     assert _hp._data_plane_warnings(ctx) == []
     assert _upstream["pg"] == [] and _upstream["redis"] == []
+    assert ctx.config.prepared == was_prepared
+
+
+def test_preflight_keeps_reading_its_owners_live_urls(
+    tmp_path: Path,
+    _upstream: dict[str, list[str]],
+    operator_database: DatabaseFactory,
+    operator_pipeline: Callable[[], EventPipeline],
+    command_runtime: CommandRuntime,
+) -> None:
+    ctx = _preflight_ctx(
+        tmp_path,
+        roles=frozenset({"agent-runner"}),
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
+    assert _hp._data_plane_warnings(ctx) == []
+    changed_pg = "postgresql://ava:changed@127.0.0.1:5434/other"
+    changed_redis = "redis://:changed@127.0.0.1:6381/1"
+    ctx.config.set_field("db_url", changed_pg)
+    ctx.config.set_field("redis_url", changed_redis)
+    assert _hp._data_plane_warnings(ctx) == []
+    assert _upstream["pg"] == [_PG_URL, changed_pg]
+    assert _upstream["redis"] == [_REDIS_URL, changed_redis]
 
 
 def test_probe_postgres_reports_refused(postgres_access: None):

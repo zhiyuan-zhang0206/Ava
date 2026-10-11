@@ -25,6 +25,11 @@ clearing it still retires the existing job without an OS registration gate.
 Creating the context does not deliver configuration or register an OS job.
 The first selected config reader captures inputs already delivered by startup;
 converge itself does not repeat dotenv delivery or replace process environment.
+PostgreSQL runtime admission, WAL-G's remote-plane refusal and health-preflight
+URLs read this same configuration owner at their original step boundaries.
+Unconfigured health checks and disabled WAL-G retain their short circuits.
+Health findings remain warning-only; invalid WAL-G and local-runtime inputs
+retain their existing startup errors.
 Collector, browser and frontend preparation skip unselected services. Native
 LGTM downloads only selected backends, and invokes Loki's config validator only
 when Loki is selected. Readiness still checks every selected service.
