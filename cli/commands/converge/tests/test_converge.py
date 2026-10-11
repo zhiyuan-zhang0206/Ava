@@ -404,7 +404,7 @@ def test_ensure_pgbouncer_step_migrates_direct_url_to_pooler_when_enabled(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ):
-    """Enablement migrates a pre-F8b direct URL to the pooler and retires the old key."""
+    """Enablement rewrites a direct URL to the pooler."""
     ctx = _pgbouncer_ctx(
         tmp_path,
         monkeypatch,
@@ -416,7 +416,6 @@ def test_ensure_pgbouncer_step_migrates_direct_url_to_pooler_when_enabled(
     converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + _POOLED_URL in env  # the record's pooler 6433
-    assert "AVA_PGBOUNCER_PORT" not in env
 
 
 def test_ensure_pgbouncer_step_leaves_remote_url_untouched(
@@ -440,8 +439,8 @@ def test_ensure_pgbouncer_step_leaves_remote_url_untouched(
     converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + remote_url in env, "the remote URL must pass through byte-identical"
-    # The pooler port normalization (and the retired-key cleanup) is skipped
-    # wholesale on the remote branch — the URL's port is the provider's.
+    # The pooler port normalization is skipped wholesale on the remote branch —
+    # the URL's port is the provider's.
 
 
 def test_ensure_pgbouncer_step_rewrites_pooler_url_back_to_direct_when_disabled(
@@ -463,7 +462,6 @@ def test_ensure_pgbouncer_step_rewrites_pooler_url_back_to_direct_when_disabled(
     converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + _DIRECT_URL in env
-    assert "AVA_PGBOUNCER_PORT" not in env
 
 
 def test_ensure_pgbouncer_step_leaves_matching_url_untouched(
@@ -473,7 +471,7 @@ def test_ensure_pgbouncer_step_leaves_matching_url_untouched(
     operator_pipeline: Callable[[], EventPipeline],
 ):
     """A URL that already matches the toggle is not rewritten — no snapshot churn
-    every start — but the retired key is still dropped."""
+    every start."""
     ctx = _pgbouncer_ctx(
         tmp_path,
         monkeypatch,
@@ -485,7 +483,6 @@ def test_ensure_pgbouncer_step_leaves_matching_url_untouched(
     converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + _POOLED_URL in env
-    assert "AVA_PGBOUNCER_PORT" not in env
 
 
 def test_ensure_pgbouncer_step_leaves_operator_standin_untouched(
@@ -507,7 +504,6 @@ def test_ensure_pgbouncer_step_leaves_operator_standin_untouched(
     converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=postgresql://ava:dev@localhost:5432/ava" in env
-    assert "AVA_PGBOUNCER_PORT" not in env
 
 
 def test_ensure_pgbouncer_step_without_env_writes_nothing(

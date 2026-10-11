@@ -34,25 +34,31 @@ def _isolate_plugin_paths(
     monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
 
 
-def _write_plugin(name: str, ui: dict[str, object] | None, *, raw: str | None = None) -> None:
-    """A plugin directory with a `plugin.py` and, unless `raw` says otherwise, a
-    manifest declaring `ui`."""
+def _write_plugin(
+    name: str,
+    ui: dict[str, object] | None,
+    *,
+    raw: str | None = None,
+    manifest: bool = True,
+) -> None:
+    """A plugin directory with a `plugin.py` and, unless `raw` or `manifest=False` says
+    otherwise, a manifest declaring `ui` (none when `ui` is None)."""
     directory = paths.repo_plugins_dir() / name
     directory.mkdir()
     (directory / "plugin.py").write_text('"""A test plugin."""\n', encoding="utf-8")
     if raw is not None:
         (directory / "ava-plugin.json").write_text(raw, encoding="utf-8")
         return
-    if ui is None:
+    if not manifest:
         return
-    manifest = {
+    manifest_data = {
         "apiVersion": 2,
         "name": name.replace("_", "-"),
         "version": "1.0.0",
         "engines": {"ava": ">=0.1.0"},
-        "contributions": {"ui": ui},
+        "contributions": {} if ui is None else {"ui": ui},
     }
-    (directory / "ava-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (directory / "ava-plugin.json").write_text(json.dumps(manifest_data), encoding="utf-8")
 
 
 def _themes(client: TestClient) -> list[dict[str, object]]:
@@ -132,13 +138,25 @@ def test_two_plugins_merge_and_same_name_stays_distinguishable() -> None:
     assert {t["name"] for t in by_plugin.values()} == {"solarized"}
 
 
-def test_plugin_without_a_manifest_or_without_ui_is_skipped() -> None:
+def test_plugin_without_ui_is_skipped() -> None:
     _write_plugin("plain", None)
     _write_plugin("declares_other", {})
     write_local({"plugins": {"plain": {"enabled": True}, "declares_other": {"enabled": True}}})
 
     with TestClient(app) as client:
         assert _themes(client) == []
+
+
+def test_plugin_without_a_manifest_fails_the_endpoint_naming_it() -> None:
+    """Every plugin ships a manifest; one that does not is loud, not skipped."""
+    _write_plugin("plain", None, manifest=False)
+    write_local({"plugins": {"plain": {"enabled": True}}})
+
+    with TestClient(app) as client:
+        r = client.get("/api/ui/contributions")
+    assert r.status_code == 500, r.text
+    assert "plain" in r.text
+    assert "ava-plugin.json not found" in r.text
 
 
 def _stats(client: TestClient) -> list[dict[str, object]]:

@@ -14,7 +14,7 @@ across an agent, agent-host or gateway restart, and the price was a miniature tm
 around them: a host protocol, record and identity liveness, a host-versus-shell lifecycle, an orphan
 reaper, a record lock, an env handoff file and a CLI subprocess per operation (0.25 to 0.5 s each).
 Of the 34 shell bugs found between 2026-08-03 and 2026-10-03, 24 sat in that layer. The sovereignty
-also ran against the target process model (`future/infra/lifecycle/lifecycle-final-state.md`, case 1): every
+also ran against the target process model (`future/infra/lifecycle/lifecycle-final-state.md`, since removed, case 1): every
 long-lived process is a member of the root's tree.
 
 ## Decision

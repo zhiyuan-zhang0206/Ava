@@ -109,7 +109,7 @@ def _state_file(tmp_path: Any, name: str) -> Path:
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX modes are not Windows ACLs")
 def test_atomic_json_preserves_bytes_and_tightens_private_modes(tmp_path: Path) -> None:
-    path = tmp_path / "state" / "im_bridge" / "weixin_sync.json"
+    path = tmp_path / "state" / "im_bridge" / "private_state.json"
     path.parent.mkdir(parents=True, mode=0o755)
     path.parent.chmod(0o755)
     payload = {"token": "café", "items": [1, 2]}
@@ -125,7 +125,7 @@ def test_atomic_json_preserves_bytes_and_tightens_private_modes(tmp_path: Path) 
 def test_atomic_json_concurrent_writes_use_distinct_temps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    path = tmp_path / "state" / "im_bridge" / "weixin_sync.json"
+    path = tmp_path / "state" / "im_bridge" / "private_state.json"
     path.parent.mkdir(parents=True)
     barrier = Barrier(2)
     sources: list[Path] = []
@@ -157,7 +157,7 @@ def test_atomic_json_concurrent_writes_use_distinct_temps(
 def test_atomic_json_failed_replace_keeps_old_content_and_cleans_temp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    path = tmp_path / "state" / "im_bridge" / "weixin_sync.json"
+    path = tmp_path / "state" / "im_bridge" / "private_state.json"
     path.parent.mkdir(parents=True)
     path.write_bytes(b"old")
 
@@ -180,7 +180,6 @@ async def test_poll_forwards_message_and_caches_context_token(native_weixin: Nat
     assert cursor == "buf-1"
     assert adapter._tokens.get("peer-1") == "tok-abc"
     assert json.loads(adapter._tokens._path.read_text()) == {"peer-1": "tok-abc"}
-    assert not (adapter._tokens._path.parent / "weixin_sync.json").exists()
 
 
 async def test_send_echoes_context_token_and_headers(env: Any) -> None:
@@ -422,7 +421,6 @@ async def test_state_files_written_0600(native_weixin: NativeWeixin) -> None:
     assert len(paths) == 2
     for path in paths:
         assert path.stat().st_mode & 0o777 == 0o600
-    assert not (adapter._tokens._path.parent / "weixin_sync.json").exists()
 
 
 async def test_push_failures_counted_and_reset(env: Any) -> None:

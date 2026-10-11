@@ -1,4 +1,4 @@
-"""POST /api/packages/draft — the skill / plugin / MCP install entry.
+"""POST /api/keyed/v1/packages/draft — the skill / plugin / MCP install entry.
 
 Spawns an ava-package-installer agent for a natural-language "I want a
 capability like X" request. The spawn is stubbed so the tests assert only the
@@ -14,7 +14,11 @@ from fastapi.testclient import TestClient
 
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from gateway.agents.tests.creation.test_guarded_creation import HEADERS
+from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
+
+DRAFT_PATH = "/api/keyed/v1/packages/draft"
 
 
 @pytest.fixture
@@ -33,6 +37,8 @@ def spawn_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         *,
         catalog: ModelCatalog,
         authority: ConfigAuthority,
+        creation_key: str,
+        creation_identity: dict[str, object],
     ) -> SpawnedAgent:
         assert catalog is app.state.catalog
         assert authority is app.state.config_authority
@@ -55,6 +61,7 @@ def spawn_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     ],
 )
 def test_draft_spawns_installer_for_each_kind(
+    client: TestClient,
     db_conn: psycopg.Connection,
     spawn_calls: dict[str, object],
     kind: str,
@@ -62,11 +69,11 @@ def test_draft_spawns_installer_for_each_kind(
 ) -> None:
     """Each kind spawns the same installer, framed with that kind's trust cost —
     the framing is what the skill turns into the confirm gate."""
-    with TestClient(app) as client:
-        r = client.post(
-            "/api/packages/draft",
-            json={"kind": kind, "nl": "something that reads my Obsidian vault"},
-        )
+    r = client.post(
+        DRAFT_PATH,
+        json={"kind": kind, "nl": "something that reads my Obsidian vault"},
+        headers=HEADERS,
+    )
     assert r.status_code == 200, r.text
     assert r.json()["agent_id"] == 901
     assert spawn_calls["label"] == "ava-package-installer"
@@ -78,12 +85,11 @@ def test_draft_spawns_installer_for_each_kind(
 
 
 def test_draft_prompt_orders_the_whole_lifecycle(
-    db_conn: psycopg.Connection, spawn_calls: dict[str, object]
+    client: TestClient, db_conn: psycopg.Connection, spawn_calls: dict[str, object]
 ) -> None:
     """Installing is the middle of the job — the prompt must also order the
     verify / judge / report steps, not just 'install it'."""
-    with TestClient(app) as client:
-        r = client.post("/api/packages/draft", json={"kind": "mcp", "nl": "linear issues"})
+    r = client.post(DRAFT_PATH, json={"kind": "mcp", "nl": "linear issues"}, headers=HEADERS)
     assert r.status_code == 200, r.text
     prompt = str(spawn_calls["prompt"])
     for phrase in ("confirm with the user", "spawn a test agent", "adaptation"):
@@ -91,10 +97,9 @@ def test_draft_prompt_orders_the_whole_lifecycle(
 
 
 def test_draft_rejects_an_unknown_kind(
-    db_conn: psycopg.Connection, spawn_calls: dict[str, object]
+    client: TestClient, db_conn: psycopg.Connection, spawn_calls: dict[str, object]
 ) -> None:
     """`kind` is a closed enum — an unknown value is a 422, never a spawn."""
-    with TestClient(app) as client:
-        r = client.post("/api/packages/draft", json={"kind": "npm", "nl": "left-pad"})
+    r = client.post(DRAFT_PATH, json={"kind": "npm", "nl": "left-pad"}, headers=HEADERS)
     assert r.status_code == 422, r.text
     assert spawn_calls == {}

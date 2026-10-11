@@ -53,7 +53,7 @@ Each declaration derives attribution records (`PluginContributions.as_records`):
 | ava_syntax_fix | deterministic syntax fixes for agent code |
 
 ## Package Manifest (spec v2)
-The `ava-plugin.json` a package may ship — identity, dependencies, declared
+The `ava-plugin.json` every plugin ships — identity, dependencies, declared
 contribution surfaces (including the console's `contributions.ui`), lifecycle
 shape — and where each is validated: [[docs/plugins/package-manifest.ava.okf.md]].
 

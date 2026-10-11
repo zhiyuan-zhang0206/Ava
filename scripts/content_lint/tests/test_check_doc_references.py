@@ -166,10 +166,10 @@ def test_skip_flags_suppresses_an_invalid_flag(tmp_path: Path) -> None:
     assert check_doc(doc, commands, skip_flags=True) == []
 
 
-def test_live_cli_options_reject_wrong_command_and_accept_alias(tmp_path: Path) -> None:
+def test_live_cli_options_reject_wrong_command(tmp_path: Path) -> None:
     doc = tmp_path / "doc.md"
     doc.write_text(
-        "Use `ava stop --keep-infra` or `ava agents context 7 --limit 8`.\n"
+        "Use `ava stop --keep-infra` or `ava agents timeline 7 --limit 8`.\n"
         "Wrong: `ava start --keep-infra`.\n"
     )
     assert check_doc(doc, check_doc_references.ava_flags()) == [

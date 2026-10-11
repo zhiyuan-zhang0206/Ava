@@ -4,8 +4,7 @@
 > Came out of a "are we reinventing Kubernetes?" discussion. Decision: document
 > the mechanism + options, do not build yet — the footgun this targets is rare and
 > already half-mitigated. Build when it bites often enough to pay for the disk +
-> release-GC layer. Related: [`commit-pinned-cluster.md`](commit-pinned-cluster.md)
-> and the recovery flow in `cli/commands/_update_recover.py`.
+> release-GC layer.
 
 ## Why this came up
 

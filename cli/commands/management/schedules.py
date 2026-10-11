@@ -9,7 +9,7 @@ shell-level management surface: list / get / create / update / delete plus the c
 Most verbs forward to an existing route under `/api/schedules` and render the
 result — the gateway owns the effect (script syntax check, version snapshot,
 session reconcile), the CLI adds only arg parsing + rendering. This is the
-operator/agent primitive form: `POST /api/schedules/draft` (hand a natural-
+operator/agent primitive form: `POST /api/keyed/v1/schedules/draft` (hand a natural-
 language request to a schedule_writer agent) is deliberately NOT exposed here —
 the CLI writes a script it already has, it does not run a conversation. Two
 verbs never touch the gateway: `provision` (restores the built-ins) and

@@ -707,7 +707,6 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       errors: 41,
       alert_classes_active: 7,
       alert_classes_dismissed: 2,
-      total_events: 100,
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
@@ -736,7 +735,6 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       errors: 2,
       alert_classes_active: 0,
       alert_classes_dismissed: 5,
-      total_events: 100,
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
@@ -758,7 +756,6 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       errors: 0,
       alert_classes_active: 1,
       alert_classes_dismissed: 0,
-      total_events: 100,
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
@@ -803,7 +800,6 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       errors: 1,
       alert_classes_active: 1,
       alert_classes_dismissed: 2,
-      total_events: 100,
       plugin_stats: [],
     };
     state.statsError = new Error("stats endpoint 500");
@@ -827,7 +823,6 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       errors: 0,
       alert_classes_active: 0,
       alert_classes_dismissed: 0,
-      total_events: 0,
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
@@ -847,7 +842,6 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       errors: 0,
       alert_classes_active: 0,
       alert_classes_dismissed: 0,
-      total_events: 0,
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
@@ -868,7 +862,6 @@ describe("plugin stat cards", () => {
       errors: 0,
       alert_classes_active: 0,
       alert_classes_dismissed: 0,
-      total_events: 0,
       plugin_stats: pluginStats,
     };
   }
@@ -1008,7 +1001,6 @@ describe("StatsCards window selector", () => {
       errors: 1,
       alert_classes_active: 1,
       alert_classes_dismissed: 2,
-      total_events: 100,
       plugin_stats: [],
     };
 
@@ -1051,7 +1043,6 @@ describe("StatsCards window selector", () => {
       errors: 0,
       alert_classes_active: 0,
       alert_classes_dismissed: 0,
-      total_events: 100,
       plugin_stats: [],
     };
 

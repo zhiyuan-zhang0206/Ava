@@ -64,15 +64,17 @@ class WeixinIngressStore:
     @staticmethod
     def lock_binding(conn: Connection, binding: PollBinding) -> None:
         current = conn.execute(
-            "SELECT b.namespace,b.account_id,b.epoch,c.state FROM weixin_ingress_bindings b "
+            "SELECT b.namespace,b.account_id,b.epoch FROM weixin_ingress_bindings b "
             "JOIN weixin_ingress_cursors c USING(namespace,account_id) WHERE b.id=1 FOR UPDATE OF b,c"
         ).fetchone()
-        if current is None or current[:3] != (binding.namespace, binding.account_id, binding.epoch):
+        if current is None or tuple(current) != (
+            binding.namespace,
+            binding.account_id,
+            binding.epoch,
+        ):
             raise StalePollBindingError("Weixin poll account generation is superseded")
-        if current[3] == IngressBindingState.HELD:
-            raise RuntimeError("legacy Weixin cursor requires explicit operator account binding")
 
-    def initialize(self, namespace: str, account_id: str, legacy_cursor: str | None) -> PollBinding:
+    def initialize(self, namespace: str, account_id: str) -> PollBinding:
         if not namespace or not account_id:
             raise ValueError("Weixin poll requires a qualified namespace and account")
         epoch = uuid4()
@@ -88,9 +90,9 @@ class WeixinIngressStore:
                 (
                     namespace,
                     account_id,
-                    legacy_cursor or "",
-                    IngressBindingState.HELD.value,
-                    "legacy_unbound" if legacy_cursor is not None else "unverified_history",
+                    "",
+                    IngressBindingState.DRAINING.value,
+                    "unverified_history",
                 ),
             )
             row = conn.execute(
@@ -102,23 +104,6 @@ class WeixinIngressStore:
             return PollBinding(
                 namespace=namespace, account_id=account_id, epoch=epoch, cursor=row[0], state=row[1]
             )
-
-    def begin_cutover(self, binding: PollBinding, *, expected_cursor: str) -> PollBinding:
-        """Operator account evidence permits quarantine-only draining, never business execution."""
-        with write_transaction(self.require_pool()) as conn:
-            current = conn.execute(
-                "SELECT namespace,account_id,epoch FROM weixin_ingress_bindings WHERE id=1 FOR UPDATE"
-            ).fetchone()
-            if current != (binding.namespace, binding.account_id, binding.epoch):
-                raise StalePollBindingError("operator binding refers to a superseded account")
-            row = conn.execute(
-                "UPDATE weixin_ingress_cursors SET state='draining',binding_reason='operator_draining',updated_at=now() "
-                "WHERE namespace=%s AND account_id=%s AND state='held' AND cursor=%s RETURNING cursor",
-                (binding.namespace, binding.account_id, expected_cursor),
-            ).fetchone()
-            if row is None:
-                raise ValueError("legacy cursor binding requires the exact held cursor")
-        return binding.model_copy(update={"cursor": row[0], "state": IngressBindingState.DRAINING})
 
     @staticmethod
     def check_source(binding: PollBinding, source: ProviderSource) -> None:
@@ -173,7 +158,7 @@ class WeixinIngressStore:
                 (binding.namespace, binding.account_id),
             ).fetchone()
             if current_state is None or current_state[0] != IngressBindingState.ACTIVE:
-                raise RuntimeError("Weixin business admission requires active cutover proof")
+                raise RuntimeError("Weixin business admission requires an active binding")
             status, inbound_id = IngressStatus.RETAINED, None
             reason = route.reason
             if route.kind == IngressRouteKind.CHAT:
@@ -249,18 +234,15 @@ class WeixinIngressStore:
                 update={"cursor": row[0], "state": IngressBindingState(row[1])}
             )
 
-    def quarantine_or_adopt(
+    def quarantine(
         self,
         binding: PollBinding,
         source: ProviderSource,
         request: dict[str, Any],
         provider_payload: dict[str, Any],
         text: str,
-        client_message_id: str,
-        *,
-        quarantine_unknown: bool = True,
-    ) -> IngressReceipt | None:
-        """Adopt retained legacy chat proof; quarantine unknown history only during draining."""
+    ) -> IngressReceipt:
+        """Retain provider backlog that cannot be proven processed, never executing it."""
         self.check_source(binding, source)
         with write_transaction(self.require_pool()) as conn:
             self.lock_binding(conn, binding)
@@ -268,44 +250,20 @@ class WeixinIngressStore:
                 "SELECT state FROM weixin_ingress_cursors WHERE namespace=%s AND account_id=%s",
                 (binding.namespace, binding.account_id),
             ).fetchone()
-            expected = "draining" if quarantine_unknown else "active"
-            if current is None or current[0] != expected:
-                raise StalePollBindingError("Weixin adoption state changed")
+            if current is None or current[0] != IngressBindingState.DRAINING:
+                raise StalePollBindingError("Weixin quarantine state changed")
             previous = self.lookup_in_transaction(conn, source, request)
             if previous is not None:
                 return previous
-            old = conn.execute(
-                "SELECT id,agent_id,content,kind,source,payload FROM inbound_messages WHERE client_message_id=%s",
-                (client_message_id,),
-            ).fetchone()
-            if old is None and not quarantine_unknown:
-                return None
-            if old is not None and (old[2], old[3], old[4], old[5]) != (text, "chat", "user", None):
-                raise IngressIdentityConflictError(
-                    "legacy Weixin raw identity identifies another message"
-                )
-            if old is not None:
-                route = IngressRoute(kind=IngressRouteKind.CHAT, text=old[2], agent_id=old[1])
-                status, inbound_id, reason = (
-                    IngressStatus.ACCEPTED,
-                    old[0],
-                    "legacy_chat_receipt_adopted",
-                )
-            else:
-                route = IngressRoute(
-                    kind=IngressRouteKind.TERMINAL,
-                    text=text,
-                    reason="legacy_business_history_unproven",
-                )
-                status, inbound_id, reason = (
-                    IngressStatus.QUARANTINED,
-                    None,
-                    "legacy_business_history_unproven",
-                )
+            route = IngressRoute(
+                kind=IngressRouteKind.TERMINAL,
+                text=text,
+                reason="unproven_history_quarantined",
+            )
             row = conn.execute(
                 sql.SQL(
-                    "INSERT INTO weixin_ingress_receipts(namespace,account_id,sender_id,message_id,request,provider_payload,route,status,inbound_id,outcome_reason,completed_at) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now()) RETURNING {}"
+                    "INSERT INTO weixin_ingress_receipts(namespace,account_id,sender_id,message_id,request,provider_payload,route,status,outcome_reason,completed_at) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,now()) RETURNING {}"
                 ).format(sql.SQL(_RECEIPT_COLUMNS)),
                 (
                     source.namespace,
@@ -315,9 +273,8 @@ class WeixinIngressStore:
                     Jsonb(request),
                     Jsonb(provider_payload),
                     Jsonb(route.model_dump(mode="json")),
-                    status.value,
-                    inbound_id,
-                    reason,
+                    IngressStatus.QUARANTINED.value,
+                    route.reason,
                 ),
             ).fetchone()
             if row is None:
@@ -428,7 +385,7 @@ class WeixinIngressStore:
                 "UPDATE weixin_ingress_cursors SET cursor=%s,updated_at=now(), "
                 "state=CASE WHEN state='draining' AND %s THEN 'active' ELSE state END, "
                 "binding_reason=CASE WHEN state='draining' AND %s THEN 'operator_activated' ELSE binding_reason END "
-                "WHERE namespace=%s AND account_id=%s AND cursor=%s AND state<>'held' RETURNING cursor,state",
+                "WHERE namespace=%s AND account_id=%s AND cursor=%s RETURNING cursor,state",
                 (
                     cursor,
                     provider_empty,

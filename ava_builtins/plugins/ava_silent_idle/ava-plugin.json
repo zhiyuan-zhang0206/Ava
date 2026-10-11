@@ -1,0 +1,13 @@
+{
+  "apiVersion": 2,
+  "name": "ava_silent_idle",
+  "version": "1.0.0",
+  "engines": {
+    "ava": ">=2026.10.1"
+  },
+  "contributions": {
+    "hooks": [
+      "before_llm"
+    ]
+  }
+}

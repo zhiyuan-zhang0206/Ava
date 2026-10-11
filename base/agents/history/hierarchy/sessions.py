@@ -180,7 +180,7 @@ def load_covered_spans(pool: ConnectionPool, agent_id: int) -> list[tuple[int, i
     with pool.connection() as conn:
         rows = conn.execute(
             "SELECT span_start, span_end FROM understanding_nodes"
-            " WHERE agent_id = %s AND depth = 1 AND engine_version LIKE 'chunk-%%'"
+            " WHERE agent_id = %s AND depth = 1"
             " ORDER BY span_start",
             (agent_id,),
         ).fetchall()

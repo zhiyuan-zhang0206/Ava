@@ -121,7 +121,7 @@ ava packages rollback <name>                 # restore the previous tree kept by
   scan. It never writes the checkout (the core channel fetches commit objects
   only), and a differing local copy is replaced — reported, with the differing
   files named (a load-dir copy is derived state, never hand-edited).
-- Version contract: a package may ship an optional `ava-plugin.json` beside
+- Version contract: a skill package may ship an optional `ava-plugin.json` beside
   `SKILL.md` (`engines.ava` range / `requires_commit`). Out-of-range content is
   refused at landing (`blocked_version` in `status`) and dropped from the
   catalog at load time.

@@ -33,16 +33,15 @@ def test_sdk_inherits_idempotency_from_contracts() -> None:
     )
     assert contracts.idempotency_for("GET", "/api/agents/7") is Idempotency.IDEMPOTENT
     creation_contract = contracts.contract_for("POST", "/api/agents")
-    assert creation_contract is not None and creation_contract.transactional_idempotency
+    assert creation_contract is not None
     assert not creation_contract.legacy_keyed_retry
     guarded_contract = contracts.contract_for("POST", "/api/keyed/v1/agents")
-    assert guarded_contract is not None and guarded_contract.transactional_idempotency
+    assert guarded_contract is not None
     assert guarded_contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY
     assert not guarded_contract.legacy_keyed_retry
-    message_contract = contracts.contract_for("POST", "/api/agents/7/messages")
-    assert message_contract is not None and message_contract.transactional_idempotency
     reconcile_contract = contracts.contract_for("POST", "/api/agents/7/messages/reconcile")
-    assert reconcile_contract is not None and not reconcile_contract.transactional_idempotency
+    assert reconcile_contract is not None
+    assert reconcile_contract.idempotency is Idempotency.IDEMPOTENT
 
 
 def test_unknown_route_defaults_to_non_idempotent() -> None:
@@ -88,13 +87,6 @@ def test_contracts_have_no_unknown_semantics() -> None:
         assert c.pause in PauseSemantics, f"bad pause on {method} {_path}"
 
 
-def test_keyed_effect_contracts_require_business_transaction_ownership() -> None:
-    """A response cache cannot justify ambiguous retries of business effects."""
-    for (method, path), contract in contracts.ROUTE_CONTRACTS.items():
-        if contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY:
-            assert contract.transactional_idempotency, (method, path)
-
-
 @pytest.mark.parametrize(
     "method,path",
     [
@@ -107,5 +99,4 @@ def test_guarded_notice_contract_excludes_legacy_retry(method: str, path: str) -
     contract = contracts.contract_for(method, path)
     assert contract is not None
     assert contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY
-    assert contract.transactional_idempotency
     assert not contract.legacy_keyed_retry

@@ -3,8 +3,8 @@
 `scripts/structure/baseline/<component>/<area>.json` groups frozen entries
 by the first two components of their directory (`agent/graph` ->
 `agent/graph.json`, `cli/commands/_x.py` -> `cli/commands.json`,
-`scripts/lint_x.py` -> `scripts.json`). Historical flat shard names remain
-readable. A shard maps section names to their entries and omits empty sections. One file per area
+`scripts/lint_x.py` -> `scripts.json`). A shard maps section names to their
+entries and omits empty sections. One file per area
 keeps concurrent PRs off each other's lines. Existing entries can stay in their
 original shard when their files move; duplicate section/key pairs are errors.
 

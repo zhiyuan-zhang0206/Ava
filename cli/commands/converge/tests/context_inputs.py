@@ -64,7 +64,7 @@ def pgbouncer_context(
     producer: Callable[[], EventPipeline],
 ) -> converge_host.ConvergeCtx:
     """Wire ensure_pgbouncer_step's deps: a record (pooler 6433 / pg 5433), settings
-    reflecting the toggle, and an optional existing .env carrying the pre-cutover
+    reflecting the toggle, and an optional existing .env carrying
     AVA_DB_URL."""
     from base import cluster
 
@@ -86,7 +86,7 @@ def pgbouncer_context(
         tmp_path / "repo", tmp_path, operator_database=operator_database, producer=producer
     )
     if db_url is not None:
-        (tmp_path / ".env").write_text(f"AVA_DB_URL={db_url}\nAVA_PGBOUNCER_PORT=6433\n")
+        (tmp_path / ".env").write_text(f"AVA_DB_URL={db_url}\n")
     return ctx
 
 

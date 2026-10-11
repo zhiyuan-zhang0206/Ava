@@ -35,7 +35,7 @@ async def lock_inbound_owner(
         elif (
             generation == incarnation.generation
             and owner == incarnation.owner
-            and kind in ("process", "hosted")
+            and kind == "hosted"
             and status in ("running", "idling")
             and lease is not None
         ):

@@ -7,7 +7,7 @@ cannot see or kill.
 
 from __future__ import annotations
 
-from ops.spec import build_services
+from ops.roster import build_services
 
 
 def _spec_session() -> str:

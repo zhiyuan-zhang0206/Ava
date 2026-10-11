@@ -35,7 +35,6 @@ lives with the current agent documentation; these rows track its remaining work.
 | [Vendored data-plane binaries](infra/data/vendored-data-plane-binaries.md) | **Redis leg only** — Postgres vendoring landed (`base/cluster/dataplane/runtime_binaries.py`), redis still comes from brew/apt. Also the single home for slice 3 of the doc below |
 | [Embedded per-cluster data plane](infra/data/embedded-per-cluster-data-plane.md) | Retained design evidence; no independent implementation work. The Redis remainder is tracked only in the vendored-binaries row above |
 | [Auth / TLS design](infra/security/auth-tls-design.md) | **Phase 3 (TLS) only** — Phase 1 (fail-closed gateway auth) and Phase 2 (cookie session auth) are deployed |
-| [Cluster consistency: commit-level pinning](infra/lifecycle/commit-pinned-cluster.md) | **Superseded evidence, not an implementation backlog.** The pin/refusal proposal has no current writer or consumer; any new consistency work starts from the existing lifecycle and fail-fast-vs-reconcile owners, not this checklist |
 | [Ops module](../ops/docs/ops-module.md) | Spec / Status built. Native maintenance drain and the source-mode fleet update own lifecycle; pg-backup is a supervised scheduler service |
 | [Extension ownership](infra/extensions/extension-ownership.md) | **S2's sync event, then S3–S5** (design for issue #39): S1 done (decision + spec revision); S2 mostly built (cluster rows + blobs, converge/boot materialization, adoption sweep); S3 onward untouched |
 | [Decentralized install + local config](infra/extensions/decentralized-install-and-config.md) | **Hooks-only plugin bundles only** — everything else (install registry, CC plugin materialization, `type="mcp"` packages, the cross-machine inventory UI) landed. The per-machine enable-state direction is proposed to be reversed by [extension-ownership](infra/extensions/extension-ownership.md) |
@@ -50,7 +49,6 @@ lives with the current agent documentation; these rows track its remaining work.
 | [Living tech-debt ledger](tech-debt/ledger.md) | Single "what debt is open now" register maintained by the sweeper engine |
 | [Checkpoint storage rebuild](infra/data/checkpoint-storage-rebuild.md) | **Observation-window calibrations (Section 7)** — delta-channel storage, keep-everything retention (R1–R4), read-time fold, and the reader-first write switch are all landed and deployed (write switch 2026-09-14, task #3180) |
 | [Heartbeat design](infra/lifecycle/heartbeat-design.md) | Original research evidence for the rejected two-tier proposal; the opt-out decision and current heartbeat implementation own behavior, with no remaining work assigned to this source |
-| [Process / service lifecycle final state](infra/lifecycle/lifecycle-final-state.md) | Superseded source evidence: preserve permission-ancestry measurements and the original P1–P7 checklist. Current runtime belongs to the component lifecycle docs; no migration window is pending from this draft |
 | [Model providers as plugins](../base/lm/docs/model-providers-as-plugins.md) | **Mechanics + Grok pilot landed** — registry, dispatch, vocabularies, key channel, and lazy load are built. Left: plugin dependency installation and deciding which remaining core providers should extract |
 
 ## Top level
@@ -80,3 +78,5 @@ lives with the current agent documentation; these rows track its remaining work.
 > the release-history dir (release history lives in the annotated git tags + `CHANGELOG.md`).
 >
 > **Cleaned up 2026-09-23 (sweeper pass).** Deleted as superseded with nothing left to track: `db-write-batching` (its subject was replaced by the event-system W1 and its conclusions carried over). Status rows refreshed: `extension-ownership`, `core-package-update-channel` (P1 landed), `checkpoint-storage-rebuild` (write switch landed), `frontend-plugin-contributions`.
+>
+> **Cleaned up 2026-10-11 (legacy pass).** Deleted as superseded with nothing left to track: `commit-pinned-cluster` and `lifecycle-final-state` (the decision records they fed stay in `docs/decisions/`). `checkpoint-storage-rebuild` lost its executed cutover steps; `unified-cluster-lifecycle` lost its executed cutover record.

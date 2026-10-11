@@ -5,8 +5,6 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi import APIRouter, FastAPI
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from gateway.agents import router as agent_router
@@ -149,34 +147,6 @@ def test_invalid_admission_has_zero_effect(
     assert (
         client.post(f"/api/keyed/v1/{surface}/draft", json=body, headers=headers).status_code == 422
     )
-    assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (0,)
-
-
-@pytest.mark.parametrize(
-    "source_router,surface,body",
-    [
-        (guide.router, "guide", {"nl": "one"}),
-        (schedules.router, "schedules", {"nl": "one"}),
-        (packages.router, "packages", {"nl": "one", "kind": "skill"}),
-    ],
-)
-def test_old_routing_cannot_execute_guarded_intent(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    source_router: APIRouter,
-    surface: str,
-    body: dict[str, str],
-) -> None:
-    old = FastAPI()
-    router = APIRouter()
-    for route in source_router.routes:
-        if isinstance(route, APIRoute) and not route.path.startswith("/api/keyed/"):
-            router.routes.append(route)
-    old.include_router(router)
-    with TestClient(old) as value:
-        assert value.post(
-            f"/api/keyed/v1/{surface}/draft", json=body, headers=HEADERS
-        ).status_code in (404, 405)
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (0,)
 
 

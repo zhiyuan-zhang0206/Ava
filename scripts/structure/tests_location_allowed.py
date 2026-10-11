@@ -304,10 +304,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "tests the reference watcher scripts of the ava_builtins skills",
     ),
-    "tests/skills/use_other_agents/test_spawn_runtime_compat.py": (
-        "contract",
-        "tests the spawn scripts of the ava_builtins/skills/platform/ava-guide/external-agents skill",
-    ),
     "tests/harness/test_asyncio_stall_probe.py": (
         "contract",
         "tests the CI stall probe, tests/_asyncio_stall_probe.py",
