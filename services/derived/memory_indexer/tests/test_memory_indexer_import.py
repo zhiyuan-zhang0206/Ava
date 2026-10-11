@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).parents[4]
+_PROBE = Path(__file__).with_name("child_daemon_import.py")
 _BACKEND_PREFIX = "services.derived.memory_indexer.backends."
 _CONCRETE_BACKENDS = {
     f"{_BACKEND_PREFIX}numpy",
@@ -16,7 +17,7 @@ _CONCRETE_BACKENDS = {
 }
 
 
-def _run_fresh_daemon_import(tmp_path: Path, code: str) -> subprocess.CompletedProcess[str]:
+def _run_fresh_daemon_import(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Import the daemon in a fresh interpreter with an isolated unit home."""
     (tmp_path / ".env").write_text(
         "AVA_MACHINE_NAME=test-box\n"
@@ -36,7 +37,7 @@ def _run_fresh_daemon_import(tmp_path: Path, code: str) -> subprocess.CompletedP
     env.pop("AVA_PROCESS_PROFILE", None)
     env.pop("AVA_AGENT_ID", None)
     return subprocess.run(  # noqa: S603 — fixed interpreter and repository-owned code
-        [sys.executable, "-c", code],
+        [sys.executable, str(_PROBE), *args],
         cwd=_REPO_ROOT,
         check=True,
         capture_output=True,
@@ -48,18 +49,7 @@ def _run_fresh_daemon_import(tmp_path: Path, code: str) -> subprocess.CompletedP
 
 def test_daemon_import_does_not_load_backend_implementations(tmp_path: Path) -> None:
     """Importing the daemon must leave every concrete backend unselected."""
-    result = _run_fresh_daemon_import(
-        tmp_path,
-        f"""
-import json
-import sys
-
-import services.derived.memory_indexer.daemon
-
-prefix = {_BACKEND_PREFIX!r}
-print(json.dumps(sorted(name for name in sys.modules if name.startswith(prefix))))
-""",
-    )
+    result = _run_fresh_daemon_import(tmp_path, "backends", _BACKEND_PREFIX)
 
     imported = set(json.loads(result.stdout))
     assert imported.isdisjoint(_CONCRETE_BACKENDS)
@@ -67,16 +57,7 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith(prefix))
 
 def test_daemon_cold_import_completes_within_updater_budget(tmp_path: Path) -> None:
     """The daemon import must remain comfortably inside the updater timeout."""
-    result = _run_fresh_daemon_import(
-        tmp_path,
-        """
-import time
-
-started = time.monotonic()
-import services.derived.memory_indexer.daemon
-print(time.monotonic() - started)
-""",
-    )
+    result = _run_fresh_daemon_import(tmp_path, "timing")
 
     # 20s leaves broad host variance while catching the 38–52s eager-import regression
     # before the updater's 30s timeout is reached.

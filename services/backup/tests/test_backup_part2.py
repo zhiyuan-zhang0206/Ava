@@ -8,11 +8,6 @@ to the host's timezone would pass or fail by which machine ran it.
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-import textwrap
-import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -25,7 +20,6 @@ from services.backup import dump as backup
 from services.backup.artifact import offsite
 
 _CLUSTER_TZ = "America/Los_Angeles"
-_REPO = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture
@@ -55,41 +49,6 @@ def _disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(offsite, "publish", _skip)
-
-
-def _spawn_backup_lock_holder(
-    ava_home: Path, ready: Path, hold_s: float
-) -> subprocess.Popen[bytes]:
-    """A separate interpreter that takes `backup_lock`, signals, and holds it."""
-    code = textwrap.dedent(f"""
-        import sys
-        import time
-        from pathlib import Path
-
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.backup.dump import backup_lock
-
-        with backup_lock(timeout_s=60):
-            Path({str(ready)!r}).write_text("1", encoding="utf-8")
-            time.sleep({hold_s})
-    """)
-    env = dict(os.environ)
-    env["AVA_HOME"] = str(ava_home)
-    return subprocess.Popen(  # noqa: S603
-        [sys.executable, "-c", code],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=env,
-    )
-
-
-def _await_backup_lock_holder(ready: Path, proc: subprocess.Popen[bytes]) -> None:
-    deadline = time.monotonic() + 30
-    while not ready.exists():
-        assert proc.poll() is None, "the holder exited before taking the backup lock"
-        assert time.monotonic() < deadline, "the holder never took the backup lock"
-        time.sleep(0.02)
 
 
 # ─── the clock the schedule is read on ───

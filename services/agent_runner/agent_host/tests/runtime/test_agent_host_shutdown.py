@@ -240,9 +240,8 @@ def _shutdown_child(failure: str, home: Path) -> subprocess.CompletedProcess[str
     return subprocess.run(  # noqa: S603 -- fixed test helper in this checkout
         [
             sys.executable,
-            "-c",
-            "from services.agent_runner.agent_host.tests.runtime.test_agent_host_shutdown import _exercise_shutdown; "
-            "from pathlib import Path; import sys; _exercise_shutdown(sys.argv[1], Path(sys.argv[2]))",
+            str(Path(__file__).resolve().parents[1] / "agent_host" / "child_runtime_scenarios.py"),
+            "shutdown",
             failure,
             str(home),
         ],

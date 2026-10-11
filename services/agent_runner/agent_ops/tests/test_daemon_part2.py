@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import textwrap
 import time
 from pathlib import Path
 
@@ -21,7 +20,7 @@ from psycopg_pool import ConnectionPool
 
 from ops.rpc_schemas import LaunchAgentRequest
 
-_REPO = Path(__file__).resolve().parents[4]
+_CHILD = Path(__file__).with_name("child_daemon_exit.py")
 
 
 def _stub_pool() -> ConnectionPool:
@@ -98,30 +97,9 @@ def test_a_wedged_arm_does_not_hold_the_process_exit(tmp_path: Path) -> None:
     process is gone. It fails by timing out against the pre-fix code.
     """
     ready = tmp_path / "wedged"
-    script = textwrap.dedent(f"""
-        import pathlib, sys, time
-        sys.path.insert(0, {str(_REPO)!r})
-        from base.config import ConfigBoot
-        from base.config.service_read import ConfigAuthority
-        from services.agent_runner.agent_ops import boot, daemon
-
-        config = ConfigBoot()
-        config.boot()
-        runtime = config.ensure_eager()
-        authority = ConfigAuthority(
-            runtime, runtime if runtime.profile is None else config.complete_read_model(),
-            pathlib.Path({str(tmp_path)!r}) / ".env",
-        )
-        pool = boot.op_thread_pool(authority=authority)
-        pool.submit(lambda: (pathlib.Path({str(ready)!r}).write_text("1"), time.sleep(3600)))
-        while not pathlib.Path({str(ready)!r}).exists():
-            time.sleep(0.01)
-        boot.shutdown_op_pool(pool)
-        daemon._hard_exit(0)
-    """)
     started = time.monotonic()
     done = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", script],
+        [sys.executable, str(_CHILD), "wedged_arm", str(tmp_path), str(ready)],
         capture_output=True,
         text=True,
         timeout=30,  # the pre-fix code never returns; the timeout IS the failure
@@ -137,13 +115,11 @@ def test_a_wedged_arm_does_not_hold_the_process_exit(tmp_path: Path) -> None:
 def test_the_exit_code_survives_the_hard_exit(tmp_path: Path) -> None:
     """`_hard_exit` replaced a `raise` on the crash path, so the code a supervisor
     reads has to still distinguish a crash from a clean stop."""
-    script = textwrap.dedent(f"""
-        import sys
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.agent_runner.agent_ops import daemon
-        daemon._hard_exit(1)
-    """)
     done = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=30, check=False
+        [sys.executable, str(_CHILD), "hard_exit", "1"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert done.returncode == 1
