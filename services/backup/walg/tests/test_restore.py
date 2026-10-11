@@ -110,7 +110,7 @@ def _assert_data_directory_left_behind(destination: Path, socket_dirs: list[Path
 
 
 def test_recovers_to_the_target_lsn_and_never_touches_the_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_dirs: list[Path]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_dirs: list[Path], postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
     # max_connections above the default: the recovering instance only starts if it
@@ -139,7 +139,9 @@ def test_recovers_to_the_target_lsn_and_never_touches_the_source(
     _assert_data_directory_left_behind(destination, socket_dirs)
 
 
-def test_recovers_to_a_target_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recovers_to_a_target_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, postgres_access: None
+) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
     with archiving_postgres() as pg:
         scenario = _scenario(sandbox, pg)
@@ -156,7 +158,7 @@ def test_recovers_to_a_target_time(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 
 def test_without_a_target_recovery_replays_all_archived_wal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
     with archiving_postgres() as pg:
@@ -174,7 +176,7 @@ def test_without_a_target_recovery_replays_all_archived_wal(
 
 
 def test_a_backup_that_carries_archive_settings_still_cannot_archive(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, postgres_access: None
 ) -> None:
     """A source that once wrote archive settings into postgresql.auto.conf brings them back."""
     sandbox = make_sandbox(tmp_path, monkeypatch)
@@ -205,7 +207,7 @@ def test_a_backup_that_carries_archive_settings_still_cannot_archive(
 
 
 def test_a_missing_segment_between_backup_and_target_fails_recovery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_dirs: list[Path]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_dirs: list[Path], postgres_access: None
 ) -> None:
     """The target is only reachable through an unbroken chain: Postgres' own FATAL says so."""
     sandbox = make_sandbox(tmp_path, monkeypatch)
@@ -370,7 +372,7 @@ def test_control_settings_refuses_a_directory_without_a_control_file(tmp_path: P
 
 
 def test_a_role_the_restored_cluster_does_not_have_fails_at_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_dirs: list[Path]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_dirs: list[Path], postgres_access: None
 ) -> None:
     """The cluster's superuser is the source's initdb user. A role Postgres refuses never
     becomes valid, so the wait for promotion must end with Postgres' answer, not run out

@@ -20,6 +20,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_older_server_rejects_guarded_tool_before_creating_anything(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,

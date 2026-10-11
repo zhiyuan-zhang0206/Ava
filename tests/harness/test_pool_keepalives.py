@@ -120,7 +120,9 @@ def test_prepare_threshold_survives_the_merge(database_gate: ProcessDbGate) -> N
     assert "prepare_threshold" not in db.PG_KEEPALIVE_KWARGS
 
 
-def test_borrowed_connection_arms_the_kernel_keepalive(database_gate: ProcessDbGate) -> None:
+def test_borrowed_connection_arms_the_kernel_keepalive(
+    db_url: str, database_gate: ProcessDbGate
+) -> None:
     """The kwargs reach the kernel: a borrowed connection's socket carries our
     exact idle / interval / count on the fd libpq opened.
 
@@ -211,7 +213,9 @@ def test_log_sink_import_of_base_db_stays_deferred() -> None:
     )
 
 
-def test_gateway_pool_carries_keepalives(machine_identity: MachineIdentity) -> None:
+def test_gateway_pool_carries_keepalives(
+    gateway_data_plane: None, machine_identity: MachineIdentity
+) -> None:
     """`gateway/app.py`'s request-serving pool, asserted on the object the real
     lifespan builds. Sizing (max_size=8) is the site's own business; the posture
     is not."""

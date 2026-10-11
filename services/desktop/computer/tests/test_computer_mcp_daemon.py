@@ -225,7 +225,7 @@ async def test_list_tools_and_ping(*, database_gate: ProcessDbGate) -> None:
     assert ping["result"] == "pong"
 
 
-async def test_unknown_method_and_tool(*, database_gate: ProcessDbGate) -> None:
+async def test_unknown_method_and_tool(*, db_url: str, database_gate: ProcessDbGate) -> None:
     d = _daemon(database_gate=database_gate)
     assert (await d._dispatch(_req("nope")))["ok"] is False
     resp = await _call(d, "nope")

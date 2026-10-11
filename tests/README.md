@@ -247,8 +247,10 @@ keeps running with the layered values. Enforced by
 1. **`scope="session"` outside `tests/fixtures/provisioning.py` may not mutate a process global**
    (`os.environ`, a `settings` field, a module global). That plugin is the one
    exemption — the repo-root conftest loads it once per process, so "the session" and "my directory" are the same blast radius,
-   which is why `_provisioned_db` may set `AVA_DB_URL` and never put it back. Deeper
-   than that, narrow the scope or hoist the value up to `tests/fixtures/provisioning.py`. A session
+   but resource lifetime does not require permanent URL delivery: `_provisioned_db`
+   owns the instance, while the requesting function restores `AVA_DB_URL`, Settings
+   and the private `.env` on teardown. Deeper
+   than that, narrow the scope or return the owned value. A session
    fixture that owns only an expensive resource (`playwright_browser`,
    `frontend_proc`) and hands it back through the return value is fine and is not
    flagged.

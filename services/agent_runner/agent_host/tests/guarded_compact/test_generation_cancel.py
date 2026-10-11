@@ -21,6 +21,7 @@ from tests.fixtures.model_catalog import AddBindings
 
 
 async def test_actual_generation_cancel_has_one_attempt_closed_work_and_next_chat(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

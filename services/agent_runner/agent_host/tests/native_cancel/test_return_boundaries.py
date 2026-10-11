@@ -44,6 +44,7 @@ __all__ = ["blocked_host"]
 @pytest.mark.parametrize("fault_site", ["none", "after_ack"])
 @pytest.mark.parametrize("ending", ["provider_failure", "restart", "terminate"])
 async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,

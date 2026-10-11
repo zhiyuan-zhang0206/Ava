@@ -26,7 +26,7 @@ from services.upkeep.ttl_reaper import cadence, daemon, remote, shells, sweep
 
 
 @pytest.fixture
-def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+def pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
     p = base.db.pool(max_size=4, gate=database_gate)
     try:
         yield p

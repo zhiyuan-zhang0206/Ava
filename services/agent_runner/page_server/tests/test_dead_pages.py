@@ -34,7 +34,7 @@ _HOST = "127.0.0.1"
 
 
 @pytest.fixture
-def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+def pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
     p = base.db.pool(max_size=2, gate=database_gate)
     try:
         yield p
@@ -114,6 +114,7 @@ async def _round(pool: ConnectionPool, *, database_gate: ProcessDbGate) -> None:
 
 
 def test_only_open_show_pages_of_this_host_are_selected(
+    redis_url: str,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     *,
@@ -143,6 +144,7 @@ def test_only_open_show_pages_of_this_host_are_selected(
 
 
 async def test_a_dead_show_page_is_closed_and_its_owner_told_once(
+    redis_url: str,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     published: dict[str, list[Any]],
@@ -173,6 +175,7 @@ async def test_a_dead_show_page_is_closed_and_its_owner_told_once(
 
 
 async def test_the_owner_is_not_told_again_within_the_dedupe_window(
+    redis_url: str,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     published: dict[str, list[Any]],
@@ -201,6 +204,7 @@ async def test_the_owner_is_not_told_again_within_the_dedupe_window(
 
 
 async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
+    redis_url: str,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     published: dict[str, list[Any]],
@@ -239,6 +243,7 @@ async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
 
 
 async def test_a_quiesced_unit_skips_the_round(
+    redis_url: str,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     published: dict[str, list[Any]],
@@ -265,6 +270,7 @@ async def test_a_quiesced_unit_skips_the_round(
 
 
 async def test_a_failed_close_rolls_back_the_close_and_the_notice(
+    redis_url: str,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     published: dict[str, list[Any]],

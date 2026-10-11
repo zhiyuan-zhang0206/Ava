@@ -31,7 +31,7 @@ _H = 3600 * 1000
 
 
 @pytest.fixture
-def store() -> Iterator[CursorStore]:
+def store(db_url: str) -> Iterator[CursorStore]:
     """The daemon's shape: one pool on the cluster DB, shared across "restarts"."""
     pool: ConnectionPool[Any] = ConnectionPool(
         settings.data_plane.db_url, min_size=1, max_size=2, open=True

@@ -100,7 +100,11 @@ def test_prepare_retry_refuses_a_recorded_failure() -> None:
 
 
 def test_verify_drained_refuses_a_recorded_failure(
-    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate, machine_identity: MachineIdentity
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     first = _landed_member(db_conn, database_gate=database_gate, machine_identity=machine_identity)
     second = _landed_member(db_conn, database_gate=database_gate, machine_identity=machine_identity)
@@ -232,6 +236,7 @@ class _StartHarness:
 
 
 def test_start_redelivers_a_failed_continuation_and_releases_the_hold(
+    redis_url: str,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
     operator_database: DatabaseFactory,
@@ -260,6 +265,7 @@ def test_start_redelivers_a_failed_continuation_and_releases_the_hold(
 
 
 def test_start_reports_and_notifies_a_continuation_it_cannot_redeliver(
+    redis_url: str,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
     operator_database: DatabaseFactory,
@@ -299,6 +305,7 @@ def test_start_reports_and_notifies_a_continuation_it_cannot_redeliver(
 
 
 def test_start_does_not_revive_a_terminated_agent_whose_continuation_failed(
+    redis_url: str,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
     operator_database: DatabaseFactory,
@@ -327,6 +334,7 @@ def test_start_does_not_revive_a_terminated_agent_whose_continuation_failed(
 
 
 def test_failed_start_keeps_the_hold_and_its_receipts(
+    redis_url: str,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
     operator_database: DatabaseFactory,
@@ -357,6 +365,7 @@ def test_failed_start_keeps_the_hold_and_its_receipts(
 
 
 def test_unreadable_pointer_check_keeps_the_failure_receipts(
+    redis_url: str,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
     operator_database: DatabaseFactory,

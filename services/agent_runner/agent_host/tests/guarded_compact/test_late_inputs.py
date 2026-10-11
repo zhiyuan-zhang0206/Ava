@@ -29,6 +29,7 @@ async def wait_for_blocker(conn: psycopg.Connection, blocker: int) -> None:
 
 @pytest.mark.parametrize("ordering", ["input_first", "permit_first"])
 async def test_actual_trigger_orders_uncommitted_chat_against_application_permit(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

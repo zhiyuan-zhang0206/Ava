@@ -85,6 +85,7 @@ def _first_checkpoint(conn: psycopg.Connection, agent_id: int) -> str:
 class TestSpawnStamping:
     def test_absent_from_overlay_frozen_fields_are_stamped(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         *,
         config_authority: ConfigAuthority,
@@ -103,6 +104,7 @@ class TestSpawnStamping:
 
     def test_overlay_present_frozen_field_is_not_stamped(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         *,
         config_authority: ConfigAuthority,
@@ -124,6 +126,7 @@ class TestSpawnStamping:
 
     def test_the_cluster_default_model_is_what_gets_frozen(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         *,
         config_authority: ConfigAuthority,
@@ -145,6 +148,7 @@ class TestSpawnStamping:
 
     def test_a_later_default_flip_does_not_move_an_existing_agent(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         *,
         config_authority: ConfigAuthority,
@@ -214,6 +218,7 @@ class TestReplayOnWake:
 class TestForkInheritance:
     def test_a_fork_inherits_the_parents_stamp(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         *,
         config_authority: ConfigAuthority,
@@ -245,6 +250,7 @@ class TestForkInheritance:
 
     def test_a_fork_of_an_unstamped_agent_is_stamped_fresh(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         *,
         config_authority: ConfigAuthority,

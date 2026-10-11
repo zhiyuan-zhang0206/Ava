@@ -121,6 +121,7 @@ def test_one_bad_skill_aborts_a_whole_collection_before_the_first_copy(
 
 
 def test_accept_risk_installs_and_records_what_it_waived(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -149,6 +150,7 @@ def test_accept_risk_installs_and_records_what_it_waived(
 
 
 def test_a_clean_third_party_install_is_still_unreviewed(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -217,6 +219,7 @@ def test_register_and_enable_fold_the_typed_name_onto_the_real_directory(
 
 
 def test_trust_is_a_separate_human_verb(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -248,6 +251,7 @@ def test_trust_refuses_an_unknown_package(unit_home: Path, capsys: pytest.Captur
 
 
 def test_scan_reports_an_installed_package_and_exits_on_criticals(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
@@ -277,6 +281,7 @@ def test_scan_reports_an_installed_package_and_exits_on_criticals(
 
 
 def test_scan_surfaces_previously_accepted_findings(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
@@ -304,6 +309,7 @@ def test_scan_surfaces_previously_accepted_findings(
 
 
 def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],

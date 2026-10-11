@@ -85,7 +85,7 @@ def test_throwaway_pg_session_timezone_is_utc(db_conn: psycopg.Connection) -> No
 
 
 @pytest.fixture
-def scratch_pg_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+def scratch_pg_root(monkeypatch: pytest.MonkeyPatch, postgres_access: None) -> Iterator[Path]:
     """A short scratch throwaway base for tests that really start a server.
 
     The Postgres socket path (`.s.PGSQL.<port>`) is capped at 103 bytes, so the
@@ -227,3 +227,76 @@ def test_throwaway_pg_ctl_start_is_handed_the_built_start_env(
         assert conn.execute("select 1").fetchone() == (1,)
 
     assert start_envs == [sentinel]
+
+
+def test_stall_guard_joins_a_real_probe_before_releasing_access(
+    db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from threading import Event
+
+    from psycopg.conninfo import conninfo_to_dict
+
+    from base.cluster.dataplane import pg_stall_watchdog as guard
+
+    probed = Event()
+    probes: list[object] = []
+    owned: list[guard.StallWatchdog] = []
+    connect, watcher = psycopg.connect, guard.StallWatchdog
+
+    def observed_connect(*args: Any, **kwargs: Any):
+        connection = connect(*args, **kwargs)
+        probes.append(connection.execute("SELECT 1").fetchone())
+        probed.set()
+        return connection
+
+    def owned_watcher(admin: str, port: int) -> guard.StallWatchdog:
+        instance = watcher(admin, port)
+        owned.append(instance)
+        return instance
+
+    monkeypatch.setattr(guard, "_PROBE_INTERVAL_S", 0.01)
+    monkeypatch.setattr(guard, "StallWatchdog", owned_watcher)
+    monkeypatch.setattr(psycopg, "connect", observed_connect)
+    port = conninfo_to_dict(db_url)["port"]
+    assert isinstance(port, str)
+    with guard.stall_guard(db_url, int(port)):
+        assert probed.wait(3), "the owned watchdog must actually query its database"
+    assert probes and all(row == (1,) for row in probes)
+    assert not owned[0].is_alive(), "the DB access window must outlive its probe thread"
+
+
+def test_stall_guard_reports_a_probe_that_does_not_join(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from threading import Event
+
+    from base.cluster.dataplane import pg_stall_watchdog as guard
+
+    entered, release = Event(), Event()
+    owned: list[guard.StallWatchdog] = []
+    watcher = guard.StallWatchdog
+
+    def blocked_connect(*_args: object, **_kwargs: object):
+        entered.set()
+        assert release.wait(3)
+        raise psycopg.OperationalError("released test probe")
+
+    def owned_watcher(admin: str, port: int) -> guard.StallWatchdog:
+        instance = watcher(admin, port)
+        owned.append(instance)
+        return instance
+
+    monkeypatch.setattr(guard, "_PROBE_INTERVAL_S", 0.01)
+    monkeypatch.setattr(guard, "_PROBE_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(guard, "StallWatchdog", owned_watcher)
+    monkeypatch.setattr(psycopg, "connect", blocked_connect)
+    try:
+        with (
+            pytest.raises(RuntimeError, match=r"database probe .* still in flight"),
+            guard.stall_guard("postgresql://127.0.0.1:1/test", 1),
+        ):
+            assert entered.wait(3)
+    finally:
+        release.set()
+        owned[0].join(timeout=1)
+    assert not owned[0].is_alive()

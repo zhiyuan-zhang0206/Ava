@@ -482,6 +482,7 @@ def _seed_notice(
 
 
 def test_poll_reads_directly_from_db(
+    redis_url: str,
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
@@ -524,6 +525,7 @@ def test_poll_reads_directly_from_db(
 
 
 def test_list_queue_reads_directly_from_db(
+    redis_url: str,
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
@@ -554,6 +556,7 @@ def test_list_queue_reads_directly_from_db(
 
 
 def test_list_queue_limit_follows_config(
+    redis_url: str,
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
@@ -587,6 +590,7 @@ def test_list_queue_limit_follows_config(
 
 
 def test_unaccepted_notices_caps_at_display_default(
+    redis_url: str,
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,

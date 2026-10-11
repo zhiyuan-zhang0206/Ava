@@ -548,6 +548,7 @@ def test_fail_acceptance_requires_an_accepted_lease(
 
 
 def test_record_relay_failure_is_rate_limited(
+    redis_url: str,
     db_conn: psycopg.Connection,
     database: Database,
     *,
@@ -658,6 +659,7 @@ def test_abort_lease_leaves_the_automatic_end_note_to_the_resume_chain(
 
 
 def test_relay_liveness_alert_logs_only_for_stale_active_leases(
+    redis_url: str,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     database: Database,

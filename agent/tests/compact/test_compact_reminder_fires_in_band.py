@@ -224,6 +224,7 @@ async def test_compact_contract_reaches_request_without_resident_self(
 
 
 async def test_compact_summary_preserves_agent_continuity(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -262,6 +263,7 @@ async def test_compact_summary_preserves_agent_continuity(
 
 
 async def test_compact_summary_replaces_whole_history_no_tail(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -297,6 +299,7 @@ async def test_compact_summary_replaces_whole_history_no_tail(
 
 
 async def test_compact_summary_emits_compact_done(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
@@ -363,6 +366,7 @@ async def test_compact_summary_emits_compact_done(
 
 
 async def test_consecutive_compacts_both_processed(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -408,6 +412,7 @@ async def test_consecutive_compacts_both_processed(
 
 
 async def test_compact_with_empty_state_injects_system_message_and_summary(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -441,6 +446,7 @@ async def test_compact_with_empty_state_injects_system_message_and_summary(
 
 
 async def test_compact_with_super_long_summary_in_claim(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,

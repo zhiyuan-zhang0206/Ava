@@ -42,6 +42,7 @@ def _session_direct_url(_config: object = None, **_kwargs: object) -> str:
 
 
 def test_connect_runs_a_query(
+    db_url: str,
     process_gate: gate.ProcessDbGate,
 ) -> None:
     with db.connect(gate=process_gate) as conn, conn.cursor() as cur:
@@ -49,19 +50,20 @@ def test_connect_runs_a_query(
         assert cur.fetchone() == (1,)
 
 
-def test_connect_autocommit_passthrough(process_gate: gate.ProcessDbGate) -> None:
+def test_connect_autocommit_passthrough(db_url: str, process_gate: gate.ProcessDbGate) -> None:
     with db.connect(autocommit=True, gate=process_gate) as conn:
         assert conn.autocommit is True
 
 
 def test_connect_defaults_to_manual_commit(
+    db_url: str,
     process_gate: gate.ProcessDbGate,
 ) -> None:
     with db.connect(gate=process_gate) as conn:
         assert conn.autocommit is False
 
 
-def test_connect_url_bounds_statements_unless_unbounded() -> None:
+def test_connect_url_bounds_statements_unless_unbounded(db_url: str) -> None:
     """Against a real Postgres named explicitly: the door delivers the 60s
     statement ceiling by default and none when the caller dials unbounded."""
     url = settings.data_plane.db_url
@@ -73,6 +75,7 @@ def test_connect_url_bounds_statements_unless_unbounded() -> None:
 
 
 def test_pool_hands_out_working_connections(
+    db_url: str,
     process_gate: gate.ProcessDbGate,
 ) -> None:
     pool = db.pool(gate=process_gate, min_size=1, max_size=2)
@@ -364,7 +367,7 @@ def test_an_exempt_process_keeps_the_plain_restore(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.fixture
-def stored_minimum() -> Iterator[int]:
+def stored_minimum(db_conn: None) -> Iterator[int]:
     """The suite database's current `min_code_version`, restored when the test ends.
 
     The database outlives the test (one per worker), so a test that moves the

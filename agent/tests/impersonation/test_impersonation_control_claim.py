@@ -18,6 +18,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     *,
@@ -63,6 +64,7 @@ async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
 async def test_control_claim_records_superseded_accepted_intent(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     kind: str,
@@ -132,6 +134,7 @@ async def test_control_claim_records_superseded_accepted_intent(
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
 async def test_control_claim_preserves_unaccepted_intent(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     kind: str,

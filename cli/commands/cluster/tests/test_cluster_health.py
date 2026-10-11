@@ -196,6 +196,8 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_every_run_emits_the_heartbeat_healthy_or_not(
+    db_url: str,
+    redis_url: str,
     probe: Probe,
     all_checks_pass: None,
     _home: Path,
@@ -426,6 +428,8 @@ def test_source_tree_guard_skipped_is_a_distinct_alert(
 
 
 def test_signal_repeats_every_unhealthy_run_and_stops_when_healthy(
+    db_url: str,
+    redis_url: str,
     probe: Probe,
     all_checks_pass: None,
     _home: Path,
@@ -447,6 +451,8 @@ def test_signal_repeats_every_unhealthy_run_and_stops_when_healthy(
 
 
 def test_signal_names_the_failed_check(
+    db_url: str,
+    redis_url: str,
     probe: Probe,
     all_checks_pass: None,
     _home: Path,

@@ -368,7 +368,7 @@ def _run_drill(
 
 
 def test_the_drill_restores_the_newest_backup_to_the_newest_archived_segment_and_reads_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
     with archiving_postgres() as pg:
@@ -390,7 +390,7 @@ def test_the_drill_restores_the_newest_backup_to_the_newest_archived_segment_and
 
 
 def test_a_missing_segment_after_the_backup_fails_the_drill_and_cleans_up(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
     sockets: list[Path] = []
@@ -417,7 +417,7 @@ def test_a_missing_segment_after_the_backup_fails_the_drill_and_cleans_up(
 
 
 def test_without_anything_archived_after_the_backup_the_drill_recovers_to_the_end(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
     with archiving_postgres() as pg:
@@ -434,7 +434,7 @@ def test_without_anything_archived_after_the_backup_the_drill_recovers_to_the_en
 
 
 def test_a_database_without_a_conversation_fails_the_content_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
     with archiving_postgres() as pg:

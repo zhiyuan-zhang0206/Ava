@@ -26,8 +26,10 @@ New tests in an owned component inherit that
 execution requirement and fail if they attempt Postgres or Redis access.
 Explicit non-owned paths fail before collection. This process keeps unreachable
 data-plane sentinels, refuses Postgres/Redis provisioners and sync/async driver
-entry points, and never creates a native instance or its watchdog. Only native
-provisioning and per-test data-plane resets are omitted; private-home, identity,
+entry points, and never creates a native instance or its watchdog. Native
+processes also refuse undeclared driver access; ordinary fixture dependencies
+admit only their requested resources. Static processes never admit requests.
+Private-home, identity,
 plugin, leak and host-effect guards remain active for the entire process.
 The ownership list is an execution requirement, not a lint exemption. A parent
 directory, similarly named sibling or symlink escaping ownership is refused.
@@ -46,4 +48,4 @@ the static artifacts. Local pytest remains native unless explicitly selected.
 Nightly duration refresh still measures the full native environment, so its
 static-file timings do not measure this lane's cheaper execution cost.
 
-Isolation plugins: [[tests/docs/test-fixtures.ava.okf.md]].
+Isolation plugins: [[tests/docs/test-fixtures/test-fixtures.ava.okf.md]].

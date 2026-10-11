@@ -30,7 +30,7 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -318,7 +318,11 @@ def test_watch_work_heartbeats_an_unchanged_baselined_actionable_status(
     fake = _wire(monkeypatch, watch_work)
     monkeypatch.setattr(watch_work, "HEARTBEAT_SECONDS", 0)
     times = iter((0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0))
-    monkeypatch.setattr(watch_work.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(
+        watch_work,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(times), sleep=watch_work.time.sleep),
+    )
     work = tmp_path / "work.md"
     work.write_text("STATUS: DONE\n")
 

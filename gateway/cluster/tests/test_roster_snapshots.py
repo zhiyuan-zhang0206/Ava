@@ -313,6 +313,7 @@ def _snapshot_row(conn: psycopg.Connection, name: str, *, running_sha: str) -> N
 
 
 def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -341,6 +342,7 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
 
 
 def test_the_machines_endpoint_follows_the_same_two_modes(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,

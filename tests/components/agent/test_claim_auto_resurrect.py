@@ -26,6 +26,7 @@ from tests.fixtures.units import spawn_agent
 
 @pytest.fixture
 async def running_agent(
+    redis_url: str,
     aops_pool: AsyncConnectionPool,
     database: Database,
     *,

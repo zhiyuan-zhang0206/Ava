@@ -57,7 +57,9 @@ def event_pipeline(
 
 
 @pytest.fixture
-def pool():
+def pool(
+    db_url: str,
+):
     p = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
     try:
         yield p
@@ -200,6 +202,7 @@ class TestNudgeBackoffB7:
 
     def test_select_stretches_reminder_floor_by_level(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -232,6 +235,7 @@ class TestNudgeBackoffB7:
     @pytest.mark.usefixtures("event_pipeline")
     def test_reconcile_raises_level_after_n_consecutive_noops(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -273,6 +277,7 @@ class TestNudgeBackoffB7:
 
     def test_reconcile_clears_streak_on_real_inbound(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -317,6 +322,7 @@ class TestNudgeBackoffB7:
 
     def test_reconcile_clears_streak_on_pause(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -350,6 +356,7 @@ class TestNudgeBackoffB7:
 
     def test_raise_is_capped_at_24h_max_level(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -391,6 +398,7 @@ class TestNudgeBackoffB7:
     @pytest.mark.usefixtures("event_pipeline")
     def test_sweep_resets_level_on_real_inbound(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -435,6 +443,7 @@ class TestNudgeBackoffB7:
     @pytest.mark.usefixtures("event_pipeline")
     def test_sweep_leaves_level_without_engagement(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,

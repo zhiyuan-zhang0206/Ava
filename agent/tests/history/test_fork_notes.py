@@ -124,6 +124,7 @@ def test_fork_rebuild_dropping_a_conversation_message_is_rejected() -> None:
 
 @pytest.mark.usefixtures("skills_unit")
 async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -192,6 +193,7 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
 
 
 async def test_fork_without_payload_grafts_nothing(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,

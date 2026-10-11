@@ -75,6 +75,7 @@ def test_cluster_memory_index_is_not_on_fork(memory_plugin: Any) -> None:
 
 
 async def test_fork_end_to_end_single_copy_each_note(
+    redis_url: str,
     memory_plugin: Any,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -164,6 +165,7 @@ def _fake_note(tag: NoteTag, content: str, id: str) -> HumanMessage:
 
 
 async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
+    redis_url: str,
     memory_plugin: Any,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,

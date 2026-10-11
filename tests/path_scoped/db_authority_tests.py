@@ -246,7 +246,9 @@ def _reset(instance: Instance, database: str) -> None:
 
 
 @pytest.fixture
-def authority_unborn(_authority_instance: Instance, tmp_path: Path) -> Iterator[AuthorityCluster]:
+def authority_unborn(
+    _authority_instance: Instance, tmp_path: Path, postgres_access: None
+) -> Iterator[AuthorityCluster]:
     """A fresh owner-owned cluster database and private home, before birth."""
     database = f"ava_test_auth_{uuid.uuid4().hex[:12]}"
     with _authority_instance.admin("postgres") as conn:

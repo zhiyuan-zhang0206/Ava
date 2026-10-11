@@ -1,17 +1,16 @@
 """The suite's data plane and its session hooks.
 
-One throwaway native Postgres + Redis per pytest process (each xdist worker is
-its own session), pointed at through the settings singleton and the environment
-in place of the unreachable import-time sentinels that
-`tests.fixtures.env_bootstrap` planted. `_clean_state` truncates every per-test
-table and flushes Redis before each test, so every test starts on an empty
-database. This module also owns the session hooks that guard the run itself: the
+Each requested native resource has one session owner per pytest process (each
+xdist worker is its own session). Function fixtures deliver its URL through
+settings, environment and the private .env, then restore those surfaces. DB
+consumers drain telemetry and truncate; Redis consumers flush their server.
+Unrelated tests retain unreachable sentinels and the default driver refusal.
+This module also owns the session hooks that guard the run itself: the
 full-run guard (`pytest_configure`), the non-test-database refusal
 (`pytest_sessionstart`), and the leaked OS-job, runaway-memory and home cleanup
 (`pytest_sessionfinish`).
 
-The explicit static process skips native provisioning and resets; its owning
-plugin refuses data-plane effects, while these session hooks still run.
+Static processes refuse explicit resource requests; the session hooks still run.
 
 Sync vs async connection fixtures:
 - `db_conn`  (sync `psycopg.Connection`) — for root `db.py` shared helpers and
@@ -19,35 +18,25 @@ Sync vs async connection fixtures:
 - `adb_conn` (async `psycopg.AsyncConnection`) — for kernel `agent/db/__init__.py`
 """
 
+from __future__ import annotations
+
 import functools
 import os
 import re
 import subprocess
 import sys
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
-import psycopg
 import pytest
 import pytest_asyncio
-import redis
-from langgraph.checkpoint.postgres import PostgresSaver
 
-from base.cluster.machine.boot import machine_from_boot
-from base.config import ConfigBoot, settings
-from base.db import Database, insert_inbound_message, publish_inbound_wake
-from base.db.code_version_gate import ProcessDbGate
-from base.db.test_db_guard import assert_test_db_url
-from base.events.live.bus import EventBus
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from tests._containers import postgres, redis_server
 from tests._os_jobs import host_ava_os_jobs
 from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 from tests.fixtures.env_bootstrap import (
     _TEST_AVA_HOME,
-    UNPROVISIONED_DB_URL,
-    UNPROVISIONED_REDIS_URL,
 )
 from tests.fixtures.static_environment import static_mode
 from tests.fixtures.unit.gateway_auth import install_default_gateway_credentials
@@ -58,54 +47,39 @@ _OS_JOBS_AT_START = host_ava_os_jobs()
 _PROCESS_IMAGE_KEY = pytest.StashKey[LoadedCommit]()
 
 
-# ── Container provisioning: the fixture owns the database ──
-#
-# In the default native mode, a throwaway Postgres + Redis starts once per worker
-# (autouse), and settings + env are pointed at it (replacing the import-time
-# sentinel). Every test runs against a real, clean DB + Redis — `_clean_state`
-# truncates tables and flushes Redis before each test. This is deliberately
-# uniform rather than per-test fixture bookkeeping: most DB tests also touch
-# Redis through the gateway endpoints they exercise (events publish), so gating
-# Redis behind a per-test fixture was fragile (easy to miss, fails silently
-# against the sentinel). The fixed cost is ~one native pg/redis pair per worker,
-# started in parallel under `-n auto`.
-
-
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def _provisioned_db(
-    pytestconfig: pytest.Config, process_config: ConfigBoot, database_version: CodeVersion
+    pytestconfig: pytest.Config, process_config, database_version: CodeVersion
 ) -> Iterator[str]:
+    """Own one native cluster only when a database consumer requests it."""
     if static_mode(pytestconfig):
-        yield UNPROVISIONED_DB_URL
-        return
-    # Resolve the native process image before test bodies can replace subprocess.run.
+        pytest.fail("Static tests cannot request Postgres; use the native test environment.")
+    from langgraph.checkpoint.postgres import PostgresSaver
+
+    from base.cluster.machine.boot import machine_from_boot
+    from base.db.test_db_guard import assert_test_db_url
+    from tests._containers import postgres
+
+    # Resolve this entry's image before tests can replace subprocess.run.
     database_version.get()
     machine = machine_from_boot(process_config)
-    with postgres(machine_name=machine.name) as url:
-        # Belt: the throwaway provisioning must itself stay on a test database.
-        # If the throwaway db name ever changes, this assertion makes the
-        # change explicit (update base/db/test_db_guard.py) instead of silently
-        # loosening the session-start guard above.
+    with postgres(machine_name=machine.name, watch_stalls=False) as url:
         assert_test_db_url(url, context="_provisioned_db")
-        settings.data_plane.db_url = url
         process_config.set_field("db_url", url)
-        os.environ["AVA_DB_URL"] = url
-        _rewrite_test_env_file_line(_TEST_AVA_HOME / ".env", "AVA_DB_URL", url)
         with PostgresSaver.from_conn_string(url) as saver:
             saver.setup()
         yield url
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _provisioned_redis(pytestconfig: pytest.Config, process_config: ConfigBoot) -> Iterator[str]:
+@pytest.fixture(scope="session")
+def _provisioned_redis(pytestconfig: pytest.Config, process_config) -> Iterator[str]:
+    """Own one native server only when a Redis consumer requests it."""
     if static_mode(pytestconfig):
-        yield UNPROVISIONED_REDIS_URL
-        return
+        pytest.fail("Static tests cannot request Redis; use the native test environment.")
+    from tests._containers import redis_server
+
     with redis_server() as url:
-        settings.data_plane.redis_url = url
         process_config.set_field("redis_url", url)
-        os.environ["AVA_REDIS_URL"] = url
-        _rewrite_test_env_file_line(_TEST_AVA_HOME / ".env", "AVA_REDIS_URL", url)
         yield url
 
 
@@ -184,7 +158,7 @@ def pytest_configure(config: pytest.Config) -> None:
     if message is not None:
         pytest.exit(message, returncode=1)
     if _PROCESS_IMAGE_KEY not in config.stash:
-        config.stash[_PROCESS_IMAGE_KEY] = LoadedCommit.capture(config.rootpath)
+        config.stash[_PROCESS_IMAGE_KEY] = LoadedCommit.capture(Path(__file__).resolve().parents[2])
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
@@ -204,9 +178,9 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     re-imports this plugin, and subprocess tests inherit the pinned
     environment from their parent worker.
     """
-    assert_test_db_url(
-        settings.data_plane.db_url, context="pytest session (tests/fixtures/provisioning.py)"
-    )
+    from tests.fixtures.env_bootstrap import UNPROVISIONED_DB_URL
+
+    assert os.environ["AVA_DB_URL"] == UNPROVISIONED_DB_URL
 
 
 # The per-test TRUNCATE list — single source of truth. Kept as a module
@@ -312,25 +286,57 @@ _PER_TEST_TRUNCATE_TABLES = (
 
 
 @pytest.fixture(autouse=True)
-def _clean_state(
-    _provisioned_db: str,
-    _provisioned_redis: str,
-    monkeypatch: pytest.MonkeyPatch,
-    pytestconfig: pytest.Config,
-) -> Iterator[None]:
-    """Per-test isolation: truncate all tables and flush Redis before each test,
-    so every test starts against an empty DB + Redis on the session's native pg/redis.
-    Table schema is set up once per session by _provisioned_db.
+def _default_gateway_credentials(
+    monkeypatch: pytest.MonkeyPatch, pytestconfig: pytest.Config
+) -> None:
+    """Give in-process clients of the Gateway app the suite's cluster secret as bearer.
 
     The cluster API always authenticates, so the suite keeps its cluster secret
     (`env_bootstrap`) and every `TestClient` over the Gateway app carries it as its
     bearer by default (`tests.fixtures.unit.gateway_auth`); authentication tests patch
-    the secret or drop the header (`without_credentials`).
+    the secret or drop the header (`without_credentials`). The patch touches no store,
+    so it applies to every test outside the static environment.
     """
-    if static_mode(pytestconfig):
+    if not static_mode(pytestconfig):
+        install_default_gateway_credentials(monkeypatch)
+
+
+@pytest.fixture
+def _db_stall_guard(_provisioned_db: str, postgres_access: None) -> Iterator[None]:
+    """Own the cluster probe until this function's admitted DB users finish."""
+    from psycopg.conninfo import conninfo_to_dict
+
+    from base.cluster.dataplane.pg_stall_watchdog import stall_guard
+
+    port = conninfo_to_dict(_provisioned_db)["port"]
+    assert isinstance(port, str), "the native test database must publish its port"
+    with stall_guard(_provisioned_db, int(port)):
         yield
-        return
-    install_default_gateway_credentials(monkeypatch)
+
+
+@pytest.fixture
+def _clean_db(
+    _provisioned_db: str,
+    postgres_access: None,
+    _db_stall_guard: None,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> Iterator[None]:
+    """Drain prior writes and truncate before each admitted database consumer."""
+    import psycopg
+
+    from base.config import settings
+    from base.telemetry import event_store
+    from base.telemetry.emitter import sync
+    from base.telemetry.metrics.observed_metrics import close_projection
+
+    monkeypatch.setattr(settings.data_plane, "db_url", _provisioned_db)
+    monkeypatch.setitem(os.environ, "AVA_DB_URL", _provisioned_db)
+    env_file = _TEST_AVA_HOME / ".env"
+    previous_file = env_file.read_text()
+    request.addfinalizer(functools.partial(env_file.write_text, previous_file))
+    _rewrite_test_env_file_line(env_file, "AVA_DB_URL", _provisioned_db)
+    event_store.set_enabled(enabled=False)
     # Barrier before the TRUNCATE: the telemetry drain thread may hold a batch
     # dequeued during the previous test (events are written by that single
     # thread up to one flush_interval after enqueue). sync() drains the queue
@@ -339,9 +345,9 @@ def _clean_state(
     # exact-content flake class). Cheap: a marker
     # round-trip on an idle drain thread. No-op when the pipeline is absent or
     # already stopped.
-    from base import telemetry
-
-    telemetry.sync()
+    sync()
+    close_projection()
+    event_store.close_store()
     with psycopg.connect(settings.data_plane.db_url) as conn:
         # Retried on DeadlockDetected: the tolerated straggler class documented
         # on the TRUNCATE below (a background writer leaked from a prior test on
@@ -375,8 +381,35 @@ def _clean_state(
                 if attempt == 2:
                     raise
                 conn.rollback()
-    with redis.Redis.from_url(settings.data_plane.redis_url) as r:
-        r.flushdb()
+    try:
+        yield
+    finally:
+        sync()
+        close_projection()
+        event_store.close_store()
+        event_store.set_enabled(enabled=False)
+
+
+@pytest.fixture
+def _clean_redis(
+    _provisioned_redis: str,
+    redis_access: None,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> Iterator[None]:
+    """Flush only the server admitted by this consumer's Redis dependency."""
+    import redis
+
+    from base.config import settings
+
+    monkeypatch.setattr(settings.data_plane, "redis_url", _provisioned_redis)
+    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", _provisioned_redis)
+    env_file = _TEST_AVA_HOME / ".env"
+    previous_file = env_file.read_text()
+    request.addfinalizer(functools.partial(env_file.write_text, previous_file))
+    _rewrite_test_env_file_line(env_file, "AVA_REDIS_URL", _provisioned_redis)
+    with redis.Redis.from_url(_provisioned_redis) as client:
+        client.flushdb()
     yield
 
 
@@ -489,7 +522,17 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 
 @pytest.fixture
-def cluster_defaults_unset(db_conn: psycopg.Connection) -> Iterator[None]:
+def gateway_data_plane(
+    db_url: str,
+    redis_url: str,
+    _stub_label_llm: None,
+    _guard_schedule_session_control: None,
+) -> None:
+    """An assembled in-process Gateway consumes both resources and its owner guards."""
+
+
+@pytest.fixture
+def cluster_defaults_unset(db_conn) -> Iterator[None]:
     """Start the test from "the cluster has made no default-model choice".
 
     `cluster_defaults` is a seeded singleton (like cluster_pin) and is deliberately
@@ -512,9 +555,9 @@ def cluster_defaults_unset(db_conn: psycopg.Connection) -> Iterator[None]:
 
 
 @pytest.fixture
-def db_url() -> str:
+def db_url(_provisioned_db: str, _clean_db: None) -> str:
     """The session's test database URL, for tests that open their own connections."""
-    return settings.data_plane.db_url
+    return _provisioned_db
 
 
 @pytest.fixture(scope="session")
@@ -524,43 +567,60 @@ def database_version(pytestconfig: pytest.Config) -> CodeVersion:
 
 
 @pytest.fixture
-def database_gate(database_version: CodeVersion) -> ProcessDbGate:
+def database_gate(database_version: CodeVersion):
     """One test's nonexempt admission budget, shared by its explicit database builders."""
+    from base.db.code_version_gate import ProcessDbGate
     from base.telemetry import process_name
 
     return ProcessDbGate(process=process_name(), version=database_version.get)
 
 
 @pytest.fixture
-def database(database_gate: ProcessDbGate) -> Database:
+def database(db_url: str, database_gate):
     """The native test handle, sharing its test's explicit admission owner."""
+    from base.db import Database
+
     return Database.from_settings(gate=database_gate)
 
 
 @pytest.fixture
-def publish_wake(database: Database, event_bus: EventBus) -> Callable[[int, str], bool]:
+def publish_wake(database, event_bus) -> Callable[[int, str], bool]:
     """`publish_inbound_wake` bound to the session's handles, the wake callable a delivery takes."""
+    from base.db import publish_inbound_wake
+
     return functools.partial(publish_inbound_wake, database, event_bus)
 
 
 @pytest.fixture
-def insert_inbound(database: Database, event_bus: EventBus) -> Callable[..., int]:
+def insert_inbound(database, event_bus) -> Callable[..., int]:
     """`insert_inbound_message` bound to the session's handles."""
+    from base.db import insert_inbound_message
+
     return functools.partial(insert_inbound_message, database=database, bus=event_bus)
 
 
 @pytest.fixture
-def event_bus() -> EventBus:
+def redis_url(_provisioned_redis: str, _clean_redis: None) -> str:
+    """The admitted per-test Redis URL, including a clean initial keyspace."""
+    return _provisioned_redis
+
+
+@pytest.fixture
+def event_bus(redis_url: str):
     """The `EventBus` handle a composition root would pass down, bound to the session's test Redis."""
+    from base.events.live.bus import EventBus
+
     return EventBus.from_settings()
 
 
 @pytest.fixture
-def db_conn() -> Iterator[psycopg.Connection]:
-    """A sync psycopg.Connection on the session's test DB. Per-test isolation
-    is handled by the autouse `_clean_state`, so this fixture only opens and
+def db_conn(db_url: str):
+    """A sync psycopg.Connection on the requested test DB. Per-test isolation
+    is handled by the `db_url` dependency, so this fixture only opens and
     closes the connection."""
-    conn = psycopg.connect(settings.data_plane.db_url)
+    import psycopg
+
+    conn = psycopg.connect(db_url)
     try:
         yield conn
     finally:
@@ -568,10 +628,12 @@ def db_conn() -> Iterator[psycopg.Connection]:
 
 
 @pytest_asyncio.fixture
-async def adb_conn() -> AsyncIterator[psycopg.AsyncConnection]:
+async def adb_conn(db_url: str):
     """async counterpart of db_conn (the kernel's agent/db/__init__.py uses async). Cleanup
-    is the autouse `_clean_state`; this fixture only opens the AsyncConnection."""
-    aconn = await psycopg.AsyncConnection.connect(settings.data_plane.db_url)
+    is the `db_url` dependency; this fixture only opens the AsyncConnection."""
+    import psycopg
+
+    aconn = await psycopg.AsyncConnection.connect(db_url)
     try:
         yield aconn
     finally:
@@ -579,14 +641,14 @@ async def adb_conn() -> AsyncIterator[psycopg.AsyncConnection]:
 
 
 @pytest_asyncio.fixture
-async def aops_pool():
+async def aops_pool(db_url: str):
     """AsyncConnectionPool mirroring prod `agent/loop.py`'s db_pool config
     (the handle AvaContext exposes as `ops_pool`; autocommit + check_connection,
-    small). Cleanup is the autouse `_clean_state`."""
+    small). Cleanup is the `db_url` dependency."""
     from psycopg_pool import AsyncConnectionPool
 
     async with AsyncConnectionPool(
-        settings.data_plane.db_url,
+        db_url,
         min_size=1,
         max_size=2,
         kwargs={"autocommit": True, "prepare_threshold": None},
@@ -597,7 +659,7 @@ async def aops_pool():
 
 
 @pytest_asyncio.fixture
-async def aredis_inbound_listener():
+async def aredis_inbound_listener(redis_url: str):
     """RedisInboundListener for wait_for_inbound / claim_node tests. Like prod:
     a dedicated Redis pub/sub subscription, self-reconnecting. Bound to the
     fixed pseudo-agent channel (agent_id=0); tests that park in a real wake need
@@ -605,7 +667,7 @@ async def aredis_inbound_listener():
     per-agent listener instead. Closed on teardown."""
     from base.events.live.redis_listener import RedisInboundListener
 
-    listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=0)
+    listener = RedisInboundListener(redis_url, agent_id=0)
     try:
         yield listener
     finally:

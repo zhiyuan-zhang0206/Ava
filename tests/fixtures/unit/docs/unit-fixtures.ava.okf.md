@@ -75,9 +75,11 @@ not protect collection-time SDK state reads: collection declarations and
 imports must remain independent of the bound context. Open dynamic imports
 remain Unknown in source analysis; they are not a negative qualification rule.
 
-Global environment boot still prepares configuration before collection and bare
-function homes. Native DB/Redis provisioning, plugin restoration, leak checks
-and host guards retain their registration order. A bare home remains bare; the
+Global environment boot prepares private-home pins without constructing Settings.
+The session `process_config` fixture snapshots configuration when a consumer
+requests it, before that consumer's bare function home. Native DB/Redis resources
+follow their independent fixture dependencies; unrelated tests retain refusal.
+Plugin restoration, leak checks and lightweight host guards remain global. A bare home remains bare; the
 SDK environment never bootstraps configuration from that directory.
 
 ## SDK identity restoration

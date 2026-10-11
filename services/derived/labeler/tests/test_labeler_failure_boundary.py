@@ -329,6 +329,7 @@ async def test_dispatch_failure_stops_the_batch_without_rewriting_inbounds(
     ],
 )
 async def test_poll_failure_reaches_service_owner_without_retry(
+    db_url: str,
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
     config_authority: ConfigAuthority,

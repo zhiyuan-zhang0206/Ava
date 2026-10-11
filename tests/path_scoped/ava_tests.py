@@ -118,7 +118,7 @@ def _isolated_agent(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture
-def _agent_row(_isolated_agent: None) -> int:
+def _agent_row(_isolated_agent: None, db_conn: object) -> int:
     """Seed this worker's fake agent into agents_meta (session_index reset to 0).
 
     Depends on `_isolated_agent` so `ava.self.AGENT_ID` is already the worker's fake id

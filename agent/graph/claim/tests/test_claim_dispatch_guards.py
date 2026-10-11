@@ -27,6 +27,7 @@ from tests.fixtures.units import spawn_agent
 
 
 async def test_claim_unknown_kind_raises(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,

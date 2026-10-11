@@ -20,8 +20,12 @@ from base.packages.plugins import stats
 
 
 @pytest.fixture
-def stat_pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
-    """A sanctioned read pool on the session's test DB (caller-owned)."""
+def stat_pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+    """A sanctioned read pool on the session's test DB (caller-owned).
+
+    The pool resolves its target from the settings at construction, so the database
+    must already be admitted: `db_url` orders this fixture after that window.
+    """
     p = pool(gate=database_gate)
     try:
         yield p

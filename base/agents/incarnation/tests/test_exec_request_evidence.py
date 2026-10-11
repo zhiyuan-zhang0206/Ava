@@ -399,7 +399,7 @@ def test_diagnostics_name_the_file_the_owner_and_the_commands(
 
 
 def test_cli_lists_and_quarantines_reviewed_entries(
-    exec_dir: Path, quarantine_dir: Path, capsys: pytest.CaptureFixture[str]
+    db_url: str, exec_dir: Path, quarantine_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
 
@@ -413,7 +413,7 @@ def test_cli_lists_and_quarantines_reviewed_entries(
 
 
 def test_cli_refuses_an_unreviewed_retained_entry(
-    exec_dir: Path, quarantine_dir: Path, capsys: pytest.CaptureFixture[str]
+    db_url: str, exec_dir: Path, quarantine_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     request = _write_envelope(
         exec_dir, payload={"v": 1, "code": "x", "agent_id": _AGENT, "timeout_s": 5.0}, age_s=3600
@@ -425,7 +425,7 @@ def test_cli_refuses_an_unreviewed_retained_entry(
 
 
 def test_cli_force_still_quarantines_retained_evidence(
-    exec_dir: Path, quarantine_dir: Path, capsys: pytest.CaptureFixture[str]
+    db_url: str, exec_dir: Path, quarantine_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """--force keeps its review override for everything retention still holds."""
     request = _write_envelope(

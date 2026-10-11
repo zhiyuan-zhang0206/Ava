@@ -76,6 +76,7 @@ async def blocked_first_check(
 
 
 async def test_cancelled_dispatcher_unwinds_after_a_swallowed_pool_check_cancel(
+    redis_url: str,
     aops_pool: AsyncConnectionPool,
     blocked_first_check: asyncio.Event,
 ) -> None:

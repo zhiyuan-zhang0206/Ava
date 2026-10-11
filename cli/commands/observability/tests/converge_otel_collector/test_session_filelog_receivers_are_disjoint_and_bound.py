@@ -178,6 +178,7 @@ def test_station_has_separate_authenticated_reachable_receiver(
 
 
 def test_remote_observatory_gateway_relays_to_station_single_ingress(
+    db_url: str,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     *,
@@ -209,6 +210,7 @@ def test_remote_observatory_gateway_relays_to_station_single_ingress(
 
 
 def test_remote_observatory_relay_without_secret_fails_closed(
+    db_url: str,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     *,

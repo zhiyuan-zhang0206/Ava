@@ -20,6 +20,7 @@ from tests.fixtures.units import spawn_agent
 
 
 async def test_claim_compact_summary_alone_does_not_publish_committed(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -51,6 +52,7 @@ async def test_claim_compact_summary_alone_does_not_publish_committed(
 
 
 async def test_claim_compact_summary_with_no_existing_system_message(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -92,6 +94,7 @@ async def test_claim_compact_summary_with_no_existing_system_message(
 
 
 async def test_claim_compact_summary_returns_before_llm_with_halted_false(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,

@@ -96,6 +96,7 @@ def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str,
 class TestSpawnAgent:
     def test_inserts_thread_agent_and_starts_session(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -122,6 +123,7 @@ class TestSpawnAgent:
 
     def test_spawner_recorded(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -153,6 +155,7 @@ class TestSpawnAgent:
 
     def test_label_stored_sticky(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -188,6 +191,7 @@ class TestSpawnAgent:
 
     def test_persists_config_overlay(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -222,6 +226,7 @@ class TestSpawnAgent:
 
     def test_snapshot_reports_effective_model_vision_support(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         add_models: AddModels,
@@ -300,6 +305,7 @@ class TestSpawnAgent:
 
     def test_snapshot_effective_model_follows_the_birth_stamp(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -491,6 +497,7 @@ class TestSpawnerValidation:
 
     def test_agent_valid_id_accepted(
         self,
+        redis_url: str,
         db_conn,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -513,6 +520,7 @@ class TestSpawnerValidation:
 
     def test_user_spawner_accepted(
         self,
+        redis_url: str,
         db_conn,
         monkeypatch: pytest.MonkeyPatch,
         *,
@@ -534,6 +542,7 @@ class TestSpawnerValidation:
 
     def test_arbitrary_spawner_accepted(
         self,
+        redis_url: str,
         db_conn,
         monkeypatch: pytest.MonkeyPatch,
         *,

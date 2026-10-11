@@ -122,7 +122,7 @@ def _start_private_pooler(
 
 @pytest.fixture
 def native_pooler(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, postgres_access: None
 ) -> Iterator[tuple[OwnedPooler, str, str]]:
     binary = pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):

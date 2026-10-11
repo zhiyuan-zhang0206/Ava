@@ -41,7 +41,7 @@ def _log_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clean_state(*, database_gate: ProcessDbGate) -> None:
+def _clean_state(*, db_url: str, database_gate: ProcessDbGate) -> None:
     """Reset the in-process probe state between tests (the module dict is
     process-global, same as the watchdog would hold it)."""
     with base.db.connect(gate=database_gate) as conn, conn.cursor() as cur:

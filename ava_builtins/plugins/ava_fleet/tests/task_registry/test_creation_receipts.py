@@ -30,7 +30,7 @@ def _facts(db: psycopg.Connection) -> tuple[object, ...]:
 
 
 def test_concurrent_creation_returns_same_original_task(
-    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor, owner = _seed_agent(db_conn), _seed_agent(db_conn)
     barrier = Barrier(2)
@@ -64,7 +64,7 @@ def test_concurrent_creation_returns_same_original_task(
 
 
 def test_lost_response_returns_original_after_mutation_and_title_reuse(
-    db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pin_agent(_seed_agent(db_conn))
     real_emit = telemetry.emit_prepared
@@ -93,7 +93,7 @@ def test_lost_response_returns_original_after_mutation_and_title_reuse(
 
 
 def test_deleted_task_and_parent_replay_snapshot(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     pin_agent(_seed_agent(db_conn))
     parent = task_registry.create("parent", "work", parent=root_task_id, operation_key=str(uuid4()))
@@ -108,7 +108,7 @@ def test_deleted_task_and_parent_replay_snapshot(
 
 
 def test_default_intention_replays_original_and_owner_alias(
-    db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     actor = _seed_agent(db_conn)
     pin_agent(actor)
@@ -141,7 +141,7 @@ def test_default_intention_replays_original_and_owner_alias(
     "change", [{"description": "changed"}, {"parent": -1}, {"owner": -1}, {"priority": "P1"}]
 )
 def test_changed_request_conflicts_before_mutable_checks(
-    db_conn: psycopg.Connection, root_task_id: int, change: dict[str, Any]
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, change: dict[str, Any]
 ) -> None:
     pin_agent(_seed_agent(db_conn))
     kwargs: dict[str, Any] = {
@@ -198,7 +198,7 @@ def test_invalid_key_has_no_effect(
 
 
 def test_snapshot_validation_never_defaults_or_accepts_unknown_enum(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     pin_agent(_seed_agent(db_conn))
     snapshot: dict[str, object] = asdict(
@@ -216,7 +216,7 @@ def test_snapshot_validation_never_defaults_or_accepts_unknown_enum(
 
 
 def test_actor_scope_independent_and_new_key_keeps_title_constraint(
-    db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     first_actor, second_actor = _seed_agent(db_conn), _seed_agent(db_conn)
     pin_agent(first_actor)

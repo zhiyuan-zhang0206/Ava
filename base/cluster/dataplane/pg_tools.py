@@ -600,11 +600,18 @@ def _teardown_throwaway(
 
 @contextmanager
 def throwaway_postgres(
-    schema_sql: str | None = None, *, base: Path | None = None, foreground: bool = False
+    schema_sql: str | None = None,
+    *,
+    base: Path | None = None,
+    foreground: bool = False,
+    watch_stalls: bool = True,
 ) -> Generator[str]:
     """initdb a throwaway Postgres cluster on an ephemeral port, optionally
     apply schema + checkpoint tables, and yield a psycopg connection URL.
     The cluster is destroyed on context exit.
+
+    `watch_stalls=False` lets an owner with narrower database-access windows
+    hold `stall_guard` during those windows instead of this cluster's lifetime.
 
     Entering first sweeps clusters leaked by killed runs (see the block above), so
     an interrupted run's orphan is bounded by the next spin-up rather than held
@@ -761,7 +768,7 @@ def throwaway_postgres(
             with PostgresSaver.from_conn_string(url) as saver:
                 saver.setup()
 
-        with stall_guard(admin, port):
+        with stall_guard(admin, port) if watch_stalls else contextlib.nullcontext():
             yield url
     finally:
         _teardown_throwaway(tmp, data, registration, process, foreground=foreground)

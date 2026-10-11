@@ -15,7 +15,7 @@ def get_models(*, local_machine: MachineIdentity) -> ModelsResponse:
 
 
 def test_fast_services_have_separate_picker_prices_and_tps(
-    *, machine_identity: MachineIdentity
+    *, gateway_data_plane: None, machine_identity: MachineIdentity
 ) -> None:
     catalog = get_models(local_machine=machine_identity)
     standard = catalog.models["gpt-5.6-sol"]
@@ -34,7 +34,9 @@ def test_fast_services_have_separate_picker_prices_and_tps(
     assert wire["models"]["gpt-5.6-sol-fast"]["reference_tps"]["display"] == ">80"
 
 
-def test_picker_exposes_declared_fast_relationships(*, machine_identity: MachineIdentity) -> None:
+def test_picker_exposes_declared_fast_relationships(
+    *, gateway_data_plane: None, machine_identity: MachineIdentity
+) -> None:
     catalog = get_models(local_machine=machine_identity)
     assert catalog.models["gpt-5.6-sol-fast"].fast_of == "gpt-5.6-sol"
     assert catalog.models["gpt-5.6-sol"].fast_of is None
@@ -43,7 +45,7 @@ def test_picker_exposes_declared_fast_relationships(*, machine_identity: Machine
 
 
 def test_picker_exposes_served_service_cache_write_rates(
-    *, machine_identity: MachineIdentity
+    *, gateway_data_plane: None, machine_identity: MachineIdentity
 ) -> None:
     catalog = get_models(local_machine=machine_identity)
     standard = catalog.models["claude-opus-5-5"].pricing

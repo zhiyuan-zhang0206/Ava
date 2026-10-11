@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import NoReturn
 
 import pytest
 
@@ -74,37 +73,20 @@ def _argument_path(config: pytest.Config, arg: str) -> Path:
     return path if path.is_absolute() else config.invocation_params.dir / path
 
 
-def _refuse_data_plane(*_args: object, **_kwargs: object) -> NoReturn:
-    pytest.fail("Static tests cannot use Postgres or Redis; use the native test environment.")
-
-
 def _refuse_native_data_plane(patch: pytest.MonkeyPatch) -> None:
-    import psycopg
-    import redis
-    import redis.asyncio
-    from redis.asyncio.connection import AbstractConnection as AsyncRedisConnection
-    from redis.connection import AbstractConnection as RedisConnection
-
     from tests import _containers
-    from tests.fixtures.guards import _stub_everywhere
+    from tests.fixtures.guards import refuse_native_data_plane, stub_everywhere
 
-    for module, name in [
-        (psycopg, "connect"),
-        (_containers, "postgres"),
-        (_containers, "redis_server"),
-    ]:
-        _stub_everywhere(patch, module, name, _refuse_data_plane)
-    for connection in (psycopg.Connection, psycopg.AsyncConnection):
-        for name in ("connect", "cursor", "execute"):
-            patch.setattr(connection, name, _refuse_data_plane)
-    for cursor in (psycopg.Cursor, psycopg.AsyncCursor):
-        for name in ("execute", "executemany"):
-            patch.setattr(cursor, name, _refuse_data_plane)
-    for client in (redis.Redis, redis.asyncio.Redis):
-        patch.setattr(client, "execute_command", _refuse_data_plane)
-    for transport in (RedisConnection, AsyncRedisConnection):
-        for name in ("connect", "send_packed_command"):
-            patch.setattr(transport, name, _refuse_data_plane)
+    refuse_native_data_plane(
+        patch, reason="Static tests cannot use Postgres or Redis; use the native test environment."
+    )
+
+    def refuse_container(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Static tests cannot use Postgres or Redis; use the native test environment.")
+
+    # Keep the existing helper-entry refusal before even a private process starts.
+    stub_everywhere(patch, _containers, "postgres", refuse_container)
+    stub_everywhere(patch, _containers, "redis_server", refuse_container)
 
 
 def _select_static_paths(config: pytest.Config) -> None:

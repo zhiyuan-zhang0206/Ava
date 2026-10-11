@@ -171,6 +171,7 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
     "boundary", ["fresh", "same_owner", "foreign", "unowned", "fatal", "terminated"]
 )
 async def test_owner_recovery_scan_excludes_unrelated_rows(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     status: str,
@@ -224,6 +225,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
 
 @pytest.mark.parametrize("status", ["running", "idling"])
 async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     status: str,

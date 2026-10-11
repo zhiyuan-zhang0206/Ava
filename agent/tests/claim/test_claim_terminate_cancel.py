@@ -76,6 +76,7 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
 
 
 async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -100,9 +101,7 @@ async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=True),
         make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
+        thread_config(tid),
     )
     assert cmd.goto == END
     # Turn boundary only: no process exit, no other state touched.
@@ -110,6 +109,7 @@ async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
 
 
 async def test_claim_hosted_ends_turn_instead_of_parking(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -136,9 +136,7 @@ async def test_claim_hosted_ends_turn_instead_of_parking(
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
         make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
+        thread_config(tid),
     )
 
     assert cmd.goto == END
@@ -146,6 +144,7 @@ async def test_claim_hosted_ends_turn_instead_of_parking(
 
 
 async def test_claim_hosted_never_enters_idling_status(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -170,9 +169,7 @@ async def test_claim_hosted_never_enters_idling_status(
     await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
         make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
+        thread_config(tid),
     )
 
     with db_conn.cursor() as cur:
@@ -222,6 +219,7 @@ async def test_claim_hosted_still_dispatches_an_available_batch(
 
 
 async def test_claim_cancel_kind_halts_to_idle_without_marker(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -245,9 +243,7 @@ async def test_claim_cancel_kind_halts_to_idle_without_marker(
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
         make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
+        thread_config(tid),
     )
     # re-enter claim to idle (alive), not END (dead)
     assert cmd.goto == "claim"

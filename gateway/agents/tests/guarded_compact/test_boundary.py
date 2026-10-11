@@ -17,6 +17,7 @@ from services.agent_runner.agent_host.tests.guarded_compact.admission import adm
     "invalid", ["protocol_bool", "extra", "source_id_bool", "model_null", "segment_negative"]
 )
 async def test_strict_target_rejects_before_creating_another_receipt(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,
@@ -49,6 +50,7 @@ async def test_strict_target_rejects_before_creating_another_receipt(
 
 
 async def test_verified_principal_scope_key_and_changed_original_body(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,
@@ -91,6 +93,7 @@ async def test_verified_principal_scope_key_and_changed_original_body(
 
 @pytest.mark.parametrize("agent_id", [0, -1, 2**63])
 async def test_path_bounds_before_domain_access(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

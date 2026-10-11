@@ -196,6 +196,7 @@ def test_unowned_idle_intent_is_preserved_without_restart_or_termination(
 
 
 async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -513,6 +514,7 @@ async def _assert_cold_checkpoint_carries_the_exec_tool_result(
 
 
 async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_receipt(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,

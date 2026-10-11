@@ -18,6 +18,7 @@ from tests.fixtures.model_catalog import AddBindings
 
 
 async def test_real_chain_pool_one_provider_can_borrow_only_connection(
+    redis_url: str,
     db_conn: psycopg.Connection,
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

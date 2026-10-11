@@ -85,6 +85,7 @@ def _installed_names() -> set[str]:
 
 
 def test_bare_standard_skill_from_local_path(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -117,6 +118,7 @@ def test_bare_standard_skill_from_local_path(
 
 
 def test_optional_standard_fields_do_not_block_the_mount(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -145,6 +147,7 @@ def test_optional_standard_fields_do_not_block_the_mount(
 
 
 def test_claude_code_skills_tree(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -172,6 +175,7 @@ def test_claude_code_skills_tree(
 
 
 def test_skills_collection_keeps_nested_subskills(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -197,6 +201,7 @@ def test_skills_collection_keeps_nested_subskills(
 
 
 def test_bare_collection_of_skill_folders(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -220,6 +225,7 @@ def test_bare_collection_of_skill_folders(
 
 
 def test_path_selects_a_subdirectory(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -245,6 +251,7 @@ def test_path_selects_a_subdirectory(
 
 
 def test_crlf_and_bom_skill_installs(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -272,6 +279,7 @@ def test_crlf_and_bom_skill_installs(
 
 
 def test_collision_leaves_the_load_dir_untouched(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
@@ -387,6 +395,7 @@ def test_missing_path_in_source_errors(
 
 
 def test_install_skips_junk_names(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -419,6 +428,7 @@ def test_install_skips_junk_names(
 
 
 def test_install_records_explicit_update_policy(
+    db_url: str,
     unit_home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],

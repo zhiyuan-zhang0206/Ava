@@ -22,7 +22,7 @@ from services.wake.heartbeat.liveness import _probe_machine, run_liveness_pass
 
 
 @pytest.fixture
-def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+def pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
     p = base.db.pool(max_size=2, gate=database_gate)
     try:
         yield p

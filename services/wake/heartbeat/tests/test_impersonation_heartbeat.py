@@ -25,7 +25,7 @@ from tests.impersonation_support import attested_caller
 
 
 @pytest.fixture
-def pool():
+def pool(db_url: str):
     with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool:
         yield pool
 
@@ -58,6 +58,7 @@ def selected(pool: ConnectionPool) -> dict[int, float]:
 
 @pytest.mark.parametrize("status", ["idling", "running"])
 def test_active_clock_does_not_depend_on_native_turns(
+    redis_url: str,
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
     status: str,
@@ -81,6 +82,7 @@ def test_active_clock_does_not_depend_on_native_turns(
 
 
 def test_activation_starts_the_clock(
+    redis_url: str,
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
     config_authority: ConfigAuthority,
@@ -153,6 +155,7 @@ def test_pause_then_normal_cadence(
 
 
 def test_external_work_is_not_a_failed_native_turn(
+    redis_url: str,
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
     config_authority: ConfigAuthority,
@@ -183,6 +186,7 @@ def test_external_work_is_not_a_failed_native_turn(
 
 
 def test_expired_active_lease_does_not_receive_checkin(
+    redis_url: str,
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
     config_authority: ConfigAuthority,
@@ -205,6 +209,7 @@ def test_expired_active_lease_does_not_receive_checkin(
 
 
 def test_sdk_attachment_can_pause_heartbeat(
+    redis_url: str,
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,

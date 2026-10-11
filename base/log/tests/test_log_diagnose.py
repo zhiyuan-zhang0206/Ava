@@ -68,7 +68,9 @@ def test_exception_local_variable_is_not_rendered_into_the_sink(_file_sink: Path
     assert _SENTINEL not in content
 
 
-def test_psycopg_connect_dsn_password_is_not_rendered_into_the_sink(_file_sink: Path) -> None:
+def test_psycopg_connect_dsn_password_is_not_rendered_into_the_sink(
+    _file_sink: Path, postgres_access: None
+) -> None:
     """A DSN's password lives as a local in psycopg's connect frames when the
     connection attempt fails — the concrete leak the independent review found."""
     dsn = f"postgresql://u:{_SENTINEL}@127.0.0.1:1/x"
