@@ -719,40 +719,12 @@ def test_no_local_participant_uses_the_real_optional_gate(
 
 @pytest.mark.parametrize("error_type", ["ImportError", "RuntimeError"])
 def test_cold_capture_import_failure_rejects_body(tmp_path: Path, error_type: str) -> None:
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 — fixed argv, this interpreter runs the child script
         [
             sys.executable,
             "-I",
-            "-c",
-            """
-import importlib.abc
-import os
-import sys
-from base.agents.sdk import call_policy, telemetry
-from base.agents.sdk.call_policy import SamplingPolicy
-
-assert 'base.agents.impersonation.manifest' not in sys.modules
-error_type = {'ImportError': ImportError, 'RuntimeError': RuntimeError}[os.environ['TEST_CAPTURE_ERROR']]
-failure = error_type('invalid cold capture module')
-executed = []
-call_policy.policy = lambda owner: SamplingPolicy()
-telemetry.emit = lambda *args, **kwargs: executed.append('emit')
-
-class BrokenCapture(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path, target=None):
-        if fullname == 'base.agents.impersonation.manifest':
-            raise failure
-
-sys.meta_path.insert(0, BrokenCapture())
-try:
-    telemetry.run_metered('capture.call', lambda: executed.append('body'), (), {}, identity={},
-                          sampling_owner=call_policy.SamplingPolicyOwner())
-except (ImportError, RuntimeError) as actual:
-    assert actual is failure
-else:
-    raise AssertionError('capture import failure was hidden')
-assert executed == []
-""",
+            str(Path(__file__).with_name("_sdk_cold_child.py")),
+            "capture_import_failure",
         ],
         cwd=tmp_path,
         env={
