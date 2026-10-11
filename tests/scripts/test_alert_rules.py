@@ -88,6 +88,7 @@ _EXPECTED_UIDS = {
     "ava-ops-memory-search-rows-critical",
     # recovery posture — scheduled restore-drill failure
     "ava-ops-recovery-drill-failed",
+    "ava-ops-backup-dump-failed",
     # alerting stack health — remote Tempo scrape target (task #3330)
     "ava-ops-tempo-backend-down",
 }

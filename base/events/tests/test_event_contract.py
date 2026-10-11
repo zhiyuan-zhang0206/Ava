@@ -106,6 +106,13 @@ def test_recovery_drill_failed_payload() -> None:
     assert payload_keys("recovery_drill_failed") == ("drill", "detail")
 
 
+def test_backup_dump_failed_payload() -> None:
+    """A failed daily dump carries only its bounded diagnostic."""
+    from base.events.contract import payload_keys
+
+    assert payload_keys("backup_dump_failed") == ("detail",)
+
+
 def test_category_for_kind() -> None:
     assert category_for_kind("llm_usage") == "telemetry"
     assert category_for_kind("spawn") == "audit"

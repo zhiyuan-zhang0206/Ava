@@ -393,6 +393,27 @@ def test_recovery_drill_failure_rule_is_immediate_and_names_the_drill() -> None:
     assert "attributes_drill" in rule["annotations"]["summary"]
 
 
+def test_backup_dump_failure_rule_fires_on_any_event_in_a_day() -> None:
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-backup-dump-failed"]
+
+    assert _exprs(rule, "loki") == [
+        'sum(count_over_time({service_name="unknown_service", '
+        'event_name="backup_dump_failed"} | json | cluster=".ava" | '
+        'category="telemetry" | level="error" [24h]))'
+    ]
+    assert rule["for"] == "0m"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+    assert _threshold_params(rule) == [[0]]
+    assert rule["labels"] == {
+        "severity": "error",
+        "ruleUID": "ava-ops-backup-dump-failed",
+        "metric": "backup_dump_failure",
+        "team": "ava-ops",
+    }
+
+
 def test_tempo_backend_down_rule_tracks_the_remote_scrape() -> None:
     """The silence guard for the remote Tempo backend (task #3330): the rule
     fires on `up{job="tempo"}` below 1 held for 1h. A drift in the scrape job
