@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.provider_contract import ProviderContribution
+from base.lm.catalog.provider_contract import DecisionProviderContribution, ProviderContribution
 from base.packages.plugins.contributions import Contribution
 from base.packages.plugins.inspector import InspectWidgetSpec
 from base.telemetry.metrics.plugin_metrics import MetricSpec
@@ -152,6 +152,10 @@ class PluginContributions:
     # validates a chat model, installed into the process's model catalog by
     # `base/lm/plugin_providers.py` (the one writer).
     providers: tuple[ProviderContribution, ...] = ()
+    # Decision-model providers (typed questions answered with probabilities, never text), declared
+    # by the same `provider.py` and installed into the same catalog builder, but into parallel
+    # tables the chat paths cannot reach (`base/lm/catalog/decide`).
+    decision_providers: tuple[DecisionProviderContribution, ...] = ()
     # The SDK surface (`ava.*`): namespaces (optionally promoted into the prompt's expanded SDK
     # reference), members hung on an existing namespace, wrap layers, and skill-root providers.
     sdk_namespaces: tuple[SdkNamespace, ...] = ()
@@ -227,7 +231,11 @@ class PluginContributions:
             Contribution("providers", p.binding.prefix, plugin, p.binding.display_name)
             for p in self.providers
         )
-        return (*metrics, *widgets, *providers)
+        decision_providers = (
+            Contribution("decisionProviders", p.prefix, plugin, p.display_name)
+            for p in self.decision_providers
+        )
+        return (*metrics, *widgets, *providers, *decision_providers)
 
     def _sdk_records(self, plugin: str) -> tuple[Contribution, ...]:
         namespaces = (

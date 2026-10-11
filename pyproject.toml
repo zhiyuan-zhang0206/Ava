@@ -1084,6 +1084,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/lm/catalog/decide/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/lm/compat/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

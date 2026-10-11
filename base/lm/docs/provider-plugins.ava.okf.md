@@ -45,6 +45,16 @@ be retried by constructing a new catalog.
   limits, image-dimension tiers, and native PDF document blocks. An absent
   policy preserves the core attachment defaults for older plugins.
 
+## Decision providers
+
+A `provider.py` may also return `PluginContributions(decision_providers=(...))`: decision
+models are installed by `CatalogBuilder.install_decision` into parallel catalog tables, never
+into the chat tables, and the loader gates them with the manifest key `decisionProviders`.
+Decision and chat prefixes share one namespace across plugins, so a collision in either
+direction fails at load; one plugin may hold both under a vendor prefix. Their `key_env` is
+relayed by bootstrap like a chat binding's. Mechanics and call contract:
+[[base/lm/docs/decision-models.ava.okf.md]].
+
 ## Builder and key contract
 
 Fast inference services are independent selectable Ava IDs. A provider may use
