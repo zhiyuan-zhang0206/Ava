@@ -8,3 +8,11 @@ export function newOperationKey(): string {
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+/** The header pair every keyed gateway request carries: the operation key and its scope. */
+export function keyedHeaders(operationKey: string): Record<string, string> {
+  if (typeof operationKey !== "string" || !operationKey || operationKey.length > 128) {
+    throw new Error("idempotency key must contain 1 to 128 characters");
+  }
+  return { "Idempotency-Key": operationKey, "Idempotency-Scope": "principal-v1" };
+}
