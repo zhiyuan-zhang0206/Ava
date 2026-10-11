@@ -335,6 +335,7 @@ async def test_start_stop_loop(clock: FakeClock) -> None:
 # -- integration against the real supervisor -----------------------------------
 
 _SLEEP_FOREVER = [sys.executable, "-c", "import time; time.sleep(60)"]
+_CHILD = Path(__file__).with_name("child_unit.py")
 
 StartFactory = Callable[..., Awaitable[Supervisor]]
 
@@ -396,14 +397,11 @@ async def test_code_gate_exit_is_not_automatically_restarted(
     started: StartFactory, short_tmp: Path, recorder: _Recorder
 ) -> None:
     marker = short_tmp / "starts"
-    script = (
-        "from pathlib import Path; "
-        "from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE; "
-        f"p=Path({str(marker)!r}); p.write_text(p.read_text()+'start\\n' if p.exists() else 'start\\n'); "
-        "raise SystemExit(CODE_BEHIND_MINIMUM_EXIT_CODE)"
-    )
     unit = manifest_mod.UnitManifest(
-        "svc", (sys.executable, "-c", script), manifest_mod.RestartPolicy.ALWAYS, "root"
+        "svc",
+        (sys.executable, str(_CHILD), "code_gate_exit", str(marker)),
+        manifest_mod.RestartPolicy.ALWAYS,
+        "root",
     )
     supervisor = await started([unit])
     await _wait_stopped(supervisor)

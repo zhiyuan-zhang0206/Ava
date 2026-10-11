@@ -7,14 +7,18 @@ Tests cover both _Link (request/response framing) and _ReconnectingLink
 import asyncio
 import json
 from collections.abc import Callable
-from importlib import import_module
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
+from services.desktop.browser import mcp_socket_bridge
+from services.desktop.browser import mcp_wrapper as browser_wrapper
 from services.desktop.browser.mcp_socket_bridge import NotDeliveredError
 from services.desktop.browser.mcp_wrapper import _Link, _ReconnectingLink
+from services.desktop.computer import mcp_wrapper as computer_wrapper
+
+_WRAPPERS = {"browser": browser_wrapper, "computer": computer_wrapper}
 
 # ---------------------------------------------------------------------------
 # Fake stream helpers
@@ -359,7 +363,7 @@ async def test_link_drain_reset_preserves_unknown_delivery_error() -> None:
 async def test_shared_socket_bridge_dials_with_bounded_retries(
     monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
 ) -> None:
-    bridge = import_module("services.desktop.browser.mcp_socket_bridge")
+    bridge = mcp_socket_bridge
     failures = [FileNotFoundError("absent"), ConnectionRefusedError("refused")]
     reader, writer = FakeReader([]), FakeWriter()
     calls: list[tuple[str, int]] = []
@@ -394,7 +398,7 @@ async def test_shared_socket_bridge_dials_with_bounded_retries(
 async def test_shared_socket_bridge_passes_through_unclassified_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    bridge = import_module("services.desktop.browser.mcp_socket_bridge")
+    bridge = mcp_socket_bridge
     failure = PermissionError("denied")
     call = AsyncMock(side_effect=failure)
     monkeypatch.setattr(bridge.asyncio, "open_unix_connection", call)
@@ -406,7 +410,7 @@ async def test_shared_socket_bridge_passes_through_unclassified_error(
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
 async def test_wrapper_retry_budget_and_backoff(retry_waits: list[float], side: str) -> None:
-    wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
+    wrapper = _WRAPPERS[side]
     reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
     failure = RuntimeError("offline")
     connect = AsyncMock(side_effect=failure)
@@ -421,7 +425,7 @@ async def test_wrapper_retry_budget_and_backoff(retry_waits: list[float], side: 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
 async def test_wrapper_failure_policy_and_wire_messages(side: str) -> None:
-    wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
+    wrapper = _WRAPPERS[side]
     label = "chrome MCP daemon" if side == "browser" else "computer MCP daemon"
     cases = [
         (b"", ConnectionError, f"{label} closed the connection", True),
@@ -459,7 +463,7 @@ async def test_wrapper_failure_policy_and_wire_messages(side: str) -> None:
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
 async def test_upstream_rejection_is_browser_only(retry_waits: list[float], side: str) -> None:
-    wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
+    wrapper = _WRAPPERS[side]
     rejection = "chrome upstream session is down; browser-mcp will restart"
     writers = [FakeWriter(), FakeWriter()]
     closed: list[int] = []
@@ -498,7 +502,7 @@ async def test_upstream_rejection_is_browser_only(retry_waits: list[float], side
 async def test_stalled_drain_is_unknown_delivery_without_retry(
     monkeypatch: pytest.MonkeyPatch, side: str
 ) -> None:
-    wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
+    wrapper = _WRAPPERS[side]
 
     class StalledWriter(FakeWriter):
         def __init__(self) -> None:
@@ -529,7 +533,7 @@ async def test_stalled_drain_is_unknown_delivery_without_retry(
 async def test_write_or_drain_failure_is_not_retried(
     retry_waits: list[float], side: str, fail_stage: str
 ) -> None:
-    wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
+    wrapper = _WRAPPERS[side]
 
     class FailingWriter(FakeWriter):
         def write(self, b: bytes) -> None:
@@ -570,7 +574,7 @@ async def test_write_or_drain_failure_is_not_retried(
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
 async def test_drain_reset_surfaces_unknown_delivery_without_retry(side: str) -> None:
-    wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
+    wrapper = _WRAPPERS[side]
 
     class ResetOnDrain(FakeWriter):
         async def drain(self) -> None:
@@ -603,7 +607,7 @@ async def test_drain_reset_surfaces_unknown_delivery_without_retry(side: str) ->
 async def test_closed_before_write_retries_without_sending(
     retry_waits: list[float], side: str
 ) -> None:
-    wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
+    wrapper = _WRAPPERS[side]
     closed = FakeWriter()
     closed.close()
     fresh = FakeWriter()
@@ -629,7 +633,7 @@ async def test_closed_before_write_retries_without_sending(
 async def test_bridge_timeout_readers_are_dynamic_and_isolated(side: str) -> None:
     from base.config import ConfigBoot
 
-    wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
+    wrapper = _WRAPPERS[side]
     first, second = ConfigBoot(), ConfigBoot()
     first.set_field("mcp_connect_timeout_seconds", 0.01)
     second.set_field("mcp_connect_timeout_seconds", 1.0)
@@ -676,7 +680,7 @@ def test_wrapper_main_keeps_its_own_boot_bound_reader(
 ) -> None:
     from base.config import ConfigBoot
 
-    wrapper = import_module(f"services.desktop.{side}.mcp_wrapper")
+    wrapper = _WRAPPERS[side]
     first, second = ConfigBoot(), ConfigBoot()
     first.set_field("mcp_connect_timeout_seconds", 0.25)
     second.set_field("mcp_connect_timeout_seconds", 0.75)
