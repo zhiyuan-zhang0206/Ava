@@ -179,6 +179,10 @@ class UnknownDecisionModelError(DecisionError):
     """The model id is not in the catalog's decision table."""
 
 
+class DecisionKeyMissingError(DecisionError):
+    """The provider's API key is not configured; nothing was sent."""
+
+
 class DecisionInputTooLargeError(DecisionError):
     """The estimated input exceeds the model's limits; nothing was sent. Callers truncate or chunk."""
 
