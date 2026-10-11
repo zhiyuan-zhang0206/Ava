@@ -271,7 +271,10 @@ def test_service_probes_respect_durable_service_intent(
     wanted = _service_spec.ServiceSpec("gateway", "unused", frozenset({"gateway"}), True)
     excluded = _service_spec.ServiceSpec("frontend", "unused", frozenset({"gateway"}), False)
 
-    def roster(_roles: object) -> tuple[tuple[_service_spec.ServiceSpec, None], ...]:
+    def roster(
+        _roles: object, *, machine: MachineIdentity
+    ) -> tuple[tuple[_service_spec.ServiceSpec, None], ...]:
+        assert machine is command_runtime.machine
         return ((wanted, None), (excluded, None))
 
     def probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
