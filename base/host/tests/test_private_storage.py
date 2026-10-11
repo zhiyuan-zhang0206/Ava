@@ -125,9 +125,6 @@ def test_is_foreign_owned_is_uid_only(monkeypatch: pytest.MonkeyPatch) -> None:
     theirs = _stat(os.geteuid() + 1, os.geteuid())
     assert private_storage._is_foreign_owned(theirs) is True
 
-    monkeypatch.setattr(private_storage.os, "name", "nt")
-    assert private_storage._is_foreign_owned(theirs) is False
-
 
 def test_private_dir_repairs_mode_drift(tmp_path: Path) -> None:
     """A lax directory from an older umask is tightened before reuse."""
@@ -260,7 +257,6 @@ def test_private_write_keeps_previous_complete_value_when_replace_fails(
     assert list(tmp_path.glob(".*.tmp")) == []
 
 
-@pytest.mark.skipif(os.name == "nt", reason="directory fsync is POSIX-only")
 def test_private_write_fsyncs_payload_and_parent_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -304,7 +300,6 @@ def test_converge_skips_foreign_owned_root(monkeypatch: pytest.MonkeyPatch, tmp_
     assert cap.debugs == []
 
 
-@pytest.mark.skipif(os.name == "nt", reason="unix sockets are POSIX-only")
 def test_private_tree_skips_live_unix_socket(monkeypatch: pytest.MonkeyPatch) -> None:
     """A service socket is warned about and left in place; the run completes.
 
@@ -350,7 +345,6 @@ def test_private_tree_skips_live_unix_socket(monkeypatch: pytest.MonkeyPatch) ->
         shutil.rmtree(root)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="fifos are POSIX-only")
 def test_private_tree_skips_fifo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A named pipe is warned about and left in place; the run completes."""
     root = tmp_path / "private"
@@ -397,8 +391,7 @@ def test_converge_does_not_descend_node_modules(
     payload.chmod(0o644)  # stays: nothing under node_modules is walked
     (inner / "linked").symlink_to(inner / "index.js")
     fifo = inner / "queue"
-    if os.name != "nt":
-        os.mkfifo(fifo)
+    os.mkfifo(fifo)
     top = root / "keep.txt"
     top.write_bytes(b"secret")
     top.chmod(0o644)
@@ -473,7 +466,6 @@ def test_scan_non_regular_nodes_missing_root_is_empty(tmp_path: Path) -> None:
     assert private_storage.scan_non_regular_nodes(tmp_path / "absent") == []
 
 
-@pytest.mark.skipif(os.name == "nt", reason="fifos are POSIX-only")
 def test_scan_non_regular_nodes_does_not_follow_a_symlinked_root(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.mkdir()
@@ -508,7 +500,6 @@ def test_private_file_problem_matches_the_writer_refusal(tmp_path: Path) -> None
     assert private_storage.private_file_problem(path) == "is a symlink"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="fifos are POSIX-only")
 def test_private_file_problem_sees_a_fifo(tmp_path: Path) -> None:
     path = tmp_path / "marker"
     os.mkfifo(path)

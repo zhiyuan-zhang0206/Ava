@@ -44,7 +44,7 @@ import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal, Self
 from urllib.parse import unquote, urlsplit
 
@@ -120,9 +120,7 @@ class UnitIdentity(_Record):
     @model_validator(mode="after")
     def absolute_home(self) -> Self:
         home = self.home
-        if any(ord(c) < 32 for c in home) or not (
-            PurePosixPath(home).is_absolute() or PureWindowsPath(home).is_absolute()
-        ):
+        if any(ord(c) < 32 for c in home) or not PurePosixPath(home).is_absolute():
             raise ValueError("a unit home is an absolute path on the unit's machine")
         return self
 
@@ -342,8 +340,7 @@ def write_bundle(path: Path, envelope: bytes) -> None:
     """Create `path` 0600 exclusively; the parent directory is left as it is."""
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "wb") as stream:
-        if os.name != "nt":
-            os.fchmod(stream.fileno(), 0o600)
+        os.fchmod(stream.fileno(), 0o600)
         stream.write(envelope)
         stream.flush()
         os.fsync(stream.fileno())

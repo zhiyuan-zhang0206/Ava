@@ -58,7 +58,7 @@ discipline** below.
    same service are usually a *cause* elsewhere (a port held by another unit,
    a session backend mismatch, a dead parent). Ask "what keeps killing it?"
    before fixing the respawn itself. Check the machine the event names — a
-   query that does not filter by machine can misattribute a win/wsl event to
+   query that does not filter by machine can misattribute an event to
    the wrong host (seen repeatedly).
 4. **Verify the fix, then close** — after an intervention, confirm the alert
    stops (zero new occurrences past the intervention timestamp) before

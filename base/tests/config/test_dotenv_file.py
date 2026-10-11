@@ -132,8 +132,6 @@ def test_snapshot_filename_stamps_the_host_clock(
     the host zone is pinned explicitly rather than inherited from the
     environment.
     """
-    if not hasattr(time, "tzset"):
-        pytest.skip("time.tzset is POSIX-only")
 
     original_tz = os.environ.get("TZ")
     try:
@@ -243,7 +241,7 @@ def test_upsert_noop_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     The repeated converge (every `ava start`, every boot-retry attempt) presents
     the same value again and again; before the skip it rewrote the file and
-    appended an `old == new` audit record each time — the WSL noise of #3637.
+    appended an `old == new` audit record each time — the noise of #3637.
     """
     from base.host.env import dotenv_file
 

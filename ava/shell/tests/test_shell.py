@@ -2,7 +2,7 @@
 
 Runs against a real pty-sessions service + real bash. The `pty_service` fixture
 (tests/path_scoped/pty_service.py) starts one under the tmp test home and closes its
-sessions when the test ends; POSIX-only, skips entirely on Windows.
+sessions when the test ends.
 
 Sessions are distinguished by name prefix. Parallel xdist workers each use a
 reserved high-range fake agent-id (`_TEST_AGENT_BASE`) for isolation; tests
@@ -23,11 +23,9 @@ import pytest
 import ava
 import ava.sdk_surface.agent_identity
 from ava import shell
-from base.native_process.os_platform import is_windows
 from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
 
 pytestmark = [
-    pytest.mark.skipif(is_windows(), reason="PTY sessions are POSIX-only"),
     # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); only the
     # pty-backed session tests want it. `pty_service` must come first: the
     # isolation fixture's own kill_all/list calls hit the session backend.

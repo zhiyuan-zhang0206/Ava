@@ -16,8 +16,6 @@ import pytest
 
 from base.config import settings
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="gateway runner is POSIX-only")
-
 
 def _await_file(path: Path) -> None:
     deadline = time.monotonic() + 15

@@ -95,7 +95,6 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
         ["cluster", "db-authority", "issue-unit"],
         ["config", "set", "A=B"],
         ["config", "unset", "A"],
-        ["boot"],
         ["some-verb-nobody-has-heard-of"],
         # Help of a verb is a command like any other: a development checkout that
         # wants to read it names a temporary AVA_HOME.
@@ -103,9 +102,8 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
         ["status", "-h"],
         ["--help", "start"],
         ["-h", "--help"],
-        # `--help` as data after `--`, and `boot`, which never reaches argparse.
+        # `--help` as data after `--`.
         ["config", "unset", "--", "--help"],
-        ["boot", "--help"],
     ],
 )
 def test_gate_refuses_every_command_from_a_foreign_checkout(
@@ -143,7 +141,7 @@ def test_gate_passes_bare_ava_and_a_lone_help_flag(
 
 
 @pytest.mark.parametrize(
-    "argv", [["status"], ["stop"], ["boot"], ["start", "--help"], ["config", "set", "A=B"]]
+    "argv", [["status"], ["stop"], ["start", "--help"], ["config", "set", "A=B"]]
 )
 def test_gate_passes_everything_for_the_homes_own_checkout(
     argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -153,7 +151,7 @@ def test_gate_passes_everything_for_the_homes_own_checkout(
 
 
 @pytest.mark.parametrize(
-    "argv", [["status"], ["stop"], ["boot"], ["start", "--help"], ["config", "set", "A=B"]]
+    "argv", [["status"], ["stop"], ["start", "--help"], ["config", "set", "A=B"]]
 )
 def test_gate_passes_everything_for_a_home_without_a_source(
     argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -231,10 +231,6 @@ def _spawn_child(tmp_path: Path, slug: str) -> _Child:
     return child
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="POSIX SIGTERM path; Windows stops route through the private console",
-)
 @pytest.mark.parametrize("slug", sorted(_CASES))
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path, slug: str) -> None:
     """SIGTERM exits within the bound while a wedged executor job is in flight."""

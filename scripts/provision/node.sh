@@ -4,7 +4,7 @@
 # macOS: the linked `node` formula (npx must land on PATH for ava-browser);
 # the keg-only `node@22` is the force-linked fallback. Idempotent.
 #
-# WSL without sudo: a host that already runs node >= 20.9 (the frontend's floor)
+# Without sudo: a host that already runs node >= 20.9 (the frontend's floor)
 # skips apt entirely — the nodesource setup + apt install need root. An apt
 # failure degrades to a warning: the gateway can run headless without the
 # frontend (`ava start --disable-service frontend`).
