@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json as _json
-from typing import NoReturn
+from typing import NamedTuple, NoReturn
 
 import ava
 from ava.sdk_surface import settings as _settings
@@ -18,6 +18,7 @@ from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 __all_for_ava__ = [
     "AGENT_ID",
     "MACHINE_SPEC",
+    "MachineSpec",
     "SELF_MACHINE_NAME",
     "attach",
     "compact",
@@ -38,8 +39,21 @@ __all_for_ava__ = [
 # every `ava.self.AGENT_ID` access routes to `__getattr__`.
 AGENT_ID: int
 
-MACHINE_SPEC: tuple[str, str]
-"""(name, description) of the machine this agent runs on."""
+
+class MachineSpec(NamedTuple):
+    """Identity of a machine.
+
+    Fields:
+        name: the machine's name.
+        description: free prose about what the machine is for; empty if unset.
+    """
+
+    name: str
+    description: str
+
+
+MACHINE_SPEC: MachineSpec
+"""The machine this agent runs on."""
 
 SELF_MACHINE_NAME: str
 """Name of the machine this agent runs on — the default target for
@@ -52,22 +66,15 @@ def __getattr__(name: str) -> object:
         # placeholder before bootstrap). `ava.help(ava.self)` still documents
         # the name from the AnnAssign + PEP 224 docstring above — a bare value
         # routes through the doc-carrying constant renderer there.
-        # Local import: the MACHINE_SPEC branch's `import ava` makes `ava` a
+        # Local import: the SELF_MACHINE_NAME branch's `import ava` makes `ava` a
         # function-local name, so reach the bootstrap slot explicitly here.
         import ava.sdk_surface.agent_identity
 
         return ava.sdk_surface.agent_identity.agent_id()
     if name == "MACHINE_SPEC":
-        import ava
         from base.cluster.machine import machine_description, machine_name
 
-        return ava.const(
-            (machine_name(), machine_description() or ""),
-            doc=(
-                "(name, description) of the machine this agent runs on; "
-                "description is free prose, empty if unset."
-            ),
-        )
+        return MachineSpec(machine_name(), machine_description() or "")
     if name == "SELF_MACHINE_NAME":
         import ava
         from base.cluster.machine import machine_name

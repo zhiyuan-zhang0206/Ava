@@ -42,11 +42,12 @@ Standalone creation returns the original accepted Task snapshot on replay;
 see [[task_creation_receipts.ava.okf.md|Creation receipts]]. Query `get(task.id)`
 for current state.
 
-### `create_and_assign(title, description, *, operation_key, preset=None, label=None, config_overlay=None, machine=None, parent, priority="P2", remind_interval_seconds=None) -> (Task, int)`
+### `create_and_assign(title, description, *, operation_key, preset=None, label=None, config_overlay=None, machine=None, parent, priority="P2", remind_interval_seconds=None) -> TaskAssignment`
 
 Accept the agent birth, task and initial assignment in one transaction. An explicit
 `operation_key` is required; reuse the same key and inputs to recover the original
-pair after a lost reply. The SDK uses only `/api/keyed/v1/task-assignments`.
+result after a lost reply. The result is `TaskAssignment(task, agent_id)`, a
+NamedTuple that still unpacks as `task, agent_id`. The SDK uses only `/api/keyed/v1/task-assignments`.
 There is no opt-in flag or separate spawn/create recipe. A missing preset uses
 the gateway's current defaults rather than assuming a named preset exists.
 
