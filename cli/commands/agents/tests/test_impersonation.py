@@ -32,7 +32,9 @@ def _args(*args: str) -> Namespace:
     return build_parser().parse_args(["impersonate", *args])
 
 
-def test_timeline_and_context_are_one_command(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_timeline_command_dispatches_to_the_timeline_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[tuple[int, int, str | None]] = []
 
     def timeline(agent_id: int, limit: int, before: str | None) -> int:
@@ -40,12 +42,11 @@ def test_timeline_and_context_are_one_command(monkeypatch: pytest.MonkeyPatch) -
         return 0
 
     monkeypatch.setattr("cli.commands.agents.timeline.cmd_agents_timeline", timeline)
-    for name in ("timeline", "context"):
-        args = build_parser().parse_args(
-            ["agents", name, "405", "--limit", "100", "--before", "12.0"]
-        )
-        assert args.func(args) == 0
-    assert calls == [(405, 100, "12.0"), (405, 100, "12.0")]
+    args = build_parser().parse_args(
+        ["agents", "timeline", "405", "--limit", "100", "--before", "12.0"]
+    )
+    assert args.func(args) == 0
+    assert calls == [(405, 100, "12.0")]
 
 
 def test_request_uses_external_identity_without_delivering_a_credential(
