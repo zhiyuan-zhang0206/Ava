@@ -47,12 +47,10 @@ handlers must distinguish a missing key from an explicitly empty one.
 
 `principal-v1` binds verified principal, method, path and caller ID into the
 stored identity (`base.api_contracts.idempotency.stored_key`); there is no raw
-caller-key namespace. The open API binds its one fixed unauthenticated
-administrator, and MCP credentials scope to the authenticated client ID. Chat
+caller-key namespace. MCP credentials scope to the authenticated client ID. Chat
 messages are the one cluster-wide identity: `chat_message_key` fixes the stored
-`client_message_id` to the cluster administrator so the delivery outbox flush,
-which commits without an HTTP request, lands on the same receipt as the HTTP
-route. See [[gateway/http/auth/docs/request_principal.ava.okf.md]]. Do not try
+`client_message_id` to the cluster administrator so delivery and reconciliation
+land on the same receipt. See [[gateway/http/auth/docs/request_principal.ava.okf.md]]. Do not try
 another namespace after a conflict.
 
 Chat `inbound_messages` rows already own acceptance and pending processing;
@@ -77,9 +75,9 @@ writes.
 
 The browser fetch wrapper makes one HTTP attempt. Its chat receipt recovery
 uses the original message ID; it must not extend that retry loop to unprotected
-writes. CLI management uses one-shot HTTP dials. CLI/SDK chat delivery has an
-existing local delivery outbox; this program does not introduce or expand
-client/browser outboxes. MCP chat uses the same domain inbound transaction.
+writes. CLI management uses one-shot HTTP dials. CLI/SDK chat delivery retries the HTTP call under one
+key and has no client outbox; this program does not introduce client/browser
+outboxes. MCP chat uses the same domain inbound transaction.
 Agent-ops RPC keys cover their existing dispatch boundary only: HTTP command
 retries are not protected by generating a new RPC key for each attempt.
 External IM sends need provider-specific receipt and uncertainty handling;

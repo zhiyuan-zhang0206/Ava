@@ -18,14 +18,14 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
+from base.api_contracts.idempotency import keyed_headers
 
 _TIMEOUT_S = 15.0
 
 
 def _keyed_headers(headers: dict[str, str]) -> dict[str, str]:
     """Auth headers plus one fresh principal-v1 operation key for a resolve call."""
-    return {**headers, "Idempotency-Key": str(uuid4()), SCOPE_HEADER: PRINCIPAL_SCOPE}
+    return {**headers, **keyed_headers(str(uuid4()))}
 
 
 def _dial() -> tuple[str, dict[str, str], Any, Any]:

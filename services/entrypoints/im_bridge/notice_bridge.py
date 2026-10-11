@@ -30,7 +30,7 @@ from uuid import uuid4
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import PoolTimeout
 
-from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
+from base.api_contracts.idempotency import keyed_headers
 from base.db.transaction import write_transaction
 from base.paths import ava_home
 from services.entrypoints.im_bridge import copy
@@ -149,11 +149,7 @@ class NoticeBridge:
 
     def _keyed_headers(self) -> dict[str, str]:
         """Auth headers plus one fresh principal-v1 operation key for a resolve call."""
-        return {
-            **self.core.gateway._headers(),
-            "Idempotency-Key": str(uuid4()),
-            SCOPE_HEADER: PRINCIPAL_SCOPE,
-        }
+        return {**self.core.gateway._headers(), **keyed_headers(str(uuid4()))}
 
     async def _post(self, path: str, body: dict[str, Any]) -> None:
         g = self.core.gateway
