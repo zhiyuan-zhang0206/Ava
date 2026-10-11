@@ -48,8 +48,8 @@ def test_begin_maintenance_records_and_refresh_re_stamps_the_shepherd() -> None:
     assert after.driver == stamp
 
 
-def test_a_legacy_journal_without_a_shepherd_reads_none() -> None:
-    """A pre-#3270 journal is valid state with missing evidence, not an error."""
+def test_a_journal_without_a_shepherd_reads_none() -> None:
+    """A journal without a shepherd is valid state with missing evidence, not an error."""
     from base.deploy.maintenance.state import MaintenanceHold
 
     pause_owner.state_path().write_text(

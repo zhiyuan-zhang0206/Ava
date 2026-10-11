@@ -3,15 +3,14 @@
 Every process on a configured pure agent-runner (serve_agent_runner flag on,
 enrolled with a gateway URL) fetches the cluster's config from the gateway at
 startup and injects it into os.environ before Settings is built — there is no
-materialized `.env` cache of cluster facts anymore (retired 2026-08-01). The
+materialized `.env` cache of cluster facts. The
 one cache that does exist is a transient 0600 config snapshot under
 `$AVA_HOME/run/`: a successful fetch writes it, and a later process skips the
 fetch while it is fresh, falling back to it (with a warning) when the gateway
 is unreachable — see the snapshot helpers below. A
 gateway-capable unit keeps the cluster's config in its own `$AVA_HOME/.env` and
 never fetches; which side a unit is on is derived from its serve flags (see
-`config_source_is_local` / `should_fetch_from_gateway`), not from an env var
-(AVA_CONFIG_SOURCE deleted). A bare checkout with no role flags (CI, lint
+`config_source_is_local` / `should_fetch_from_gateway`), not from an env var. A bare checkout with no role flags (CI, lint
 scripts) and a not-yet-enrolled runner resolve locally with no fetch — the preflight gate refuses an unenrolled
 `ava start`, not the Settings import. The
 bytes travel the private network; an authenticated gateway requires a bearer,
@@ -81,36 +80,6 @@ def cluster_plugin_config_values(plugin: str) -> dict[str, object] | None:
     return cast("dict[str, object]", values)
 
 
-def legacy_plugin_config_values(aliases: tuple[str, ...]) -> dict[str, str]:
-    """Capture declared legacy inputs for one-time import; never write a home."""
-    if not aliases:
-        return {}
-    from dotenv import dotenv_values
-
-    from base.host.env.dotenv_boot import resolve_ava_home
-
-    disk = dotenv_values(resolve_ava_home() / ".env")
-    values: dict[str, str] = {}
-    for alias in aliases:
-        disk_value = disk.get(alias)
-        delivered = os.environ.get(alias)
-        if disk_value is not None and delivered is not None and disk_value != delivered:
-            raise ValueError(f"legacy plugin input {alias} differs between environment and .env")
-        value = delivered if delivered is not None else disk_value
-        if value is not None:
-            values[alias] = value
-    return values
-
-
-def consume_legacy_plugin_env(values: dict[str, str]) -> None:
-    """Drop only process inputs successfully imported by the image writer."""
-    for alias, captured in values.items():
-        current = os.environ.get(alias)
-        if current is not None and current != captured:
-            raise RuntimeError(f"legacy plugin input {alias} changed during import")
-        os.environ.pop(alias, None)
-
-
 def _fetch_backoff(attempt: int) -> float:
     return 0.5 * (attempt + 1)
 
@@ -126,9 +95,8 @@ def _fetch_backoff(attempt: int) -> float:
 # because during a gateway outage no cluster config edit can have happened
 # since the snapshot was written.
 _SNAPSHOT_NAME = "bootstrap-snapshot.json"
-# Version 3 snapshots carry no database credential (bootstrap serves the
-# credential-free endpoint); an older snapshot may hold a runner login and is
-# never reused.
+# Snapshots carry no database credential (bootstrap serves the credential-free
+# endpoint); a snapshot of any other version is never reused.
 _SNAPSHOT_VERSION = 3
 # Freshness window: how long a snapshot may stand in for a live fetch. Bounds
 # cluster-edit propagation to a few minutes in steady state (the first child
@@ -294,12 +262,9 @@ def fetch_bootstrap_config(
     Retries with linear backoff so a gateway that is briefly unreachable as the
     agent boots doesn't strand it.
 
-    A runner never takes a database credential from bootstrap: any password in
-    the served `AVA_DB_URL` (an older gateway still projecting a runner login) is
-    removed here, before the value reaches the snapshot or `os.environ`. The
-    runner's login comes only from its installed unit capability
-    (`base.cluster.authority.unit`). Nor does it take the human cluster secret:
-    an `AVA_CLUSTER_SECRET` in the payload is dropped the same way.
+    Bootstrap serves the credential-free database endpoint and no cluster
+    secret. The runner's login comes only from its installed unit capability
+    (`base.cluster.authority.unit`).
 
     Presents `Authorization: Bearer <bearer>`: an explicit `bearer` (a joining
     start holding its bundle's token), else this process's machine API token
@@ -336,14 +301,7 @@ def fetch_bootstrap_config(
     def _fetch_once() -> dict[str, str]:
         resp = dial_get(url, timeout=timeout, headers=headers)
         resp.raise_for_status()
-        values = _validated_bootstrap_payload(resp.json())
-        if "AVA_DB_URL" in values:
-            from base.cluster.authority.unit import credential_free
-
-            values["AVA_DB_URL"] = credential_free(values["AVA_DB_URL"])
-        # A unit never holds the human bearer, whatever a gateway serves.
-        values.pop("AVA_CLUSTER_SECRET", None)
-        return values
+        return _validated_bootstrap_payload(resp.json())
 
     return retry(policy)(_fetch_once)
 
@@ -535,8 +493,8 @@ def inject_config_from_gateway() -> EnvBootResult:
     Runs at Settings construction on a pure agent-runner (see
     `config_source_is_local`). The fetched values are AUTHORITATIVE: every key
     the gateway serves overwrites os.environ, including a stale value a
-    pre-cutover `.env` still materializes (`_enforce_cluster_env_authority`
-    forces file values in at `load_ava_env`, and this runs after it) and a
+    `.env` still carries (`_enforce_cluster_env_authority` forces file values
+    in at `load_ava_env`, and this runs after it) and a
     forwarded copy from a spawning process. The gateway's `.env` is the single
     cluster-wide copy.
 

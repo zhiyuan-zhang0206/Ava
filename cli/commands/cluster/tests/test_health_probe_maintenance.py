@@ -98,7 +98,7 @@ def test_expected_low_population_does_not_rollback_or_promote(
 
 
 @pytest.mark.parametrize(
-    "intent", ["absent", "other-service", "legacy-pause", "resumed", "invalid"]
+    "intent", ["absent", "other-service", "holdless-pause", "resumed", "invalid"]
 )
 def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
     probe_home: Path, rollbacks: list[list[str]], alerts: list[dict[str, object]], intent: str
@@ -106,8 +106,8 @@ def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
     holder, acquired_at = "test-maintenance", datetime.now(UTC)
     if intent == "other-service":
         _select_excluded({"frontend"})
-    elif intent == "legacy-pause":
-        # The plain record (no maintenance hold) the retired updater's stop op wrote.
+    elif intent == "holdless-pause":
+        # A record without a maintenance hold reads as invalid.
         marker = pause_owner.state_path()
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(
