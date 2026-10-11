@@ -196,6 +196,7 @@ CONTRIBUTION_KEYS = {
     "metrics",
     "inspectWidgets",
     "providers",
+    "decisionProviders",
     "opsServices",
     "config",
     "skills",

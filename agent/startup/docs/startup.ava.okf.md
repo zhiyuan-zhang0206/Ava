@@ -20,8 +20,8 @@ birth config, then current cluster config.
 
 `agent/startup/__init__.py` provides the shared recovery and saver operations:
 
-- Reconcile claimed inbounds against the actual checkpoint.
-- Repair crash-left unpaired tool uses/results.
+- Consume interrupted claimed chats, distinguishing committed history from unknown work.
+- Pair crash-left tool uses with explicit unknown results without executing them.
 - Wrap saver writes with visible failures and the configured N-step interval.
   Delta-bearing threads retire the interval: every super-step and write batch
   persists as upstream wrote it. The final flush removes its pending tail only
@@ -37,9 +37,9 @@ only the accepted control path can complete its own drain.
 `AVA_CHECKPOINT_INTERVAL` defaults to four; the agent's `checkpoint_interval`
 configuration can override it. The effective interval travels with the turn's
 invoke configuration, so a shared host saver does not impose one agent's
-interval on another. Ordinary threads can replay up to N-1 skipped super-steps
-after a crash, including model costs and tool effects; terminal flush persists
-the remaining tail. Delta-bearing threads retire throttling and retain every
+interval on another. A crash can lose up to N-1 skipped super-steps; the host
+starts at claim with fresh input rather than replaying that tail. Terminal flush
+persists the remaining tail when it succeeds. Delta-bearing threads retain every
 super-step. Interval one restores every-step persistence. The operator
 [canary protocol](../../../docs/conventions/agents/checkpoint-interval-canary.md)
 owns verification and rollback.

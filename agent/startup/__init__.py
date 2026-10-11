@@ -415,7 +415,7 @@ async def reconcile_claimed_inbounds_at_startup(
     No prior checkpoint (brand-new agent) → no commits to confirm; reconcile
     is still called with an empty set so any unlikely stray `'claimed'`
     rows (e.g. from a previous run that we shouldn't have lost track of)
-    are reset to `'pending'`.
+    are consumed as unknown rather than redelivered.
     """
     from agent.db import reconcile_claimed_inbounds
     from base.agents.history.inbound_sideload import committed_ids_for_reconcile
@@ -429,7 +429,7 @@ async def reconcile_claimed_inbounds_at_startup(
     )
     if committed or reset or dead_lettered:
         logger.info(
-            "inbound reconcile: {committed} committed → done, {reset} orphans → pending, "
+            "inbound reconcile: {committed} committed → done, {reset} interrupted → consumed, "
             "{dead_lettered} stale → dead-lettered",
             event="inbound_reconcile",
             agent_id=agent_id,

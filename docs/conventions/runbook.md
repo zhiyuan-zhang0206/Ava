@@ -511,37 +511,14 @@ itself (its own public key in its own `authorized_keys`):
 
 See [component operations](../../services/backup/walg/docs/operations.md).
 
-### Agent recovery after a provider billing stoppage
+### Agent continuation after a provider error
 
-A provider balance exhaustion (e.g. DeepSeek HTTP 402) classifies as a
-permanent rejection; two consecutive ones open the recovery breaker
-(`permanent_reject_streak >= 2`, reason `billing`) and the corpse reaper
-terminates the victims. Recovery after a top-up is one explicit command:
-
-```bash
-ava agents resurrect-billing            # strictly read-only preview
-ava agents resurrect-billing --execute  # balance gate -> resurrect each candidate on its home machine
-```
-
-The preview itself is the identification tool: it lists the billing-class halt
-victims (terminated, streak at the halt threshold, reason `billing`, and not
-`user` / `integrity`-terminated), the halted-but-alive rows
-(report-only — no action is needed; the halt clears on their next successful
-turn), and the live provider balance readout. `--execute` refuses (exit 1)
-unless the balance endpoint reports the account available above
-`AVA_BILLING_RECOVERY_MIN_BALANCE` (default 1.0); a probe failure refuses too —
-fix the account or the `AVA_BILLING_RECOVERY_*` config and rerun. The run is
-idempotent: the candidate set self-clears, a rerun is an audited no-op, and a
-concurrent second run is refused by the run-level single-flight lock.
-
-Boundaries: `user` / `integrity`-terminated rows and halted-but-alive agents
-are never actioned — the latter recover on their next inbound; the former stay
-a per-agent human decision (`ava agents resurrect <id>`). Audit lands on the `billing_resurrect` event
-(balance readout + candidate / resurrected / refused / deferred / failed sets)
-plus `billing_resurrect_run` telemetry; each resurrected agent's own
-`resurrect` event carries `via='billing_recovery'`. Rationale and rejected
-alternatives: [billing batch resurrect decision](../decisions/agents/lifecycle/2026-09-18-billing-batch-resurrect.md).
-
+One permanent provider rejection suppresses background wakes. Fix the provider
+account or configuration, then send the affected agent a fresh message. An
+explicit `ava agents resurrect <id>` is also available when the row is terminated.
+There is no balance-gated billing batch command or permanent-error restart loop.
+Unknown code execution is never automatically replayed. Interrupted strong
+cancel, compact or restart receipts may remain held and require inspection.
 
 ## Private-network deployment (phone / multi-device access)
 
@@ -665,6 +642,7 @@ whether a restart is required — see
 | `MOONSHOT_API_KEY` | platform.moonshot.cn -> API keys |
 | `MIMO_API_KEY` | this provider's own developer console |
 | `DASHSCOPE_API_KEY` | bailian.console.aliyun.com -> API-KEY |
+| `TYPESAFE_API_KEY` | TypeSafe console -> API keys (Jev decision models) |
 | `BRAVE_API_KEY` | api-dashboard.search.brave.com |
 | `JINA_API_KEY` | jina.ai -> API keys |
 | `WANDB_API_KEY` | wandb.ai -> Settings -> API keys |

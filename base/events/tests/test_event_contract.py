@@ -83,37 +83,6 @@ def test_root_unit_failure_payloads_name_the_evidence() -> None:
     assert payload_keys("root_unit_not_revivable") == ("unit", "detail")
 
 
-def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
-    assert payload_keys("delivery_wake_suppressed") == (
-        "consecutive_failures",
-        "suppress_seconds",
-        "suppress_count",
-        "reason",
-    )
-
-
-def test_delivery_recovery_decision_payload_names_the_verdict() -> None:
-    assert payload_keys("delivery_recovery_decision") == ("inbound_id", "decision", "reason")
-
-
-def test_delivery_outbox_payloads_name_the_evidence() -> None:
-    assert payload_keys("delivery_outbox_flushed") == (
-        "inbound_id",
-        "attempts",
-        "flush_attempts",
-        "age_s",
-        "origin_agent_id",
-    )
-    assert payload_keys("delivery_outbox_abandoned") == (
-        "reason",
-        "detail",
-        "attempts",
-        "flush_attempts",
-        "age_s",
-        "origin_agent_id",
-    )
-
-
 def test_exec_child_boot_payload_exposes_ready_duration() -> None:
     """The exec-child readiness event owns the boot duration measurement."""
     assert payload_keys("exec_child_boot") == ("duration_ms",)

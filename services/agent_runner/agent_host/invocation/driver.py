@@ -7,10 +7,6 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.context import AvaContext
-from base.agents.history.delta_read_compat import RecoveryReconstructionScope
-from base.agents.history.inbound_sideload import ReconcileReadInputs
-from base.agents.observation.db_wait import DatabaseWaits
-from services.agent_runner.agent_host.db_recovery import recover_database
 from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph
 from services.agent_runner.agent_host.invocation.compact.execute import run_compact
 from services.agent_runner.agent_host.invocation.compact.lifecycle import settle_original_restart
@@ -23,13 +19,8 @@ async def drive_context(
     graph: CompactGraph,
     agent_id: int,
     ctx: AvaContext,
-    database_waits: DatabaseWaits,
-    peek_lock: asyncio.Lock,
     invoke: Callable[[int, AvaContext], Awaitable[TurnOutcome]],
     drop_agent: Callable[[int], None],
-    *,
-    reconcile_inputs: ReconcileReadInputs,
-    reconstruction: RecoveryReconstructionScope | None = None,
 ) -> TurnOutcome:
     """The publisher and explicit context belong to this invocation, not a cached runtime."""
     publisher = ctx.event_publisher
@@ -40,19 +31,7 @@ async def drive_context(
         async with asyncio.TaskGroup() as tasks:
             await publisher.start(tasks)
             try:
-                outcome = await _drive_work(
-                    pool,
-                    saver,
-                    graph,
-                    agent_id,
-                    ctx,
-                    database_waits,
-                    peek_lock,
-                    invoke,
-                    drop_agent,
-                    reconstruction=reconstruction,
-                    reconcile_inputs=reconcile_inputs,
-                )
+                outcome = await _drive_work(pool, saver, graph, agent_id, ctx, invoke, drop_agent)
             except BaseException as primary:
                 invocation_error = primary
                 try:
@@ -88,13 +67,8 @@ async def _drive_work(
     graph: CompactGraph,
     agent_id: int,
     ctx: AvaContext,
-    database_waits: DatabaseWaits,
-    peek_lock: asyncio.Lock,
     invoke: Callable[[int, AvaContext], Awaitable[TurnOutcome]],
     drop_agent: Callable[[int], None],
-    *,
-    reconcile_inputs: ReconcileReadInputs,
-    reconstruction: RecoveryReconstructionScope | None = None,
 ) -> TurnOutcome:
     """Run compact continuation and ordinary work in the admitted context."""
     incarnation = ctx.require_original_incarnation(agent_id)
@@ -104,17 +78,6 @@ async def _drive_work(
         graph,
         incarnation,
         ctx,
-        lambda work: recover_database(
-            pool=pool,
-            checkpointer=saver,
-            graph=graph,
-            incarnation=incarnation,
-            database_waits=database_waits,
-            peek_lock=peek_lock,
-            work=work,
-            reconstruction_parent=reconstruction,
-            reconcile_inputs=reconcile_inputs,
-        ),
     ):
         return TurnOutcome(exited=False, crashed=False, native_held=True)
     restarted = await settle_original_restart(
@@ -123,17 +86,6 @@ async def _drive_work(
         agent_id,
         incarnation.owner,
         drop_agent,
-        lambda token: recover_database(
-            pool=pool,
-            checkpointer=saver,
-            graph=graph,
-            incarnation=token,
-            database_waits=database_waits,
-            peek_lock=peek_lock,
-            work=ctx.native_work,
-            reconstruction_parent=reconstruction,
-            reconcile_inputs=reconcile_inputs,
-        ),
         incarnation=incarnation,
         resources=ctx.hosted_resources,
     )

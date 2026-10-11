@@ -25,8 +25,9 @@ or a blocked graph invocation.
   admitted generation, owner and lease. A stale or missing owner cannot claim
   another incarnation's work.
 - **Checkpoint reconciliation**: startup, compaction and co-batch deferral use
-  the same owner lock. They only mutate chat rows and never acknowledge a
-  lifecycle command using missing checkpoint evidence.
+  the same owner lock. Interrupted claimed chats are consumed, never requeued;
+  successful completion is distinguished from unknown execution. Reconciliation
+  never acknowledges a lifecycle command using missing checkpoint evidence.
 - **Interrupt peek**: `pending_interrupt_reason` reads pending external cancel or
   terminate commands so an in-flight operation can abort. It retains user/system attribution from the first matching inbound;
   `has_pending_interrupt` projects presence for backoff/ownership consumers.

@@ -39,6 +39,14 @@ Fast request to Standard; missing or unknown Fast receipts fail rather than
 guessing its price. Claude Fast remains subject to vendor access approval.
 Anthropic cache writes are still outside Ava's three-rate accounting model.
 
+## Decision models
+
+Decision models are priced on input only; output, and for OpenAI also cache reads and writes, are
+not charged, so cache hit and miss carry the same rate. Both ids have archive rows.
+
+- **jev-1.13.0** costs $0.042 per 1M input tokens, output free ([TypeSafe models](https://docs.typesafe.ai/models), checked 2026-10-11). The id is a pinned release; the `jev-latest` alias is deliberately not used.
+- **gpt-6-luna-decisions** (wire model `gpt-6-luna` on `/v1/decisions`) costs $0.10 per 1M input tokens ([Decisions guide](https://developers.openai.com/api/docs/guides/decisions), checked 2026-10-11). The guide mentions long-context multipliers without a threshold; the model's input ceiling is held at the chat model's 272K base tier.
+
 ## Published model rates
 
 - **gpt-5.6-sol carries its promotional price** ($4 in / $0.4 cached / $20 out per 1M, official model page checked 2026-09-06, valid at least through 2026-11-21). The revert to the standard rates ($5 / $0.5 / $30) is a deliberate manual flip in the plugin + archive, not an automatic period boundary (405 ruling 2026-09-07).

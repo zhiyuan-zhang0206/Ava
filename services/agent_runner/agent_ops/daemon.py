@@ -86,7 +86,7 @@ from ops.rpc_schemas import (
     OpStatus,
     is_op_kind,
 )
-from services.agent_runner.agent_ops import boot, health, outbox_flusher
+from services.agent_runner.agent_ops import boot, health
 from services.agent_runner.agent_ops import maintenance as maintenance_activity
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -627,14 +627,7 @@ async def _main(*, database: Callable[[], Database], image: LoadedCommit) -> Non
 
     pool = boot.open_db_pool(database=database)
     executor = _op_thread_pool()
-    db, bus = boot.ops_handles(database=database)
-    # Redeliver recorded delivery failures whenever the data plane allows
-    # (task #3757): a resident loop that outlives every sender process, owned with
-    # the server by the TaskGroup below.
     liveness = LivenessGroup()
-    outbox_progress = liveness.register(
-        "delivery-outbox", outbox_flusher.INITIAL_LIVENESS_TIMEOUT_S
-    )
 
     try:
         # Every /ops dial presents a machine API token of this generation; an
@@ -682,13 +675,8 @@ async def _main(*, database: Callable[[], Database], image: LoadedCommit) -> Non
         )
         boot.register_boot(database=database)
         try:
-            # One TaskGroup owns the server and the outbox loop: a loop that raises
-            # cancels the server and ends the process, and the supervisor restarts it.
-            async with server, asyncio.TaskGroup() as resident:
-                resident.create_task(server.serve_forever())
-                resident.create_task(
-                    outbox_flusher.outbox_loop(pool, db, bus, outbox_progress, authority=authority)
-                )
+            async with server:
+                await server.serve_forever()
         finally:
             await stop_health_server(server)
             _remove_pidfile()

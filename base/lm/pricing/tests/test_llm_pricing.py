@@ -96,6 +96,7 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
         "moonshot",
         "zhipu",
         "alibaba",
+        "typesafe",
     }
     assert {
         "gemini-embedding-2": models["gemini-embedding-2"]["vendor"],

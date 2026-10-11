@@ -1,13 +1,11 @@
 """One retained hosted compact continuation, without regenerating unknown provider results."""
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
-import psycopg
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from psycopg_pool import AsyncConnectionPool, PoolTimeout
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.interrupt import interruptible_model, subscribe_interrupt
 from agent.hooks.compact import COMPACT_MIN_SUMMARY_CHARS, conversation_messages, generate_summary
@@ -16,7 +14,6 @@ from agent.state import AgentState
 from base.agents.compaction.execution import (
     CompactCommand,
     claim_attempt,
-    completed_original,
     history_unchanged,
     pending,
     require_receiver,
@@ -27,15 +24,14 @@ from base.agents.compaction.models import CompactHeldError, CompactOutcome, Prep
 from base.agents.compaction.source_owner import require_source_receiver
 from base.agents.context import AvaContext
 from base.agents.incarnation.native_work import activate_work
-from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.config import settings
 from base.db.transaction import async_write_transaction
 from base.lm.factory import build_chat_model_bound, provider_key_of_model
+from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph, apply_prepared
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.invocation.compact.completion import close_terminal
-from services.agent_runner.agent_host.invocation.native_work import settle_native_invocation
 
 
 @dataclass
@@ -208,42 +204,27 @@ async def run_compact(
     graph: CompactGraph,
     incarnation: RuntimeIncarnation,
     ctx: AvaContext,
-    recover: Callable[[NativeWorkTarget | None], Awaitable[None]],
 ) -> bool:
-    """Return whether ordinary work may start; uncertainty retains the original gate."""
+    """Run a fresh command once; an interrupted attempt stays held for inspection."""
     command = await pending(pool, incarnation.agent_id)
     if command is None:
         return True
-    continuation = CompactContinuation(command, command.result)
-    if command.outcome is CompactOutcome.UNCERTAIN:
+    if command.attempt_id is not None or command.outcome is CompactOutcome.UNCERTAIN:
+        logger.warning(
+            "interrupted compact is not automatically resumed", agent_id=incarnation.agent_id
+        )
         return False
-    while True:
-        try:
-            if await completed_original(pool, continuation.command):
-                if continuation.command.execution is not None:
-                    await settle_native_invocation(
-                        pool,
-                        saver,
-                        graph,
-                        incarnation,
-                        continuation.command.execution,
-                        {"configurable": {"thread_id": str(incarnation.agent_id)}},
-                        resources=ctx.hosted_resources,
-                    )
-                return True
-            if continuation.command.attempt_id is None and not await _generate_original(
-                pool, saver, incarnation, ctx, continuation
-            ):
-                return True
-            return await _finish_original(pool, saver, graph, incarnation, ctx, continuation)
-        except (psycopg.OperationalError, PoolTimeout):
-            # Preserve this exact local result and UUID while the database recovers.
-            await recover(continuation.command.execution)
-            if continuation.generation_failed and continuation.command.attempt_id is not None:
+    continuation = CompactContinuation(command, command.result)
+    try:
+        if not await _generate_original(pool, saver, incarnation, ctx, continuation):
+            return True
+        return await _finish_original(pool, saver, graph, incarnation, ctx, continuation)
+    except Exception:
+        if continuation.command.attempt_id is not None:
+            try:
                 await _mark_unknown(pool, continuation.command, incarnation)
-                return False
-        except Exception:
-            if continuation.generation_failed and continuation.command.attempt_id is not None:
-                await _mark_unknown(pool, continuation.command, incarnation)
-                return False
-            raise
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "compact failure could not be persisted", agent_id=incarnation.agent_id
+                )
+        raise

@@ -61,7 +61,6 @@ def _no_plugin_expansions() -> Iterator[None]:
             prior.registry,
             catalog=prior.catalog,
             authority=prior.authority,
-            delivery_sender=prior.delivery_sender,
         )
 
 

@@ -50,43 +50,28 @@ lifecycle controls flush any prior buffered checkpoint before claiming their
 restart, without invoking the graph or consuming ordinary messages;
 `applied_at`, an idle row, or a released lease alone is insufficient.
 
-Failure receipts are graded at record time by the turn exception. The
-database-outage family (`psycopg.OperationalError`, `PoolTimeout`) is
-crash-equivalent: the continuation outcome is unknown but durable, as after
-a crash. Every DB channel hang surfaces as one of these, so the bare
-`TimeoutError` — since 3.11 also the LLM `wait_for` timeout — grades
-as an ordinary blocking failure. Those land in `undelivered`, never
-`failures`; they never block. They are re-driven through the held-control
-path (no failure fence), and certification still requires the applied
-restart, so a drain never certifies an un-flushed tail. Other failures block.
+Continuation failures, including database connection failures, are recorded
+as blocking maintenance failures. Same-boot and persisted hold fences prevent
+automatic re-drive after failure. Explicit operator resume is required; restart
+does not turn an unknown continuation into a successful drain receipt.
 
 Phases are `preparing → draining → drained → stopping → stopped`, owned by
 `state.MaintenancePhase`; `ava stop` / `ava restart` walk all five. Journal
-decoding restores this enum and rejects unknown values; the certified drain
-subset is shared by receipt classification and the quiesced admission gate.
-There is no start phase: `ava start` authorizes bring-up against the `stopped`
-(or earlier) hold and releases it after readiness. A failed prepare/drain/stop keeps the hold. Ordinary
-`ava start` authorizes the existing operation for bring-up and resumes after
-readiness. `authorized_start` returns the operation snapshot; nested calls pass
-it explicitly and verify the journal holder and acquisition time. It grants
-no service-process credential. Stranded-pause recovery cannot abandon a
-maintenance hold. A recorded blocking continuation/flush failure blocks the
-drain, the phase transitions and every bare resume path; `ava start` is the exit.
-Once the unit serves, `cli/commands/lifecycle/_failed_receipts.py` settles each
-failed receipt before the hold releases: it checks that the agent's restart
-pointer is still pending or claimed (the release's resume then wakes it, with
-every other member's), logs and notifies the owner for any agent whose pointer is
-gone, skips a terminated agent, and `admission.clear_failures` drops the receipts
-from the journal by compare-and-swap. A turn that lands another failure after the
-clear keeps the hold for the next `ava start`. A start that fails before the unit
-serves settles nothing. The failure is crash-equivalent: the pointer survives in
-Postgres, and cold admission continues the agent from its last durable
-checkpoint. Undelivered receipts are never cleared; they never block. Resume
-wakes the saved restart IDs; DB pointers survive a lost Redis wake. Cold admission reloads checkpoints, leaves idle agents idle,
-continues unfinished work and does not revive terminated identities.
-Repeating `stop` after a completed, failure-free stop reads this same journal
-before configuration bootstrap, so an offline gateway does not prevent the
-idempotent stop. First-time normal drain still needs data-plane configuration.
+reads validate the enum. There is no start phase: `ava start` authorizes bring-up
+against the retained hold and releases it after actual readiness. Nested calls
+pass the authorized operation snapshot and verify its holder and acquisition time.
+
+A recorded blocking continuation/flush failure prevents drain, phase transitions
+and bare resume. Explicit `ava start` may settle the failed receipt after the unit
+serves, preserving a pending/claimed restart pointer or reporting a lost pointer
+before clearing the receipt by compare-and-swap. A new failure keeps the hold.
+This operator action does not replay the original graph or code execution. Pending
+restart controls remain subject to resource and lifecycle gates; unknown compact
+or cancel attempts stay held. New ordinary execution requires fresh input.
+
+Repeating a completed, failure-free stop reads the journal before configuration
+bootstrap. First-time normal drain still needs data-plane configuration.
+
 
 SDK dependencies remain available through prepare/drain. Service stop closes
 new ordinary ops admission and waits for admitted handlers and executor work before
@@ -105,13 +90,12 @@ also stays reachable and remains counted through completion. Its existing
 authentication requirements are unchanged.
 Resume still checks the exact generation, failure receipts and actual serving
 state. Ordinary start proves readiness before releasing the hold; an exit-code
-waiver never marks either serving or explicit maintenance `ready`. Business APIs
-and native work stay closed until that successful resume.
+waiver never certifies serving. Business APIs and native work stay closed until
+that successful resume.
 
 Explicit force kills native processes without stamping a normal termination or
-inventing a restart/flush receipt. It preserves the original metadata for the
-existing crash-recovery policy, whose auto-resurrection and retry limits still
-apply; it does not promise the normal drain's continuation guarantee.
+inventing a restart/flush receipt. It preserves original metadata for inspection;
+crash reaping reports termination without resurrecting or replaying old work.
 
 `ava status` reads the hold journal (`ava status --json` prints only the hold) and
 `ava start` is its only exit, over a hold in any phase. It cannot prove replay

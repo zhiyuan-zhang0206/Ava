@@ -511,10 +511,10 @@ def test_send_delivers_as_the_borrowed_agent(
     capsys: pytest.CaptureFixture[str],
     operator_database: DatabaseFactory,
 ) -> None:
-    seen: list[tuple[int, str, str, int | None]] = []
+    seen: list[tuple[int, str, str]] = []
 
-    def deliver(agent_id: int, content: str, *, source: str, origin_agent_id: int | None) -> str:
-        seen.append((agent_id, content, source, origin_agent_id))
+    def deliver(agent_id: int, content: str, *, source: str) -> str:
+        seen.append((agent_id, content, source))
         return "enqueued"
 
     def require_active(_db: object, lease: str, caller: dict[str, Any]) -> dict[str, Any]:
@@ -528,7 +528,7 @@ def test_send_delivers_as_the_borrowed_agent(
     args = _args("send", "0", "--agent", "405", "--to", "42", "--content", "hi")
     args.database_factory = operator_database
     assert args.func(args) == 0
-    assert seen == [(42, "hi", "agent:405", 405)]
+    assert seen == [(42, "hi", "agent:405")]
     assert json.loads(capsys.readouterr().out) == {
         "status": "enqueued",
         "to": 42,

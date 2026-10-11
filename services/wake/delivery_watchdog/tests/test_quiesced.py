@@ -17,38 +17,13 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
-from services.wake.delivery_watchdog import daemon, resurrect_retry, stall_recovery, turn_liveness
+from services.wake.delivery_watchdog import daemon
 
 _Loop = Callable[[ConnectionPool, LoopProgress, ProcessDbGate], Coroutine[Any, Any, None]]
 
 _LOOPS: dict[str, _Loop] = {
     "scan": lambda pool, progress, database_gate: daemon._scan_loop(
         pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), progress
-    ),
-    "resurrect": lambda pool, progress, database_gate: resurrect_retry.resurrect_loop(
-        pool,
-        Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
-        progress,
-        0.01,
-        10,
-        60.0,
-    ),
-    "harvest": lambda pool, progress, database_gate: stall_recovery.stall_recovery_loop(
-        pool,
-        Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
-        progress,
-        0.01,
-        60.0,
-    ),
-    "hosted_turn": lambda pool, progress, database_gate: turn_liveness.hosted_turn_recovery_loop(
-        pool,
-        Database.from_settings(gate=database_gate),
-        cast("EventBus", MagicMock()),
-        progress,
-        0.01,
-        60.0,
     ),
 }
 

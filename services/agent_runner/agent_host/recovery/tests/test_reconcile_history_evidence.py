@@ -12,7 +12,7 @@ from agent.startup import reconcile_claimed_inbounds_at_startup
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import admit_recovery
+from services.agent_runner.agent_host.recovery.tests.helpers import admit as _admit
 from services.agent_runner.agent_host.recovery.tests.test_reconcile_after_abort import (
     _build_graph,
     _CountingSaver,
@@ -32,7 +32,7 @@ async def test_checkpoint_clock_skew_scans_settled_history(
     database_gate: ProcessDbGate,
 ) -> None:
     """A checkpoint clock over 300 seconds behind DB time cannot bound writes."""
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -69,7 +69,7 @@ async def test_historical_clock_skew_cannot_hide_a_fresh_commit(
     database_gate: ProcessDbGate,
 ) -> None:
     """A later clock-correct checkpoint must not make an old skewed write disappear."""
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -111,7 +111,7 @@ async def test_incomplete_full_write_scan_preserves_claimed_row(
     database_gate: ProcessDbGate,
 ) -> None:
     """A failed history scan cannot turn missing proof into a reset."""
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,

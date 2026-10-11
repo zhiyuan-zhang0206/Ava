@@ -18,15 +18,7 @@ Mutation routes remain in `gateway/agents/`.
 send_message, list, and patch — all in the `gateway/agents/` package. CRUD
 and spawn live in `router.py`; lifecycle actions live in `lifecycle.py`; message
 and state reads live in `state.py`; `forward.py` provides the cross-machine
-forwarding helpers. The billing batch-recovery entry is `POST /api/agents/resurrect-billing`
-(a read-only preview unless the body sets `execute`; orchestration in
-`ops/lifecycle/billing_recovery.py`, per-agent dispatch via the
-`resurrect-billing` home action). `ops/rpc_schemas/billing_recovery.py` owns
-the distinct `BillingRecoveryHomeResult` and per-agent `BillingRecoveryOutcome` enums,
-plus run-level `BillingRecoveryMode` (`dry_run` / `execute`) and
-`BillingRecoveryRunOutcome` (`preview` / `executed` / `refused`);
-lifecycle dispatch translates home verdicts into batch outcomes. Raw RPC values
-are validated by the response models, and JSON wire strings stay unchanged.
+forwarding helpers. New message delivery retains an exact-input home-machine wake and bounded sender retry. Billing batch recovery is removed.
 
 Versioned `/api/keyed/v1/agents/{id}/cancel-work` and `compact-history` accept
 observed native work and closed history targets with required principal-scoped

@@ -109,13 +109,6 @@ EVENTS: dict[str, EventSpec] = {
         persist=True,
     ),
     "agent_resurrected": telemetry_event("agent_resurrected", "agent resurrected", persist=True),
-    "billing_resurrect_run": telemetry_event(
-        "billing_resurrect_run",
-        "billing batch recovery run finished",
-        site=(
-            'ops/lifecycle/billing_recovery.py:_record_run_event telemetry.emit("telemetry", ...)'
-        ),
-    ),
     "auto_resurrect_refused": telemetry_event(
         "auto_resurrect_refused",
         "an automatic resurrect of a terminated agent was refused (e.g. "

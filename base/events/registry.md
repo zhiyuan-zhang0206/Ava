@@ -74,7 +74,6 @@ Emit sites and consumers: see the comments at each emit point.
 | `restart` | agent restart initiated | business | — | events |
 | `cancel` | in-flight turn cancelled | business | — | events |
 | `resurrect` | terminated agent woken | business | — | events |
-| `billing_resurrect` | billing batch recovery run: billing-class halt victims reinstated after the provider balance gate passed (task #3919) | business | — | events |
 | `hosted_legacy_adoption` | a hosted successor replaced a legacy NULL-resource owner before lease expiry on machine-local evidence (dead predecessor probe set) | business | — | events |
 | `compact` | agent context compacted | business | — | events |
 | `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue) | business | — | events |
@@ -132,17 +131,12 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to | — | events | — |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events | ✓ |
 | `delivery_poisoned` | delivery backlog — permanently-failing inbound poisoned (dispatch cap reached) | anomaly | inbound_id, dispatch_count, age_s | — | events | — |
-| `delivery_wake_suppressed` | automatic delivery wakes suppressed after repeated resurrection failures | anomaly | consecutive_failures, suppress_seconds, suppress_count, reason | — | events | — |
-| `delivery_recovery_decision` | stalled crash-marked recovery decision (harvest / refusal) | anomaly | inbound_id, decision, reason | — | events | — |
-| `delivery_outbox_flushed` | delivery backlog — a deferred-send record was redelivered (task #3757) | observation | inbound_id, attempts, flush_attempts, age_s, origin_agent_id | — | events | — |
-| `delivery_outbox_abandoned` | delivery backlog — a deferred-send record abandoned at its budget or on a permanent failure (task #3757) | anomaly | reason, detail, attempts, flush_attempts, age_s, origin_agent_id | — | events | — |
 | `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | events | ✓ |
 | `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events | ✓ |
 | `exec_envelope` | exec envelope transfer cost (size + serialize time) — request snapshot / result delta | observation | envelope, op, size_bytes, serialize_ms | — | events | — |
 | `exec_child_boot` | exec child bootstrap duration before agent-authored code | noise | duration_ms | — | events | — |
 | `exec_child_boot_failed` | exec child crashed before running the agent's code (bootstrap-class failure) | anomaly | exc_type, exc_msg | — | events | — |
 | `exec_request_quarantine` | stale exec request evidence preserved under the explicit quarantine | observation | reason, event_dir, sources, vanished | — | events | — |
-| `exec_request_bounded_quarantine` | an unreadable exec request envelope past the bounded-disposition bound (twice the exec node timeout, no live process reference, no live host process) was quarantined without review — the bytes are preserved with a receipt and the recovery path no longer defers on it; off via AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED restores unbounded retention | anomaly | — | — | events | — |
 | `exec_cancelled` | execute_code cancelled | anomaly | — | — | events | ✓ |
 | `exec_timeout` | execute_code timed out | anomaly | — | — | events | ✓ |
 | `exec_node_timeout` | node-level timeout | anomaly | — | — | events | ✓ |
@@ -177,8 +171,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `impersonation_event_log_incomplete` | an impersonation event log cannot complete on its own (ended lease with an open source, or a failed capture source); re-emitted every reaper pass while it holds | anomaly | condition, lease_id, lease_machine, pending_reason, session | — | events | — |
 | `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events | — |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events | — |
-| `host_recovery_wake_started` | hosted recovery wake started a turn and occupied an in-flight pacing slot | noise | — | — | events | — |
-| `host_recovery_wake_released` | hosted recovery turn completed and released its in-flight pacing slot | noise | — | — | events | — |
 | `host_dispatcher_reconnect` | hosted dispatcher's wake subscription dropped — reconnecting (wakes published while down are lost; the delivery watchdog re-publish covers them) | noise | — | — | events | — |
 | `host_dispatcher_scan_failed` | hosted dispatcher's durable pending scan failed; the wake subscription remains open and attributes carry the next scan backoff_s | anomaly | backoff_s | — | events | — |
 | `host_dispatcher_restart_required` | hosted dispatcher could not unwind a stale turn — exiting for supervisor recovery | anomaly | — | — | events | — |
@@ -200,9 +192,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `corpse_reaper_terminated` | the corpse reaper terminated crash-marked idling rows past the grace window (termination_source='reaper') | anomaly | — | — | events | — |
 | `corpse_reaper_failed` | the beat's corpse reap pass failed — retried on the next beat; leases of healthy rows are unaffected (renewal runs first) | anomaly | — | — | events | — |
 | `corpse_reaper_publish_failed` | a reaped corpse's frontend snapshot publish failed — best-effort; the durable terminated flip already committed | noise | — | — | events | — |
-| `crash_recovery_wake_queued` | the corpse reaper committed a crash death's recovery wake — one system-source chat carrying the hosted_turn_recovery marker — inside the terminating transaction, so a committed reap always has a wake to resume its owner (task #4039) | observation | — | — | events | — |
-| `crash_recovery_wake_attempted` | the service layer attempted the guarded auto-resurrect for a reaped corpse's committed recovery wake; carries the status the attempt returned (task #4039) | observation | — | — | events | — |
-| `crash_recovery_wake_deferred` | a reaped corpse's guarded resurrect attempt failed — the wake row stays pending for the delivery watchdog's terminated-owner retry until the stale age gate (task #4039) | observation | — | — | events | — |
 | `host_recrash_reap_skipped` | the recrash prompt reap skipped terminating a re-crashed corpse (fail-closed) — the grace-window reap stays the backstop. Carries the reason: the gray switch is off (disabled), the turn never settled to idling (settle_incomplete), or the row moved on since the crash (row_moved_on) | noise | — | — | events | — |
 | `host_turn_stall_aborted` | a hosted turn task ended after its no-progress abort: the invocation unwound and was dropped; the runtime was discarded by run_turn, so the next wake re-runs the startup reconcile before resuming from the checkpoint | anomaly | — | — | events | — |
 | `host_abort_reconcile_skipped` | the settled hosted turn abort skipped the immediate inbound reconcile (fail-closed) — the claimed rows are left to the next cold admission. Carries the reason: the soft switch is off (disabled), the turn's resources never fully settled (resources_unsettled), or the runtime ownership was already replaced (ownership_lost — the replacement disposes the rows) | noise | — | — | events | — |
@@ -229,7 +218,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `halt` | turn stopped (idle/compact/system) | noise | body | — | events | ✓ |
 | `agent_spawned` | agent process started | observation | spawner, forked_from | — | events | ✓ |
 | `agent_resurrected` | agent resurrected | observation | — | — | events | ✓ |
-| `billing_resurrect_run` | billing batch recovery run finished | observation | — | — | events | — |
 | `auto_resurrect_refused` | an automatic resurrect of a terminated agent was refused (e.g. runtime_cutover_required); the triggering inbound stays queued until an operator resolves the named reason | anomaly | — | — | events | — |
 | `auto_resurrect_failed` | an automatic resurrect failed for a possibly transient reason; the triggering inbound stays queued for a later or manual resurrect | observation | — | — | events | — |
 | `wake_degraded` | RedisInboundListener wake path degraded (instant pub/sub wake off) | anomaly | — | — | events | — |

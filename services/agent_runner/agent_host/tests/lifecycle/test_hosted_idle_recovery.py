@@ -3,42 +3,27 @@
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import psycopg
 import pytest
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.graph import END, START, StateGraph
-from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.claim.node import claim_node
 from agent.state import BaseAgentState
-from base.agents.context import AvaContext
 from base.agents.incarnation.resources import (
     IncarnationResources,
     ResourceProcess,
-    decode_resources,
 )
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import pause_owner
-from base.deploy.maintenance.cohort import _classify, _RuntimeRow
-from base.deploy.maintenance.state import MaintenanceHold
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from base.native_process.runtime_incarnation import RuntimeIncarnation
-from services.agent_runner.agent_host import dispatcher
-from services.agent_runner.agent_host import runtime as runtime_module
-from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
+from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import admit_recovery
+from services.agent_runner.agent_host.recovery.tests.helpers import admit as _admit
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.components.base.poll_until import poll_until_async
 
@@ -86,122 +71,6 @@ def _mark_predecessor_idle(
     db_conn.commit()
 
 
-async def _assert_recovered_without_a_model_call(
-    db_conn: psycopg.Connection,
-    incarnation: RuntimeIncarnation,
-    agent: int,
-    host: AgentHost,
-    scheduler: TurnScheduler,
-    dispatcher: InboundWakeDispatcher,
-    graph: Any,
-    config: RunnableConfig,
-    messages: list[HumanMessage | AIMessage],
-) -> None:
-    """The quiet-idle recovery ran one turn with no model call, and left the
-    agent idling under a fresh runtime generation with its prior state intact."""
-    assert [wake.agent_id for wake in await host.pending_inbound_wakes(60)] == [agent]
-    await dispatcher.scan_once()
-    await poll_until_async(lambda: not scheduler.active_agents, timeout=5)
-    row = db_conn.execute(
-        "SELECT id,status,runtime_kind,runtime_owner,runtime_generation,"
-        "lease_expires_at>clock_timestamp(),pid,incarnation_resources "
-        "FROM agents_meta WHERE id=%s",
-        (agent,),
-    ).fetchone()
-    assert row is not None
-    assert row[1:4] == ("idling", "hosted", host._owner)
-    assert row[4] != incarnation.generation and row[5] is True
-    assert host.stats.turns_started == 1
-    assert await host.pending_inbound_wakes(60) == []
-    assert db_conn.execute(
-        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
-    ).fetchone() == (0,)
-    state = await graph.aget_state(config)
-    assert [message.content for message in state.values["messages"]] == [
-        message.content for message in messages
-    ]
-    assert state.values["halted"] is True
-    assert _classify([_RuntimeRow(*row)], MaintenanceHold(), host._owner, set()).commands == {
-        agent: 0
-    }
-
-
-@pytest.mark.parametrize("evidence", ["legacy", "managed"])
-@pytest.mark.parametrize("released", [False, True])
-async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    evidence: str,
-    released: bool,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    incarnation = await admit_recovery(
-        aops_pool,
-        model_catalog=model_catalog,
-        config_authority=config_authority,
-        database_gate=database_gate,
-    )
-    agent = incarnation.agent_id
-    row = db_conn.execute(
-        "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent,)
-    ).fetchone()
-    assert row is not None
-    resources = decode_resources(row[0])
-    assert isinstance(resources, IncarnationResources)
-    assert resources.host_process is not None
-    _mark_predecessor_idle(db_conn, resources, agent, evidence=evidence, released=released)
-
-    monkeypatch.setattr(runtime_module, "validate_model_config", _accept_model)
-    monkeypatch.setattr(
-        runtime_module,
-        "boot_agent_scope",
-        AsyncMock(return_value=(FakeListChatModel(responses=[]), None)),
-    )
-
-    saver = AsyncPostgresSaver(
-        cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], aops_pool)
-    )
-    await saver.setup()
-    builder = StateGraph(BaseAgentState, context_schema=AvaContext)
-    builder.add_node("claim", claim_node)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
-    builder.add_node("before_llm", _unexpected_model)  # pyright: ignore[reportUnknownMemberType]
-    builder.add_node("init_context", _unexpected_model)  # pyright: ignore[reportUnknownMemberType]
-    builder.add_edge(START, "claim")
-    builder.add_edge("before_llm", END)
-    builder.add_edge("init_context", END)
-    graph = builder.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
-    config: RunnableConfig = {"configurable": {"thread_id": str(agent)}}
-    messages = [HumanMessage(content="Existing question"), AIMessage(content="Already answered")]
-    await graph.aupdate_state(config, {"messages": messages, "halted": True})
-    host = AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        graph=graph,
-        checkpointer=saver,
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(gate=database_gate),
-        catalog=model_catalog,
-    )
-    scheduler = TurnScheduler(host.run_turn)
-    dispatcher = InboundWakeDispatcher(
-        EventBus.from_settings(),
-        scheduler,
-        pending_scan=host.pending_inbound_wakes,
-        stale_after_s=60,
-    )
-    try:
-        await _assert_recovered_without_a_model_call(
-            db_conn, incarnation, agent, host, scheduler, dispatcher, graph, config, messages
-        )
-    finally:
-        await scheduler.aclose()
-        await host.aclose()
-
-
 async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -212,7 +81,7 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await admit_recovery(
+    incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -233,7 +102,7 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
-    assert [wake.agent_id for wake in await host.pending_inbound_wakes(60)] == [agent]
+    assert await host.pending_inbound_wakes(60) == []
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
@@ -280,71 +149,3 @@ class TestReapedSuccessorMarker:
                 assert joined.value is failure
             else:
                 await scheduler.aclose()
-
-    async def test_old_successor_cleanup_preserves_new_reaper_marker(self) -> None:
-        release = asyncio.Event()
-
-        async def run_turn(_agent_id: int) -> None:
-            await release.wait()
-
-        async def pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [dispatcher.PendingInboundWake(1, False, True)]
-
-        scheduler = TurnScheduler(run_turn)
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), scheduler, pending_scan=pending, stale_after_s=180.0
-        )
-        try:
-            await disp.scan_once()
-            original = disp._recovery_in_flight[1]
-            original.cancel()
-            await asyncio.sleep(0)  # Run the cancelled original.
-            await asyncio.sleep(0)  # Run its reaper, before the replacement starts.
-            old_successor = scheduler.reaped_successor(1)
-            assert old_successor is not None
-            assert disp._recovery_in_flight[1] is old_successor
-            old_successor.cancel()  # Reap again before this pump starts.
-            await poll_until_async(
-                lambda: scheduler.reaped_successor(1) is not old_successor, timeout=3
-            )
-            new_successor = scheduler.reaped_successor(1)
-            assert new_successor is not None
-            assert scheduler.task_for(1) is new_successor
-            await asyncio.sleep(0)  # Let its recovery-slot callback finish.
-            assert scheduler.reaped_successor(1) is new_successor
-            assert disp._recovery_in_flight[1] is new_successor
-            release.set()
-            await poll_until_async(
-                lambda: (
-                    new_successor.done()
-                    and scheduler.reaped_successor(1) is None
-                    and disp._recovery_in_flight == {}
-                ),
-                timeout=3,
-            )
-        finally:
-            release.set()
-            await scheduler.aclose()
-
-    async def test_late_original_release_skips_completed_reaper_successor(self) -> None:
-        async def run_turn(_agent_id: int) -> None:
-            return
-
-        scheduler = TurnScheduler(run_turn)
-        disp = InboundWakeDispatcher(EventBus.from_settings(), scheduler)
-        try:
-            original = scheduler.wake(1)
-            assert original is not None
-            disp._recovery_in_flight[1] = original
-            original.cancel()
-            await asyncio.sleep(0)
-            await asyncio.sleep(0)
-            successor = scheduler.reaped_successor(1)
-            assert successor is not None
-            await poll_until_async(
-                lambda: successor.done() and scheduler.reaped_successor(1) is None, timeout=3
-            )
-            disp._release_recovery_slot(1, original)
-            assert disp._recovery_in_flight == {}
-        finally:
-            await scheduler.aclose()

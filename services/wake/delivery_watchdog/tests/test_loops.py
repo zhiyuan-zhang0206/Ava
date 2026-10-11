@@ -3,7 +3,6 @@ sequential round runner, the bounded fan-out, and the attempt clocks."""
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
@@ -13,10 +12,9 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from base.config.service_read import ConfigAuthority
-from base.daemon.loop_health import LivenessGroup, LoopProgress
+from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster.rpc import worst_case_dispatch_seconds
@@ -51,91 +49,6 @@ def _agent(
         authority=config_authority,
         database_gate=database_gate,
     )
-
-
-def _patch_loops(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    crashing: str | None,
-    config_authority: ConfigAuthority,
-    cancelled: list[str],
-    registered: list[str] | None = None,
-) -> None:
-    """Replace the four loop bodies with stand-ins that park forever, except
-    `crashing`, which raises."""
-
-    def stand_in(name: str):
-        async def loop(*_args: object) -> None:
-            if name == crashing:
-                await asyncio.sleep(0.01)
-                raise RuntimeError(f"{name} loop crashed")
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                cancelled.append(name)
-                raise
-
-        return loop
-
-    monkeypatch.setattr(daemon, "_scan_loop", stand_in("scan"))
-    monkeypatch.setattr(daemon.resurrect_retry, "resurrect_loop", stand_in("resurrect"))
-    monkeypatch.setattr(daemon.stall_recovery, "stall_recovery_loop", stand_in("harvest"))
-    monkeypatch.setattr(daemon.turn_liveness, "hosted_turn_recovery_loop", stand_in("hosted_turn"))
-
-    def threshold(authority: ConfigAuthority) -> float:
-        assert authority is config_authority
-        return 2400.0
-
-    monkeypatch.setattr(daemon.turn_liveness, "hosted_turn_threshold_seconds", threshold)
-
-
-@pytest.mark.parametrize("crashing", ["scan", "resurrect", "harvest", "hosted_turn"])
-async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
-    pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    crashing: str,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    cancelled: list[str] = []
-    _patch_loops(
-        monkeypatch, crashing=crashing, cancelled=cancelled, config_authority=config_authority
-    )
-
-    with pytest.raises(ExceptionGroup) as raised:
-        await daemon._run_loops(
-            pool,
-            Database.from_settings(gate=database_gate),
-            EventBus.from_settings(),
-            LivenessGroup(),
-            authority=config_authority,
-        )
-
-    assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} loop crashed"]
-    assert sorted(cancelled) == sorted({"scan", "resurrect", "harvest", "hosted_turn"} - {crashing})
-
-
-async def test_each_loop_reports_its_own_progress(
-    pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    liveness = LivenessGroup()
-    _patch_loops(monkeypatch, crashing="scan", cancelled=[], config_authority=config_authority)
-
-    with pytest.raises(ExceptionGroup):
-        await daemon._run_loops(
-            pool,
-            Database.from_settings(gate=database_gate),
-            EventBus.from_settings(),
-            liveness,
-            authority=config_authority,
-        )
-
-    assert set(liveness.snapshot()) == {"scan", "resurrect", "harvest", "hosted_turn"}
 
 
 def test_claim_hands_an_agent_out_once_per_cooldown(

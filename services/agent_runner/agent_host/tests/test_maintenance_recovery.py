@@ -514,6 +514,11 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     entered, finish = asyncio.Event(), asyncio.Event()
     calls: list[str] = []
     effect = tmp_path / "effect.txt"
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'Do the action','chat','user')",
+        (agent,),
+    )
+    db_conn.commit()
     model = _model_that_runs_the_effect_tool_once(calls, entered, finish, effect)
 
     saver = AsyncPostgresSaver(aops_pool)
@@ -572,8 +577,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         assert calls == ["model", "before_exec", "after_exec"]
         await host.run_turn(agent)
         assert calls == ["model", "before_exec", "after_exec"]
-        # Drop the old host's in-memory graph/cache: recovery consumes the
-        # durable restart pointer and real cold checkpoint after explicit release.
+        # Explicit release observes the restart; it cannot resume the old graph.
         assert current.maintenance is not None
         start_cluster_through_ready_gate(monkeypatch)
         successor = _host_driving_invoke_until_done(
@@ -588,7 +592,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         wakes = await successor.pending_inbound_wakes(stale_after_s=300)
         assert agent in [wake.agent_id for wake in wakes]
         await successor.run_turn(agent)
-        assert calls == ["model", "before_exec", "after_exec", "model"]
+        assert calls == ["model", "before_exec", "after_exec"]
         assert effect.read_text() == "once"
         assert db_conn.execute(
             "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s",

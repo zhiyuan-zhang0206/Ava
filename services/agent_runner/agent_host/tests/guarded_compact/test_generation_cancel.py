@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.interrupt import ModelInterruptedError
 from agent.tests.claim.test_inbound_ownership import _insert
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -57,18 +58,19 @@ async def test_actual_generation_cancel_has_one_attempt_closed_work_and_next_cha
     running = asyncio.create_task(accepted.host.run_turn(accepted.agent))
     await asyncio.wait_for(started.wait(), 3)
     cancellation = accept_cancel(client, accepted)
-    await asyncio.wait_for(running, 5)
+    with pytest.raises(ModelInterruptedError):
+        await asyncio.wait_for(running, 5)
     status = accepted.status(client)
     assert ended.is_set() and calls == ["original"]
-    assert status["outcome"] == "uncertain" and status["recovery_checkpoint_id"]
+    assert status["outcome"] == "uncertain" and status["recovery_checkpoint_id"] is None
     assert status["checkpoint_id"] is None and not status["result_available"]
     assert db_conn.execute(
         "SELECT outcome FROM native_cancel_commands WHERE id=%s", (cancellation["command_id"],)
-    ).fetchone() == ("applied",)
+    ).fetchone() == ("accepted",)
     assert db_conn.execute(
         "SELECT phase,ended_at IS NOT NULL FROM native_graph_work WHERE id=%s",
         (status["execution"]["work_id"],),
-    ).fetchone() == ("settled", True)
+    ).fetchone() == ("active", False)
     _insert(db_conn, accepted.agent)
     await accepted.host.run_turn(accepted.agent)
-    assert calls == ["original"] and len(accepted.ordinary) == 2
+    assert calls == ["original"] and len(accepted.ordinary) == 1

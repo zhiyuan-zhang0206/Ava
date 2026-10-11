@@ -178,13 +178,11 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
         await close_hosted_turn(
             aops_pool,
             aops_pool,
-            host._db,
             host._bus,
             saver,
             incarnation,
             TurnOutcome(exited=False, crashed=True),
             resources=resources,
-            wake_enabled=configured_policy().recovery_wake_enabled,
             prompt_reap_enabled=configured_policy().recrash_reap_enabled,
             reconcile_inputs=configured_policy().reconcile_inputs,
         )

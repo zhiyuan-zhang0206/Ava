@@ -1,7 +1,7 @@
 # Model providers as plugins
 
 > **Status: implemented.** Core registers no provider bindings or chat models.
-> The eight repository providers live under `ava_builtins/plugins/lm_*`, and
+> The repository providers live under `ava_builtins/plugins/lm_*`, and
 > enabled provider plugins are the sole source of chat models, builders, API-key
 > declarations, effort vocabularies, vision fallbacks, stop vocabularies, and
 > current prices.
@@ -62,6 +62,7 @@ The repository ships this default enabled set:
 | `lm_google` | `gemini-` | `ChatGoogleGenerativeAI` | `lm_google` (`google_genai`) |
 | `lm_moonshot` | `kimi-` | `ChatMoonshot` | `lm_moonshot` (`moonshot`) |
 | `lm_openai` | `gpt-` | `ChatOpenAI` Responses API | `lm_openai` (`openai`) |
+| `lm_typesafe` | `jev-` (decision only) | none; HTTP decision binding | none |
 | `lm_xiaomi` | `mimo-` | `ReasoningContentChatModel` | `lm_openai` (`openai`) |
 | `lm_zhipu` | `glm-` | `ReasoningContentChatModel` | `lm_openai` (`openai`) |
 
@@ -91,6 +92,13 @@ views to their consumers. Model resolution, pricing, media selection and DTO
 admission never reconstruct an owner. Known declaration errors preserve typed
 registration failures; unexpected Python errors retain their original object
 and traceback. No failed attempt publishes a partial catalog.
+
+## Decision providers
+
+`lm_typesafe` contributes no chat model: Jev is a decision model, so its plugin declares only
+`decision_providers`, and `lm_openai` adds the Decisions API beside its chat provider. Decision
+models are installed into parallel catalog tables and are unreachable from any chat path; see
+[decision-models.ava.okf.md](decision-models.ava.okf.md).
 
 ## Provider contract
 

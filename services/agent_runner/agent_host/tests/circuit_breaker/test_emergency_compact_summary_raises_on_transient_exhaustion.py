@@ -144,7 +144,7 @@ async def test_llm_node_cancel_does_not_close_circuit(
     assert cmd.update["halted"] is True  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
 
 
-async def test_two_permanent_rejections_trip_the_recovery_breaker(
+async def test_first_permanent_rejection_trips_the_recovery_breaker(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
@@ -153,11 +153,7 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Two consecutive permanent rejections with no successful turn between
-    them halt automatic recovery: the durable streak reaches the threshold,
-    the wake suppression names the reason, the metadata-only report reaches
-    the nearest live ancestor, and the frontend gets a blocked Error — while
-    ONE rejection alone changes none of it."""
+    """One permanent rejection halts background recovery and reports the cause."""
     ancestor_id, child_id = _spawn_child_under_idling_ancestor(
         db_conn,
         model_catalog=model_catalog,
@@ -171,9 +167,8 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
         "SELECT permanent_reject_streak, wake_suppress_reason FROM agents_meta WHERE id = %s",
         (child_id,),
     ).fetchone()
-    assert row == (1, None)  # one rejection is not a halt
+    assert row == (1, "permanent_provider_reject")  # the first rejection halts background wakes
 
-    await _reject_turn(aops_pool, child_id, publisher=publisher, database_gate=database_gate)
     row = db_conn.execute(
         "SELECT permanent_reject_streak, wake_suppress_reason, "
         "EXTRACT(EPOCH FROM (wake_suppressed_until - clock_timestamp())) "
@@ -182,7 +177,7 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
     ).fetchone()
     assert row is not None
     streak, reason, window_s = row
-    assert streak == 2
+    assert streak == 1
     assert reason == "permanent_provider_reject"
     assert window_s > 300 * 24 * 3600.0  # until-human, far past any timer
 

@@ -30,7 +30,6 @@ class TestResurrectIfTerminatedPlacement:
 
     @pytest.fixture(autouse=True)
     def _default_unsuppressed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(lifecycle, "_wake_suppression_active", lambda _db, _aid: False)
         monkeypatch.setattr(lifecycle, "_recovery_halted", lambda _db, _aid: False)
         monkeypatch.setattr(lifecycle, "_clear_wake_suppression", lambda _db, _aid: None)
         # The notice guard reads the trigger row from the DB; these tests pin
@@ -38,28 +37,6 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(
             lifecycle, "_system_notice_source_of_trigger", lambda _db, _aid, _iid: None
         )
-
-    @pytest.mark.asyncio
-    async def test_active_suppression_skips_forward_and_launch(
-        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
-    ) -> None:
-        from base.agents import AgentStatus
-
-        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
-        monkeypatch.setattr(lifecycle, "_wake_suppression_active", lambda _db, _aid: True)
-
-        def _no_machine_read(_db, _aid: int) -> str:
-            raise AssertionError("suppressed auto-resurrect must not read or contact the home")
-
-        monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
-        status = await lifecycle.resurrect_if_terminated(
-            _db(database_gate=database_gate),
-            event_bus,
-            5,
-            trigger_inbound_id=88,
-            trigger_inbound_kind=InboundKind.CHAT,
-        )
-        assert status is AgentStatus.TERMINATED
 
     @pytest.mark.asyncio
     async def test_tripped_recovery_breaker_skips_forward_and_launch(
@@ -82,7 +59,7 @@ class TestResurrectIfTerminatedPlacement:
             event_bus,
             5,
             trigger_inbound_id=88,
-            trigger_inbound_kind=InboundKind.CHAT,
+            trigger_inbound_kind=InboundKind.HEARTBEAT,
         )
         assert status is AgentStatus.TERMINATED
 
@@ -327,7 +304,6 @@ class TestResurrectIfTerminatedNotificationGuard:
 
     @pytest.fixture(autouse=True)
     def _default_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(lifecycle, "_wake_suppression_active", lambda _db, _aid: False)
         monkeypatch.setattr(lifecycle, "_recovery_halted", lambda _db, _aid: False)
         monkeypatch.setattr(lifecycle, "_clear_wake_suppression", lambda _db, _aid: None)
 
@@ -482,7 +458,7 @@ class TestResurrectIfTerminatedNotificationGuard:
             bus=event_bus,
             database=database,
         )
-        assert lifecycle._system_notice_source_of_trigger(database, aid, recovery_iid) is None
+        assert lifecycle._system_notice_source_of_trigger(database, aid, recovery_iid) == "system"
         user_marker_iid = insert_inbound_message(
             db_conn,
             aid,
@@ -513,72 +489,6 @@ class TestResurrectIfTerminatedNotificationGuard:
                 database=database,
             )
             assert lifecycle._system_notice_source_of_trigger(database, aid, iid) == "system", label
-
-    @pytest.mark.asyncio
-    async def test_hosted_turn_recovery_marker_reaches_dispatch(
-        self,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
-        database: Database,
-        event_bus: EventBus,
-        *,
-        database_gate: ProcessDbGate,
-    ) -> None:
-        """BLOCK regression (Ava #3242): the watchdog's hosted-turn recovery
-        chat is kind='chat', source='system' — the plain notice verdict
-        silently matched it and both resurrection channels went dark. This
-        drives the REAL guard (no stub) against the REAL marker row and
-        asserts the chain reaches the resurrect dispatch, with only the
-        below-dispatch machinery stubbed; a guard that wrongly matched would
-        reach no dispatch and fail the assert."""
-        from base.agents import AgentStatus
-        from base.db import create_agent, insert_inbound_message
-
-        aid = create_agent(db_conn)
-        db_conn.commit()
-        rec_iid = insert_inbound_message(
-            db_conn,
-            aid,
-            "continue from the latest checkpoint",
-            source="system",
-            payload={"hosted_turn_recovery": True},
-            bus=event_bus,
-            database=database,
-        )
-        statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
-        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: next(statuses))
-        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _db, _aid: "home-a")
-        monkeypatch.setattr(lifecycle, "machine_name", lambda: "home-a")
-        calls: list[tuple[int, int | None]] = []
-
-        async def _fake_op(
-            _db: object,
-            _bus: object,
-            agent_id: int,
-            body: ResurrectAgentRequest,
-            *,
-            trigger_inbound_id: int | None = None,
-            trigger_inbound_kind: str | None = None,
-        ) -> ResurrectAgentResponse:
-            calls.append((agent_id, trigger_inbound_id))
-            return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
-
-        monkeypatch.setattr(lifecycle, "resurrect_agent_op", _fake_op)
-
-        async def _unreachable(*_a: object, **_kw: object) -> dict:
-            raise lifecycle._cluster_rpc.ClusterOpUnreachable("no ops server")
-
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
-
-        status = await lifecycle.resurrect_if_terminated(
-            _db(database_gate=database_gate),
-            event_bus,
-            aid,
-            trigger_inbound_id=rec_iid,
-            trigger_inbound_kind=InboundKind.CHAT,
-        )
-        assert status is AgentStatus.IDLING
-        assert calls == [(aid, rec_iid)]
 
 
 @pytest.mark.asyncio

@@ -245,12 +245,13 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
         assert cur.fetchall() == [("chat", 1), ("resurrect", 1)]
 
 
-async def test_peer_message_queues_during_suppression_and_watchdog_recovers_after_expiry(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+async def test_fresh_peer_message_wakes_owner_despite_previous_suppression(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
-    """Suppression gates automatic resurrection, never durable delivery."""
+    """A new explicit peer message retries after a previous wake failure."""
     from ops.cluster import rpc as cluster_rpc
-    from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
     tid = create_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -282,7 +283,7 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
 
     assert delivery.status is AgentStatus.TERMINATED
     assert delivery.inbound_id is not None
-    assert forwards == []
+    assert forwards == ["forwarded"]
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT status,kind,source,content FROM inbound_messages WHERE id=%s",
@@ -295,17 +296,6 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
             (tid,),
         )
         assert cur.fetchall() == [(42, str(delivery.inbound_id))]
-    with _sync_pool() as pool:
-        assert select_terminated_owners_with_pending(pool, 86400.0) == []
-
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET wake_suppressed_until=now()-interval '1 second' WHERE id=%s",
-            (tid,),
-        )
-    db_conn.commit()
-    with _sync_pool() as pool:
-        assert select_terminated_owners_with_pending(pool, 86400.0) == [(tid, delivery.inbound_id)]
 
 
 async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(

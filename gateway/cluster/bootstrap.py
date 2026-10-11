@@ -65,7 +65,11 @@ def get_bootstrap(
     try:
         return request.app.state.config_authority.bootstrap_config_values(
             provider_key_envs=(
-                binding.key_env for binding in request.app.state.catalog.bindings.values()
+                *(binding.key_env for binding in request.app.state.catalog.bindings.values()),
+                *(
+                    provider.key_env
+                    for provider in request.app.state.catalog.decision_providers.values()
+                ),
             ),
             plugin_cluster_config=plugin_bootstrap_config(),
         )

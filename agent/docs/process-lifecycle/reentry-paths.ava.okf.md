@@ -18,34 +18,24 @@ accept different lifecycle states.
   unapplied restart/terminate command is settled as superseded, so a delayed
   older terminate can never be replayed onto the successor incarnation
   (issue #2158). Then it publishes a host wake.
-- Automatic resurrection requires actual pending work newer than the current
-  death and above the force-terminate inbound fence — except for a row the
-  system itself reaped after a crash (`termination_source='reaper'` with the
-  `last_turn_fatal_at` marker), where work from before the death still resumes
-  its owner — and the reap itself commits such work: every termination queues
-  one `hosted_turn_recovery`-marked chat and attempts the guarded resurrect on
-  the spot (task #4039), so a crash death with no arrival still recovers
-  near-field. The home-machine lock, automatic-wake policy, suppression window
-  and the recovery breaker's durable streak guard that transition; a stale
-  trigger cannot undo a concurrent user termination. There is no closed
-  state: any new message may resurrect a user-terminated agent, including its
-  own shells' and watchers' messages — a terminate with
-  `kill_all_shell_sessions` requests best-effort cleanup after termination
-  commits ([ownership](../../ownership/docs/ownership.ava.okf.md)).
-- A chat stalled `pending` on a crash-marked idling corpse reaches a
-  bounded-time recovery decision: the delivery watchdog escalates to the
-  owner's home runner (`recover-crash-marked`), which harvests the corpse
-  into the reaper's terminal shape (making the relaxed trigger above resume
-  the work) or refuses with a reason (task #3618).
-- Host crash recovery reconciles stale owned rows and durable checkpoints;
-  it does not launch individual agent processes.
+- Ordinary fresh chat may resurrect a terminated owner only when the input is
+  newer than the current death and above the force-terminate fence. Home placement,
+  pause state and unresolved resource/lifecycle evidence still guard admission.
+  Historical recovery markers grant no exemption. A permanent provider rejection
+  stops background wakes; explicit new chat or operator resurrection may retry.
+- Crash reaping records termination and diagnostics without enqueueing recovery
+  work. The delivery watchdog neither harvests a corpse nor resurrects a stalled
+  or terminated owner.
+- Host boot reconciles stale owned rows and consumes interrupted claims. New work
+  starts at claim with fresh input; it never resumes old code execution. Interrupted
+  compact or native cancel remains held when completion is unknown.
 
 | Operation | Host task | Agent ID and context | Persistent shells |
 | --- | --- | --- | --- |
 | `terminate()` | finishes native control | retained, terminal | retained |
 | `restart()` | completes, then new admission | retained | retained |
 | `resurrect()` | scheduled for terminated identity | retained | retained |
-| `ava restart` / update | drains native controls | retained, resumable | closed |
-| full cluster `stop` | drains then stops host | retained, resumable | closed |
+| `ava restart` / update | drains native controls | retained; interrupted work not replayed | closed |
+| full cluster `stop` | drains then stops host | retained; interrupted work not replayed | closed |
 
 Related: [[../lifecycle.ava.okf.md]] and [[base/deploy/maintenance/docs/maintenance.ava.okf.md]].
