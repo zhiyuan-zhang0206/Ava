@@ -37,7 +37,7 @@ def test_unprotected_write_is_sent_once(method: str, path: str, failure: str) ->
         transport.use_client(client),
     ):
 
-        def send() -> httpx.Response:
+        def send() -> transport.TransportResponse:
             if method == "POST":
                 return transport.post(path)
             if method == "PATCH":

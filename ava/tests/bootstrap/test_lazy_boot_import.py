@@ -6,7 +6,9 @@ client and the live-events -> agent-snapshot -> psycopg chain (both reached via
 `ava.self`) plus the audit -> telemetry chain (via `ava.skills`). Those edges
 are function-scoped now (task #3816 M1/M2), so a clean `import ava` — and the
 trivial shell/files child riding on it — must leave none of these module
-families in `sys.modules`.
+families in `sys.modules`. The gateway transport and its retry policy keep httpx
+behind the first request the same way, so the connection stack an `AvaContext`
+defers (`base/agents/context/tests/test_clients.py`) stays off `import ava` too.
 
 Probe mechanics mirror `test_lazy_lm_import.py`: clean subprocess, agent-launch
 env vars stripped, repo root forced onto `sys.path` under `-I`.
@@ -46,6 +48,13 @@ _FORBIDDEN_PREFIXES = (
     "psycopg",
     "opentelemetry",
 )
+# The clients an `AvaContext` builds on first use: HTTP, database pool, Redis, chat model.
+_CONNECTION_STACK = (
+    "httpx",
+    "psycopg_pool",
+    "redis",
+    "langchain_core",
+)
 
 # Literal source with data in argv, so test selection can read the probe's imports.
 _PROBE = """
@@ -61,7 +70,7 @@ print(json.dumps(bad))
 """
 
 
-def test_import_ava_clean_does_not_load_redis_psycopg_or_otel() -> None:
+def _loaded_after_import_ava(prefixes: tuple[str, ...]) -> list[str]:
     env = {key: value for key, value in os.environ.items() if key not in _CLEAN_ENV_STRIP}
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
         [
@@ -73,7 +82,7 @@ def test_import_ava_clean_does_not_load_redis_psycopg_or_otel() -> None:
             "-c",
             _PROBE,
             str(_REPO_ROOT),
-            json.dumps(_FORBIDDEN_PREFIXES),
+            json.dumps(prefixes),
         ],
         cwd=_REPO_ROOT,
         env=env,
@@ -83,7 +92,16 @@ def test_import_ava_clean_does_not_load_redis_psycopg_or_otel() -> None:
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
-    loaded = json.loads(proc.stdout.strip().splitlines()[-1])
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_import_ava_clean_does_not_load_redis_psycopg_or_otel() -> None:
+    loaded = _loaded_after_import_ava(_FORBIDDEN_PREFIXES)
     assert loaded == [], (
         f"`import ava` must not load the redis/psycopg/otel stacks, found: {loaded}"
     )
+
+
+def test_import_ava_clean_does_not_load_the_connection_stack() -> None:
+    loaded = _loaded_after_import_ava(_CONNECTION_STACK)
+    assert loaded == [], f"`import ava` must not load a connection stack, found: {loaded}"

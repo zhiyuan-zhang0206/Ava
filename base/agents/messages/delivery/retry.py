@@ -1,21 +1,38 @@
 """Explicit gateway failures eligible for bounded retry and deferred delivery."""
 
 import json
-from typing import cast
-
-import httpx
+from typing import Any, Protocol, cast
 
 # 500 is an unknown server failure. The caller must see its original response.
 TRANSIENT_HTTP_STATUSES = frozenset({429, 502, 503, 504})
-NETWORK_ERRORS = (
-    httpx.TimeoutException,
-    httpx.NetworkError,
-    httpx.RemoteProtocolError,
-    httpx.ProxyError,
-)
 
 
-def retryable_response(response: httpx.Response) -> bool:
+class GatewayResponse(Protocol):
+    """The slice of ``httpx.Response`` the retry policy reads.
+
+    Declared structurally so this module, which loads on the ``import ava`` path through the
+    gateway transport, does not import httpx at module level.
+    """
+
+    @property
+    def status_code(self) -> int: ...
+
+    def json(self, **kwargs: Any) -> Any: ...
+
+
+def network_errors() -> tuple[type[Exception], ...]:
+    """The httpx transport failures that leave the gateway reachable on a later attempt."""
+    import httpx  # deferred: `import ava` reaches this module and must not load the HTTP stack
+
+    return (
+        httpx.TimeoutException,
+        httpx.NetworkError,
+        httpx.RemoteProtocolError,
+        httpx.ProxyError,
+    )
+
+
+def retryable_response(response: GatewayResponse) -> bool:
     """Known transient status, unless the wire refuses retry or proves commit.
 
     A proxy's non-JSON error page retains its status policy. Structured gateway

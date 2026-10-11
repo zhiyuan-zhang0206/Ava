@@ -7,14 +7,13 @@ import uuid as _uuid
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
-
-import httpx
+from typing import Any, Protocol, cast
 
 import ava
 from base.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
 from base.agents.context import AvaContext
-from base.agents.messages.delivery.retry import NETWORK_ERRORS, retryable_response
+from base.agents.context.clients import GatewayHandle
+from base.agents.messages.delivery.retry import GatewayResponse, network_errors, retryable_response
 from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER, validate_idempotency_key
@@ -22,12 +21,43 @@ from base.host.net.resilience import Policy, http_classifier, retry
 
 __all__ = [
     "GatewayTransportInputs",
+    "TransportResponse",
+    "TransportTimeout",
     "get",
     "patch",
     "post",
     "raise_from_response",
     "use_client",
 ]
+
+# httpx stays off the `import ava` path: every function that needs it imports it in its body, and
+# the annotations below are structural (`TransportResponse`, `TransportTimeout`) or the client
+# alias owned by `base.agents.context.clients`.
+
+
+class TransportResponse(GatewayResponse, Protocol):
+    """The slice of ``httpx.Response`` the SDK reads from a gateway reply."""
+
+    @property
+    def is_success(self) -> bool: ...
+
+    def raise_for_status(self) -> object: ...
+
+
+class TransportTimeout(Protocol):
+    """The ``httpx.Timeout`` a caller passes to override one request's client timeout."""
+
+    @property
+    def connect(self) -> float | None: ...
+
+    @property
+    def read(self) -> float | None: ...
+
+    @property
+    def write(self) -> float | None: ...
+
+    @property
+    def pool(self) -> float | None: ...
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -48,7 +78,7 @@ def _inputs(context: AvaContext | None = None) -> GatewayTransportInputs:
     return owner.clients.get(GatewayTransportInputs)
 
 
-def _http(context: AvaContext | None = None) -> httpx.Client:  # pyright: ignore[reportUndefinedVariable]
+def _http(context: AvaContext | None = None) -> GatewayHandle:
     """The bound context's gateway client, built on first use so importing the SDK in a no-config
     context does not require the gateway URL to be resolvable until an actual call is made. Its
     timeout is `Settings.gateway_client_http_timeout_seconds` (env override
@@ -116,7 +146,7 @@ _MEMORY_SEARCH_MAX_RETRIES = 2
 _MEMORY_SEARCH_TIMEOUT_MARGIN_S = 3.0
 
 
-def _memory_search_timeout(context: AvaContext | None = None) -> httpx.Timeout:  # pyright: ignore[reportUndefinedVariable]
+def _memory_search_timeout(context: AvaContext | None = None) -> TransportTimeout:
     """Per-attempt HTTP timeout for one memory search: the gateway's own
     search deadline plus the margin, so the server's deadline fires first."""
     import httpx
@@ -152,7 +182,7 @@ def _retry_delay_seconds(attempt: int, context: AvaContext | None = None) -> flo
     return base + _agent_jitter_seconds(context)
 
 
-def raise_from_response(resp: httpx.Response) -> None:  # pyright: ignore[reportUndefinedVariable]
+def raise_from_response(resp: TransportResponse) -> None:
     """Non-2xx → rebuild exception per wire contract. Flow:
 
     1. body JSON parse failure (FastAPI default 500 plain text, corrupted
@@ -196,7 +226,7 @@ def raise_from_response(resp: httpx.Response) -> None:  # pyright: ignore[report
     raise EXCEPTION_BY_REASON[reason](body["detail"])
 
 
-def _wire_reason(resp: httpx.Response) -> tuple[ErrorReason, dict[str, Any]] | None:  # pyright: ignore[reportUndefinedVariable]
+def _wire_reason(resp: TransportResponse) -> tuple[ErrorReason, dict[str, Any]] | None:
     """Parse the wire `reason` from a non-2xx response body, or None.
 
     None means the body does not carry a valid wire-contract reason (not
@@ -235,20 +265,21 @@ def _wire_reason(resp: httpx.Response) -> tuple[ErrorReason, dict[str, Any]] | N
 class _TransientResponseError(Exception):
     """Carry the original HTTP response through the exception-based retry executor."""
 
-    def __init__(self, response: httpx.Response) -> None:  # pyright: ignore[reportUndefinedVariable]
+    def __init__(self, response: TransportResponse) -> None:
         self.response = response
 
 
 def _request_with_retry(
-    request: Callable[[], httpx.Response],  # pyright: ignore[reportUndefinedVariable]
+    request: Callable[[], TransportResponse],
     attempts: int,
     *,
     retryable: bool = True,
     context: AvaContext | None = None,
-) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
+) -> TransportResponse:
     """Execute one route's policy while keeping its final wire response intact."""
     import httpx
 
+    transport_errors = network_errors()
     pre_send_errors = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
     gateway_classifier = http_classifier.with_(permanent={500})
 
@@ -256,11 +287,11 @@ def _request_with_retry(
         if not retryable:
             # A non-idempotent POST can only be repeated when nothing was sent.
             return isinstance(exc, pre_send_errors)
-        if isinstance(exc, httpx.TransportError) and not isinstance(exc, NETWORK_ERRORS):
+        if isinstance(exc, httpx.TransportError) and not isinstance(exc, transport_errors):
             return False
         return gateway_classifier(exc)
 
-    def once() -> httpx.Response:
+    def once() -> TransportResponse:
         resp = request()
         if retryable and retryable_response(resp):
             raise _TransientResponseError(resp)
@@ -283,7 +314,7 @@ def _request_with_retry(
     except _TransientResponseError as exc:
         # The caller still owns raise_from_response and its wire-reason mapping.
         return exc.response
-    except NETWORK_ERRORS as exc:
+    except transport_errors as exc:
         if not retryable and not isinstance(exc, pre_send_errors):
             raise GatewayUnavailable(
                 f"Gateway transport error at {_http(context).base_url} "
@@ -305,14 +336,14 @@ def post(
     path: str,
     json: dict[str, Any] | None = None,
     params: dict[str, Any] | None = None,
-    timeout: httpx.Timeout | None = None,  # pyright: ignore[reportUndefinedVariable]
+    timeout: TransportTimeout | None = None,
     *,
     idempotent: bool | None = None,
     idempotency_key: str | None = None,
     idempotency_scope: str | None = None,
     max_retries: int | None = None,
     context: AvaContext | None = None,
-) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
+) -> TransportResponse:
     """Unified POST wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
     Retries known network failures and HTTP 429/502/503/504 responses only when the route
@@ -369,7 +400,7 @@ def post(
         if not isinstance(idempotency_scope, str) or idempotency_scope != PRINCIPAL_SCOPE:
             raise ValueError("unsupported idempotency scope; expected principal-v1")
         idempotency_key = validate_idempotency_key(idempotency_key)
-    per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
+    per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else cast(httpx.Timeout, timeout)
 
     # Inherit retry semantics from the route's doorplate unless the caller
     # overrides: server promises (base/api_contracts/contracts.py), clients inherit.
@@ -405,10 +436,10 @@ def get(
     path: str,
     *,
     params: dict[str, Any] | None = None,
-    timeout: httpx.Timeout | None = None,  # pyright: ignore[reportUndefinedVariable]
+    timeout: TransportTimeout | None = None,
     max_retries: int | None = None,
     context: AvaContext | None = None,
-) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
+) -> TransportResponse:
     """Unified GET wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
     Same policy as `post`; a GET is always idempotent, so transient HTTP
@@ -423,7 +454,7 @@ def get(
     """
     import httpx
 
-    per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
+    per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else cast(httpx.Timeout, timeout)
     retries = _max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
         lambda: _http(context).get(path, params=params, timeout=per_call), retries, context=context
@@ -432,7 +463,7 @@ def get(
 
 def patch(
     path: str, json: dict[str, Any] | None = None, *, idempotency_key: str | None = None
-) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
+) -> TransportResponse:
     """Unified PATCH wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
     Retry ambiguous failures only when the route declares natural idempotency.
@@ -459,7 +490,7 @@ def patch(
     )
 
 
-def _delete(path: str) -> httpx.Response:  # pyright: ignore[reportUndefinedVariable]
+def _delete(path: str) -> TransportResponse:
     """Delete with the route's verified retry policy, not a verb-based assumption."""
     return _request_with_retry(
         lambda: _http().delete(path),
