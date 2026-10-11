@@ -296,14 +296,6 @@ EVENTS: dict[str, EventSpec] = {
         "cancellation — cancelling it would only re-queue it at the tail",
         tier="anomaly",
     ),
-    "hosted_boot_recovery_deferred": telemetry_event(
-        "hosted_boot_recovery_deferred",
-        "hosted boot recovery was deferred for an agent: retained exec request "
-        "evidence is not disposable yet. Emitted once per deferred agent per "
-        "boot; repeats across boots mean the evidence is not clearing on its "
-        "own — inspect the named evidence and its disposition commands",
-        tier="anomaly",
-    ),
     "host_turn_stall_detected": telemetry_event(
         "host_turn_stall_detected",
         "the hosted dispatcher's durable scan found an in-flight turn whose "

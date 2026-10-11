@@ -94,11 +94,6 @@ EVENTS: dict[str, EventSpec] = {
         "cancel", "in-flight turn cancelled", site="base/agents/inbox/insert.py:48 same as above"
     ),
     "resurrect": audit_event("resurrect", "terminated agent woken"),
-    "hosted_legacy_adoption": audit_event(
-        "hosted_legacy_adoption",
-        "a hosted successor replaced a legacy NULL-resource owner before lease "
-        "expiry on machine-local evidence (dead predecessor probe set)",
-    ),
     "compact": audit_event("compact", "agent context compacted"),
     "circuit_breaker": audit_event(
         "circuit_breaker",

@@ -1,7 +1,7 @@
 """Durable cadence clocks for the reaper's slow phases.
 
-The fire-log prune (daily), the torn lifecycle-pointer scan and the
-absent-machine fence settle (hourly) run once per interval, not once per pass.
+The fire-log prune (daily) and the stuck lifecycle-pointer scan (hourly) run
+once per interval, not once per pass.
 The clock lives in `maintenance_state`, one row per phase, so a restart resumes
 the cadence instead of running every slow phase at once.
 
@@ -15,8 +15,7 @@ from psycopg_pool import ConnectionPool
 from base.db.transaction import write_transaction
 
 FIRE_LOG_PRUNE = "schedule_fire_log_prune"
-TORN_POINTER_SCAN = "torn_pointer_scan"
-ABSENT_FENCE_SETTLE = "absent_fence_settle"
+STUCK_POINTER_SCAN = "stuck_pointer_scan"
 
 HOURLY_S = 3600.0
 

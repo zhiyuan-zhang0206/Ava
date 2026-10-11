@@ -50,17 +50,6 @@ def test_checker_catches_scaled_violation(monkeypatch: pytest.MonkeyPatch) -> No
     assert any("AGENT_LEASE_TTL_S >= 10 * AGENT_LEASE_RENEW_INTERVAL_S" in f for f in failures)
 
 
-def test_legacy_adoption_silence_is_floored_by_the_renewal_beat(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A slower beat that would let a live predecessor read as silent is reported."""
-    monkeypatch.setattr(deploy, "AGENT_LEASE_RENEW_INTERVAL_S", 20.0)
-    failures = validate_clock_lattice()
-    assert any(
-        "LEGACY_HOST_ADOPTION_SILENCE_S >= 4 * AGENT_LEASE_RENEW_INTERVAL_S" in f for f in failures
-    )
-
-
 def test_a_default_bundle_lifetime_past_the_cap_is_reported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
