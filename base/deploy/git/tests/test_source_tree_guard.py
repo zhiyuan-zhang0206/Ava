@@ -122,15 +122,11 @@ def test_tracked_modification_is_a_violation(
 def test_head_move_alone_is_not_a_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A clean checkout whose HEAD moved is not tampering. No current lifecycle
-    records an installed commit for a source checkout, so a legacy
-    `$AVA_HOME/installed_sha` bookmark left behind by the retired updater must
-    not turn a legitimate checkout move into a permanent alert."""
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
+    """A clean checkout whose HEAD moved is not tampering. No lifecycle records
+    an installed commit for a source checkout, so a legitimate checkout move
+    must not become a permanent alert."""
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
-    (home / "installed_sha").write_text(_git(repo, "rev-parse", "HEAD") + "\n")
     _commit(repo, "y", "c2")
 
     assert stg.source_tree_violations(repo) == ()

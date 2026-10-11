@@ -27,16 +27,14 @@ without `SET ROLE`. Custody of that connection belongs to the opener.
 |---|---|
 | owner | `NOLOGIN`, no password, not a superuser, owns the database and schema objects, no memberships |
 | `ava_gateway` | `NOLOGIN` group: DML on every table (SELECT/INSERT only on the append-only `audit_events` and `telemetry_events`), `USAGE, SELECT, UPDATE` on sequences, `EXECUTE` on every routine, `MAINTAIN` on the checkpoint tables; no TRUNCATE/REFERENCES/TRIGGER |
-| `ava_runner` | `NOLOGIN` group: the audited runner matrix (the historical login, demoted in place) |
+| `ava_runner` | `NOLOGIN` group: the audited runner matrix |
 | `ava_g0_<class>` | `LOGIN NOSUPERUSER INHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, stored SCRAM verifier, owns nothing, no direct grant or setting, member of exactly its group with `INHERIT TRUE, SET FALSE, ADMIN FALSE` |
 | `ava_monitor` | stable, not a generation: `LOGIN INHERIT`, nothing elevated, **no password** (pg_hba admits it only by `peer` from the home's OS user over the owner-only socket), member of exactly `pg_read_all_stats` (`INHERIT TRUE, SET FALSE`), only direct grant `CONNECT` on the cluster database, owns nothing; the OTel collector's PostgreSQL receiver (`monitor.ensure_monitor`) |
 
 Both groups hold `CONNECT` (PUBLIC loses it) and `USAGE` on `public`.
 `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` covers objects later migrations
 create; `groups.ensure_groups` re-runs the point-in-time `ALL` grants after a
-migration. A login's privileges equal its group's. The runner group also holds
-`EXECUTE` on the retired publication-admission lock function while it exists;
-no admission calls it, and a later migration drops it.
+migration. A login's privileges equal its group's.
 
 The runner matrix grants `INSERT, UPDATE` on `native_graph_work` for hosted
 work preparation and closure, and on `upload_delivery_copies` and
