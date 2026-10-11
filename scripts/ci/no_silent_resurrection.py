@@ -75,9 +75,7 @@ MIN_DEAD_LINES = 3
 SAMPLE_LINES = 3
 
 # Lock and generated files carry line churn that no reader reviews: they are
-# regenerated from their source, which the check does see. Both the current
-# location and the pre-2026-09-29 layout (the `shared -> base` move) are listed
-# so the 30-day window stays clean across the move. Mirrors the codegen
+# regenerated from their source, which the check does see. Mirrors the codegen
 # freshness hooks in .pre-commit-config.yaml.
 SKIPPED_FILES = frozenset(
     {
@@ -86,16 +84,11 @@ SKIPPED_FILES = frozenset(
         "ui/web/openapi.json",
         "ui/web/src/lib/contracts/types-generated.ts",
         "base/host/env/config_lite_table.json",
-        "shared/config_lite_table.json",
         "base/events/registry.md",
-        "shared/events/registry.md",
         "db/schema.sql",
         "scripts/zombie_pyright_ignores.registry",
         "base/agents/api.txt",
-        "shared/agents/api.txt",
         "base/events/api.txt",
-        "shared/events/api.txt",
-        "scripts/structure/baseline.json",
     }
 )
 SKIPPED_DIRS = ("migrations/", "scripts/structure/baseline/")

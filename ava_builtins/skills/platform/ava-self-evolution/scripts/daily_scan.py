@@ -175,7 +175,7 @@ def alert_exit(
     `counts` (collect.collect_with_counts) refines the sentinel: an empty
     dataset whose every pre-filter run was a TEST- spawn is the filter
     working as designed, not a source outage, and exits 0 (QA review of
-    PR #698, 2026-08-29). Without counts the legacy sentinel applies."""
+    PR #698, 2026-08-29). Without counts any empty dataset exits 2."""
     if not records:
         return 0 if _is_test_only_window(records, counts) else 2
     return 2 if any(r["label"] != "ok" for r in records) else 0
