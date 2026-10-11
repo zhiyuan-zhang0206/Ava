@@ -76,6 +76,7 @@ def alerts(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
 @pytest.mark.parametrize("intent", ["disabled", "maintenance"])
 def test_expected_low_population_does_not_rollback_or_promote(
     probe: Probe,
+    operator_database: DatabaseFactory,
     probe_home: Path,
     rollbacks: list[list[str]],
     alerts: list[dict[str, object]],

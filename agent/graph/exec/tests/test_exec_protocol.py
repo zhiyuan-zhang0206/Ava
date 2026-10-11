@@ -160,23 +160,24 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
         process="test-exec-envelope", producer=lambda: pipeline, machine_reader=lambda: "test"
     )
     try:
-        path = make_request_path(tmp_path, agent_id=7)
-        write_request(
-            path,
-            code="print('hi')",
-            context=_context_description(7),
-            timeout_s=1.0,
-            state=_make_state_dump(),
-            incarnation=None,
-        )
-        read_request(path)
+        with logger.contextualize(agent_id=7):
+            path = make_request_path(tmp_path, agent_id=7)
+            write_request(
+                path,
+                code="print('hi')",
+                context=_context_description(7),
+                timeout_s=1.0,
+                state=_make_state_dump(),
+                incarnation=None,
+            )
+            read_request(path)
 
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            telemetry.flush()
-            if len(_exec_envelope_events()) >= events_before + 2:
-                break
-            time.sleep(0.05)
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                telemetry.flush()
+                if len(_exec_envelope_events()) >= events_before + 2:
+                    break
+                time.sleep(0.05)
     finally:
         logger.remove(sink_id)
         pipeline.stop(timeout=2)
