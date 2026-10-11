@@ -6,7 +6,7 @@ no test touches the real repo tree.
 
 from __future__ import annotations
 
-import importlib
+from scripts.content_lint import lint_migrations as lint
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
@@ -20,7 +20,6 @@ _BASELINE_INSERT = "INSERT INTO schema_migrations (name) VALUES ('00000000T00000
 def _lint(monkeypatch, tmp_path, *, schema_body: str = _BASELINE_INSERT, stub_base: bool = True):
     """Point the lint module at a tmp migrations/ + db/schema.sql; return
     (lint_module, migrations_dir)."""
-    lint = importlib.import_module("scripts.content_lint.lint_migrations")
     if stub_base:
         monkeypatch.setattr(lint, "_immutability_base", lambda _ref: None)
     migrations_dir = tmp_path / "migrations"

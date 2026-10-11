@@ -6,9 +6,7 @@ the same function also calls (or hands to a runner) a recorder.
 
 from __future__ import annotations
 
-import importlib
-
-_lint = importlib.import_module("scripts.content_lint.lint_audit_record")
+from scripts.content_lint import lint_audit_record as _lint
 
 
 def _scopes(src: str) -> list[str]:

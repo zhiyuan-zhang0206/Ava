@@ -8,19 +8,13 @@ assert the opposite property: that it fires when its premise breaks.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
+
+from scripts.content_lint import check_cross_branch_migrations as mod
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
 # pyright: reportUnknownArgumentType = warning
-
-_MOD = "scripts.content_lint.check_cross_branch_migrations"
-
-
-def _mod():
-    return importlib.import_module(_MOD)
 
 
 @pytest.mark.parametrize(
@@ -29,7 +23,7 @@ def _mod():
 )
 def test_breach_detected(branch: str) -> None:
     """Every name/prefix denoting a parallel integration line is a breach."""
-    assert _mod().breaches(["main", branch]) == [branch]
+    assert mod.breaches(["main", branch]) == [branch]
 
 
 @pytest.mark.parametrize(
@@ -49,12 +43,11 @@ def test_ordinary_branches_are_not_breaches(branch: str) -> None:
     boundaries — a substring test or `startswith("release")` would false-positive
     on both, and a tripwire that cries wolf gets disabled.
     """
-    assert _mod().breaches([branch]) == []
+    assert mod.breaches([branch]) == []
 
 
 def test_passes_on_single_branch_model(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """The premise holding is reported, not silently assumed."""
-    mod = _mod()
     monkeypatch.setattr(mod, "remote_branches", lambda: ["main", "ava-1-x"])
     assert mod.main() == 0
     assert "single-branch premise holds" in capsys.readouterr().out
@@ -62,7 +55,6 @@ def test_passes_on_single_branch_model(monkeypatch: pytest.MonkeyPatch, capsys) 
 
 def test_fails_when_premise_breaks(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """A long-lived second branch fails the step and names the remedy."""
-    mod = _mod()
     monkeypatch.setattr(mod, "remote_branches", lambda: ["main", "develop"])
     assert mod.main() == 1
     err = capsys.readouterr().err
@@ -79,7 +71,6 @@ def test_unqueryable_remote_fails_rather_than_passing(
     Returning 0 here would rebuild the silent pass-through this script replaced:
     a gate that cannot answer has to say so, not say 'fine'.
     """
-    mod = _mod()
 
     def _boom() -> list[str]:
         raise RuntimeError("git ls-remote failed (rc=128): no such remote")
@@ -91,7 +82,6 @@ def test_unqueryable_remote_fails_rather_than_passing(
 
 def test_remote_branches_parses_ls_remote_output(monkeypatch: pytest.MonkeyPatch) -> None:
     r"""Tab-separated `<sha>\trefs/heads/<name>` lines; non-head refs ignored."""
-    mod = _mod()
 
     class _Proc:
         returncode = 0
@@ -104,7 +94,6 @@ def test_remote_branches_parses_ls_remote_output(monkeypatch: pytest.MonkeyPatch
 
 def test_remote_branches_raises_on_git_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-zero git exit propagates as RuntimeError, never an empty list."""
-    mod = _mod()
 
     class _Proc:
         returncode = 128

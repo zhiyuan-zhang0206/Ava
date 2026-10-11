@@ -14,26 +14,16 @@ a failed GitHub query raises instead of reading as "no failed jobs".
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
-from pathlib import Path
 from typing import Any
 
 import pytest
 
+from scripts.ci.pull_requests import job_rerun as rerun
+
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownArgumentType = warning
-
-_MOD_PATH = (
-    Path(__file__).resolve().parents[4] / "scripts" / "ci" / "pull_requests" / "job_rerun.py"
-)
-_MOD_NAME = "ci_job_rerun_under_test"
-_spec = importlib.util.spec_from_file_location(_MOD_NAME, _MOD_PATH)
-assert _spec and _spec.loader
-rerun = importlib.util.module_from_spec(_spec)
-sys.modules[_MOD_NAME] = rerun
-_spec.loader.exec_module(rerun)
+# pyright: reportUnknownMemberType = warning
 
 
 class _R:
