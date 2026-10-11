@@ -30,8 +30,8 @@ __all__ = [
     "HostCachePolicy",
     "HostPolicy",
     "HostStats",
+    "StoredConfig",
     "_AgentRuntime",
-    "_StoredConfig",
     "_config_fingerprint",
     "admit_stored_model",
 ]
@@ -95,7 +95,7 @@ def _config_fingerprint(
 
 
 @dataclass
-class _StoredConfig:
+class StoredConfig:
     """One agent's row as the host needs it: where it lives, whether it may run,
     and the two config maps that decide what running means."""
 
@@ -159,7 +159,7 @@ def admit_stored_model(
     pins: dict[str, Any],
     *,
     agent_id: int,
-    stored: _StoredConfig,
+    stored: StoredConfig,
     stats: HostStats,
     rejected: dict[int, str],
     normalized: dict[int, str],

@@ -14,7 +14,7 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.tests.health_support import unknown_image
 from ops.agent_pause.probe import host_identity
-from services.agent_runner.agent_host.scheduling.health_routes import stats_route
+from services.agent_runner.agent_host.health_routes import stats_route
 
 
 async def test_actual_stats_route_matches_configured_port_home_pid_and_owner(

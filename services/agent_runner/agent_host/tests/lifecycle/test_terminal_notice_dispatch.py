@@ -30,10 +30,8 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
     from threading import Event
 
     from base.agents.impersonation import terminal_notices
-    from services.agent_runner.agent_host.dispatcher import (
-        InboundWakeDispatcher,
-        PendingInboundWake,
-    )
+    from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
+    from services.agent_runner.agent_host.scheduling.pending_wakes import PendingInboundWake
 
     pool = _PendingScanPool([(17, False)])
     host = _host(
@@ -46,7 +44,7 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
     )
     expected = [PendingInboundWake(agent_id=17, stale=False)]
     monkeypatch.setattr(
-        "services.agent_runner.agent_host.lifecycle.maintenance.pending_wakes",
+        "services.agent_runner.agent_host.scheduling.pending_wakes.held_maintenance_wakes",
         Mock(return_value=expected if held else None),
     )
     entered, release, exited = Event(), Event(), Event()
