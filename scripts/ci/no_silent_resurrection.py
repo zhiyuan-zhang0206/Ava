@@ -48,6 +48,7 @@ warnings go to stderr; the failing message carries the allowance recipe.
 from __future__ import annotations
 
 import argparse
+import ast
 import io
 import re
 import subprocess
@@ -229,6 +230,25 @@ def _has_distinctive_identifier(text: str) -> bool:
     return False
 
 
+def _exception_handler_header(text: str) -> bool:
+    """A header naming exception types does not contain the handler's operation."""
+    if not text.startswith(("except ", "except* ")) or not text.endswith(":"):
+        return False
+    try:
+        tree = ast.parse(f"try:\n    pass\n{text}\n    pass\n")
+    except SyntaxError:
+        # Unrecognized fragments retain the conservative distinctive rule.
+        return False
+    statement = tree.body[0]
+    if not isinstance(statement, (ast.Try, ast.TryStar)):
+        return False
+    exception_type = statement.handlers[0].type
+    return exception_type is not None and all(
+        isinstance(node, (ast.Name, ast.Attribute, ast.Tuple, ast.Load))
+        for node in ast.walk(exception_type)
+    )
+
+
 def _classify(text: str) -> tuple[bool, bool]:
     """Return (strong, distinctive) for one normalized added line."""
     if not MIN_STRONG_LENGTH <= len(text) <= MAX_STRONG_LENGTH:
@@ -244,7 +264,11 @@ def _classify(text: str) -> tuple[bool, bool]:
     declaration = text.startswith(("def ", "async def ", "class ")) and text.endswith(":")
     return (
         strong,
-        strong and not text.endswith("(") and not declaration and _has_distinctive_identifier(text),
+        strong
+        and not text.endswith("(")
+        and not declaration
+        and not _exception_handler_header(text)
+        and _has_distinctive_identifier(text),
     )
 
 
@@ -573,9 +597,11 @@ def _path_matches(declared: str, path: str) -> bool:
 def _covers(allowance: Allowance, hit: Hit) -> bool:
     if allowance.allow_all:
         return True
-    if any(hit.commit.sha.startswith(sha) for sha in allowance.shas):
-        return True
-    return any(_path_matches(declared, hit.path) for declared in allowance.paths)
+    if allowance.shas and not any(hit.commit.sha.startswith(sha) for sha in allowance.shas):
+        return False
+    if allowance.paths:
+        return any(_path_matches(declared, hit.path) for declared in allowance.paths)
+    return bool(allowance.shas)
 
 
 def _apply_allowances(
