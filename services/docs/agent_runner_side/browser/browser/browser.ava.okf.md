@@ -23,7 +23,7 @@ A shared headed Chrome management service on agent-runner — a three-component 
 - **Strongly-typed line protocol**: `protocol.py` defines `Request`/`Response` (`OkResponse | ErrResponse`, discriminated by `ok`) TypedDict — three processes, daemon (server), wrapper (client), `healthchecks/browser_mcp.py` (probe), share the same wire types, no longer hand-writing dict shapes individually.
 
 ## Gating
-See [[services/docs/agent_runner_side/browser/browser/gating.ava.okf.md]].
+See [[services/docs/agent_runner_side/browser/browser/gating.ava.okf.md]]. Per-agent tab groups: [tab-groups](tab-groups.ava.okf.md).
 
 ## Key Dependencies
 - [[ava/mcps/docs/mcps.ava.okf.md]] — `chrome-devtools-mcp` is the upstream

@@ -1404,6 +1404,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/desktop/browser/tab_groups/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/desktop/browser/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

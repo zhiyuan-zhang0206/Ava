@@ -66,8 +66,8 @@ def _install_fake_cdp(monkeypatch: pytest.MonkeyPatch) -> dict[str, FakeWS]:
         http_calls.append(url)
         return {"webSocketDebuggerUrl": "ws://browser"}
 
-    browser_ws = FakeWS([{"id": 1, "result": {"targetId": "t-1"}}, {"id": 2, "result": {}}])
-    page_ws = FakeWS([{"id": 3, "result": {"success": True}}])
+    browser_ws = FakeWS([{"id": 1, "result": {"targetId": "t-1"}}, {"id": 3, "result": {}}])
+    page_ws = FakeWS([{"id": 2, "result": {"success": True}}])
 
     def fake_connect(url: str, **kwargs: Any) -> FakeWS:
         return browser_ws if "browser" in url else page_ws
@@ -179,13 +179,13 @@ async def test_inject_raises_when_browser_rejects_cookie(monkeypatch: pytest.Mon
 
     class RejectingPageWS(FakeWS):
         def __init__(self) -> None:
-            super().__init__([{"id": 3, "result": {"success": False}}])
+            super().__init__([{"id": 2, "result": {"success": False}}])
 
     def fake_connect(url: str, **kwargs: Any) -> FakeWS:
         return (
             RejectingPageWS()
             if "browser" not in url
-            else FakeWS([{"id": 1, "result": {"targetId": "t-1"}}, {"id": 2, "result": {}}])
+            else FakeWS([{"id": 1, "result": {"targetId": "t-1"}}, {"id": 3, "result": {}}])
         )
 
     monkeypatch.setattr(s2.websockets, "connect", fake_connect)
