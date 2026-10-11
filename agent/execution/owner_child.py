@@ -7,7 +7,6 @@ neither that handle nor the original host's control writer. EOF is refusal.
 import argparse
 import hashlib
 import os
-import runpy
 import sys
 import threading
 import time
@@ -140,7 +139,9 @@ def _run_permitted(context: OwnerContext) -> None:
         os.dup2(empty.fileno(), 0)
     # The actual old child entry, not a second execution engine. Its request
     # and result environment is prepared by the original runtime as before.
-    runpy.run_module("agent.execution.child", run_name="__main__")
+    from agent.execution import child
+
+    child.run_as_entry()
 
 
 if __name__ == "__main__":

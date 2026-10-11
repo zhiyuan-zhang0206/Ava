@@ -17,7 +17,7 @@ from pathlib import Path
 
 import psutil
 
-from agent.execution import owner_child
+from agent.execution import child, owner_child
 from base.agents.incarnation.exec_owner_protocol import OwnerControl, read_owner_context
 
 
@@ -119,8 +119,7 @@ def _orphan(context_path: Path, ready: Path) -> None:
 def _entry(mode: str, context: Path, ready: Path) -> None:
     if mode in {"normal", "cleanup", "refused"}:
 
-        def payload(_name: str, *, run_name: str) -> dict[str, object]:
-            assert run_name == "__main__"
+        def payload() -> dict[str, object]:
             assert any(t.name == "exec-original-deadline" for t in threading.enumerate())
             ready.write_text("entered")
             if mode == "cleanup":
@@ -131,7 +130,7 @@ def _entry(mode: str, context: Path, ready: Path) -> None:
                     ctypes.CDLL(None).sleep(60)
             return {}
 
-        owner_child.runpy.run_module = payload
+        child.run_as_entry = payload
         sys.argv = ["owner_child", "--context", str(context)]
         if mode == "refused":
             try:

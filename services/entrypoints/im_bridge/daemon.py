@@ -159,7 +159,20 @@ _ADAPTERS: tuple[tuple[str, Callable[[], Any] | None], ...] = (
 def _import_adapter(name: str) -> Any:
     """Import one adapter module by channel name (seam for tests)."""
 
-    return __import__(f"services.entrypoints.im_bridge.adapters.{name}", fromlist=["*"])
+    # One static import per channel: a disabled adapter's module is never imported.
+    if name == "telegram":
+        from services.entrypoints.im_bridge.adapters import telegram
+
+        return telegram
+    if name == "weixin":
+        from services.entrypoints.im_bridge.adapters import weixin
+
+        return weixin
+    if name == "feishu":
+        from services.entrypoints.im_bridge.adapters import feishu
+
+        return feishu
+    raise ValueError(f"unknown im_bridge adapter {name!r}")
 
 
 def _load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:

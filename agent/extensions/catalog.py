@@ -29,15 +29,22 @@ reader to ignore the diff.
 
 from __future__ import annotations
 
-import importlib
 import inspect
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 from agent.extensions._discovery import enabled_plugin_dirs, pkg_of
+from base.lm.provider_api import DecisionProviderContribution, ProviderContribution
 from base.packages.plugins import enable_config
 from base.packages.plugins.contributions import Contribution
+from base.packages.plugins.extensions import (
+    ContextNote,
+    PluginContributions,
+    SdkMember,
+    SdkNamespace,
+    SdkWrap,
+)
 from base.packages.plugins.manifest import CONTRIBUTION_KEYS, PluginManifest, load_manifest
 from base.packages.skills import names
 
@@ -50,9 +57,9 @@ class Surface:
 
     - id: the ledger surface id; equal to the `ava-plugin.json` contribution key
       when the manifest grammar has one for it.
-    - entry_points: `module:attr` paths of the functions a plugin calls. Resolved
-      live for the rendered signature, so an unresolvable path is a hard failure
-      rather than a stale line.
+    - entry_points: the declaration types a plugin builds. Held as live objects
+      so the rendered signature cannot drift, and a moved type fails at import
+      rather than leaving a stale line.
     - manifest_key: the `contributions` key that declares this surface, or None
       when the spec has no way to declare it.
     - protocol: a second signature a contributor must satisfy (the `Hook` call
@@ -61,7 +68,7 @@ class Surface:
     """
 
     id: str
-    entry_points: tuple[str, ...]
+    entry_points: tuple[type, ...]
     manifest_key: str | None
     protocol: str | None
     note: str
@@ -70,7 +77,7 @@ class Surface:
 SURFACES: tuple[Surface, ...] = (
     Surface(
         id="hooks",
-        entry_points=("base.packages.plugins.extensions:PluginContributions",),
+        entry_points=(PluginContributions,),
         manifest_key="hooks",
         protocol="agent.hooks.Hook.__call__"
         "(state: AgentState, runtime: Runtime[AvaContext], config: RunnableConfig, /)"
@@ -84,7 +91,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="state",
-        entry_points=("base.packages.plugins.extensions:PluginContributions",),
+        entry_points=(PluginContributions,),
         manifest_key=None,
         protocol=None,
         note=(
@@ -96,7 +103,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="sdkNamespaces",
-        entry_points=("base.packages.plugins.extensions:SdkNamespace",),
+        entry_points=(SdkNamespace,),
         manifest_key="sdkNamespaces",
         protocol=None,
         note=(
@@ -107,7 +114,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="sdkMembers",
-        entry_points=("base.packages.plugins.extensions:SdkMember",),
+        entry_points=(SdkMember,),
         manifest_key=None,
         protocol=None,
         note=(
@@ -117,7 +124,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="sdkExpansions",
-        entry_points=("base.packages.plugins.extensions:PluginContributions",),
+        entry_points=(PluginContributions,),
         manifest_key=None,
         protocol=None,
         note=(
@@ -127,7 +134,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="sdkWraps",
-        entry_points=("base.packages.plugins.extensions:SdkWrap",),
+        entry_points=(SdkWrap,),
         manifest_key="sdkWraps",
         protocol="wrapper(inner: Callable, *args, **kwargs) -> Any",
         note=(
@@ -137,7 +144,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="systemPromptSections",
-        entry_points=("base.packages.plugins.extensions:PluginContributions",),
+        entry_points=(PluginContributions,),
         manifest_key="systemPromptSections",
         protocol="section(slices: AgentSlices, *, catalog: ModelCatalog) -> str",
         note=(
@@ -147,7 +154,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="contextNotes",
-        entry_points=("base.packages.plugins.extensions:ContextNote",),
+        entry_points=(ContextNote,),
         manifest_key=None,
         protocol="note(slices: AgentSlices) -> HumanMessage | None",
         note=(
@@ -158,7 +165,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="metrics",
-        entry_points=("base.packages.plugins.extensions:PluginContributions",),
+        entry_points=(PluginContributions,),
         manifest_key="metrics",
         protocol="MetricSpec",
         note=(
@@ -169,7 +176,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="inspectWidgets",
-        entry_points=("base.packages.plugins.extensions:PluginContributions",),
+        entry_points=(PluginContributions,),
         manifest_key="inspectWidgets",
         protocol="InspectWidgetSpec",
         note=(
@@ -179,7 +186,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="providers",
-        entry_points=("base.lm.provider_api:ProviderContribution",),
+        entry_points=(ProviderContribution,),
         manifest_key="providers",
         protocol=None,
         note=(
@@ -191,7 +198,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="decisionProviders",
-        entry_points=("base.lm.provider_api:DecisionProviderContribution",),
+        entry_points=(DecisionProviderContribution,),
         manifest_key="decisionProviders",
         protocol=None,
         note=(
@@ -204,7 +211,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="skillSources",
-        entry_points=("base.packages.plugins.extensions:PluginContributions",),
+        entry_points=(PluginContributions,),
         manifest_key=None,
         protocol="provider() -> list[Path]",
         note=(
@@ -214,7 +221,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="config",
-        entry_points=("base.packages.plugins.extensions:PluginContributions",),
+        entry_points=(PluginContributions,),
         manifest_key="config",
         protocol=None,
         note=(
@@ -257,27 +264,17 @@ def _unquoted(annotation: Any) -> Any:
     return _SourceText(annotation) if isinstance(annotation, str) else annotation
 
 
-def entry_point_signature(entry_point: str) -> str:
-    """`agent.hooks.make_hook_runner(hook_name, default_next, hooks) -> ...` — rendered from the
-    live object, so the catalog cannot drift from the code it describes.
-
-    Raises:
-        ModuleNotFoundError / AttributeError: the entry point moved and `SURFACES`
-            was not updated — a catalog that describes a surface nobody can call
-            is worse than a crash.
-    """
-    module_path, _, attr_path = entry_point.partition(":")
-    obj: Any = importlib.import_module(module_path)
-    for segment in attr_path.split("."):
-        obj = getattr(obj, segment)
-    signature = inspect.signature(obj)
+def entry_point_signature(entry_point: type) -> str:
+    """`base.packages.plugins.extensions.SdkWrap(name, ...)` — rendered from the live
+    object, so the catalog cannot drift from the code it describes."""
+    signature = inspect.signature(entry_point)
     signature = signature.replace(
         parameters=[
             p.replace(annotation=_unquoted(p.annotation)) for p in signature.parameters.values()
         ],
         return_annotation=_unquoted(signature.return_annotation),
     )
-    return f"{entry_point.replace(':', '.')}{signature}"
+    return f"{entry_point.__module__}.{entry_point.__qualname__}{signature}"
 
 
 # ── the per-machine composition ─────────────────────────────────────────
