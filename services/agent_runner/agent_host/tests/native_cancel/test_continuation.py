@@ -20,6 +20,7 @@ from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -32,6 +33,7 @@ from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @dataclass
@@ -102,7 +104,9 @@ async def test_original_invocation_settles_once_after_database_fault(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
+    machine_identity.set(name="claim-test")
     async with hosted_scope() as resources:
         pool: ConnectionPool
         incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
@@ -130,7 +134,7 @@ async def test_original_invocation_settles_once_after_database_fault(
             pool=aops_pool,
             checkpointer=saver,
             graph=graph,
-            machine="claim-test",
+            machine=machine_identity,
             bus=EventBus.from_settings(),
             db=database,
             catalog=model_catalog,
@@ -143,6 +147,7 @@ async def test_original_invocation_settles_once_after_database_fault(
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
+            machine=machine_identity,
         )
         faults = _install_faults(monkeypatch, agent, site)
         running = asyncio.create_task(

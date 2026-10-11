@@ -83,6 +83,8 @@ def test_generation_claim_is_single_winner_and_stale_token_loses_authority(
     active: tuple[dict[str, Any], RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     session, owner = active
     tokens = ["first-private-token", "second-private-token"]
@@ -96,8 +98,12 @@ def test_generation_claim_is_single_winner_and_stale_token_loses_authority(
     winner = tokens[next(i for i, value in enumerate(outcomes) if value is not None)]
     other = tokens[1 - tokens.index(winner)]
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
-        leases.relay_heartbeat(database, session["id"], other)
-    latest = leases.relay_get(database, event_bus, session["id"], winner)
+        leases.relay_heartbeat(
+            database, session["id"], other, local_machine=machine_identity.name()
+        )
+    latest = leases.relay_get(
+        database, event_bus, session["id"], winner, local_machine=machine_identity.name()
+    )
     assert latest["relay_generation"] == 1
     assert latest["expires_at"] <= session["expires_at"] + __import__("datetime").timedelta(
         seconds=1
@@ -106,7 +112,12 @@ def test_generation_claim_is_single_winner_and_stale_token_loses_authority(
         relay.provision_relay(database, session["id"], owner, "loser", expected_generation=0)
         is None
     )
-    assert leases.relay_get(database, event_bus, session["id"], winner)["relay_generation"] == 1
+    assert (
+        leases.relay_get(
+            database, event_bus, session["id"], winner, local_machine=machine_identity.name()
+        )["relay_generation"]
+        == 1
+    )
 
 
 def test_terminal_notice_claim_has_one_sender_and_persists_host_acceptance(

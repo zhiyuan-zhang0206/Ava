@@ -17,6 +17,8 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     _hermetic_start as _hermetic_start,
 )
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import _roster
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from gateway.app import app
 from tests.components.agent.test_maintenance import isolate as isolate
 from tests.components.services.test_maintenance_readiness import (
@@ -35,6 +37,8 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
     database: Database,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
 
     _roster(monkeypatch, (("gateway", None),))
@@ -58,6 +62,7 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
                 retained_children=[],
                 database_factory=operator_database,
                 producer=operator_pipeline,
+                command=command_runtime,
             )
             == 0
         )
@@ -68,5 +73,5 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
     assert measurements and set(measurements) == {200}
     assert start_serving.is_serving()
     assert not admission.held()
-    posture = host_deploy_state.read(database)
+    posture = host_deploy_state.read(database, machine=command_runtime.machine.name())
     assert posture is not None and posture.posture == "idle"

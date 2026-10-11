@@ -53,7 +53,7 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
         authority=config_authority,
         catalog=model_catalog,
     )
-    await _admitted(aops_pool, aid, database_gate=database_gate)
+    await _admitted(aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity)
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (aid,))
     db_conn.commit()
 
@@ -90,6 +90,7 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     force(resurrected)
     wake.resurrect_agent(
@@ -144,6 +145,7 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     force(aid)
     if invalid == "unapplied":
@@ -163,5 +165,7 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
     )
     before = _resources(db_conn, aid)
     with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
-        await _admitted(aops_pool, aid, database_gate=database_gate)
+        await _admitted(
+            aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
+        )
     assert _resources(db_conn, aid) == before

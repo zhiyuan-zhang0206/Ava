@@ -9,20 +9,27 @@ import pytest
 import cli.commands.converge.host as cv
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def _ctx(
-    home: Path, *, operator_database: Callable[[], Any], producer: Callable[[], EventPipeline]
+    home: Path,
+    *,
+    operator_database: Callable[[], Any],
+    producer: Callable[[], EventPipeline],
+    command_runtime: CommandRuntime,
 ) -> cv.ConvergeCtx:
     return cv.ConvergeCtx(
         repo=Path("/repo"),
         ava_home=home,
         roles=frozenset({"agent-runner"}),
-        config=ConfigBoot(),
+        config=command_runtime.config,
         database_factory=operator_database,
         producer=producer,
+        machine=command_runtime.machine,
     )
 
 
@@ -35,9 +42,16 @@ def test_always_sheds_legacy_plugin_file(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The legacy converge-written file is removed (chrome is now built-in)."""
-    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     ctx.config.set_field("browser_enabled", False)
     legacy = _plugin_path(tmp_path)
     legacy.parent.mkdir(parents=True)
@@ -51,8 +65,15 @@ def test_disabled_noop_when_already_absent(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
-    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     ctx.config.set_field("browser_enabled", False)
     cv._ensure_browser(ctx)  # no raise, nothing to remove
     assert not _plugin_path(tmp_path).exists()
@@ -63,8 +84,15 @@ def test_enabled_runs_preflight_writes_nothing(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
-    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     ctx.config.set_field("browser_enabled", True)
     import services.desktop.browser.profile as bp
 
@@ -79,10 +107,17 @@ def test_capable_offers_profile_seed_with_tty_flag(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """When the host is browser-capable, the step invokes the profile-seed offer,
     passing interactive = both stdin AND stdout are TTYs."""
-    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     ctx.config.set_field("browser_enabled", True)
     import services.desktop.browser.profile as bp
 
@@ -104,9 +139,16 @@ def test_incapable_host_does_not_offer_profile_seed(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A headless host must return before ever offering the profile-seed choice."""
-    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     ctx.config.set_field("browser_enabled", True)
     import services.desktop.browser.profile as bp
 
@@ -125,9 +167,16 @@ def test_enabled_but_incapable_warns_not_raises(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """On a headless machine, converge prints an informational skip and returns."""
-    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     ctx.config.set_field("browser_enabled", True)
     monkeypatch.setattr(cv, "browser_incapability", lambda: "no display")
     cv._ensure_browser(ctx)
@@ -144,9 +193,16 @@ def test_enabled_with_missing_npx_prints_the_repair_box(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A repairable dependency gap keeps converge's existing warn-not-raise path."""
-    ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     ctx.config.set_field("browser_enabled", True)
     monkeypatch.setattr(
         cv, "browser_incapability", lambda: "no npx (install Node.js for chrome-devtools-mcp)"
@@ -160,14 +216,22 @@ def test_steps_read_their_context_owner_and_later_overlay(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from services.desktop.browser import profile
 
     first = _ctx(
-        tmp_path / "first", operator_database=operator_database, producer=operator_pipeline
+        tmp_path / "first",
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
     )
     second = _ctx(
-        tmp_path / "second", operator_database=operator_database, producer=operator_pipeline
+        tmp_path / "second",
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
     )
     first.config.set_field("browser_enabled", False)
     second.config.set_field("browser_enabled", True)
@@ -194,6 +258,8 @@ def test_context_read_failure_keeps_the_original_error(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     error = RuntimeError("context configuration is unavailable")
 
@@ -208,6 +274,7 @@ def test_context_read_failure_keeps_the_original_error(
         config=FailedBoot(),
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
     with pytest.raises(RuntimeError) as caught:
         cv._ensure_browser(ctx)

@@ -51,8 +51,8 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base import telemetry
-from base.cluster.machine import validate_machine_name
-from base.config import settings
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
     Liveness,
@@ -62,6 +62,7 @@ from base.daemon.health import (
 from base.daemon.shutdown import install_graceful_shutdown
 from base.db import Database, insert_inbound_message_in_transaction, publish_inbound_wake
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
@@ -73,6 +74,7 @@ from base.packages.plugins.config_registration import (
     read_authority_config,
     read_service_config,
 )
+from base.paths import ava_home
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
@@ -341,18 +343,21 @@ def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     image = LoadedCommit.capture()
-    assert_schema_current(settings.data_plane.db_url)
+    boot = ConfigBoot()
+    boot.boot()
+    machine = machine_from_boot(boot)
+    assert_schema_current(boot.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="task_maintenance", exempt=False)
 
     def database() -> Database:
-        return Database.from_settings(gate=gate)
+        return Database(db_config_from_boot(boot), gate=gate, local_host=machine.host)
 
-    pipeline = telemetry.build_pipeline(database=database)
+    pipeline = telemetry.build_pipeline(database=database, machine=machine, home=ava_home())
     init_gateway_process(
         name="task_maintenance",
         producer=lambda: pipeline,
-        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        machine_reader=machine.name,
         image=image,
     )
     install_graceful_shutdown("task_maintenance")

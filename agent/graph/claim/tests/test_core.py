@@ -26,6 +26,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.paths import ava_home
 from tests.fixtures.model_catalog import AddModels
 from tests.fixtures.pin_agent import pin_agent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -33,9 +34,13 @@ from tests.fixtures.units import spawn_agent
 
 
 @pytest.fixture
-def event_pipeline(database: Database) -> Iterator[telemetry.EventPipeline]:
+def event_pipeline(
+    database: Database, machine_identity: MachineIdentity
+) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the operation and its mirror barrier."""
-    pipeline = telemetry.build_pipeline(database=lambda: database)
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity, home=ava_home()
+    )
     try:
         telemetry.init_telemetry(process="test-sdk-operation", pipeline=pipeline)
         yield pipeline

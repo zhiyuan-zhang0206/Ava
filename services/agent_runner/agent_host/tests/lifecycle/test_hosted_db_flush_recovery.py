@@ -12,6 +12,7 @@ from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.ownership.tests.test_lifecycle_intent import _command
 from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.context import AvaContext
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database, insert_inbound_message
 from base.db.code_version_gate import ProcessDbGate
@@ -26,6 +27,7 @@ from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure 
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize(
@@ -41,6 +43,7 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     async with hosted_scope() as resources:
         agent = agent_row(db_conn)
@@ -60,6 +63,7 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
+            machine=machine_identity,
         )
         ctx = AvaContext(
             ops_pool=aops_pool,
@@ -69,6 +73,7 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
+            machine=machine_identity,
         )
         # A real closed PostgreSQL connection supplies the I/O failure. Injection
         # selects only the boundary; checkpoint, graph and lifecycle transactions run.

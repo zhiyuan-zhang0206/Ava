@@ -439,6 +439,7 @@ def _drain_and_stop(
                 acquired_at,
                 direct_db="gateway" in roles,
                 database_factory=database_factory,
+                local_machine=machine,
             ),
         )
         # Nothing is left in the service: stop it, and the root with it when nothing else is kept.

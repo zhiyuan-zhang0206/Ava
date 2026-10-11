@@ -23,12 +23,18 @@ def test_reminder_is_inserted_once_per_lease_and_wakes(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    owner = create_native_owner(db_conn)
-    lease = accept_controller(owner, authority=config_authority, database_gate=database_gate)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '4 minutes' "
         "WHERE id=%s",
@@ -72,8 +78,13 @@ def test_reminder_ack_suppresses_further_reminders(
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    owner = create_native_owner(db_conn)
-    lease = accept_controller(owner, authority=config_authority, database_gate=database_gate)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '4 minutes' "
         "WHERE id=%s",
@@ -118,12 +129,18 @@ def test_reminder_skips_leases_outside_the_window(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    owner = create_native_owner(db_conn)
-    accept_controller(owner, authority=config_authority, database_gate=database_gate)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '30 minutes' "
         "WHERE agent_id=%s",
@@ -151,8 +168,13 @@ def test_release_dismisses_its_pending_reminder(
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    owner = create_native_owner(db_conn)
-    lease = accept_controller(owner, authority=config_authority, database_gate=database_gate)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '2 minutes' "
         "WHERE id=%s",
@@ -182,12 +204,18 @@ def test_expiry_dismisses_its_pending_reminder(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents.impersonation import maintenance as maintenance
     from base.db import pool
 
-    owner = create_native_owner(db_conn)
-    lease = accept_controller(owner, authority=config_authority, database_gate=database_gate)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '1 minute' "
         "WHERE id=%s",
@@ -233,12 +261,16 @@ def test_reminder_window_tracks_current_ttl(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
     lease = accept_controller(
-        create_native_owner(db_conn), authority=config_authority, database_gate=database_gate
+        create_native_owner(db_conn, local_machine=machine_identity.name()),
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
     )
     db_conn.execute(
         "UPDATE agent_impersonations SET ttl_seconds=%s, "
@@ -264,7 +296,10 @@ def test_renewal_recomputes_window_and_allows_a_new_reminder(
     from base.db import pool
 
     lease = accept_controller(
-        create_native_owner(db_conn), authority=config_authority, database_gate=database_gate
+        create_native_owner(db_conn, local_machine=machine_identity.name()),
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
     )
     caller = attested_caller(lease)
     with pool(max_size=2, gate=database_gate) as reaper_pool:

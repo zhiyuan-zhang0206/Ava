@@ -5,12 +5,14 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.tests.test_agent_host import _host, _PendingScanPool
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("held", [False, True])
@@ -22,7 +24,9 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
+    machine_identity.set(name="this-box")
     from threading import Event
 
     from base.agents.impersonation import terminal_notices
@@ -38,6 +42,7 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
         graph=object(),
         catalog=model_catalog,
         database_gate=database_gate,
+        machine=machine_identity,
     )
     expected = [PendingInboundWake(agent_id=17, stale=False, recovery=False)]
     monkeypatch.setattr(
@@ -76,7 +81,8 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
         async with asyncio.TaskGroup() as owner:
             activity = owner.create_task(
                 terminal_notices.run_notice_delivery(
-                    Database.from_settings(gate=database_gate), "this-box"
+                    Database.from_settings(gate=database_gate),
+                    machine_identity.name(),
                 )
             )
             assert await asyncio.to_thread(entered.wait, 5)

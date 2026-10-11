@@ -17,14 +17,14 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions
 from base.agents.messages import delivery_outbox as outbox
-from base.cluster.machine import MachineIdentity
 from base.config import Settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.impersonation import _send
-from tests.fixtures.unit.identity import machine_identity as machine_identity
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.impersonation_support import attested_caller, recorded_tree
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -46,8 +46,9 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     event_bus: EventBus,
     publish_wake: Callable[[int, str], bool],
     operator_database: Callable[[], Any],
-    machine_identity: MachineIdentity,
+    command_runtime: CommandRuntime,
 ) -> None:
+    machine_identity = command_runtime.machine
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
@@ -69,13 +70,24 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
         provider="codex",
         thread_id=str(uuid4()),
         process_metadata=recorded_tree(),
+        local_machine=machine_identity.name(),
     )
-    lease = history.resolve(database, owner.agent_id, result["session_id"])
+    lease = history.resolve(
+        database, owner.agent_id, result["session_id"], local_machine=machine_identity.name()
+    )
     leases.accept(
-        database, event_bus, str(lease["id"]), owner.agent_id, owner, "Continue the login fix"
+        database,
+        event_bus,
+        str(lease["id"]),
+        owner.agent_id,
+        owner,
+        "Continue the login fix",
+        local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, str(lease["id"]), owner)
-    lease = history.resolve(database, owner.agent_id, result["session_id"])
+    lease = history.resolve(
+        database, owner.agent_id, result["session_id"], local_machine=machine_identity.name()
+    )
 
     target_id = create_agent(db_conn)
     db_conn.execute(
@@ -108,6 +120,7 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
 
     monkeypatch.setattr("base.host.net.http_dial.post", gateway_down)
     args = argparse.Namespace(
+        runtime=command_runtime,
         agent_id=owner.agent_id,
         session_id=0,
         target_agent_id=target_id,
@@ -154,7 +167,12 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     ).fetchone() == (1,)
 
     leases.release(
-        database, event_bus, str(lease["id"]), attested_caller(lease), "CLI delivery replayed"
+        database,
+        event_bus,
+        str(lease["id"]),
+        attested_caller(lease),
+        "CLI delivery replayed",
+        local_machine=machine_identity.name(),
     )
     api_events = [
         row["payload"]
@@ -164,4 +182,9 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     assert [(event["event_name"], event["agent_id"]) for event in api_events] == [
         ("send_message", target_id)
     ]
-    assert history.resolve(database, owner.agent_id, 0)["events_completed_at"] is not None
+    assert (
+        history.resolve(database, owner.agent_id, 0, local_machine=machine_identity.name())[
+            "events_completed_at"
+        ]
+        is not None
+    )

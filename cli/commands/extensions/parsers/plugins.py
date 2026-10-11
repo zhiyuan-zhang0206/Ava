@@ -36,6 +36,7 @@ def _h_plugins_install(args: argparse.Namespace) -> int:
         args.path,
         accept_risk=args.accept_risk,
         database_factory=args.database_factory,
+        machine=args.runtime.machine,
     )
 
 

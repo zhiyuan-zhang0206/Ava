@@ -20,6 +20,7 @@ from agent.state import BaseAgentState
 from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.context import AvaContext
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -29,6 +30,7 @@ from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_host_trace_reads_final_messages_after_nstep_flush(
@@ -38,7 +40,9 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
+    machine_identity.set(name="test")
     async with hosted_scope() as resources:
         agent_id = agent_row(db_conn)
         incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
@@ -79,7 +83,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                 pool=aops_pool,
                 checkpointer=saver,
                 graph=graph,
-                machine="test",
+                machine=machine_identity,
                 bus=EventBus.from_settings(),
                 db=Database.from_settings(gate=database_gate),
                 catalog=model_catalog,
@@ -97,6 +101,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                             bus=EventBus.from_settings(),
                             catalog=model_catalog,
                             clock_factory=configured_policy().clock_factory,
+                            machine=machine_identity,
                         ),
                         original_incarnation=incarnation,
                         hosted_resources=resources,

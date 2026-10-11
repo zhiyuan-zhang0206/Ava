@@ -14,8 +14,10 @@ import pytest
 
 from base.cluster import ClusterPorts
 from base.cluster.dataplane import pooler as base_pooler
+from base.cluster.machine import MachineIdentity
 from base.cluster.record import ClusterRecord
 from services.supervision.ava_root_glue.diagnostic_probes import pgbouncer
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize(
@@ -23,7 +25,12 @@ from services.supervision.ava_root_glue.diagnostic_probes import pgbouncer
     [(True, True, "alive"), (True, False, "down"), (False, False, "down")],
 )
 def test_pooler_protocol_requires_both_authenticated_listeners(
-    monkeypatch: pytest.MonkeyPatch, loopback: bool, public: bool, expected: str
+    monkeypatch: pytest.MonkeyPatch,
+    loopback: bool,
+    public: bool,
+    expected: str,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.cluster import ownership
     from services.supervision.ava_root_glue import diagnostic_probes
@@ -50,19 +57,22 @@ def test_pooler_protocol_requires_both_authenticated_listeners(
         assert (port, password) == (6432, admin.password)
         return loopback
 
-    def _fake_public_listener_reachable(*_a: object) -> bool:
+    def _fake_public_listener_reachable(*_a: object, machine: MachineIdentity) -> bool:
+        assert machine is machine_identity
         return public
 
     monkeypatch.setattr(base_pooler, "pgbouncer_listener_reachable", _fake_listener_reachable)
     monkeypatch.setattr(
         base_pooler, "pgbouncer_public_listener_reachable", _fake_public_listener_reachable
     )
-    assert pgbouncer().verdict.value == expected
+    assert pgbouncer(machine=machine_identity).verdict.value == expected
 
 
-def test_unknown_pooler_record_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unknown_pooler_record_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     def _fake_get_record(_home: Path) -> ClusterRecord | None:
         return None
 
     monkeypatch.setattr("base.cluster.get_record", _fake_get_record)
-    assert pgbouncer().verdict.value == "unavailable"
+    assert pgbouncer(machine=machine_identity).verdict.value == "unavailable"

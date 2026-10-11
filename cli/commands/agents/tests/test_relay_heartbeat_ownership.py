@@ -9,7 +9,10 @@ from uuid import UUID
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.db import Database
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 
 from .. import impersonation
 from .. import impersonation_relay as relay
@@ -33,6 +36,8 @@ def test_heartbeat_failure_does_not_cancel_inbox_or_change_cli_error_contract(
     error_type: type[Exception] | None,
     cancelled: bool,
     interrupt: bool,
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     database_handle = MagicMock(spec=Database)
     database_factory = MagicMock(return_value=database_handle)
@@ -56,7 +61,7 @@ def test_heartbeat_failure_does_not_cancel_inbox_or_change_cli_error_contract(
     monkeypatch.setattr(relay, "resolve_adapter", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(relay, "_write_heartbeat", MagicMock(return_value=True))
 
-    async def heartbeat(*_args: object) -> None:
+    async def heartbeat(*_args: object, **_kwargs: object) -> None:
         events.append("heartbeat_started")
         if cancelled:
             try:
@@ -79,18 +84,20 @@ def test_heartbeat_failure_does_not_cancel_inbox_or_change_cli_error_contract(
     monkeypatch.setattr(relay.base.events.live.redis_listener, "RedisInboundListener", MagicMock())
 
     if interrupt:
-        assert relay.cmd_relay(args, database_factory=database_factory) == 130
+        assert (
+            relay.cmd_relay(args, database_factory=database_factory, machine=command_machine) == 130
+        )
         assert capsys.readouterr().err == (
             "Relay stopped; pending messages are unchanged and the lease is not renewed.\n"
         )
     elif error_type is TypeError:
         with pytest.raises(TypeError) as caught:
-            relay.cmd_relay(args, database_factory=database_factory)
+            relay.cmd_relay(args, database_factory=database_factory, machine=command_machine)
         assert caught.value is error
     else:
-        assert relay.cmd_relay(args, database_factory=database_factory) == (
-            0 if error is None else 1
-        )
+        assert relay.cmd_relay(
+            args, database_factory=database_factory, machine=command_machine
+        ) == (0 if error is None else 1)
         if error is not None:
             assert capsys.readouterr().err == "Impersonation relay stopped: heartbeat defect\n"
     assert events == ["heartbeat_started", "inbox_finished"] + (

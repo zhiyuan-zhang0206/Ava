@@ -25,26 +25,30 @@ import pytest
 from loguru import logger as _global_logger
 
 from base import telemetry
-from base.config import settings
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.log.process import _postgres_sink, add_postgres_sink
+from base.paths import ava_home
 from base.telemetry.delivery.receipts import DrainStatus
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
-def sink_logger(database: Database):
+def sink_logger(database: Database, machine_identity: MachineIdentity):
     """Register the loguru -> emitter adapter + bind agent_id, cleanup after yield.
 
     The adapter enqueues (non-blocking); tests flush via `_last_event`. bind
     agent_id="-" simulates the gateway init form; within tests when the agent
     process perspective is needed, logger.bind() overrides it.
     """
-    pipeline = telemetry.build_pipeline(database=lambda: database)
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity, home=ava_home()
+    )
 
     def producer() -> telemetry.EventPipeline:
         return pipeline
 
-    add_postgres_sink(producer=producer, machine_reader=lambda: settings.cluster.self_machine_name)
+    add_postgres_sink(producer=producer, machine_reader=machine_identity.name)
     _global_logger.remove()
     sink_id = _global_logger.add(
         partial(_postgres_sink, producer=producer), level="INFO", enqueue=False, catch=False

@@ -319,7 +319,13 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
     )
     if mode == "delayed_resurrection":
         _age_and_sweep_notices(db_conn, owner.agent_id, database_gate=database_gate)
-    resurrect_agent(database, event_bus, owner.agent_id, resurrected_by="user")
+    resurrect_agent(
+        database,
+        event_bus,
+        owner.agent_id,
+        resurrected_by="user",
+        local_machine=machine_identity.name(),
+    )
     successor = await admit_hosted_runtime(
         aops_pool,
         owner.agent_id,
@@ -523,7 +529,9 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     # cmd_relay owns asyncio.run, as a real separately launched relay would.
     import asyncio
 
-    result = await asyncio.to_thread(relay.cmd_relay, args, database_factory=lambda: database)
+    result = await asyncio.to_thread(
+        relay.cmd_relay, args, database_factory=lambda: database, machine=machine_identity
+    )
     assert result == (1 if transport_dead else 0)
     assert len(emitted) == 1
     assert f"Ava impersonation lease {session['session_id']}" in emitted[0]
@@ -570,7 +578,12 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
             )
             db_conn.commit()
         return relay._read_inbox(
-            database, event_bus, owner.agent_id, lease_uuid, session["relay_token"]
+            database,
+            event_bus,
+            owner.agent_id,
+            lease_uuid,
+            session["relay_token"],
+            local_machine=machine_identity.name(),
         )
 
     async def reserve(_ids: list[int]) -> frozenset[int]:
@@ -643,7 +656,14 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
         yield db_conn
 
     monkeypatch.setattr(Database, "write_transaction", earlier_transaction)
-    resurrect_agent(database, event_bus, owner.agent_id, resurrected_by="user", prompt="Continue")
+    resurrect_agent(
+        database,
+        event_bus,
+        owner.agent_id,
+        resurrected_by="user",
+        prompt="Continue",
+        local_machine=machine_identity.name(),
+    )
     ordered = db_conn.execute(
         "SELECT kind,payload->>'note_tag' FROM inbound_messages "
         "WHERE agent_id=%s ORDER BY created_at,id",

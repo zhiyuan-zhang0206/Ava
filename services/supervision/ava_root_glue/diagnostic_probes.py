@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -70,7 +71,7 @@ def redis_acl() -> DaemonProbe:
     return protocol_probe.probe_protocol(ping)
 
 
-def pgbouncer() -> DaemonProbe:
+def pgbouncer(*, machine: MachineIdentity) -> DaemonProbe:
     from base.cluster import get_record
     from base.cluster.authority import POOLER_ADMIN, AuthorityRefusedError, read_pooler_admin
     from base.cluster.dataplane import pooler
@@ -89,7 +90,7 @@ def pgbouncer() -> DaemonProbe:
     def protocol() -> DaemonProbe:
         loopback = pooler.pgbouncer_listener_reachable(port, admin_password)
         public = loopback and pooler.pgbouncer_public_listener_reachable(
-            port, POOLER_ADMIN, settings.data_plane.cluster_secret
+            port, POOLER_ADMIN, settings.data_plane.cluster_secret, machine=machine
         )
         if loopback and public:
             return DaemonProbe.up("native pooler admin console and required listeners answered")
@@ -213,7 +214,7 @@ def build_diagnostics(
         if not settings.data_plane.is_remote:
             checks.append(Diagnostic("redis-acl", redis_acl))
             if settings.data_plane.pgbouncer_enabled:
-                checks.append(Diagnostic("pgbouncer", pgbouncer))
+                checks.append(Diagnostic("pgbouncer", partial(pgbouncer, machine=machine)))
         if settings.observability.observability_url.strip():
             station = StationProbe(database=database)
             checks.append(Diagnostic("observatory-station", station.probe))

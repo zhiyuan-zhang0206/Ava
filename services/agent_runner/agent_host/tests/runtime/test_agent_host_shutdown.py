@@ -41,6 +41,7 @@ from tests.components.services.daemon_shutdown_test_support import (
     KILL_SLACK_S,
     spawn_child,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _note_pidfile_removed(events: list[str], _path: object) -> None:
@@ -330,7 +331,11 @@ class _UnreachablePool:
 
 
 async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachable(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A/B/A run 6: with the pooler gone, the stop path's ownership release waited
     out the control pool's 30 s acquire timeout, so ava-root's 10 s TERM window
@@ -338,12 +343,13 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
     from ... import host as host_mod
 
     monkeypatch.setattr(host_mod, "_RELEASE_OWNER_TIMEOUT_S", 0.05)
+    machine_identity.set(name="this-box")
     host = host_mod.AgentHost(
         policy=configured_policy(),
         pool=cast(Any, _UnreachablePool()),
         checkpointer=cast(Any, object()),
         graph=cast(Any, object()),
-        machine="this-box",
+        machine=machine_identity,
         catalog=model_catalog,
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),

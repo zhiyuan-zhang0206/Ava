@@ -34,6 +34,7 @@ from agent.ownership.hosted import (
     settle_hosted_runtime,
 )
 from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
@@ -41,6 +42,7 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from ops.agents import wake
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _agent(conn: psycopg.Connection[Any], machine: str = "host-test") -> int:
@@ -397,6 +399,8 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
     event_bus: EventBus,
     database: Database,
     database_gate: ProcessDbGate,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The reaped corpse's next transition is the resurrect — run it against a
     second reap attempt and assert one winner per state and no torn row.
@@ -414,7 +418,9 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
 
     monkeypatch.setattr(wake, "publish_inbound_wake", _wake)
 
-    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool, database_gate=database_gate)
+    agent_id, incarnation = await _recrashed_row(
+        db_conn, aops_pool, database_gate=database_gate, machine=machine_identity.name()
+    )
     reaped = await reap_recrashed_corpse(
         aops_pool,
         incarnation,
@@ -431,7 +437,12 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
             wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
         ),
         asyncio.to_thread(
-            wake.resurrect_agent, database, event_bus, agent_id, resurrected_by="user"
+            wake.resurrect_agent,
+            database,
+            event_bus,
+            agent_id,
+            resurrected_by="user",
+            local_machine=machine_identity.name(),
         ),
     )
 

@@ -30,6 +30,7 @@ from typing import Any
 import psutil
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.deploy.maintenance import admission
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import SERVICE_UNIT, ledger_path
@@ -54,6 +55,7 @@ from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
 from cli.commands.lifecycle.tests.stop_support import written as written
 from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
@@ -439,6 +441,8 @@ def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """The grace never exceeds the stop's deadline or the ceiling; the SIGKILL leg runs
     with its own bound even when the deadline is already spent."""
@@ -455,6 +459,7 @@ def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
         datetime.now(UTC),
         direct_db=False,
         database_factory=operator_database,
+        local_machine=command_machine,
     )
     ((grace, kill),) = asked
     assert expected_grace - 0.5 <= grace <= expected_grace
@@ -480,7 +485,11 @@ def test_a_terminal_left_after_the_closure_fails_the_stop_in_its_own_words(
 
 
 def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
-    home: Path, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """The closure evidence waits until the stop's deadline, and at least the SIGKILL
     leg's bound: a session still tearing down past that bound but gone from the
@@ -501,6 +510,7 @@ def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
         datetime.now(UTC),
         direct_db=False,
         database_factory=operator_database,
+        local_machine=command_machine,
     )
     assert time.monotonic() >= cleared_at
 
@@ -542,6 +552,8 @@ def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """No service listens, so there is no one to ask: the stop closes from the ledger
     the dead service left, the leftover hung up first and SIGKILLed when it ignores
@@ -560,6 +572,7 @@ def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
         datetime.now(UTC),
         direct_db=False,
         database_factory=operator_database,
+        local_machine=command_machine,
     )
     assert proc.wait(timeout=10) == (-signal.SIGKILL if ignores_hangup else -signal.SIGHUP)
     assert strict.live_terminals() == []
@@ -623,7 +636,11 @@ def test_force_close_still_fails_when_known_shell_survives(
 
 @pytest.mark.parametrize("force", [False, True])
 def test_operational_terminal_close_failure_is_not_best_effort_success(
-    monkeypatch: pytest.MonkeyPatch, force: bool, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    force: bool,
+    operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
 
     def failed_close(_grace_s: float, _kill_s: float) -> closure.Outcome:
@@ -640,4 +657,5 @@ def test_operational_terminal_close_failure_is_not_best_effort_success(
                 datetime.now(UTC),
                 direct_db=False,
                 database_factory=operator_database,
+                local_machine=command_machine,
             )

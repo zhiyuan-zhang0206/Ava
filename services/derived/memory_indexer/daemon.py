@@ -20,7 +20,6 @@ import logging
 import os
 import queue
 import signal
-import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -32,6 +31,7 @@ import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -47,7 +47,6 @@ from base.log import prepare_process_logging
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import ava_home, gateway_memory_dir
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.emitter import build_pipeline
@@ -55,6 +54,7 @@ from services.derived.memory_indexer import config as indexer_config
 from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.derived.memory_indexer.backends.factory import get_backend
 from services.derived.memory_indexer.backends.probe import probe_backend
+from services.derived.memory_indexer.checkout_refresh import refresh_gateway_checkout
 from services.derived.memory_indexer.chunking import _file_rows
 from services.derived.memory_indexer.config import MemoryIndexerInputs
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
@@ -64,9 +64,9 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.derived.memory_indexer.daemon")
 
 
-def _memory_root() -> Path:
+def _memory_root(*, roles: MachineRoles) -> Path:
     """The consolidated memory checkout this daemon indexes, resolved on use."""
-    return gateway_memory_dir()
+    return gateway_memory_dir(roles=roles)
 
 
 def _endpoint() -> ServiceEndpoint:
@@ -219,7 +219,12 @@ def _embed_batches(
 
 
 def _process_paths(
-    backend: MemorySearchBackend, paths: set[Path], provider: EmbeddingProvider, liveness: Liveness
+    backend: MemorySearchBackend,
+    paths: set[Path],
+    provider: EmbeddingProvider,
+    liveness: Liveness,
+    *,
+    machine: MachineIdentity,
 ) -> None:
     """Process a batch of dirty paths: missing/foreign -> delete; else embed+upsert.
 
@@ -254,7 +259,7 @@ def _process_paths(
     Backends must be cross-thread safe (the HTTP client and the pgvector pool are).
     """
     liveness.beat()
-    root = _memory_root().resolve()
+    root = _memory_root(roles=machine.role()).resolve()
     to_delete, to_embed = _classify_dirty(backend, paths, provider, root)
 
     for p in to_delete:
@@ -398,7 +403,11 @@ def _reconcile_health(retry: _ReconcileRetrySchedule) -> dict[str, object]:
 
 
 def _reconcile(
-    backend: MemorySearchBackend, provider: EmbeddingProvider, liveness: Liveness
+    backend: MemorySearchBackend,
+    provider: EmbeddingProvider,
+    liveness: Liveness,
+    *,
+    machine: MachineIdentity,
 ) -> bool:
     """Diff disk vs index db; fill gaps at cold start and on scheduled follow-up passes.
 
@@ -421,11 +430,11 @@ def _reconcile(
     never split a file; its rows commit as one unit (issue #1946). An
     `EmbeddingAPIError` is logged and the remaining chunks are skipped.
     """
-    disk = _scan_disk(_memory_root())
+    disk = _scan_disk(_memory_root(roles=machine.role()))
     indexed = backend.all_meta()
     indexed_paths = {Path(p) for p in indexed}
     disk_paths = set(disk.keys())
-    root = _memory_root().resolve()
+    root = _memory_root(roles=machine.role()).resolve()
 
     dirty: set[Path] = set()
     # Changes / additions — mark dirty when mtime differs;
@@ -453,7 +462,7 @@ def _reconcile(
             for i in range(0, len(ordered), _RECONCILE_CHUNK_PATHS):
                 chunk = set(ordered[i : i + _RECONCILE_CHUNK_PATHS])
                 liveness.beat()  # per chunk: a rebuild outlives the liveness ceiling
-                _process_paths(backend, chunk, provider, liveness)
+                _process_paths(backend, chunk, provider, liveness, machine=machine)
                 liveness.beat()  # chunk committed -> the rebuild is progressing
         except EmbeddingAPIError as exc:
             _log.error(
@@ -464,49 +473,14 @@ def _reconcile(
     return True
 
 
-def _refresh_gateway_checkout() -> None:
-    """Fast-forward the gateway checkout to origin/main — hourly safety net.
-
-    The intended path for new merged notes to reach the index is the
-    arbiter's post-merge `ava memory refresh` (bundled into `ava memory
-    arbiter merge`). This catches the case where that step is skipped or
-    fails: fetch + ff-only merge is cheap, and when HEAD moves the fs
-    observer fires events that re-embed the changed files. A failure is
-    logged at ERROR and retried next cycle — a stale index can no longer
-    rot silently. Keep-local mode: `pull_main` is a no-op.
-    """
-    from base.deploy.git.memory_repo import gateway_memory_dir, pull_main
-
-    cwd = gateway_memory_dir()
-    try:
-        before = subprocess.check_output(  # noqa: S603 — argv is a static literal
-            ["git", "-C", str(cwd), "rev-parse", "HEAD"],
-            text=True,
-            creationflags=CREATE_NO_WINDOW,
-        ).strip()
-        head = pull_main()
-    except Exception as exc:
-        _log.error(
-            "[indexer] gateway checkout refresh failed: %r — the search index may be "
-            "stale; run `ava memory refresh`. Will retry next cycle.",
-            exc,
-        )
-        return
-    if head != before:
-        _log.info(
-            "[indexer] gateway checkout fast-forwarded %s → %s (post-merge refresh "
-            "was missed — new notes are now searchable)",
-            before[:8],
-            head[:8],
-        )
-
-
 async def _drain_loop(
     backend: MemorySearchBackend,
     dirty_queue: queue.Queue[Path],
     liveness: Liveness,
     provider: EmbeddingProvider,
     retry: _ReconcileRetrySchedule,
+    *,
+    machine: MachineIdentity,
 ) -> None:
     """Main loop: every _LOOP_INTERVAL_S drain queue, dedup, batch process.
 
@@ -525,13 +499,15 @@ async def _drain_loop(
         now = time.monotonic()
         if now >= next_checkout_refresh:
             next_checkout_refresh = now + _CHECKOUT_REFRESH_INTERVAL_S
-            await asyncio.to_thread(_refresh_gateway_checkout)
+            await asyncio.to_thread(refresh_gateway_checkout, machine=machine)
         # Waiting is safe: every loop tick keeps beating liveness until due.
         if retry.due():
             # Cancellation stays prompt; an in-flight to_thread worker finishes
             # in the background and is deliberately abandoned at exit (the
             # hard exit skips the executor join — see main()/_hard_exit).
-            complete = await asyncio.to_thread(_reconcile, backend, provider, liveness)
+            complete = await asyncio.to_thread(
+                _reconcile, backend, provider, liveness, machine=machine
+            )
             liveness.beat()  # the pass's tail must not stack with the next operation
             if complete:
                 retry.record_pass_complete()
@@ -547,7 +523,9 @@ async def _drain_loop(
         if not batch:
             continue
         try:
-            await asyncio.to_thread(_process_paths, backend, batch, provider, liveness)
+            await asyncio.to_thread(
+                _process_paths, backend, batch, provider, liveness, machine=machine
+            )
             liveness.beat()  # embed batch returned -> loop is making progress
         except EmbeddingAPIError as exc:
             # Name the blast radius: which/how many paths lost this round.
@@ -624,7 +602,13 @@ def _close_backend(backend: MemorySearchBackend) -> None:
         _log.warning("[indexer] backend close failed during shutdown", exc_info=True)
 
 
-async def run(*, config: ConfigBoot, database: Callable[[], Database], image: LoadedCommit) -> None:
+async def run(
+    *,
+    config: ConfigBoot,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    machine: MachineIdentity,
+) -> None:
     """Write pidfile -> start healthz server -> cold-start -> drain loop.
 
     Both before cold-start — cold-start may take tens of seconds
@@ -674,7 +658,7 @@ async def run(*, config: ConfigBoot, database: Callable[[], Database], image: Lo
     )
     _log.info("[indexer] healthz listening on :%s", endpoint.health_port)
 
-    root = _memory_root()
+    root = _memory_root(roles=machine.role())
     root.mkdir(parents=True, exist_ok=True)
     # Preflight the selected backend BEFORE the retry loop: a backend that can
     # never work (fatal) fails fast with the actionable fix instead of a 30s
@@ -712,10 +696,10 @@ async def run(*, config: ConfigBoot, database: Callable[[], Database], image: Lo
     _log.info("[indexer] watching %s", root)
 
     try:
-        if not await asyncio.to_thread(_reconcile, backend, provider, liveness):
+        if not await asyncio.to_thread(_reconcile, backend, provider, liveness, machine=machine):
             delay = retry.record_incomplete()
             _log.warning("[indexer] startup reconcile incomplete; retry scheduled in %.1fs", delay)
-        await _drain_loop(backend, dirty_queue, liveness, provider, retry=retry)
+        await _drain_loop(backend, dirty_queue, liveness, provider, retry=retry, machine=machine)
     finally:
         observer.stop()
         observer.join(timeout=5.0)
@@ -757,7 +741,7 @@ def main() -> None:
         # then hard-exit without closing Runner and its default executor.
         runner = asyncio.Runner()
         try:
-            runner.run(run(config=config, database=database, image=image))
+            runner.run(run(config=config, database=database, image=image, machine=machine))
         except KeyboardInterrupt:
             signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
             _log.info("[indexer] received interrupt, shutting down")

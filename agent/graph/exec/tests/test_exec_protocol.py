@@ -38,8 +38,11 @@ from agent.graph.exec.protocol import (
     write_request,
     write_result,
 )
+from base.cluster.machine import MachineIdentity
 from base.db import Database
+from base.paths import ava_home
 from tests.fixtures.pin_agent import exec_context
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @patch.dict(os.environ)
@@ -146,7 +149,7 @@ def test_request_envelope_round_trip(tmp_path: Path) -> None:
 
 
 def test_request_envelope_transfers_emit_size_and_serialize_time(
-    tmp_path: Path, database: Database
+    tmp_path: Path, database: Database, machine_identity: MachineIdentity
 ) -> None:
     """Request writes and reads record the final envelope size and their own
     serialization cost in the durable event stream."""
@@ -155,9 +158,13 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
     from base.log.process import add_postgres_sink
 
     events_before = len(_exec_envelope_events())
-    pipeline = telemetry.build_pipeline(database=lambda: database)
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity, home=ava_home()
+    )
     sink_id = add_postgres_sink(
-        process="test-exec-envelope", producer=lambda: pipeline, machine_reader=lambda: "test"
+        process="test-exec-envelope",
+        producer=lambda: pipeline,
+        machine_reader=machine_identity.name,
     )
     try:
         with logger.contextualize(agent_id=7):
@@ -381,13 +388,18 @@ def test_writer_killed_before_commit_leaves_no_envelope_at_all(
         "import agent.graph.exec.protocol as protocol\n"
         "def die(*_args, **_kwargs):\n"
         "    os._exit(9)\n"
-        f"{kill_point} = die\n"
+        "if sys.argv[2] == 'os.replace':\n"
+        "    os.replace = die\n"
+        "elif sys.argv[2] == 'os.fsync':\n"
+        "    os.fsync = die\n"
+        "else:\n"
+        "    raise ValueError('Unknown envelope kill point')\n"
         "protocol.write_request(Path(sys.argv[1]), code='x=1', "
         "context={'identity': {'agent_id': 7, 'owns_loop': True, 'actor': None}}, "
         "timeout_s=1.0, state=None, incarnation=None)\n"
     )
     completed = subprocess.run(  # noqa: S603 — our own venv python running a fixed in-test script
-        [sys.executable, "-c", script, str(path)], check=False
+        [sys.executable, "-c", script, str(path), kill_point], check=False
     )
 
     assert completed.returncode == 9
