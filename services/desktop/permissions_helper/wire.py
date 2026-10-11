@@ -23,6 +23,13 @@ class PingResult(TypedDict):
     ax_target_v1: NotRequired[bool]  # explicit process selection and observed-PID actions
     native_input_v1: NotRequired[bool]  # buttons/counts/modifiers/atomic holds
     corner_failsafe_v1: NotRequired[bool]  # input stops while the mouse is at the top-left corner
+    capture_indicator_v1: NotRequired[
+        bool
+    ]  # marks the window each input lands on; serves `indicator_stop`
+
+
+class IndicatorStopResult(TypedDict):
+    stopped: bool  # False when no indicator stream was running
 
 
 class ScreencaptureResult(TypedDict):
