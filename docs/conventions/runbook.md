@@ -319,9 +319,8 @@ explicit through `ava memory init`.
 **Health observations.** `ava cluster health-probe` retries
 gateway liveness three times, 30 seconds apart, before declaring it unhealthy.
 It checks data-volume usage before gateway liveness so a full disk that prevents
-gateway startup is reported as disk pressure. Both the crash-loop and schema
-checks are enabled by default; `--no-crash-loop-check` and `--no-schema-check`
-disable them individually.
+gateway startup is reported as disk pressure. The schema
+check is enabled by default; `--no-schema-check` disables it.
 Gateway and population failures retain their code, environment, or local-maintenance
 classification. A disabled agent-host or native maintenance hold cannot hide a low
 global population: the probe still exits 1 and grades that outage.
@@ -342,8 +341,7 @@ health-probe registration. Registration replaces this home's scheduled payload w
 `ava cluster health-probe`; other homes' jobs stay untouched.
 
 A dev/QA cluster's birth seeds `AVA_HEALTH_PROBE_AGENT_MIN=0` when it has no resident
-agents by design; an explicit value stands as written. Crash-loop limits remain
-health observation parameters.
+agents by design; an explicit value stands as written.
 
 **`ava start` reports the admitted roster's readiness.**
 

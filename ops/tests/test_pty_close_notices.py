@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -363,21 +362,6 @@ def test_notices_for_skips_a_session_that_is_not_an_agent_shell() -> None:
     built = notices.notices_for(sessions, reason=notices.CRASH_REASON)
 
     assert [notice.agent_id for notice in built] == [5]
-
-
-def test_a_staged_batch_round_trips_through_the_file(tmp_path: Path) -> None:
-    """The staged file carries the exact notice — `as_dict`/`from_dict` is a lossless
-    round trip, a stop's hold and a survivor list included — so a re-send is the
-    same notice, on the same key, with the same text."""
-    path = tmp_path / "pty-close-notices.json"
-    stopped = _notice(survivors=((4242, "sudo"),))
-
-    path.write_text(json.dumps({"version": 1, "notices": [stopped.as_dict()]}))
-    (read_back,) = notices.read_pending(path)
-
-    assert read_back == stopped
-    assert read_back.dedup_key() == stopped.dedup_key()
-    assert notices._content(read_back) == notices._content(stopped)
 
 
 def test_closure_receipt_stores_the_canonical_ops_status(db_conn: psycopg.Connection) -> None:

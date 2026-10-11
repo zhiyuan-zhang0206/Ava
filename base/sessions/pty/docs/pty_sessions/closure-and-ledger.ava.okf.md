@@ -42,8 +42,7 @@ sessions. Decision:
 
 The database-free service records start-time sweep outcomes in local logs.
 It does not stage owner notices or replay a previous start's journal. Existing
-`run/pty-close-notices.json` files remain untouched and can be inspected with
-`ops.pty_close_notices.read_pending`; no automatic sender consumes them.
+`run/pty-close-notices.json` files remain untouched; nothing reads or sends them.
 Explicit operator stops still make one best-effort notification attempt for
 known closed busy shells. Those writes retain same-key dedup and never wake a
 terminated owner.
