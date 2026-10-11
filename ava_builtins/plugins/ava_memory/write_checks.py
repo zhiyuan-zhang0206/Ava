@@ -33,7 +33,9 @@ from base.log import logger
 from .template import validate
 
 _SEARCH_K = 5
-"""Closest notes whose duplicate probability is considered for one written note."""
+"""Closest notes whose duplicate probability is considered for one written note. The search
+ranks exactly that many (`memory_dedup_candidates`), so when the note itself is already indexed
+(an update of an existing note) it takes one of the slots and four others are judged."""
 
 _QUERY_CHAR_CAP = 4000
 """Most characters of the written note sent as the search query (description, then body)."""
@@ -91,7 +93,7 @@ async def _search(
         return await asyncio.to_thread(
             gateway_client.memory_search,
             query,
-            _SEARCH_K + 1,  # one slot for the note itself, which the pool may already hold
+            _SEARCH_K,
             purpose="dedup",
             timeout=deadline,
             context=context,

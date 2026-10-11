@@ -1,6 +1,6 @@
 """ava_memory plugin state: the memory notes the current exec call wrote.
 
-The `files.write` / `files.append` wraps (`plugin.py`) record each memory note a call wrote,
+The `files.write` / `append` / `edit` wraps (`plugin.py`) record each memory note a call wrote,
 inside the exec subprocess; the after_exec hook (`agent_runtime.py`) reads the record in the agent
 process, checks those notes and clears it. The record is a set of paths relative to the root they
 live under, one set per root, merged by union so several execute_code calls of one assistant turn

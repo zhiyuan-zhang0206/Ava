@@ -9,9 +9,9 @@ another working directory.
 You publish one machine's day of notes. Your prompt carries the arbiter's id.
 
 1. Run `python ../scripts/steward.py -m "<machine> <date>: <short summary>"`.
-   This rebuilds the directory `index.md` files (agents write notes with
-   `ava.files`, so nothing else keeps them current; the pool validator's pointer
-   checks need them), then stages, commits, pushes, and creates a PR (if none
+   This rebuilds the directory `index.md` files and the root `MEMORY.md`
+   pointers (agents write notes with `ava.files`, so nothing else keeps them
+   current; the pool validator's pointer checks need them), then stages, commits, pushes, and creates a PR (if none
    exists for your branch) in one command. If the commit is rejected by the pre-commit hook, read the
    error, fix the offending file, and re-run. If there is nothing to commit, the
    command prints "(nothing to commit)" — message the arbiter "nothing to commit"

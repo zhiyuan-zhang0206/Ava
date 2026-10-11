@@ -92,13 +92,16 @@ def run(
 
 
 def regenerate_indexes() -> None:
-    """Rebuild every directory `index.md` of the pool (`skills/scripts/gen_indexes.py`).
+    """Rebuild the pool's indexes: every directory `index.md` (`skills/scripts/gen_indexes.py`)
+    and the `## Pointers` section of the root `MEMORY.md` (`skills/scripts/rebuild_memory_index.py`:
+    one line per root note, one per top-level directory; the rest of the file is kept).
 
-    Agents write notes with `ava.files` and nothing maintains the directory indexes as they do,
-    so the consolidation scripts rebuild them before staging: the pool validator's index checks
-    (every note pointed at once, titles matching) pass on what gets committed."""
-    script = Path(__file__).parent / "skills" / "scripts" / "gen_indexes.py"
-    run([sys.executable, str(script)])
+    Agents write notes with `ava.files` and nothing maintains these indexes as they do, so the
+    consolidation scripts rebuild them before staging: the pool validator's pointer checks
+    (every note pointed at once, titles matching, no missing targets) pass on what gets committed."""
+    scripts = Path(__file__).parent / "skills" / "scripts"
+    run([sys.executable, str(scripts / "gen_indexes.py")])
+    run([sys.executable, str(scripts / "rebuild_memory_index.py")])
 
 
 def stage_and_commit(message: str, pool: Path) -> bool:

@@ -3353,7 +3353,8 @@ export interface paths {
          *     each with the chunk that matched and a relevance score.
          *
          *     Two stages. Vector search finds the best chunk of the closest
-         *     `memory_rerank_candidates` notes; a decision model then judges each chunk
+         *     `memory_rerank_candidates` notes (`memory_dedup_candidates` for the `dedup`
+         *     purpose); a decision model then judges each chunk
          *     against the query, and the response is ordered by the probability that the
          *     chunk is relevant (`score`). No text is generated on this path.
          *

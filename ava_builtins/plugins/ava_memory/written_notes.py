@@ -1,6 +1,6 @@
 """Record which memory notes an exec call wrote — the SDK-surface half of the write check.
 
-Runs inside the exec subprocess, as the body of the `files.write` / `files.append` wraps declared in
+Runs inside the exec subprocess, as the body of the `files.write` / `append` / `edit` wraps declared in
 `plugin.py`. It must stay light and harmless: no network request, no httpx or decision-model import,
 and nothing it does may change what the wrapped call returns or raises. Checking the notes happens
 afterwards, in the agent process (`write_checks.py`, driven by the after_exec hook).

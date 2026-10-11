@@ -73,7 +73,7 @@ def _recorded(key: str) -> set[str]:
 
 
 def test_wraps_stack_over_the_cwd_wraps_of_the_same_targets(exec_turn: Path) -> None:
-    for target in ("files.write", "files.append"):
+    for target in ("files.write", "files.append", "files.edit"):
         assert [plugin for plugin, _ in ava.extend.stack(target)] == ["ava_code", "ava_memory"]
 
 
@@ -95,6 +95,26 @@ def test_append_records_the_note_too(exec_turn: Path) -> None:
     ava.files.append(ava.memory.PATH / "log-ish.md", "again\n")
     assert _recorded(_SHARED) == {"log-ish.md"}
     assert (ava.memory.PATH / "log-ish.md").read_text() == "line\nagain\n"
+
+
+def test_an_in_place_edit_records_the_note(exec_turn: Path) -> None:
+    note = ava.memory.PATH / "topics" / "rule.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("alpha beta\n")
+    ava.files.edit(note, "beta", "gamma")
+    assert _recorded(_SHARED) == {"topics/rule.md"}
+    assert note.read_text() == "alpha gamma\n"
+    ava.files.edit(ava.memory.PATH / "topics" / "rule.md", "alpha", "delta", replace_all=True)
+    assert note.read_text() == "delta gamma\n"
+
+
+def test_a_failed_edit_raises_unchanged_and_records_nothing(exec_turn: Path) -> None:
+    note = ava.memory.PERSONAL_PATH / "mine.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("text\n")
+    with pytest.raises(ValueError, match="old not found"):
+        ava.files.edit(note, "absent", "x")
+    assert _recorded(_PERSONAL) == set()
 
 
 def test_several_writes_of_one_call_merge(exec_turn: Path) -> None:
@@ -148,8 +168,17 @@ def test_the_wrap_returns_what_the_layer_below_returns() -> None:
 
     wrapped_write = cast("Callable[..., Any]", plugin._wrapped_write)
     wrapped_append = cast("Callable[..., Any]", plugin._wrapped_append)
+    wrapped_edit = cast("Callable[..., Any]", plugin._wrapped_edit)
     assert wrapped_write(inner, "x.md", "c") is sentinel
     assert wrapped_append(inner, "x.md", "c") is sentinel
+    edit_calls: list[tuple[Any, ...]] = []
+
+    def edit_inner(*args: Any, **kwargs: Any) -> object:
+        edit_calls.append((args, kwargs))
+        return sentinel
+
+    assert wrapped_edit(edit_inner, "x.md", "a", "b", replace_all=True) is sentinel
+    assert edit_calls == [(("x.md", "a", "b"), {"replace_all": True})]
     assert calls == [("x.md", "c"), ("x.md", "c")]
 
 

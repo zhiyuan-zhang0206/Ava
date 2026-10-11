@@ -208,6 +208,7 @@ def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
         deadline=lambda: config.view.services.memory_search_deadline_seconds,
         rerank_model=lambda: config.view.services.memory_rerank_model,
         rerank_candidates=lambda: config.view.services.memory_rerank_candidates,
+        dedup_candidates=lambda: config.view.services.memory_dedup_candidates,
     )
     app.state.memory_graph_cache = memory_router.MemoryGraphCache()
     app.state.auth401_log = rejection_log.AuthRejectionLog()

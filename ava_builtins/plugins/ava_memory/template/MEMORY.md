@@ -7,10 +7,10 @@ and after a compact. Two sections, and they hold different kinds of thing.
 short enough to carry in every context window.
 
 `## Pointers` is one line per note, and only a line — a note's body lives in its
-own file. Each pointer carries a title, a path, and a description; the
+own file. Each pointer carries a title, the note's path (ending in .md), and a description; the
 description is what a reader judges relevance by without opening the note:
 
-    - [Title](path.md) — one-line description of what the note holds
+    - [Title](relative/path/to/the/note) — one-line description of what the note holds
 
 Keep this file under 16000 characters; the commit hook rejects it otherwise,
 which is the signal to move detail into a pointed-to note.

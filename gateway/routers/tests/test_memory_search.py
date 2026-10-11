@@ -38,6 +38,7 @@ def _memory_inputs() -> MemorySearchInputs:
         deadline=lambda: settings.services.memory_search_deadline_seconds,
         rerank_model=lambda: settings.services.memory_rerank_model,
         rerank_candidates=lambda: settings.services.memory_rerank_candidates,
+        dedup_candidates=lambda: settings.services.memory_dedup_candidates,
     )
 
 
@@ -390,6 +391,23 @@ class TestRerank:
             client.post("/api/memory/search", json={"query": "q", "k": 60, "purpose": "search"})
         # at least k notes are always retrieved, even above the candidate count
         assert [k for k, _timeout in asked] == [40, 60]
+
+    def test_dedup_asks_for_its_own_candidate_count(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        self._pool(monkeypatch, tmp_path)
+        asked = self._backend(monkeypatch, [])
+        monkeypatch.setattr(settings.services, "memory_rerank_candidates", 40)
+        monkeypatch.setattr(settings.services, "memory_dedup_candidates", 7)
+
+        with TestClient(app) as client:
+            for purpose, k in (("dedup", 5), ("dedup", 9), ("recall", 5), ("search", 5)):
+                client.post("/api/memory/search", json={"query": "q", "k": k, "purpose": purpose})
+        # dedup ranks its own count (never fewer than k); recall and search keep the shared one
+        assert [k for k, _timeout in asked] == [7, 9, 40, 40]
+
+    def test_dedup_candidate_count_defaults_to_five(self) -> None:
+        assert settings.services.memory_dedup_candidates == 5
 
     def test_stale_vector_hits_are_dropped_before_ranking(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: _Judge

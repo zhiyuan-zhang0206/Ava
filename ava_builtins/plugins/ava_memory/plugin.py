@@ -25,7 +25,7 @@ shared memory pool at ava.memory.PATH):
    consolidation procedure is the ava.skills.ava_memory.consolidation
    sub-skill.
 
-4. **Memory write check** — wraps `ava.files.write` / `ava.files.append` to record which memory
+4. **Memory write check** — wraps `ava.files.write` / `append` / `edit` to record which memory
    notes (.md files under PATH or PERSONAL_PATH) an exec call wrote, and an after_exec hook
    (`agent_runtime.py`, logic in `write_checks.py`) that checks them in the agent process: the
    pool's own single-note rules (`template/validate.py`) for every note, and for shared notes a
@@ -109,10 +109,10 @@ from .written_notes import record_written_note
 # (`import ava.memory`), so both spellings resolve identically.
 
 
-# ── wrap ava.files.write / ava.files.append ───────────────────────────
+# ── wrap ava.files.write / append / edit ─────────────────────────────
 # Transparent: `inner` is called exactly once with the caller's arguments, its result is returned
 # and its exception propagates untouched; the note is recorded only after a write that succeeded.
-# Recording never raises (`record_written_note`). Neither wrap carries a docstring, so the rendered
+# Recording never raises (`record_written_note`). None of the wraps carries a docstring, so the rendered
 # SDK keeps the original `files.*` contracts.
 def _wrapped_write(inner: Callable[..., None], path: str | Path, content: str) -> None:
     result = inner(path, content)
@@ -126,6 +126,14 @@ def _wrapped_append(inner: Callable[..., None], path: str | Path, content: str) 
     return result
 
 
+def _wrapped_edit(
+    inner: Callable[..., None], path: str | Path, old: str, new: str, *, replace_all: bool = False
+) -> None:
+    result = inner(path, old, new, replace_all=replace_all)
+    record_written_note(path)
+    return result
+
+
 def contribute() -> PluginContributions:
     """What this plugin declares for the SDK surface."""
     return PluginContributions(
@@ -133,5 +141,6 @@ def contribute() -> PluginContributions:
         sdk_wraps=(
             SdkWrap("files.write", _wrapped_write),
             SdkWrap("files.append", _wrapped_append),
+            SdkWrap("files.edit", _wrapped_edit),
         ),
     )
