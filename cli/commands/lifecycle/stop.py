@@ -13,11 +13,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from base.cluster import session_name
 from base.db import Database
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.sessions.pty.paths import SERVICE_UNIT
-from cli.commands._repo import _repo_root, session_name
+from cli.commands._repo import _repo_root
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import force_close_terminals
 from cli.start_runtime import StartRuntime

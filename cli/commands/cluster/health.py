@@ -283,6 +283,7 @@ def _service_probes() -> list[str]:
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
     from base.deploy.lifecycle.service_selection import read_selection
+    from ops.spec import services_for_capabilities_annotated
 
     roles = _repo_commands._roles_or_none()
     if roles is None:
@@ -292,7 +293,7 @@ def _service_probes() -> list[str]:
     except (OSError, ValueError, RuntimeError, TypeError) as exc:
         return [f"service selection unavailable ({exc})"]
     failing: list[str] = []
-    for spec, gate_reason in _repo_commands._services_for_roles_annotated(roles):
+    for spec, gate_reason in services_for_capabilities_annotated(roles):
         if gate_reason is not None or not selection.enabled(spec.session):
             continue
         probe = _probe_commands.probe_service(spec)
