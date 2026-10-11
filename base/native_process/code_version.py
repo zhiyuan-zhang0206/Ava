@@ -31,7 +31,6 @@ import subprocess
 from pathlib import Path
 
 from base.native_process import loaded_commit
-from base.native_process.os_platform import CREATE_NO_WINDOW
 
 # The tree this module was loaded from (not the cwd), the same anchor
 # `loaded_commit` freezes.
@@ -61,7 +60,6 @@ def first_parent_count(repo: Path, rev: str = "HEAD") -> int:
             capture_output=True,
             text=True,
             check=False,
-            creationflags=CREATE_NO_WINDOW,
             timeout=_GIT_TIMEOUT_S,
         )
     except (OSError, subprocess.SubprocessError) as exc:

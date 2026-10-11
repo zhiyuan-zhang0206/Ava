@@ -4,10 +4,9 @@ One source of truth for a managed dump's file name, shared by the local
 due-ness and prune logic (`services.backup.dump`), the scheduled commit
 (`services.backup.scheduler.worker`) and the off-site namespace
 (`services.backup.artifact.offsite`). The pool is flat:
-``<db>-<UTC stamp>.dump.enc`` (the ciphertext suffix ``.dump.gz.enc`` and a
-bare ``.dump`` stay inside the grammar). A file outside it is never counted,
-pruned or published as a managed dump: a hand-made dump parked beside them is
-left alone.
+``<db>-<UTC stamp>.dump.enc`` (a bare ``.dump`` stays inside the grammar). A
+file outside it is never counted, pruned or published as a managed dump: a
+hand-made dump parked beside them is left alone.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from datetime import UTC, datetime
 REMOTE_ROOT = "ava-logical"
 """The off-site logical-dump namespace."""
 
-DUMP_NAME_RE = re.compile(r"^(?P<db>.+)-(?P<ts>\d{8}T\d{6}Z)\.dump(?:\.gz\.enc|\.enc)?$")
+DUMP_NAME_RE = re.compile(r"^(?P<db>.+)-(?P<ts>\d{8}T\d{6}Z)\.dump(?:\.enc)?$")
 TS_FORMAT = "%Y%m%dT%H%M%SZ"  # UTC, offset-bearing by construction
 
 

@@ -139,7 +139,7 @@ def test_parser_skips_frontmatter_and_takes_only_the_body() -> None:
 
 
 def test_parser_normalizes_crlf() -> None:
-    """A Windows-written entry (text-mode CRLF) parses like an LF one —
+    """A CRLF entry (text-mode write) parses like an LF one —
     frontmatter included."""
     text = f"---\r\nname: x\r\n---\r\n\r\n{OPEN}\r\ncrlf block\r\n{CLOSE}"
     assert inherit.parse_inheritable_blocks(text) == ["crlf block"]

@@ -10,7 +10,7 @@ Never restore an artifact into the live database.
 - **RPO:** one day at the daily cluster-time backup window (`services.backup_hour`, default 03:00).
 - **RTO target:** complete a full restore within one maintenance window.
 - **Measured dry run (2026-08-25):** the test-sized encrypted artifact completed
-  the full decrypt → gunzip → scratch restore → checkpoint-reader verification
+  the full decrypt → scratch restore → checkpoint-reader verification
   path in 22.8 seconds. This is a command-path measurement, not a substitute
   for the operator's production-sized drill; record that elapsed value here
   after it runs.
@@ -18,12 +18,8 @@ Never restore an artifact into the live database.
   (677 MiB, custom+zstd dump of the 4.34 GiB DB) completed decrypt → scratch
   restore → checkpoint-reader verification in **136.6 s** (`agents=3527
   checkpoints=4345 checkpoint_blobs=10334 sample_agent=405 messages=14041`).
-- **Artifact format (2026-08-27 change):** artifacts are now
-  `<db>-<utc>.dump.enc` — a custom-format `pg_dump` (zstd-compressed in-dump)
-  encrypted with AES-CBC, with no separate gzip layer. The drill's gunzip step
-  is gone; a legacy `<db>-<utc>.dump.gz.enc` artifact is detected by its gzip
-  magic header and decompressed automatically, so old artifacts remain
-  restorable through the same procedure.
+- **Artifact format:** `<db>-<utc>.dump.enc` — a custom-format `pg_dump`
+  (zstd-compressed in-dump) encrypted with AES-CBC.
 
 ## Recommended automated drill
 
@@ -35,9 +31,8 @@ From the checkout that owns the backup cluster, run either command:
 ```
 
 The first command selects the newest managed local artifact. The script creates
-a native throwaway Postgres cluster, decrypts the artifact (decompressing a
-legacy gzip layer when present), restores with `pg_restore --clean
---if-exists`, and removes all scratch data and the cluster when it exits.
+a native throwaway Postgres cluster, decrypts the artifact, restores with
+`pg_restore --clean --if-exists`, and removes all scratch data and the cluster when it exits.
 
 The drill picks the scratch cluster's base directory with capacity awareness.
 The platform default (`/dev/shm` on Linux) is kept when the estimated restore
@@ -76,8 +71,6 @@ key_file="$scratch_dir/backup.key"
 chmod 600 "$key_file"
 openssl enc -d -aes-256-cbc -pbkdf2 -salt -kfile "$key_file" -in /absolute/path/to/<db>-<utc>.dump.enc -out "$scratch_dir/backup.dump"
 chmod 600 "$scratch_dir/backup.dump"
-# Legacy artifacts (<db>-<utc>.dump.gz.enc) need one extra step:
-# gzip --decompress --stdout "$scratch_dir/backup.dump" > "$scratch_dir/backup.dump.raw" && mv "$scratch_dir/backup.dump.raw" "$scratch_dir/backup.dump"
 ```
 
 The key file holds the logical-backup passphrase from its one resolution
@@ -88,12 +81,7 @@ once. It never changes with the cluster secret and is never
 derived: a home without it refuses. It is private, never passed on argv, and
 must be deleted with the scratch directory after the drill. Only the gateway
 holds it, so disaster recovery needs that file: keep an escrowed copy with the
-gateway's other backup keys. An artifact an empty-secret home wrote before its
-cutover pinned a minted passphrase was encrypted under the public
-`sha256("")`; restore it with
-`.venv/bin/python scripts/data_plane_ops/restore_drill.py <artifact> --legacy-empty-secret-passphrase`
-(by hand: the key file holds `printf '' | shasum -a 256 | cut -d' ' -f1`).
-The archive's compression CRC and `pg_restore` failure path detect corruption;
+gateway's other backup keys. The archive's compression CRC and `pg_restore` failure path detect corruption;
 the artifact is encrypted with AES-256-CBC and inherits the local artifact's
 0600 threat model.
 

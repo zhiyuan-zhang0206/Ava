@@ -282,7 +282,7 @@ def _write_atomic(path: Path, entry: OutboxEntry) -> None:
     write_text_atomic(
         path,
         json.dumps(entry.as_dict(), separators=(",", ":"), sort_keys=True),
-        sync_parent=os.name != "nt",
+        sync_parent=True,
         suppress_cleanup_error=True,
     )
 

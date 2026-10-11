@@ -451,16 +451,15 @@ running. Use `base.host.proc.run_bounded(argv, timeout=...)` instead — same sh
 but it kills the whole tree (descendants enumerated *before* the parent dies)
 and still raises `TimeoutExpired`, so caller control flow is unchanged.
 
-The gap is invisible on POSIX for a well-behaved child and load-bearing on
-Windows, where `C:\Program Files\Git\cmd\git.exe` is a launcher stub for the real
-git: the fleet's Windows agent-runner accumulated 66 orphaned `git.exe` + 66
-`ssh.exe` + 63 `sh.exe`, all below a killed stub. Anything with a shell in the
-middle (`shell=True`, a `-lc` wrapper) has the same shape on every platform.
+The gap is invisible for a well-behaved child and load-bearing when the
+spawned process is a launcher for the real work (git, ssh): orphaned `git` +
+`ssh` + `sh` processes accumulated below a killed launcher. Anything with a
+shell in the middle (`shell=True`, a `-lc` wrapper) has the same shape.
 
 Git specifically: pass `env=base.deploy.git.gitenv.git_env()` so a credential prompt
 errors instead of blocking on a terminal that does not exist, and ssh neither
 asks nor dials unbounded. Note that `ConnectTimeout` is not the bound — an
-`ssh.exe` on that box reached a state where its own timeout never fired, so the
+`ssh` process can reach a state where its own timeout never fires, so the
 caller's bound is the only real one.
 
 Not lint-enforced repo-wide yet; the modules that drive git are guarded by

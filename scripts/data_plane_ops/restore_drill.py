@@ -2,9 +2,8 @@
 
 The default target is the newest managed artifact in the local backup directory;
 pass an explicit artifact path to exercise a different retained copy. The drill
-never touches the live database. It decrypts (removing the legacy gzip layer
-when the artifact predates the 2026-08-27 double-gzip removal), restores into a
-native throwaway Postgres cluster, verifies the recovery-source tables and a
+never touches the live database. It decrypts, restores into a native
+throwaway Postgres cluster, verifies the recovery-source tables and a
 checkpoint reader sample, then removes every scratch file and the throwaway
 cluster.
 """
@@ -100,7 +99,7 @@ def _restore_failure_message(proc: subprocess.CompletedProcess[bytes], base: Pat
     """The pg_restore failure with the capacity context an operator needs.
 
     A scratch restore that outgrows its base dies server-side mid-COPY, so the
-    client-side failure carries no diagnosis of its own: the 2026-09-14 WSL run
+    client-side failure carries no diagnosis of its own: the 2026-09-14 run
     surfaced only `pg_restore exited 1` while the postmaster had been killed by
     the full tmpfs (dmesg signal 6; PQputCopyData: server closed the connection).
     Naming the base and its free space makes the next occurrence diagnosable from
@@ -168,7 +167,7 @@ _SCRATCH_SPACE_FACTOR = 3.0
 """Scratch space the drill reserves on the base holding the restored copy, as a
 multiple of the (decrypted) dump's size. A floor for picking the base, not a size
 prediction: the restore holds the dump's content decompressed, and in-dump zstd
-ratios vary with content mix. Measured on the WSL daily drill: 2026-09-14 restored
+ratios vary with content mix. Measured on the daily drill: 2026-09-14 restored
 >=17 GiB from a 10.16 GiB artifact (~1.7x); 2026-09-19 restored ~8 GiB from a
 ~3.0 GiB artifact (>=2.7x at 60s sampling — it outgrew the 7.8 GiB tmpfs that 2x
 had cleared, task #4033). 3x keeps margin above the observed maximum while
@@ -187,16 +186,12 @@ def run_drill(
     *,
     foreground: bool = False,
     scratch_root: Path | None = None,
-    legacy_empty_secret: bool = False,
 ) -> tuple[RestoreReport, float]:
     """Run the complete decrypt, restore, and verification drill.
 
     `scratch_root` places the decrypted dump inside a caller-owned private
     directory, so a caller that proves the drill's closure can remove it even
-    when the drill was killed before its own cleanup. `legacy_empty_secret`
-    decrypts with the public key an empty-secret home used before its cutover
-    pinned a minted passphrase (`backup.decrypt_artifact`); only an operator
-    asks for it, for such an artifact.
+    when the drill was killed before its own cleanup.
     """
     artifact = artifact or _newest_artifact()
     if not artifact.is_file():
@@ -205,9 +200,7 @@ def run_drill(
     with tempfile.TemporaryDirectory(prefix="ava-restore-drill-", dir=scratch_root) as tmp:
         scratch = Path(tmp)
         raw_dump = scratch / "backup.dump"
-        backup.decrypt_artifact(artifact, raw_dump, legacy_empty_secret=legacy_empty_secret)
-        # Legacy artifacts carry a gzip layer; current ones are raw archives.
-        backup.gunzip_if_needed(raw_dump)
+        backup.decrypt_artifact(artifact, raw_dump)
         required = _scratch_space_requirement(raw_dump)
         base = select_throwaway_base(required)
         logger.info(
@@ -224,18 +217,8 @@ def run_drill(
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Restore and verify an encrypted Ava DB backup.")
     parser.add_argument("artifact", nargs="?", type=Path, help="managed .dump.enc artifact")
-    parser.add_argument(
-        "--legacy-empty-secret-passphrase",
-        action="store_true",
-        help=(
-            "decrypt with sha256(''), the public key an empty-secret home used before its "
-            "cutover pinned a minted passphrase (never tried unless given)"
-        ),
-    )
     args = parser.parse_args(argv)
-    report, elapsed = run_drill(
-        args.artifact, legacy_empty_secret=args.legacy_empty_secret_passphrase
-    )
+    report, elapsed = run_drill(args.artifact)
     print(
         "restore drill passed: "
         f"agents={report.agents} checkpoints={report.checkpoints} "

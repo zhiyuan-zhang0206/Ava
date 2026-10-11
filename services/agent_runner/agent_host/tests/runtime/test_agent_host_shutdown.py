@@ -282,10 +282,6 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
         assert events.index("turns_drained") < events.index("beat_stopped")
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="POSIX SIGTERM path; Windows stops route through the private console",
-)
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
     """SIGTERM exits within the bound while a wedged default-executor job stands."""
     # The exit bound only matters relative to the stop budget it protects:

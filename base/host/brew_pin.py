@@ -22,7 +22,7 @@ PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
 )
 
 # The operator-approved uv version for standalone installs (toolchain.sh on
-# Linux/WSL/Docker, CI setup-uv input). Homebrew hosts pin the `uv` formula
+# Linux/Docker, CI setup-uv input). Homebrew hosts pin the `uv` formula
 # above; this is the same version for the GitHub-release-asset path.
 # toolchain.sh embeds these values because it runs before Python exists on a
 # fresh box; tests/scripts/test_toolchain_uv_pin.py asserts the copies match.

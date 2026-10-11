@@ -50,9 +50,8 @@ stream, where it is likewise self-reported by the agent's own process.
 Coordinate contract: every tool coordinate is in PHYSICAL pixels — the same
 space as the `snapshot` PNG, so a caller can click exactly where it saw a
 pixel. The daemon divides by the backing scale before calling the helper,
-whose CGEvent space is logical points (Retina 2x on macOS; Windows reports
-scale 1, so the conversion is a no-op there). The scale is measured from the
-capture (PNG physical size vs logical screen size), not taken from the helper
+whose CGEvent space is logical points (Retina 2x on macOS). The scale is
+measured from the capture (PNG physical size vs logical screen size), not taken from the helper
 report — the helper holds no AppKit event loop and can serve a stale scale
 (2026-08-30: scale 2 on a 1x display, halving every click). `snapshot` returns
 the physical pixel size and the logical screen size + the measured scale.

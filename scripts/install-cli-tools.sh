@@ -12,17 +12,17 @@
 # Does NOT clean /var/lib/apt/lists/* — the caller decides (the verification
 # Dockerfile removes them after the whole system layer).
 #
-# WSL without sudo: a host that already carries every tool skips apt entirely
+# Without sudo: a host that already carries every tool skips apt entirely
 # (the gh keyring + apt-sources writes below need root), and an apt failure
 # degrades to a warning instead of a hard stop — the missing tools can be
-# installed later via `sudo apt-get install ...`. See docs/conventions/operations/windows-setup.md.
+# installed later via `sudo apt-get install ...`.
 
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/provision/_lib.sh"
 
 # The complete tool set, keyed by the binary each package provides (Debian
 # renames fd-find -> fdfind and bat -> batcat). A host that already carries
-# every one of them — a WSL distro without sudo, a pre-provisioned CI image —
+# every one of them — a host without sudo, a pre-provisioned CI image —
 # skips apt entirely.
 TOOL_BINS=(curl gpg git rg jq fdfind batcat tree fzf htop gh)
 missing=()
@@ -35,9 +35,8 @@ if [ ${#missing[@]} -eq 0 ]; then
 fi
 
 if ! command -v apt-get >/dev/null 2>&1; then
-    echo "install-cli-tools.sh: requires apt-get (Debian/Ubuntu/WSL)." >&2
+    echo "install-cli-tools.sh: requires apt-get (Debian/Ubuntu)." >&2
     echo "  macOS: brew install git ripgrep jq fd bat tree fzf htop gh" >&2
-    echo "  Windows: install these via winget or use WSL2 (see docs/conventions/operations/windows-setup.md)" >&2
     exit 2
 fi
 
@@ -53,7 +52,7 @@ prov_sudo apt-get install -y --no-install-recommends \
 
 # GitHub CLI keyring + repo (gh is not in Debian/Ubuntu default sources).
 # Only touched when gh is absent — a present gh must not force root writes.
-# Best-effort: on a WSL distro without sudo the keyring write fails, and gh
+# Best-effort: without sudo the keyring write fails, and gh
 # then comes from another source or must be installed manually.
 if ! command -v gh >/dev/null 2>&1; then
     if ! curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \

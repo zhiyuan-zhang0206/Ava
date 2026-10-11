@@ -26,13 +26,12 @@ from pathlib import Path
 
 import pytest
 
-from base.native_process.os_platform import is_windows
 from base.paths import repo_root
 
 pytestmark = [
     pytest.mark.skipif(
-        is_windows() or shutil.which("bash") is None,
-        reason="needs a POSIX host with bash (the login-shell PATH rebuild is under test)",
+        shutil.which("bash") is None,
+        reason="needs a host with bash (the login-shell PATH rebuild is under test)",
     ),
     # A real session IS the subject here: nothing stubs respawn_service, or these
     # assertions would pass without spawning anything. The session lands on this
