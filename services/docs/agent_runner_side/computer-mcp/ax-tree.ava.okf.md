@@ -24,6 +24,15 @@ screenshot tools instead — nothing falls back automatically. Secure text field
 are never echoed. A helper that predates the method (no `ax_tree_v1` in `ping`)
 fails the tool with a rebuild instruction.
 
+`ax_tree(target={pid})` or `ax_tree(target={bundle_id})` explicitly chooses one
+running process without activating it. `app` and `target` are mutually exclusive;
+legacy exact app names and bundle IDs must resolve uniquely. A duplicated name
+or bundle ID fails with a PID-selection instruction rather than choosing the
+first process. The result reports the actual `pid`. The same `AppTarget` selector
+owns observation and `focus_app`, but only `focus_app` changes the foreground.
+The tree still selects that app's focused/main/first AX window; a window-server
+ID from `snapshot` does not identify an AX window.
+
 ## Stable element ids
 The helper numbers every walk's nodes afresh (raw ids) and stamps each with a
 path fingerprint: parent fingerprint + role + identifier/title/description +
@@ -48,6 +57,14 @@ not answer within the timeout yields `completed=false` plus a note (the action m
 `set_value` writes text into the field and is never echoed in the result, an
 error or the `computer_action` audit row; the row carries the element center
 and the action (`x,y,action`).
+
+Actions and name-only scoped reads carry the observed table's PID to the helper,
+so a same-named process or changed application order cannot redirect them.
+Explicit scoped selectors must resolve to the scope element's original process.
+The process's disappearance fails; another process does not inherit its ids.
+These process-selection guarantees require `ax_target_v1`; older running helpers
+fail with a rebuild instruction before a walk or action is sent. Element/window
+staleness and an unanswered action retain their existing behavior.
 
 `perform_action` requires `native_action` copied exactly from the element's
 reported actions in `ax_tree`. These platform identifiers are not model-input

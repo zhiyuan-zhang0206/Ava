@@ -20,6 +20,7 @@ class PingResult(TypedDict):
     ax_tree_v1: NotRequired[bool]  # the helper serves `ax_tree`
     ax_act_v1: NotRequired[bool]  # the helper serves `ax_act`
     ax_act_v2: NotRequired[bool]  # reported actions and exact text selection
+    ax_target_v1: NotRequired[bool]  # explicit process selection and observed-PID actions
     native_input_v1: NotRequired[bool]  # buttons/counts/modifiers/atomic holds
 
 
