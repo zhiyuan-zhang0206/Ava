@@ -27,6 +27,7 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_cmd_start_needs_no_tty(
+    db_url: str,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
@@ -57,6 +58,7 @@ def test_cmd_start_needs_no_tty(
 
 
 def test_root_launch_uses_the_start_callers_child_owner(
+    db_url: str,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],

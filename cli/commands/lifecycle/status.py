@@ -18,6 +18,7 @@ from pathlib import Path
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import session_name
 from base.cluster.machine import MachineIdentity, MachineRoles
+from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import service_selection
 from cli.commands._repo import _repo_root
@@ -61,7 +62,9 @@ def _status_roster(
     )
 
 
-def cmd_status(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> int:
+def cmd_status(
+    *, database_factory: DatabaseFactory, machine: MachineIdentity, config: ConfigBoot
+) -> int:
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands._repo as _repo_commands
 
@@ -109,7 +112,7 @@ def cmd_status(*, database_factory: DatabaseFactory, machine: MachineIdentity) -
     # The private-network relay is a host data-plane resource.
     if not runner_only:
         print("\nredis bridge (private-network ingress):")
-        print_redis_bridge_status(machine=machine)
+        print_redis_bridge_status(machine=machine, config=config)
 
     # any installed host: surface the prod source ($AVA_HOME/source) branch state.
     # A source-run home executes that checkout. Source-mode releases materialize

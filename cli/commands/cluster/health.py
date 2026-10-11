@@ -32,6 +32,7 @@ import redis.exceptions
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from cli.commands.cluster._provider_guard import run_provider_guard
 from cli.database.runtime import CommandRuntime
 
@@ -304,7 +305,7 @@ def _service_probes(*, machine: MachineIdentity) -> list[str]:
     return failing
 
 
-def _redis_bridge_probe(*, machine: MachineIdentity) -> str | None:
+def _redis_bridge_probe(*, machine: MachineIdentity, config: ConfigBoot) -> str | None:
     """End-to-end Redis relay failure text, or None when healthy/not required.
 
     Gateway-only and alert-only: a failed host listener is an
@@ -320,7 +321,7 @@ def _redis_bridge_probe(*, machine: MachineIdentity) -> str | None:
         return None
     from cli.commands.converge.redis_bridge import probe_redis_bridge
 
-    status = probe_redis_bridge(machine=machine)
+    status = probe_redis_bridge(machine=machine, config=config)
     if not status.required:
         return None
     if not status.serving:
@@ -565,7 +566,7 @@ def _check_alert_only_health(*, database_factory: DatabaseFactory, command: Comm
     # 5. Per-service health and the host-level Redis bridge.
     failing = _service_probes(machine=command.machine) + [
         failure
-        for failure in (_redis_bridge_probe(machine=command.machine),)
+        for failure in (_redis_bridge_probe(machine=command.machine, config=command.config),)
         if failure is not None
     ]
     if failing:

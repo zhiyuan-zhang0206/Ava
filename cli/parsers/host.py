@@ -82,7 +82,11 @@ def _h_status(args: argparse.Namespace) -> int:
         return cmd_status_json()
     from cli.commands.lifecycle.status import cmd_status
 
-    return cmd_status(database_factory=args.database_factory, machine=args.runtime.machine)
+    return cmd_status(
+        database_factory=args.database_factory,
+        machine=args.runtime.machine,
+        config=args.runtime.config,
+    )
 
 
 def _h_converge(args: argparse.Namespace) -> int:
