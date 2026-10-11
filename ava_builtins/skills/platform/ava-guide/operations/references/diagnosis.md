@@ -65,8 +65,7 @@ from real incidents; the concrete sizes and dates are illustrative.
 - Checks: `ava status` (session vs probe columns), session records
   (`run/sessions/*.json`), the session-backend in use
   (`get_backend()` vs `get_shell_backend()`).
-- Causes: after the session-backend migration, **service** sessions live in
-  `PosixProcSessionBackend` while **PTY** sessions (agent shells, watchers,
+- Causes: **service** sessions live in `PosixProcSessionBackend` while **PTY** sessions (agent shells, watchers,
   schedules) live in `get_shell_backend()`. Code
   that probes sessions on the wrong backend sees an empty set and relaunches
   into live sessions — the schedule-manager regression: launch
@@ -86,10 +85,9 @@ from real incidents; the concrete sizes and dates are illustrative.
 - Checks: `schedules` table status; gateway log launch failures; runner
   process alive?; the schedule session's pane output.
 - Causes: the manager asked the wrong session backend — schedule sessions
-  run on `get_shell_backend()` (the pty-sessions service) since the migration
-  (step 2: the launch command rides the service's initial-command mechanism,
-  so a PTY login shell can run a schedule runner); before that they were raw
-  orchestration sessions. A backend mismatch (manager on one backend, session
+  run on `get_shell_backend()` (the pty-sessions service; the launch command
+  rides the service's initial-command mechanism, so a PTY login shell can run
+  a schedule runner). A backend mismatch (manager on one backend, session
   on the other) makes reconcile relaunch every tick and collide with the live
   session (`duplicate session` -> breaker trip). Also:
   a stale session from before a rollout that the new gateway cannot adopt; a

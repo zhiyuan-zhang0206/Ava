@@ -18,7 +18,7 @@ choice, plugin config fields, and per-agent settings into a config overlay.
 Selecting a preset at spawn time seeds the new agent's config from it; an
 explicit config passed alongside wins per-key. The preset is named inside the
 config overlay — `config_overlay={"preset": "name", ...}` — resolved at the
-spawn boundary (the former top-level `preset` spawn argument is retired).
+spawn boundary.
 
 Use this when:
 - The user asks to "add a new agent type" or "create a preset"

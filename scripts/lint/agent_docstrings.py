@@ -411,12 +411,11 @@ def _agent_visible_names(tree: ast.Module) -> set[str] | None:
 
 
 def _wrap_targets(tree: ast.Module) -> set[str]:
-    """Find wrapper functions that take over public SDK entries at module top level.
+    """Find wrapper functions that take over public SDK entries.
 
-    Two shapes: the declaration `SdkWrap("files.read", _wrapped_read)` (the current
-    form, anywhere in the module) and a legacy bare `ava.X.Y = _wrapped`
-    reassignment. Either way the wrapper's docstring becomes the docstring of
-    the SDK name it replaces, so it's agent-visible even when underscore-prefixed.
+    The declaration is `SdkWrap("files.read", _wrapped_read)`, anywhere in the
+    module. The wrapper's docstring becomes the docstring of the SDK name it
+    replaces, so it's agent-visible even when underscore-prefixed.
     """
     targets: set[str] = set()
     # `SdkWrap("target", <name>)` — wrapper is the 2nd positional arg
@@ -425,14 +424,6 @@ def _wrap_targets(tree: ast.Module) -> set[str]:
             wrapper = _sdk_wrap_wrapper(node)
             if wrapper is not None:
                 targets.add(wrapper)
-    for node in tree.body:
-        # Legacy `ava.X.Y = <name>` reassignment
-        if (
-            isinstance(node, ast.Assign)
-            and isinstance(node.value, ast.Name)
-            and any(_is_ava_member_target(target) for target in node.targets)
-        ):
-            targets.add(node.value.id)
     return targets
 
 
@@ -446,16 +437,6 @@ def _sdk_wrap_wrapper(call: ast.Call) -> str | None:
     ):
         return call.args[1].id
     return None
-
-
-def _is_ava_member_target(target: ast.expr) -> bool:
-    """`ava.X.<attr>` as an assignment target."""
-    return (
-        isinstance(target, ast.Attribute)
-        and isinstance(target.value, ast.Attribute)
-        and isinstance(target.value.value, ast.Name)
-        and target.value.value.id == "ava"
-    )
 
 
 def _is_visible(name: str, all_names: set[str] | None) -> bool:
