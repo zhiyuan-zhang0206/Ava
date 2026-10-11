@@ -46,20 +46,8 @@ def _probe(home: Path, system_bin: Path, *, inherited: str = "") -> dict[str, An
         "AVA_PROCESS_PROFILE": "gateway",
         "AVA_REDIS_BIN_DIR": inherited,
     }
-    code = """
-import json, subprocess
-from cli.commands.data_plane import cluster_instance as instance
-from base.config import settings
-instance.is_macos = lambda: False
-tools = [instance._redis_server_bin(), instance._redis_cli_bin()]
-print(json.dumps({
-    'configured': settings.data_plane.redis_bin_dir,
-    'tools': tools,
-    'versions': [subprocess.check_output([tool, '--version'], text=True).strip() for tool in tools],
-}))
-"""
     result = subprocess.run(  # noqa: S603 — fixed interpreter and test-owned source/config.
-        [sys.executable, "-c", code],
+        [sys.executable, str(Path(__file__).with_name("child_redis_probe.py"))],
         env=env,
         capture_output=True,
         text=True,
