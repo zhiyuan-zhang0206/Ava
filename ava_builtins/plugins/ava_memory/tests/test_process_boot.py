@@ -70,7 +70,7 @@ def test_eval_isolation_disables_network_and_result_sdk_surfaces() -> None:
         assert ava.memory.PATH.is_dir()
         assert ava.memory.PATH.__doc__ == original_path_doc
         assert ava.memory.search("shared result") == []
-        assert ava.memory.search_detailed("shared result") == []
+        assert not hasattr(ava.memory, "search_detailed")
         print("ok")
     """)
     assert code == 0, err

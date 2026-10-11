@@ -11,8 +11,11 @@ __all_for_ava__ = [
 ]
 
 import difflib
+import errno
 import glob as _glob
 import os
+import stat
+import uuid
 from pathlib import Path
 
 from ava.sdk_surface import agent_identity
@@ -141,13 +144,43 @@ def read(
     return scan_content("".join(selected), source=source)
 
 
+def _replace_atomically(target: Path, content: str) -> None:
+    """Replace `target` with `content` so a reader sees the old file or the new one, never half.
+
+    The content goes to a temporary file in the same directory (same filesystem, so the rename is
+    atomic), which then replaces the target. A symlink target is written through, as an in-place
+    write would. An existing target keeps its permission bits and must be writable; a new file gets
+    the mode the umask gives any new file. A failure at any point removes the temporary file and
+    leaves the target as it was."""
+    if target.is_symlink():
+        target = target.resolve()
+    existing_mode: int | None = None
+    if target.exists():
+        if not os.access(target, os.W_OK):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
+        existing_mode = stat.S_IMODE(target.stat().st_mode)
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        # os.open honors the umask for a new file's mode, as open() does.
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(content)
+        if existing_mode is not None:
+            temporary.chmod(existing_mode)
+        temporary.replace(target)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
 def write(path: str | Path, content: str) -> None:
-    """Write, creating parent directories if needed."""
+    """Write, creating parent directories if needed. An existing file is replaced in one step, so
+    a reader never sees a half-written file."""
     path = coerce_str(path, "path", allow_types=(os.PathLike,))
     content = coerce_str(content, "content")
     p = resolve(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content, encoding="utf-8")
+    _replace_atomically(p, content)
 
 
 def append(path: str | Path, content: str) -> None:
