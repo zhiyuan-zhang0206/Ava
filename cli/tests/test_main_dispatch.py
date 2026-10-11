@@ -94,9 +94,14 @@ def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
             assert module.startswith("cli.parsers."), (leaf.prog, module)
 
 
-def _run_isolated_program(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
-        [sys.executable, "-B", "-c", code],
+_CHILD = Path(__file__).with_name("bootstrap") / "child_main_dispatch.py"
+
+
+def _run_isolated_program(
+    scenario: str, tmp_path: Path, *args: str
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - fixed interpreter and repository-owned probe.
+        [sys.executable, "-B", str(_CHILD), scenario, *args],
         cwd=Path(__file__).resolve().parents[2],
         env={**os.environ, "HOME": str(tmp_path)},
         capture_output=True,
@@ -108,18 +113,7 @@ def _run_isolated_program(code: str, tmp_path: Path) -> subprocess.CompletedProc
 
 def test_import_defers_cli_logging_until_dispatch(tmp_path: Path) -> None:
     """A settings-free entry can import the parser before choosing its path."""
-    code = """
-import sys
-import cli.main
-assert 'base.log' not in sys.modules
-assert 'base.config' not in sys.modules
-assert not any(name in sys.modules for name in (
-    'cli.commands.agents.control', 'cli.commands.agents.notices',
-    'cli.commands.agents.timeline', 'cli.commands.agents.impersonation',
-    'cli.commands.agents.impersonation_relay', 'cli.commands.agents.impersonation_adapters',
-))
-"""
-    result = _run_isolated_program(code, tmp_path)
+    result = _run_isolated_program("defer_logging", tmp_path)
     assert result.returncode == 0, result.stderr
 
 
@@ -690,51 +684,7 @@ def test_command_import_boundary_is_settings_free(entry: str, tmp_path: Path) ->
     args (without dispatching to its handler), since `cli.parsers` must stay
     just as settings-free while doing that. The `config` case imports the
     `ava config` module, whose local repair path must also run without Settings."""
-    code = """
-import importlib.abc
-import sys
-class Deny(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname == 'base.config':
-            raise AssertionError('forbidden early import: ' + fullname)
-sys.meta_path.insert(0, Deny())
-import cli.commands
-assert not any(name.startswith('cli.commands.') for name in sys.modules)
-assert not hasattr(cli.commands, '__getattr__')
-assert not hasattr(cli.commands, '__all__')
-if sys.argv[1] == 'parser':
-    from cli.parsers import build_parser
-    parser = build_parser()
-    args = parser.parse_args(['cluster', 'db-authority', 'issue-unit', '--machine', 'unit', '--home', '/unit', '--out', '/unused/bundle'])
-    assert args.machine == 'unit'
-    args = parser.parse_args(['agents', 'restart', '7', '--config', '{}'])
-    assert args.agent_id == 7
-    assert args.config == '{}'
-    args = parser.parse_args(['notices', 'list', '--agent', '7'])
-    assert args.agent == 7
-    args = parser.parse_args(['impersonate', 'list', '--agent', '7'])
-    assert args.agent_id == 7
-    args = parser.parse_args(['impersonate', 'relay', '7', '--session', '0', '--provider', 'codex', '--thread-id', 'thread'])
-    assert args.session_id == 0
-    assert args.provider == 'codex'
-    loaded = {name for name in sys.modules if name.startswith('cli.commands.')}
-    assert loaded == {'cli.commands.agents', 'cli.commands.agents.parsers', 'cli.commands.agents.impersonation_parsers',
-        'cli.commands.extensions', 'cli.commands.extensions.parsers',
-        'cli.commands.extensions.parsers.mcp', 'cli.commands.extensions.parsers.packages',
-        'cli.commands.extensions.parsers.plugins'}, loaded
-elif sys.argv[1] == 'config':
-    import cli.commands.management.config
-assert 'base.config' not in sys.modules
-"""
-    result = subprocess.run(  # noqa: S603 — fixed interpreter, isolated import-only program.
-        [sys.executable, "-B", "-c", code, entry],
-        cwd=Path(__file__).resolve().parents[2],
-        env={**os.environ, "HOME": str(tmp_path)},
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
+    result = _run_isolated_program("import_boundary", tmp_path, entry)
     assert result.returncode == 0, result.stderr
 
 
@@ -743,43 +693,7 @@ def test_help_keeps_service_database_admission_unchanged(
 ) -> None:
     """`ava stop` writes to the database to drain agents, so a host left on stale
     code must still be able to run it through its own handles; help preserves the service gate."""
-    code = """
-import sys
-from cli import main
-try:
-    main.main(['--help'])
-except SystemExit as exc:
-    assert exc.code == 0
-else:
-    raise AssertionError('help must exit')
-assert 'base.config' not in sys.modules
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from cli.database import operator_database_factory
-from cli.database.runtime import CommandRuntime
-command = CommandRuntime.create()
-
-def unavailable():
-    raise AssertionError('help and operator admission must not read a Git version')
-
-service = ProcessDbGate(version=unavailable, process='service')
-assert service.min_read_due() is True
-seen = []
-def from_settings(*, gate, local_host):
-    assert local_host == command.machine.host
-    assert gate.application_name() == 'ava:cli'
-    assert gate.min_read_due() is False
-    seen.append(gate)
-    return object()
-Database.from_settings = from_settings
-factory = operator_database_factory(local_host=command.machine.host)
-assert not seen
-factory()
-factory()
-assert len(seen) == 2 and seen[0] is seen[1]
-assert service.min_read_due() is True
-"""
-    result = _run_isolated_program(code, tmp_path)
+    result = _run_isolated_program("help_admission", tmp_path)
     assert result.returncode == 0, result.stderr
 
 

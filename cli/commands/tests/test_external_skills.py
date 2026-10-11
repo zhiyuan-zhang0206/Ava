@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -9,6 +8,7 @@ import pytest
 
 from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
+from cli.commands.extensions import external_skills
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -22,10 +22,6 @@ def home(tmp_path: Path) -> Path:
     host_home = tmp_path / "home"
     host_home.mkdir()
     return host_home
-
-
-def _bridge_module():
-    return importlib.import_module("cli.commands.extensions.external_skills")
 
 
 def _write_source(repo: Path) -> None:
@@ -48,11 +44,10 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    module = _bridge_module()
     step = next(
         candidate
         for candidate in converge_host.CONVERGE_STEPS
-        if candidate.apply is module.converge_external_agent_skill
+        if candidate.apply is external_skills.converge_external_agent_skill
     )
     assert step.host_global
     assert not step.requires_unit_config
@@ -63,7 +58,7 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
         return True
 
     monkeypatch.setattr(converge_host, "is_default_home", default_home)
-    monkeypatch.setattr(module.Path, "home", lambda: home)
+    monkeypatch.setattr(external_skills.Path, "home", lambda: home)
 
     dev_repo = tmp_path / ".worktrees" / "feature"
     _write_source(dev_repo)

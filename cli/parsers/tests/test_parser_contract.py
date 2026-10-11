@@ -60,15 +60,11 @@ def test_options_keep_command_paths_and_fresh_snapshots() -> None:
 def test_public_queries_do_not_load_settings_or_dispatch(tmp_path: Path) -> None:
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env["AVA_HOME"] = str(tmp_path)
-    child = subprocess.run(
+    child = subprocess.run(  # noqa: S603 -- fixed interpreter and repository-owned helper
         [
             sys.executable,
             "-I",
-            "-c",
-            "from cli.parsers import command_options, parse_args; import sys; "
-            "assert command_options(); assert callable(parse_args(['status']).func); "
-            "assert 'base.config' not in sys.modules; "
-            "assert 'cli.commands.lifecycle.status' not in sys.modules",
+            str(Path(__file__).with_name("child_public_queries.py")),
         ],
         env=env,
         capture_output=True,
