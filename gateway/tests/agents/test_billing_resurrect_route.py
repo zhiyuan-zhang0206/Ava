@@ -7,12 +7,17 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from gateway.app import app
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _stub_run(captured: dict[str, Any]) -> Any:
-    async def _run(*, execute: bool, pool: object, db: object, bus: object) -> dict[str, Any]:
+    async def _run(
+        *, execute: bool, pool: object, db: object, bus: object, local_machine: str
+    ) -> dict[str, Any]:
         captured["execute"] = execute
+        captured["local_machine"] = local_machine
         return {
             "mode": "execute" if execute else "dry_run",
             "outcome": "executed" if execute else "preview",
@@ -32,7 +37,9 @@ def _stub_run(captured: dict[str, Any]) -> Any:
 
 
 class TestBillingResurrectRoute:
-    def test_defaults_to_a_read_only_preview(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_defaults_to_a_read_only_preview(
+        self, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    ) -> None:
         from ops.lifecycle import billing_recovery
 
         captured: dict[str, Any] = {}
@@ -41,12 +48,15 @@ class TestBillingResurrectRoute:
         with TestClient(app) as client:
             resp = client.post("/api/agents/resurrect-billing", json={})
 
+        assert captured["local_machine"] == machine_identity.name()
         assert resp.status_code == 200
         assert captured["execute"] is False
         assert resp.json()["outcome"] == "preview"
         assert resp.json()["halted_alive"] == [{"agent_id": 7, "machine": "m", "streak": 2}]
 
-    def test_execute_flag_round_trips(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_execute_flag_round_trips(
+        self, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    ) -> None:
         from ops.lifecycle import billing_recovery
 
         captured: dict[str, Any] = {}
@@ -55,6 +65,7 @@ class TestBillingResurrectRoute:
         with TestClient(app) as client:
             resp = client.post("/api/agents/resurrect-billing", json={"execute": True})
 
+        assert captured["local_machine"] == machine_identity.name()
         assert resp.status_code == 200
         assert captured["execute"] is True
         assert resp.json()["outcome"] == "executed"

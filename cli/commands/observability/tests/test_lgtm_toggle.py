@@ -56,6 +56,7 @@ def test_on_preserves_explicit_other_service_choices(
             "retained_children": [],
             "database_factory": operator_database,
             "producer": operator_pipeline,
+            "command": command_runtime,
         }
     ]
 
@@ -89,6 +90,7 @@ def test_off_disables_backends_even_on_role_declared_station(
             "retained_children": [],
             "database_factory": operator_database,
             "producer": operator_pipeline,
+            "command": command_runtime,
         }
     ]
     assert data.read_bytes() == b"durable history"
@@ -128,6 +130,7 @@ def test_off_only_backend_allowlist_does_not_enable_all_services(
             "retained_children": [],
             "database_factory": operator_database,
             "producer": operator_pipeline,
+            "command": command_runtime,
         }
     ]
 

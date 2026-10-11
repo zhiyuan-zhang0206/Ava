@@ -166,8 +166,10 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     def record_start(
         operation: pause_owner.PauseOwnerSnapshot | None,
         _database_factory: DatabaseFactory,
+        machine: MachineIdentity,
         **kwargs: object,
     ) -> int:
+        assert machine is command_runtime.machine
         assert operation is None
         assert kwargs["persist_services"] is False
         events.append("services-started")

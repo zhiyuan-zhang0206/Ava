@@ -13,6 +13,7 @@ written, and leaves it for the next start when the database is unreachable.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -526,7 +527,10 @@ def test_the_crash_child_uses_only_its_captured_image(
     writer = Mock(return_value=[])
     gates: list[ProcessDbGate] = []
 
-    def make_database(cls: type[Database], *, gate: ProcessDbGate) -> Database:
+    def make_database(
+        cls: type[Database], *, gate: ProcessDbGate, local_host: Callable[[], str]
+    ) -> Database:
+        assert callable(local_host)
         gates.append(gate)
         assert gate.min_read_due(), "the crash child must remain gated"
         assert gate.application_name() == "ava:pty-close-notices:v42"

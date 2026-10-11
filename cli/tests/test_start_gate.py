@@ -12,7 +12,7 @@ import pytest
 
 import cli.main as cli_main
 from base import cluster
-from base.paths import ava_home
+from base.host.env.dotenv_boot import resolve_ava_home
 from cli import start_identity, start_intent, unit_join
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
@@ -83,7 +83,7 @@ def _start(
     *flags: str, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
 ) -> int:
     producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=ava_home()
+        operator_database, machine=command_runtime.machine, home=resolve_ava_home()
     )
     args = build_parser().parse_args(["start", *flags])
     args.runtime = command_runtime

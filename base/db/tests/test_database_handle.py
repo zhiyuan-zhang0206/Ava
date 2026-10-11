@@ -100,12 +100,6 @@ def test_the_module_level_connect_builds_the_live_settings_each_call(
     ]
 
 
-def test_the_direct_url_of_a_handle_without_a_pooler_is_its_url(
-    database_gate: ProcessDbGate,
-) -> None:
-    assert Database(_config(), gate=database_gate).direct_url() == _URL
-
-
 def test_a_write_transaction_declares_itself_writable(
     database_gate: ProcessDbGate, dialed: _Dialed
 ) -> None:

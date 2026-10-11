@@ -69,6 +69,7 @@ def test_gateway_data_plane_brings_up_own_instance(
             "redis_password": "redis-runtime",
             "redis_user": "ava",
             "retained_children": [],
+            "machine": command_runtime.machine,
         }
     ]
 

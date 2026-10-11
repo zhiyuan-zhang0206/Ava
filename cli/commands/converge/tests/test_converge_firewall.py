@@ -119,7 +119,11 @@ def test_nonexistent_resolved_paths_are_dropped(
 
 
 def _stub_audit(monkeypatch: pytest.MonkeyPatch, audit: FirewallAudit) -> None:
-    monkeypatch.setattr(cfw, "audit_this_host", lambda _roles: audit)  # pyright: ignore[reportUnknownArgumentType]
+    def fake_audit_this_host(_roles: frozenset[str], *, machine: MachineIdentity) -> FirewallAudit:
+        assert isinstance(machine, MachineIdentity)
+        return audit
+
+    monkeypatch.setattr(cfw, "audit_this_host", fake_audit_this_host)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.mark.parametrize(
@@ -143,7 +147,7 @@ def test_quiet_on_every_host_that_cannot_have_the_defect(
     learns to skim is worthless for finding the one host that is broken."""
     _stub_audit(monkeypatch, FirewallAudit(verdict, "detail"))
     _stub_rules(monkeypatch, {})  # host-independent: CI has no socketfilterfw
-    monkeypatch.setattr(fw, "manifest_paths", lambda: ())
+    monkeypatch.setattr(fw, "manifest_paths", _empty_manifest)
     _stub_mutation_result(monkeypatch, False)
     cfw.ensure_firewall_allowlist(
         _ctx(
@@ -151,6 +155,11 @@ def test_quiet_on_every_host_that_cannot_have_the_defect(
         )
     )
     assert capsys.readouterr().err == ""
+
+
+def _empty_manifest(*, machine: MachineIdentity) -> tuple[Path, ...]:
+    assert isinstance(machine, MachineIdentity)
+    return ()
 
 
 def _stub_rules(monkeypatch: pytest.MonkeyPatch, rules: dict[str, bool]) -> None:
@@ -193,7 +202,7 @@ def test_failed_direct_and_sudo_repairs_print_exact_commands_and_do_not_raise(
         FirewallAudit(FirewallVerdict.RULES_MISSING, "1 of 1 have no rule", missing=(missing,)),
     )
     _stub_rules(monkeypatch, {})  # nothing allow-listed yet
-    monkeypatch.setattr(fw, "manifest_paths", lambda: ())  # host-independent
+    monkeypatch.setattr(fw, "manifest_paths", _empty_manifest)  # host-independent
     calls: list[list[str]] = []
 
     def fail(cmd: list[str], **_kw: object):
@@ -253,7 +262,7 @@ def test_grant_installed_repairs_silently(
 
     _stub_mutation(monkeypatch, mutate)
     _skip_verify_waits(monkeypatch)
-    monkeypatch.setattr(fw, "manifest_paths", lambda: ())
+    monkeypatch.setattr(fw, "manifest_paths", _empty_manifest)
     cfw.ensure_firewall_allowlist(
         _ctx(
             tmp_path,
@@ -277,7 +286,7 @@ def test_stale_rules_are_pruned_when_grant_installed(
     """A version bump left an orphaned rule; with the grant it is removed."""
     _stub_audit(monkeypatch, FirewallAudit(FirewallVerdict.ALLOWED, "all allow-listed"))
     _stub_rules(monkeypatch, {})
-    monkeypatch.setattr(fw, "manifest_paths", lambda: ())
+    monkeypatch.setattr(fw, "manifest_paths", _empty_manifest)
     monkeypatch.setattr(
         fw,
         "stale_manifest_rules",
@@ -318,7 +327,12 @@ def test_prune_runs_before_repair_so_replacement_rules_persist(
     )
     state = {str(stale): True}
     monkeypatch.setattr(fw, "allowlisted_paths", lambda: dict(state))
-    monkeypatch.setattr(fw, "manifest_paths", lambda: (missing,))
+
+    def manifest(*, machine: MachineIdentity) -> tuple[Path, ...]:
+        assert isinstance(machine, MachineIdentity)
+        return (missing,)
+
+    monkeypatch.setattr(fw, "manifest_paths", manifest)
     monkeypatch.setattr(fw, "stale_manifest_rules", lambda _rules: (stale,))  # pyright: ignore[reportUnknownArgumentType]
     _skip_verify_waits(monkeypatch)
     order: list[tuple[str, str]] = []
@@ -372,13 +386,18 @@ def test_unconfigured_unit_audits_the_interpreter(
 ) -> None:
     """`roles is None` is a fresh install — no capabilities, but still an interpreter."""
     seen: list[frozenset[str]] = []
+
+    def fake_audit_this_host(roles: frozenset[str], *, machine: MachineIdentity) -> FirewallAudit:
+        assert isinstance(machine, MachineIdentity)
+        return seen.append(roles) or FirewallAudit(FirewallVerdict.ALLOWED, "ok")
+
     monkeypatch.setattr(
         cfw,
         "audit_this_host",
-        lambda roles: seen.append(roles) or FirewallAudit(FirewallVerdict.ALLOWED, "ok"),  # pyright: ignore[reportUnknownArgumentType]
+        fake_audit_this_host,  # pyright: ignore[reportUnknownArgumentType]
     )
     _stub_rules(monkeypatch, {})
-    monkeypatch.setattr(fw, "manifest_paths", lambda: ())
+    monkeypatch.setattr(fw, "manifest_paths", _empty_manifest)
     _stub_mutation_result(monkeypatch, False)
     cfw.ensure_firewall_allowlist(
         _ctx(tmp_path, None, operator_database=operator_database, producer=operator_pipeline)
@@ -399,10 +418,15 @@ def test_firewall_status_renders_manifest_details(
     import cli.commands._repo as _repo_commands
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+
+    def fake_audit_this_host(_roles: frozenset[str], *, machine: MachineIdentity) -> FirewallAudit:
+        assert isinstance(machine, MachineIdentity)
+        return FirewallAudit(FirewallVerdict.ALLOWED, "all allow-listed")
+
     monkeypatch.setattr(
         firewall_cmd,
         "audit_this_host",
-        lambda _roles: FirewallAudit(FirewallVerdict.ALLOWED, "all allow-listed"),  # pyright: ignore[reportUnknownArgumentType]
+        fake_audit_this_host,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(fw, "allowlisted_paths", lambda: {"/bin/listener": True})
     monkeypatch.setattr(

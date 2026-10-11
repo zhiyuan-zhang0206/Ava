@@ -350,8 +350,10 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
         *,
         trigger_inbound_id: int | None = None,
         trigger_inbound_kind: WakeTriggerKind | None = None,
+        local_machine: str,
         catalog: ModelCatalog,
     ):
+        assert local_machine == machine_identity.name()
         raise ValueError("unparseable lifecycle path")
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _fake_lifecycle)

@@ -29,6 +29,7 @@ from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
@@ -65,18 +66,22 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
         return None
 
     def ensure_gateway_data_plane(
-        *, retained_children: object, database_factory: Callable[[], Any]
+        *, retained_children: object, database_factory: Callable[[], Any], machine: MachineIdentity
     ) -> int:
         return 0
 
     def prepare_gateway_schema() -> None:
         return None
 
-    def migrate(*, database_factory: Callable[[], Any]) -> None:
+    def migrate(*, database_factory: Callable[[], Any], machine_name: Callable[[], str]) -> None:
+        assert callable(machine_name)
         calls.append("migrate")
 
     def complete_gateway_data_plane(
-        *, refresh_schema: bool = True, database_factory: Callable[[], Any]
+        *,
+        refresh_schema: bool = True,
+        database_factory: Callable[[], Any],
+        machine: MachineIdentity,
     ) -> None:
         del refresh_schema
 
@@ -84,7 +89,8 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
         calls.append("schema-check")
         return 0
 
-    def adopt(*, database_factory: Callable[[], Any]) -> None:
+    def adopt(*, database_factory: Callable[[], Any], machine: MachineIdentity) -> None:
+        assert isinstance(machine, MachineIdentity)
         calls.append("adopt")
 
     def record_materialize(*, database_factory: Callable[[], Any]) -> None:
@@ -200,6 +206,7 @@ def test_standalone_converge_adopts_too() -> None:
     restarting it, and a machine holding un-adopted installs is not correct."""
     from cli.commands.converge.host import cmd_converge
 
-    assert "adopt_local_extensions(database_factory=database_factory)" in inspect.getsource(
-        cmd_converge
+    assert (
+        "adopt_local_extensions(database_factory=database_factory, machine=command.machine)"
+        in inspect.getsource(cmd_converge)
     )

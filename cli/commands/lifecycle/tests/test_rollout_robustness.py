@@ -118,8 +118,12 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     def start_result(
-        operation: object, database_factory: Callable[[], Any], **kwargs: object
+        operation: object,
+        database_factory: Callable[[], Any],
+        machine: MachineIdentity,
+        **kwargs: object,
     ) -> int:
+        assert machine is command_runtime.machine
         assert database_factory is operator_database
         assert kwargs["producer"] is operator_pipeline
         return 1
@@ -168,7 +172,9 @@ def test_declined_restart_releases_a_pause_nothing_else_owns(
     unpaused: list[bool] = []
     monkeypatch.setattr(
         "ops.cluster.pause.unpause_local_cluster",
-        lambda _db, _bus: unpaused.append(True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db, _bus, *, local_machine: unpaused.append(
+            local_machine is command_runtime.machine
+        ),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     _stop_commands._release_self_heal_pause(
@@ -201,7 +207,9 @@ def test_declined_restart_leaves_a_stop_holds_pause_alone(
     unpaused: list[bool] = []
     monkeypatch.setattr(
         "ops.cluster.pause.unpause_local_cluster",
-        lambda _db, _bus: unpaused.append(True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db, _bus, *, local_machine: unpaused.append(
+            local_machine is command_runtime.machine
+        ),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     _stop_commands._release_self_heal_pause(

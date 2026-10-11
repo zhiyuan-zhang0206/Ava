@@ -375,8 +375,14 @@ def test_each_loop_gets_its_own_progress_tracker(
     received: dict[str, LoopProgress] = {}
 
     async def reconcile(
-        _pool: object, progress: LoopProgress, _config: object, _bus: object
+        _pool: object,
+        progress: LoopProgress,
+        _config: object,
+        _bus: object,
+        *,
+        local_machine: MachineIdentity,
     ) -> None:
+        assert local_machine is machine_identity
         received["reconcile"] = progress
 
     async def dead(
@@ -428,7 +434,11 @@ def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
 
         return run_loop
 
-    seen = _patch_run(monkeypatch, {"reconcile": loop("reconcile"), "dead": loop("dead")}, events)
+    async def reconcile_loop(*args: object, local_machine: MachineIdentity) -> None:
+        assert local_machine is machine_identity
+        await loop("reconcile")(*args)
+
+    seen = _patch_run(monkeypatch, {"reconcile": reconcile_loop, "dead": loop("dead")}, events)
     image = LoadedCommit(Path("/page-server-tests"), None)
 
     with pytest.raises(ExceptionGroup) as raised:

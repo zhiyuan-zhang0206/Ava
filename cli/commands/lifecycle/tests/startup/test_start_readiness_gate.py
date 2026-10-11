@@ -325,7 +325,9 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
         services: frozenset[str],
         database_factory: Callable[[], Any],
         producer: Callable[[], EventPipeline],
+        command: CommandRuntime,
     ) -> None:
+        assert command is command_runtime
         assert database_factory is operator_database
         assert producer is operator_pipeline
         assert not service_selection.selection_path().exists()

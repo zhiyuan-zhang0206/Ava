@@ -18,7 +18,7 @@ import pytest
 
 from base.agents.messages import delivery_outbox as outbox
 from base.cluster.machine import MachineIdentity
-from base.config import Settings
+from base.config import ConfigBoot, Settings
 from base.config.service_read import ConfigAuthority
 from base.daemon import round_loop
 from base.daemon.endpoints import ServiceEndpoints
@@ -287,6 +287,7 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
     monkeypatch: pytest.MonkeyPatch,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    unit_home: Path,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -360,8 +361,18 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
     monkeypatch.setattr(daemon, "start_health_server", start_health)
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
 
-    def register_boot(*, database: Callable[[], Database]) -> None:
+    def register_boot(
+        *,
+        database: Callable[[], Database],
+        config: ConfigBoot,
+        machine: MachineIdentity,
+        ops_port: int,
+        home: Path,
+    ) -> None:
         assert database is ops_database
+        assert machine is machine_identity
+        assert ops_port == ServiceEndpoints.from_settings().of("ops").health_port
+        assert home == unit_home
 
     monkeypatch.setattr(boot, "register_boot", register_boot)
     monkeypatch.setattr(daemon.outbox_flusher, "outbox_loop", crashing_loop)

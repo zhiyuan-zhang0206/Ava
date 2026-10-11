@@ -639,7 +639,10 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
             state=SimpleNamespace(),
             app=SimpleNamespace(
                 state=SimpleNamespace(
-                    config_authority=config_authority, db=object(), db_pool=object()
+                    config_authority=config_authority,
+                    db=object(),
+                    db_pool=object(),
+                    machine=machine_identity,
                 )
             ),
         ),
