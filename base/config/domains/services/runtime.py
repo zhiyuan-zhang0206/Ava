@@ -358,6 +358,27 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    memory_dedup_candidates: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        alias="AVA_MEMORY_DEDUP_CANDIDATES",
+        description=(
+            "How many notes vector search hands to the decision model when the search checks "
+            "a note an agent just wrote for duplicates (purpose 'dedup'), one decision request "
+            "each. Only the closest few notes can be duplicates of it, so this is much smaller "
+            "than memory_rerank_candidates, which still applies to recall and search; a search "
+            "asking for more results than this ranks that many instead."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     memory_search_max_batch_rows: int = Field(
         default=65536,
         gt=0,

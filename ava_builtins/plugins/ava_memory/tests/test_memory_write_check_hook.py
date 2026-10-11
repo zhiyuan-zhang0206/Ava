@@ -148,7 +148,7 @@ async def test_a_clean_unique_note_adds_no_reminder_and_clears_the_record(
     assert _reminders(result) == []
 
 
-async def test_the_search_asks_for_duplicates_of_the_note_with_room_for_itself(
+async def test_the_search_asks_for_the_five_closest_notes(
     hook: Any, search: _FakeSearch, stores: tuple[Path, Path], model_catalog: Any
 ):
     pool, _ = stores
@@ -157,7 +157,7 @@ async def test_the_search_asks_for_duplicates_of_the_note_with_room_for_itself(
     await hook(_state({"retry.md"}), _runtime(model_catalog), RunnableConfig())
 
     [call] = search.calls
-    assert call["purpose"] == "dedup" and call["k"] == 6
+    assert call["purpose"] == "dedup" and call["k"] == 5
     assert call["query"].startswith("Retries above three make the outage worse")
     assert "rate-limits above three retries" in call["query"]
     assert "ava_agent" not in call["query"]

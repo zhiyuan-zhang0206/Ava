@@ -1,4 +1,4 @@
-"""Per-machine steward: rebuild the directory indexes, stage, commit, push, create PR.
+"""Per-machine steward: rebuild the indexes, stage, commit, push, create PR.
 
 Usage: python steward.py -m "memory: <machine> <date> local sync"
 

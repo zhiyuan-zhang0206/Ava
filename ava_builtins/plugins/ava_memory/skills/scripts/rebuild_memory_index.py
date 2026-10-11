@@ -89,9 +89,14 @@ for top in sorted(sub):
         detail = f"{n} notes: {', '.join(counts)}"
     lines.append(f"- [{top}/]({top}/index.md) \u2014 {detail}")
 
-with open(os.path.join(_pool(), "MEMORY.md"), encoding="utf-8") as f:
-    content = f.read()
-head = content[: content.find("## Pointers")]
+memory_path = os.path.join(_pool(), "MEMORY.md")
+content = ""
+if os.path.exists(memory_path):
+    with open(memory_path, encoding="utf-8") as f:
+        content = f.read()
+# The heading line, not a prose mention of it (the template's intro quotes `## Pointers`).
+heading = re.search(r"^## Pointers[ \t]*$", content, re.M)
+head = content[: heading.start()] if heading else (content.rstrip("\n") + "\n\n").lstrip("\n")
 new = head + "## Pointers\n\n\n" + "\n".join(lines) + "\n"
 print("root:", len(root_files), "dirs:", len(sub), "| chars:", len(new))
 with open(os.path.join(_pool(), "MEMORY.md"), "w", encoding="utf-8") as f:

@@ -1,4 +1,4 @@
-"""Single-box consolidation: rebuild the directory indexes, stage, commit, push, refresh index.
+"""Single-box consolidation: rebuild the indexes, stage, commit, push, refresh index.
 
 Usage: python consolidate.py -m "memory: <machine> <date> daily sync"
 

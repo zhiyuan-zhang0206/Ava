@@ -18,7 +18,7 @@ tags:
 
 ### Memory write check (after_exec hook)
 
-`_MemoryWriteCheckHook` checks the notes the `files.write` / `files.append` wraps recorded and adds at most one `memory_write_check` reminder; it never blocks, rewrites or raises. Details: [[ava_builtins/plugins/ava_memory/docs/memory-write-check.ava.okf.md]].
+`_MemoryWriteCheckHook` checks the notes the `files.write` / `append` / `edit` wraps recorded and adds at most one `memory_write_check` reminder; it never blocks, rewrites or raises. Details: [[ava_builtins/plugins/ava_memory/docs/memory-write-check.ava.okf.md]].
 
 ### Passive memory recall (before_llm hook)
 

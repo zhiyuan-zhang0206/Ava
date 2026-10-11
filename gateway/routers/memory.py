@@ -82,6 +82,7 @@ class MemorySearchInputs:
     deadline: Callable[[], float]
     rerank_model: Callable[[], str]
     rerank_candidates: Callable[[], int]
+    dedup_candidates: Callable[[], int]
 
 
 def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
@@ -298,7 +299,8 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     each with the chunk that matched and a relevance score.
 
     Two stages. Vector search finds the best chunk of the closest
-    `memory_rerank_candidates` notes; a decision model then judges each chunk
+    `memory_rerank_candidates` notes (`memory_dedup_candidates` for the `dedup`
+    purpose); a decision model then judges each chunk
     against the query, and the response is ordered by the probability that the
     chunk is relevant (`score`). No text is generated on this path.
 
@@ -372,6 +374,11 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     )
 
 
+def _candidate_count(inputs: MemorySearchInputs, body: MemorySearchRequest) -> int:
+    """How many notes vector search hands to the decision model for this request's purpose."""
+    return inputs.dedup_candidates() if body.purpose == "dedup" else inputs.rerank_candidates()
+
+
 async def _vector_candidates(
     request: Request,
     body: MemorySearchRequest,
@@ -382,7 +389,8 @@ async def _vector_candidates(
     """The first stage: embed the query and read the closest notes' best chunks.
 
     Asks for at least `body.k` notes so the second stage can always fill the
-    response, and for `memory_rerank_candidates` when that is more.
+    response, and for the purpose's candidate count when that is more:
+    `memory_dedup_candidates` for `dedup`, `memory_rerank_candidates` otherwise.
     """
     from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
@@ -402,7 +410,7 @@ async def _vector_candidates(
             return await _backend_topk(
                 request.app.state.db,
                 query_vector,
-                max(body.k, inputs.rerank_candidates()),
+                max(body.k, _candidate_count(inputs, body)),
                 deadline,
                 provider.dim,
                 provider.fingerprint,

@@ -146,3 +146,58 @@ def test_regenerate_indexes_writes_every_directory_index(
     assert "* [Retry rule](deep.md)" in (pool / "a" / "b" / "index.md").read_text()
     assert "* [b/](b/) - 1 notes" in (pool / "a" / "index.md").read_text()
     assert (pool / "index.md").is_file()
+
+
+def _run_validator(pool: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 — sys.executable + the validator copy seeded in the pool
+        [sys.executable, str(pool / "validate.py")],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
+def test_a_new_root_note_passes_the_pool_validator_after_the_steward(tmp_path: Path) -> None:
+    """Nothing maintains `MEMORY.md` pointers as notes are written with `ava.files`: the steward's
+    rebuild adds the root note's pointer and the directory's, so the pool validator (the pre-commit
+    hook's check) passes on what is committed."""
+    import shutil
+
+    template = _REPO_ROOT / "ava_builtins" / "plugins" / "ava_memory" / "template"
+    pool = tmp_path / ".ava" / "memory"
+    pool.mkdir(parents=True)
+    _git(pool, "init", "-q", "-b", "main")
+    _git(pool, "config", "user.email", "steward-test@example.invalid")
+    _git(pool, "config", "user.name", "Steward Test")
+    shutil.copy(template / "MEMORY.md", pool / "MEMORY.md")
+    shutil.copy(template / "validate.py", pool / "validate.py")
+    _git(pool, "add", "-A")
+    _git(pool, "commit", "-qm", "seed")
+    _git(pool, "checkout", "-qb", "machine-testbox")
+    (pool / "rule.md").write_text(_NOTE)
+    (pool / "topics").mkdir()
+    (pool / "topics" / "retry.md").write_text(_NOTE.replace("Retry rule", "Topic rule"))
+    assert _run_validator(pool).returncode != 0  # the new notes are orphans until indexed
+
+    remote = tmp_path / "remote.git"
+    subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
+        ["git", "init", "--bare", "-q", str(remote)], check=True
+    )
+    _git(pool, "remote", "add", "origin", str(remote))
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    gh = bindir / "gh"
+    gh.write_text('#!/bin/sh\necho "https://example.invalid/pr/1"\n')
+    gh.chmod(0o755)
+
+    res = _run_steward(pool, path_extra=str(bindir))
+
+    assert res.returncode == 0, res.stderr
+    memory_index = (pool / "MEMORY.md").read_text()
+    assert "## Setup (keep current, do not drop)" in memory_index
+    assert "- [Retry rule](rule.md) — Retries above three hurt" in memory_index
+    assert "- [topics/](topics/index.md) — 1 notes" in memory_index
+    validated = _run_validator(pool)
+    assert validated.returncode == 0, validated.stderr
+    assert _git(pool, "status", "--porcelain").strip() == ""

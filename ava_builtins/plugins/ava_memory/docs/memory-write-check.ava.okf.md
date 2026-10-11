@@ -35,7 +35,7 @@ Required by the pool validator (`template/validate.py`): `type`, `ava_agent`,
 
 ## Write check
 
-The `ava_memory` plugin wraps `ava.files.write` / `ava.files.append` (outside `ava_code`'s
+The `ava_memory` plugin wraps `ava.files.write` / `append` / `edit` (outside `ava_code`'s
 cwd-tracking wraps of the same targets: plugins stack in name order, the later one is
 outermost). After the layer below succeeds, a `.md` path under `PATH` or `PERSONAL_PATH` is
 added to the plugin state (`shared_notes` / `personal_notes`, relative paths, union-merged);
@@ -50,7 +50,7 @@ The `after_exec` hook then reads and clears the record and checks, under
   and the 8000-character cap; directory, index and pointer rules stay with the steward);
 - every written shared note against the pool: `POST /api/memory/search` with
   `purpose="dedup"`, query = the note's description and body (4000 characters at most),
-  `k = 6` so that the note itself can be set aside. The gateway restores the text of its
+  `k = 5` (the gateway ranks `memory_dedup_candidates`, default 5, not the 30 of recall/search; the note itself is set aside, so an already indexed note leaves four). The gateway restores the text of its
   closest candidates and a decision model answers, per candidate, whether it records
   essentially the same knowledge (`usage_kind=memory_write_dedup`). Candidates at or above
   `memory_write_dedup_threshold` (0.80, not benchmark-calibrated) are named; every probability
@@ -58,8 +58,7 @@ The `after_exec` hook then reads and clears the record and checks, under
 
 A finding becomes one `memory_write_check` system note after the exec result; no finding
 adds nothing. Nothing is blocked, rewritten or raised: a timeout, an unavailable search
-or any unexpected error is logged and the notes go unreported. `ava.files.edit` is not
-wrapped, so an in-place edit of an existing note is not re-checked.
+or any unexpected error is logged and the notes go unreported.
 
 
 ## Key Dependencies
