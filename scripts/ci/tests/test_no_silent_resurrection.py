@@ -16,7 +16,6 @@ absent.
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
@@ -25,15 +24,11 @@ from pathlib import Path
 
 import pytest
 
+from scripts.ci import no_silent_resurrection as resurrection
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SCRIPT = _REPO_ROOT / "scripts" / "ci" / "no_silent_resurrection.py"
 
-_MOD_NAME = "ci_no_silent_resurrection_under_test"
-_spec = importlib.util.spec_from_file_location(_MOD_NAME, _SCRIPT)
-assert _spec and _spec.loader
-resurrection = importlib.util.module_from_spec(_spec)
-sys.modules[_MOD_NAME] = resurrection
-_spec.loader.exec_module(resurrection)
 
 _BLOCK_A = (
     'delivery_watchdog_fields = ("last_error", "last_success")\n'

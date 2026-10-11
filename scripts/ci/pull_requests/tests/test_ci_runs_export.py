@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import subprocess
-import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -13,20 +11,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "pull_requests" / "runs_export.py"
-
-
-def _load_script() -> Any:
-    spec = importlib.util.spec_from_file_location("runs_export", _SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-runs_export = _load_script()
+from scripts.ci.pull_requests import runs_export
 
 
 def _run(**overrides: object) -> dict[str, Any]:

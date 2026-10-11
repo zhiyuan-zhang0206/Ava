@@ -35,6 +35,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import IO, Any
 
 import pytest
@@ -114,12 +115,48 @@ def _mark(name: str) -> None:
         fh.write(f"{name}\n")
 
 
+def _daemon_module(slug: str) -> ModuleType:
+    """The daemon module of one case; every branch is a static import."""
+    if slug == "memory_indexer":
+        from services.derived.memory_indexer import daemon as memory_indexer
+
+        return memory_indexer
+    if slug == "heartbeat":
+        from services.wake.heartbeat import daemon as heartbeat
+
+        return heartbeat
+    if slug == "page_server":
+        from services.agent_runner.page_server import daemon as page_server
+
+        return page_server
+    if slug == "events_maintenance":
+        from services.upkeep.events_maintenance import daemon as events_maintenance
+
+        return events_maintenance
+    if slug == "memory_search":
+        from services.derived.memory_search import daemon as memory_search
+
+        return memory_search
+    if slug == "ttl_reaper":
+        from services.upkeep.ttl_reaper import daemon as ttl_reaper
+
+        return ttl_reaper
+    if slug == "schedule_manager":
+        from services.wake.schedule_manager import daemon as schedule_manager
+
+        return schedule_manager
+    if slug == "insights":
+        from services.derived.insights import daemon as insights
+
+        return insights
+    raise ValueError(f"unknown daemon case {slug!r}")
+
+
 def _run_child() -> None:
     """Child entry: production ``main()`` with a wedge-shaped ``run()``."""
-    import importlib
-
     case = _CASES[os.environ[_CASE_ENV]]
-    module: Any = importlib.import_module(case.module)
+    module: Any = _daemon_module(os.environ[_CASE_ENV])
+    assert module.__name__ == case.module
     if case.argv:
         sys.argv = [case.module, *case.argv]
 

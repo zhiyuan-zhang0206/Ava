@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
-import sys
 import types
 from collections.abc import Callable
 from dataclasses import replace
@@ -26,14 +24,8 @@ from base.db.config import db_config_from_settings
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
+from scripts.data_plane_ops import restore_drill
 from services.backup.artifact import offsite, passphrase
-
-_SCRIPT = Path(__file__).parents[3] / "scripts" / "data_plane_ops" / "restore_drill.py"
-_SPEC = importlib.util.spec_from_file_location("restore_drill", _SCRIPT)
-assert _SPEC is not None and _SPEC.loader is not None
-restore_drill = importlib.util.module_from_spec(_SPEC)
-sys.modules[_SPEC.name] = restore_drill
-_SPEC.loader.exec_module(restore_drill)
 
 
 def _database_factory() -> Callable[[str], Database]:
