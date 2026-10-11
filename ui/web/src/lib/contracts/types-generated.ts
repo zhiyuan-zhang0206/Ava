@@ -28,11 +28,6 @@ export interface paths {
          *
          *     On failure, returns a typed 401 error envelope with detail ``"invalid password"``.
          *
-         *     A no-secret cluster (single-box no-auth posture) has no credential: login
-         *     is a no-op 200 success, deliberately BEFORE the rate limiter — there is
-         *     nothing to guess, and no-secret requests must never count into the
-         *     limiter's failure records.
-         *
          *     Brute-force guard: an IP that fails ``gateway.login_max_failures`` times in
          *     a row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on
          *     those config fields; enforcement in base/cluster/rate_limit.py).
@@ -164,9 +159,8 @@ export interface paths {
          *
          *     Raises:
          *         HTTPException: 401 when the request carries neither the active write
-         *             generation's machine API token nor the cluster secret as its bearer
-         *             (a no-secret cluster serves without auth — there is no credential
-         *             to require); 400 when the gateway configuration has no database
+         *             generation's machine API token nor the cluster secret as its bearer;
+         *             400 when the gateway configuration has no database
          *             endpoint.
          */
         get: operations["get_bootstrap_api_bootstrap_get"];

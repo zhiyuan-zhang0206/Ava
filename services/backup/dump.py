@@ -494,7 +494,7 @@ def _dump_and_encrypt(
 ) -> None:
     dump_partial.chmod(0o600)
     # Pass only the credential this process owns to pg_dump. In particular, do
-    # not inherit a shell's PGPASSWORD: a no-auth cluster must not accidentally
+    # not inherit a shell's PGPASSWORD: a dump must not accidentally
     # authenticate with another cluster's value (#550 alignment).
     dump_env = {"PGPASSWORD": password} if password else {}
     dump_cmd = [
