@@ -221,10 +221,10 @@ async def test_superseded_poll_waiting_for_provider_cannot_admit_or_checkpoint(
     ).fetchone() == ("",)
 
 
-async def test_unclaimed_source_recovers_frozen_route_before_new_poll(
-    native_weixin: NativeWeixin, monkeypatch: pytest.MonkeyPatch
+async def test_unclaimed_source_is_rejected_at_restart_and_never_dispatched_late(
+    native_weixin: NativeWeixin, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ingress, _binding = await native_weixin.adapter._ensure_ingress()
+    ingress, binding = await native_weixin.adapter._ensure_ingress()
     dispatch = ingress.dispatch
 
     async def before_first_claim(*_args: object) -> None:
@@ -235,17 +235,60 @@ async def test_unclaimed_source_recovers_frozen_route_before_new_poll(
     with pytest.raises(RuntimeError, match="before command claim"):
         await native_weixin.adapter._handle_message(payload)
     monkeypatch.setattr(ingress, "dispatch", dispatch)
+    assert db_conn.execute("SELECT status FROM weixin_ingress_receipts").fetchone() == ("retained",)
+    with pytest.raises(RuntimeError, match="unprocessed"):
+        ingress.store.checkpoint(binding, "", "blocked-while-retained")
+    before = len(native_weixin.gateway_requests)
     replacement = WeixinAdapter(native_weixin.core, client=native_weixin.adapter._http)
     native_weixin.core.register(replacement)
     native_weixin.provider_responses.append(
-        {"ret": 0, "msgs": [], "get_updates_buf": "after-recovery"}
+        {"ret": 0, "msgs": [], "get_updates_buf": "after-restart"}
     )
     cursor, _ = await replacement._poll_once("", 35000)
-    assert cursor == "after-recovery"
-    result = await replacement._handle_message(payload)
-    assert result.status == IngressStatus.ACCEPTED
-    assert result.route.text == f"/switch {native_weixin.agent_id}"
-    assert result.result is not None and result.result["agent_id"] == native_weixin.agent_id
+    # The restart finalized the never-started source, which released the cursor guard.
+    assert cursor == "after-restart"
+    assert db_conn.execute(
+        "SELECT status,outcome_reason,attempt_id,completed_at IS NOT NULL FROM weixin_ingress_receipts"
+    ).fetchone() == ("rejected", "command_not_started_at_restart", None, True)
+    # The provider redelivers the same source: it returns the rejected receipt, unexecuted.
+    redelivered = await replacement._handle_message(payload)
+    assert redelivered.status == IngressStatus.REJECTED
+    assert redelivered.outcome_reason == "command_not_started_at_restart"
+    assert redelivered.attempt_id is None and redelivered.result is None
+    assert len(native_weixin.gateway_requests) == before
+    assert db_conn.execute("SELECT count(*) FROM weixin_ingress_receipts").fetchone() == (1,)
+
+
+async def test_retained_source_is_not_dispatched_by_poll_or_redelivery_in_process(
+    native_weixin: NativeWeixin, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ingress, _binding = await native_weixin.adapter._ensure_ingress()
+    dispatch = ingress.dispatch
+    claims = 0
+
+    async def interrupted(*_args: object) -> None:
+        raise RuntimeError("injected failure before command claim")
+
+    monkeypatch.setattr(ingress, "dispatch", interrupted)
+    payload = message(f"/switch {native_weixin.agent_id}", "26")
+    # A failure before the claim is raised to the poll owner, never swallowed or retried inline.
+    with pytest.raises(RuntimeError, match="before command claim"):
+        await native_weixin.adapter._handle_message(payload)
+    monkeypatch.setattr(ingress, "dispatch", dispatch)
+    original_claim = ingress.store.claim
+
+    def counting_claim(*args: Any, **kwargs: Any) -> Any:
+        nonlocal claims
+        claims += 1
+        return original_claim(*args, **kwargs)
+
+    monkeypatch.setattr(ingress.store, "claim", counting_claim)
+    native_weixin.provider_responses.append({"ret": 0, "msgs": [payload], "get_updates_buf": "n"})
+    with pytest.raises(RuntimeError, match="unprocessed"):
+        await native_weixin.adapter._poll_once("", 35000)
+    assert claims == 0
+    assert db_conn.execute("SELECT status FROM weixin_ingress_receipts").fetchone() == ("retained",)
+    assert db_conn.execute("SELECT cursor FROM weixin_ingress_cursors").fetchone() == ("",)
 
 
 async def test_native_transport_timeout_is_not_provider_empty_cutover_proof(

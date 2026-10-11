@@ -133,6 +133,33 @@ def test_command_crash_is_retained_uncertain_and_cursor_can_continue(
             store.checkpoint(restarted, "", "wrong-cursor")
 
 
+def test_restart_rejects_unclaimed_sources_and_releases_the_checkpoint_guard(
+    database: Database,
+) -> None:
+    with database.pool(min_size=1, max_size=2) as pool:
+        store = WeixinIngressStore(pool)
+        binding = store.initialize("https://provider.example", "account")
+        binding = store.checkpoint(binding, "", "", provider_empty=True)
+        route = IngressRoute(kind=IngressRouteKind.COMMAND, text="/spawn")
+        unclaimed = store.retain(binding, source("1"), {"text": "a"}, {}, route, "key-1")
+        claimed_source = store.retain(binding, source("2"), {"text": "b"}, {}, route, "key-2")
+        claimed = store.claim(binding, claimed_source.id)
+        assert claimed is not None
+        with pytest.raises(RuntimeError, match="unprocessed"):
+            store.checkpoint(binding, "", "blocked")
+        restarted = store.initialize("https://provider.example", "account")
+        store.recover_claims(restarted)
+        rejected = store.lookup(restarted, source("1"), {"text": "a"})
+        assert rejected is not None and rejected.id == unclaimed.id
+        assert rejected.status == IngressStatus.REJECTED
+        assert rejected.outcome_reason == "command_not_started_at_restart"
+        assert rejected.attempt_id is None
+        uncertain = store.lookup(restarted, source("2"), {"text": "b"})
+        assert uncertain is not None and uncertain.status == IngressStatus.UNCERTAIN
+        assert store.claim(restarted, unclaimed.id) is None
+        assert store.checkpoint(restarted, "", "advanced").cursor == "advanced"
+
+
 def test_fresh_binding_drains_unproven_backlog_until_a_real_empty_commit(
     db_conn: psycopg.Connection,
     database: Database,
