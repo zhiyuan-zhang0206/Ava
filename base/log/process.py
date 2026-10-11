@@ -18,7 +18,7 @@ from base.native_process import loaded_commit
 from base.telemetry.delivery.pipeline import EventPipeline
 
 __all__ = [
-    "add_postgres_sink",
+    "add_event_sink",
     "init_cli_process",
     "init_gateway_process",
     "init_subprocess_logger",
@@ -41,18 +41,15 @@ def _message_to_params(
 ) -> tuple[Any, int | None, str, str, dict[str, Any], str]:
     """Extract `(ts, agent_id, level, event, payload, source)` from one loguru record.
 
-    Pure — no IO, no pool access — so the sync `_postgres_sink` and the
+    Pure — no IO, no pool access — so the sync `_event_sink` and the
     unified emitter derive their rows from one implementation and cannot
     drift apart.
 
     `event` field source:
-      1. record.extra["event"] (new code explicitly passes event=);
+      1. record.extra["event"] (callers pass event= explicitly);
          empty string raises (caller bug, must not silently fall
          through)
-      2. record.extra["label"] (compat for the existing
-         `logger.info("[{label}] {body}", label="exec", ...)` pattern;
-         label is treated as an event alias)
-      3. "log" (bare `logger.info("foo")` without event/label; the
+      2. "log" (bare `logger.info("foo")` without event=; the
          jsonb payload's msg field preserves the original text so
          debug grep still works)
 
@@ -78,7 +75,7 @@ def _message_to_params(
     event_explicit = extra.pop("event", None)
     if event_explicit == "":
         raise ValueError(f"empty event= passed to logger: {record['message']!r}")
-    event = event_explicit or extra.get("label") or "log"
+    event = event_explicit or "log"
     transport_source = extra.pop("transport_source", None)
     source = transport_source if transport_source is not None else extra.pop("source", "system")
     # "-" sentinel = no agent (gateway / unbound logger), maps to
@@ -130,7 +127,7 @@ _LOG_LEVELS: dict[str, str] = {
 }
 
 
-def _postgres_sink(
+def _event_sink(
     message: loguru.Message, *, producer: Callable[[], EventPipeline] | None = None
 ) -> None:
     """Route one loguru record into the unified event pipeline.
@@ -196,12 +193,12 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
     if record.get("message") == "Setting attribute on ended span.":
         return False
     level = getattr(record.get("level"), "name", "")  # missing level -> "" (unsampled)
-    if level == "INFO" and (extra.get("event") or extra.get("label") or "log") == "log":
+    if level == "INFO" and (extra.get("event") or "log") == "log":
         return next(_log_info_sample_counter) % _LOG_INFO_SAMPLE_EVERY == 0
     return True
 
 
-def add_postgres_sink(
+def add_event_sink(
     process: str = "unknown",
     *,
     agent_id: int | None = None,
@@ -235,25 +232,25 @@ def add_postgres_sink(
         pipeline=producer(),
         machine_reader=machine_reader,
     )
-    global _postgres_sink_id  # noqa: PLW0603 — process-level singleton
+    global _event_sink_id  # noqa: PLW0603 — process-level singleton
     live_handlers: Any = cast(Any, logger)._core.handlers  # private `_core` registry
-    if _postgres_sink_id is not None and _postgres_sink_id in live_handlers:
-        return _postgres_sink_id
-    _postgres_sink_id = add_sink(
-        partial(_postgres_sink, producer=producer),
+    if _event_sink_id is not None and _event_sink_id in live_handlers:
+        return _event_sink_id
+    _event_sink_id = add_sink(
+        partial(_event_sink, producer=producer),
         level="INFO",
         enqueue=False,
         catch=True,
         filter=_event_pipeline_filter,
     )
-    return _postgres_sink_id
+    return _event_sink_id
 
 
 # Process-level singleton: exec_child calls this from two paths (env
 # AVA_AGENT_ID + request), and a second registration double-emits every
 # loguru record (byte-identical mirror rows, task #1638). The stored id is
 # re-verified against live handlers so a removed sink re-registers.
-_postgres_sink_id: int | None = None
+_event_sink_id: int | None = None
 
 
 # Process-level idempotency guard. The init_* functions add
@@ -337,7 +334,7 @@ def init_gateway_process(
     from base.paths import logs_dir
 
     _add_file_sink(logs_dir() / f"{name}.log")
-    add_postgres_sink(process=name, producer=producer, machine_reader=machine_reader)
+    add_event_sink(process=name, producer=producer, machine_reader=machine_reader)
     _install_stdlib_intercept()
     # One structured `service_started` agent_event per gateway-style process
     # boot — the ops monitor panel's restart-count source. This function is
@@ -386,6 +383,6 @@ def init_cli_process(
     from base.paths import logs_dir
 
     _add_file_sink(logs_dir() / f"{name}.log")
-    add_postgres_sink(process=name, producer=producer, machine_reader=machine_reader)
+    add_event_sink(process=name, producer=producer, machine_reader=machine_reader)
     _install_stdlib_intercept()
     _init_done = True

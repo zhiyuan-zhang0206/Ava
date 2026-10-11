@@ -32,7 +32,6 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setattr(paths, "plugins_config_path", lambda: tmp_path / "plugins.json")
     # One home, read through the one seam every consumer shares. `paths.ava_home()` is
     # `AVA_HOME` plus a mkdir, and modules that did `from base.paths import
     # ava_home` (the service roster `converge_host` consults) hold their own reference that a

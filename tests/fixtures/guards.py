@@ -408,7 +408,7 @@ def _no_stdlib_telemetry_bridge() -> Iterator[None]:
 
     base/log/__init__.py's `_install_stdlib_intercept()` (called by init_gateway_process
     and friends) installs a root-logger handler that forwards stdlib records
-    into loguru, whose `_postgres_sink` turns them into telemetry 'log' events.
+    into loguru, whose `_event_sink` turns them into telemetry 'log' events.
     Any test that monkeypatches `base.telemetry.emit` and triggers a log
     record then sees the bridge's forwarded 'log' event in its captured events
     (pgbouncer healthcheck tests, fixed 2026-08-09 via #2136). Tests that

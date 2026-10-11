@@ -389,11 +389,6 @@ PROVIDER = ProviderContribution(
             ),
             media_types=frozenset({"image", "pdf"}),
         ),
-        # Removed 2026-09-23 (task #4508): claude-opus-4-8, claude-opus-4-7,
-        # claude-opus-4-6, claude-sonnet-4-6, and claude-haiku-4-5
-        # were never selectable here (implicit spawnable=False) and have no
-        # live references. Historical prices remain in
-        # base/lm/pricing/pricing_catalog_archive.json.
     },
     pricing={
         "claude-sonnet-5": PriceRates(

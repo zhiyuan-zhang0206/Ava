@@ -5,7 +5,7 @@ down from a single turn_end signal. turn_end is the LLM node boundary — you ca
 which node the process was last inside before dying: claim / before_llm / before_exec /
 exec / after_exec. `node_lifecycle` wraps each graph node with an enter + exit event,
 outcome distinguishes ok / cancelled / exception:Type, and the exception path also
-carries a traceback (via `_postgres_sink` auto-injecting record["exception"]).
+carries a traceback (via `_event_sink` auto-injecting record["exception"]).
 """
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ async def test_node_lifecycle_flushes_aggregate_at_safety_cap(loguru_records) ->
 
 async def test_node_lifecycle_emits_exception_with_traceback(loguru_records) -> None:
     """Business exception → outcome=exception:Type, exit record carries the active
-    exception so `_postgres_sink` can put traceback / exception_type into
+    exception so `_event_sink` can put traceback / exception_type into
     events.payload. This is a regression test for the PR #60 latent bug fix:
     try/except + logger.opt(exception=True) captures inside the except block;
     finally couldn't reach it."""
@@ -156,7 +156,7 @@ async def test_node_lifecycle_emits_exception_with_traceback(loguru_records) -> 
     # log at INFO; the traceback in payload keeps the exception queryable.
     assert rec["level"].name == "INFO"  # pyright: ignore[reportUnknownMemberType]
     assert rec["exception"] is not None, (
-        "logger.opt(exception=True) must attach an exception object — _postgres_sink relies on it to inject traceback"
+        "logger.opt(exception=True) must attach an exception object — _event_sink relies on it to inject traceback"
     )
     assert rec["exception"].type is RuntimeError  # pyright: ignore[reportUnknownMemberType]
     assert "simulated exec crash" in str(rec["exception"].value)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

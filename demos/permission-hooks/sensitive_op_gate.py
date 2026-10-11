@@ -244,8 +244,7 @@ class _SensitiveOpGateHook(Hook):
         message = _build_block_message(blocked, warned, code_hash)
 
         logger.info(
-            "[{label}] {body}",
-            label="sensitive-op-gate",
+            "[sensitive-op-gate] {body}",
             body=(
                 f"agent {agent_id} intercepted: "
                 f"{len(blocked)} blocked + {len(warned)} warned, "

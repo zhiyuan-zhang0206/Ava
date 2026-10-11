@@ -20,7 +20,7 @@ class _StdlibInterceptHandler(logging.Handler):
     Many services (`services/agent_runner/agent_ops/daemon.py`, `gateway/app.py`, etc.) use
     stdlib `logging.getLogger(__name__)` for historical reasons. Without
     this handler their INFO/WARNING/ERROR lines reach stderr only and never
-    reach the unified event stream that loguru's `_postgres_sink` feeds. The
+    reach the unified event stream that loguru's `_event_sink` feeds. The
     handler is installed by every `init_*` entry point below; the
     intercepted records carry whatever `extra` (e.g. agent_id) the calling
     process has bound on the loguru singleton via `logger.configure(...)`.
@@ -138,7 +138,7 @@ def _install_stdlib_intercept() -> None:
 
     Level INFO is the floor for everyone — it keeps third-party DEBUG spam
     (httpx / psycopg / urllib3) out without an extra filter, matching
-    `add_postgres_sink`'s own threshold. `_FIRST_PARTY_LOGGER_NAMES` then
+    `add_event_sink`'s own threshold. `_FIRST_PARTY_LOGGER_NAMES` then
     raises that floor back to DEBUG for our own code only, so a controller's
     or daemon's `_log.debug(...)` still reaches the file sink (which is
     itself level=DEBUG — see `_add_file_sink`) the way a native

@@ -28,7 +28,7 @@ def test_load_watermark_drops_entries_for_missing_files(
     monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)
     (tmp_path / "spans.jsonl").write_text("x\n", encoding="utf-8")
     (tmp_path / ".ship-watermark.json").write_text(
-        json.dumps({"spans.jsonl": 2, "spans-20200101-9.jsonl": 5}),
+        json.dumps({"spans.jsonl": 2, "spans-2020-01-01T00-00-00.000-size.jsonl": 5}),
         encoding="utf-8",
     )
     marks = _load_watermark()
@@ -146,7 +146,7 @@ def test_ship_dry_run_needs_no_config(
     (tmp_path / "spans.jsonl").write_text(
         _otlp_line("a") + "\n" + _otlp_line("b") + "\n", encoding="utf-8"
     )
-    (tmp_path / "spans-2026-06-16T00-00-00.000.jsonl").write_text(
+    (tmp_path / "spans-2026-06-16T00-00-00.000-size.jsonl").write_text(
         _otlp_line("c") + "\n", encoding="utf-8"
     )
     posts: list = []
@@ -437,13 +437,15 @@ def test_windowed_ship_filters_by_file_day_and_ignores_watermark(
     _enable_tempo_config(monkeypatch, command_runtime=command_runtime)
     monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)
 
-    (tmp_path / "spans-20260610-1.jsonl").write_text(_otlp_line("old") + "\n", encoding="utf-8")
-    (tmp_path / "spans-2026-06-16T03-04-05.000.jsonl").write_text(
+    (tmp_path / "spans-2026-06-10T00-00-00.000-size.jsonl").write_text(
+        _otlp_line("old") + "\n", encoding="utf-8"
+    )
+    (tmp_path / "spans-2026-06-16T03-04-05.000-size.jsonl").write_text(
         _otlp_line("new") + "\n", encoding="utf-8"
     )
     # Pre-existing watermark at EOF for the in-window file — windowed mode ignores it.
     (tmp_path / ".ship-watermark.json").write_text(
-        json.dumps({"spans-2026-06-16T03-04-05.000.jsonl": 99999}), encoding="utf-8"
+        json.dumps({"spans-2026-06-16T03-04-05.000-size.jsonl": 99999}), encoding="utf-8"
     )
 
     posts: list[bytes] = []
