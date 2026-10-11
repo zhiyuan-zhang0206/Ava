@@ -7,6 +7,7 @@ succeeded, and only `.md` files under the shared pool or the agent's own memory 
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from collections.abc import Callable, Iterator
@@ -231,21 +232,28 @@ import json
 import sys
 
 sys.path.insert(0, sys.argv[1])
-import ava
+import ava  # noqa: F401
 
 loaded_with_ava = set(sys.modules)
 import ava_builtins.plugins.ava_memory.plugin  # the exec subprocess's face of the plugin
 import ava_builtins.plugins.ava_memory.written_notes
 
-forbidden = ("httpx", "base.lm.catalog.decide", "services.", "agent.", "langchain", "langgraph")
+# Absolute: the decision call stack, services, the agent runtime and langchain/langgraph never load.
+absolute = ("base.lm.catalog.decide.call", "base.lm.catalog.decide.http", "services.", "agent.",
+            "langchain", "langgraph")
+# Relative: `import ava` itself already loads httpx (the gateway client's transport), so the
+# plugin's face may add nothing on top of that.
 added = set(sys.modules) - loaded_with_ava
-print(json.dumps(sorted(name for name in added if name.startswith(forbidden))))
+print(json.dumps({
+    "absolute": sorted(n for n in sys.modules if n.startswith(absolute)),
+    "added_httpx": sorted(n for n in added if n.startswith("httpx")),
+}))
 """
 
 
-def test_the_subprocess_face_adds_no_http_client_decision_stack_or_agent_runtime() -> None:
-    """The wraps run in the exec subprocess: loading the plugin's face on top of `import ava`
-    brings in no httpx, no decision-model code, no service and no agent-runtime module."""
+def test_the_subprocess_face_imports_no_decision_stack_agent_runtime_or_new_http_client() -> None:
+    """The wraps run in the exec subprocess: the plugin's face brings in no decision-call code, no
+    service, no agent-runtime module, and no httpx beyond what `import ava` loads."""
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
         [sys.executable, "-I", "-B", "-X", "utf8", "-c", _BOUNDARY_PROBE, str(_REPO_ROOT)],
         cwd=_REPO_ROOT,
@@ -255,4 +263,4 @@ def test_the_subprocess_face_adds_no_http_client_decision_stack_or_agent_runtime
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip().splitlines()[-1] == "[]"
+    assert json.loads(proc.stdout.strip().splitlines()[-1]) == {"absolute": [], "added_httpx": []}
