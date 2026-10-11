@@ -17,7 +17,6 @@ from uuid import uuid4
 
 import ava
 from ava.sdk_surface import process_context
-from ava.sdk_surface import settings as sdk_settings
 from base.agents import impersonation as control
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
@@ -201,8 +200,12 @@ class Attachment:
         # state fields registered — the surface-only default would silently
         # drop them (review finding, #2616).
         self._bind_borrowed_context()
-        ava.ensure_plugins_loaded(surface=False, config=config, clock_factory=self._clock_factory)
-        self._bind_catalog()
+        ava.initialize_context(
+            ava.context,
+            surface=False,
+            config=config,
+            clock_factory=self._clock_factory,
+        )
         if config is None:
             from ava.sdk_surface.settings import config_authority
 
@@ -268,11 +271,6 @@ class Attachment:
         return AvaContext(
             clients=self._own_clients, clock_factory=self._clock_factory, machine=self._machine
         )
-
-    def _bind_catalog(self) -> None:
-        """Attach the installed catalog after identity and native plugin registration."""
-        context = ava.context
-        ava.bind_context(dataclasses.replace(context, catalog=sdk_settings.model_catalog()))
 
     def admit_sdk_call(self) -> Any:
         """Snapshot this call's original gate before its body can run."""

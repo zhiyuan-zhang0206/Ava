@@ -16,6 +16,7 @@ from typing import Any
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -173,7 +174,12 @@ def context_from_description(
     )
 
 
-def launched_context() -> AvaContext | None:
+def has_launched_identity() -> bool:
+    """Inspect the launched identity channel without constructing a context."""
+    return "AVA_AGENT_ID" in os.environ  # env-ok: launched script identity channel
+
+
+def launched_context(*, config: ConfigBoot | None = None) -> AvaContext | None:
     """Construct a launched script's context from its explicit environment channel.
 
     The SDK entry rejects shared-host startup posture before calling this.
@@ -184,11 +190,13 @@ def launched_context() -> AvaContext | None:
     raw = os.environ.get("AVA_AGENT_ID")  # env-ok: launched script identity channel
     if raw is None:
         return None
-    config = ConfigBoot()
+    if config is None:
+        config = ConfigBoot()
     config.read_process_environment()
     machine = machine_from_boot(config)
     return AvaContext(
         identity=AgentIdentity(agent_id=int(raw), owns_loop=False),
         clients=process_clients(config=config, machine=machine),
         machine=machine,
+        clock_factory=lambda: Clock(clock_config_from_boot(config)),
     )

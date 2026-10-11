@@ -102,13 +102,18 @@ def test_child_installs_signal_handlers_before_reading_request(
     def fake_ensure_plugins_loaded(
         *,
         surface: bool = True,
+        context: object,
         config: object,
         clock_factory: object,
         producer: Callable[[], object],
+        machine: object,
     ) -> None:
         # Stateless request (fake_read_request: state=None) -> the surface load.
         assert surface is True
+        assert context is ava.context
         assert callable(producer)
+        assert ava.context.clock_factory is clock_factory
+        assert ava.context.machine is machine
 
     monkeypatch.setattr(exec_child, "_line_buffered_output", lambda: None)
     monkeypatch.setattr(protocol, "read_request", fake_read_request)
