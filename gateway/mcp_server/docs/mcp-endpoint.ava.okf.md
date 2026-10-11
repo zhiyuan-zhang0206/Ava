@@ -59,7 +59,7 @@ surface and result shapes are the ones external MCP clients drive.
   the full single-agent diagnostic view.
 - **Advertised contract**: `base/api_contracts/mcp_tool_contract.py` owns the
   advertised instructions, the seven tool descriptions (including the
-  `caller_protocol` / `idempotency_key` guidance on `send_message`), and message
+  `as_external_agent` / `idempotency_key` guidance on `send_message`), and message
   projection; local tool signatures still generate the input schemas.
 - **Audit**: a `_AuditMiddleware` on the MCPServer records every `tools/call`
   as a `mcp_tool_call` event with client id/name and outcome. Each argument is

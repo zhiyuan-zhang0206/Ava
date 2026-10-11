@@ -12,7 +12,6 @@ import json
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import Mock
 
 import psycopg
 import pytest
@@ -480,32 +479,32 @@ def test_flush_abandons_missing_agent(
     assert entry.abandon_detail is None
 
 
-def test_flush_abandons_caller_protocol_carrying_the_refusal_detail(
+def test_flush_delivers_a_declared_external_agent_source(
     authority: ConfigAuthority,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     publish_wake: Callable[[int, str], bool],
 ) -> None:
-    """A gate refusal keeps its stable code AND carries the readable refusal
-    text (task #4095): the record explains itself without a log dig."""
-    emit = Mock()
-    monkeypatch.setattr("base.telemetry.emit", emit)
+    """A deferred external-agent send redelivers like any other source."""
     agent_id = _agent(db_conn)
     path = _record(authority, agent_id=agent_id, source="external_agent:codex:run-42", now=_NOW)
     assert path is not None
     report = outbox.flush(pool, publish_wake, authority=authority, now=_NOW + timedelta(seconds=31))
-    assert report.abandoned == 1
-    entry = outbox._read(path)
-    assert entry is not None
-    assert entry.abandon_reason == "caller_protocol"
-    assert entry.abandon_detail is not None
-    assert entry.abandon_detail.startswith("target runtime protocol")
-    abandoned = [c for c in emit.call_args_list if c.args[1] == "delivery_outbox_abandoned"]
-    assert len(abandoned) == 1
-    attributes = abandoned[0].kwargs["attributes"]
-    assert attributes["reason"] == "caller_protocol"
-    assert attributes["detail"] == entry.abandon_detail
+    assert report.delivered == 1
+    assert db_conn.execute(
+        "SELECT source, payload FROM inbound_messages WHERE agent_id = %s", (agent_id,)
+    ).fetchall() == [
+        (
+            "external_agent:codex:run-42",
+            {
+                "caller_identity": {
+                    "kind": "external_agent",
+                    "subject": "codex",
+                    "instance": "run-42",
+                }
+            },
+        )
+    ]
 
 
 def test_flush_abandons_key_conflict_carrying_the_conflict_detail(

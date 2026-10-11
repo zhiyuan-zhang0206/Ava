@@ -190,7 +190,8 @@ def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         required=True,
         type=_validated_source,
         help="provenance of the message (required). 'user' sends as the human operator; "
-        "'shell:N' / 'watcher:N' mark a machine notice; 'schedule:N' a gateway schedule",
+        "'external_agent:NAME[:INSTANCE]' declares you as an external agent distinct from the user "
+        "(self-asserted); 'shell:N' / 'watcher:N' mark a machine notice; 'schedule:N' a gateway schedule",
     )
     agents_send_p.add_argument(
         "--tail-file",

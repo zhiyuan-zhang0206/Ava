@@ -1,4 +1,4 @@
-"""Hosted ownership as the agent layer observes it: status events, restart release, the lifecycle advertisement and the owner beat."""
+"""Hosted ownership as the agent layer observes it: status events, restart release and the owner beat."""
 
 from unittest.mock import ANY, AsyncMock
 from uuid import UUID, uuid4
@@ -33,14 +33,6 @@ def _agent(conn: psycopg.Connection) -> int:
     )
     conn.commit()
     return agent_id
-
-
-def _version(conn: psycopg.Connection, agent_id: int) -> int:
-    row = conn.execute(
-        "SELECT runtime_protocol_version FROM agents_meta WHERE id = %s", (agent_id,)
-    ).fetchone()
-    assert row is not None
-    return int(row[0])
 
 
 def _seed_managed_row(conn: psycopg.Connection, agent_id: int, owner: UUID) -> RuntimeIncarnation:
@@ -126,31 +118,6 @@ async def test_hosted_restart_releases_before_new_incarnation(
     )
     assert second is not None and second.generation != first.generation
     assert not await settle_hosted_runtime(aops_pool, first, bus=event_bus, resources=None)
-
-
-@pytest.mark.parametrize("command", ["restart", "terminate"])
-async def test_lifecycle_apply_releases_the_advertisement(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    command: str,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    """A durable lifecycle apply zeroes a granted advertisement; only settle retains it."""
-    agent_id, owner = _agent(db_conn), uuid4()
-    seeded = _seed_managed_row(db_conn, agent_id, owner)
-    first = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
-    )
-    assert first is not None and first == seeded
-    db_conn.execute(
-        "UPDATE agents_meta SET runtime_protocol_version = 1 WHERE id = %s", (agent_id,)
-    )
-    db_conn.commit()
-    insert_inbound_message(db_conn, agent_id, "", "user", command, bus=event_bus, database=database)
-    await claim_inbound_batch(aops_pool, agent_id, incarnation=first, work=None)
-    assert await apply_hosted_lifecycle(aops_pool, first, bus=event_bus, resources=None) == command
-    assert _version(db_conn, agent_id) == 0
 
 
 async def test_owner_beat_renews_a_mid_turn_row_and_the_guard_stays_green(

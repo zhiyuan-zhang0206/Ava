@@ -20,7 +20,6 @@ from psycopg.pq import TransactionStatus
 
 from base import telemetry
 from base.agents.messages.caller_identity import caller_payload
-from base.agents.messages.caller_protocol import require_caller_protocol
 from base.agents.messages.inbound_provenance import (
     InboundProvenance,
     content_sha256,
@@ -184,7 +183,6 @@ def insert_chat_inbound_in_transaction(
     """
     if db.info.transaction_status != TransactionStatus.INTRANS:
         raise RuntimeError("chat inbound writer requires an active caller-owned transaction")
-    require_caller_protocol(db, agent_id, source)
     payload = caller_payload(source, payload)
     encoded_payload = json.dumps(payload) if payload else None
     source_verified_by = provenance.source_verified_by if provenance is not None else None
