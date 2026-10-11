@@ -338,48 +338,18 @@ def _exited_process() -> OwnedProcess:
     return identity
 
 
-def test_the_sweep_reports_a_busy_session_the_crash_ended_whole(tmp_path: Path) -> None:
+def test_the_sweep_does_not_report_a_busy_session_the_crash_ended_whole(tmp_path: Path) -> None:
     """The hangup (or a reboot) ended every process of a session the ledger last saw
-    running a job: nothing is left to close, but its owner still lost that job, so the
-    session is reported; a session that was only an idle shell is not."""
+    running a job: nothing is left to close, so the sweep reports nothing and no owner
+    is told; the entry is dropped from the ledger."""
     path = tmp_path / "ledger.json"
-    busy_shell, busy_job, idle_shell = _exited_process(), _exited_process(), _exited_process()
+    busy_shell, busy_job = _exited_process(), _exited_process()
     ledger.write(
-        path,
-        [
-            closure.Target("ava-agent-1-shell-3-busy", busy_shell, (busy_shell, busy_job)),
-            closure.Target("ava-agent-1-shell-4-idle", idle_shell, (idle_shell,)),
-        ],
+        path, [closure.Target("ava-agent-1-shell-3-busy", busy_shell, (busy_shell, busy_job))]
     )
 
-    outcome = ledger.sweep(path)
-
-    assert [closed.name for closed in outcome.closed] == ["ava-agent-1-shell-3-busy"]
-    assert outcome.closed[0].shell == busy_shell
-    assert outcome.survivors == ()
+    assert ledger.sweep(path) == closure.Outcome()
     assert ledger.read(path) == []
-
-
-def test_the_sweep_never_reports_a_busy_session_whose_shell_is_still_running(
-    tmp_path: Path,
-) -> None:
-    """A recorded shell that is still its recorded process is closed by the closure, not
-    reported twice; a recycled pid under the shell's name is not that process."""
-    path = tmp_path / "ledger.json"
-    bystander = subprocess.Popen(["sleep", "300"], start_new_session=True)
-    try:
-        real = OwnedProcess.capture(psutil.Process(bystander.pid))
-        stale = OwnedProcess(
-            real.pid, real.birth - 1000.0, None if real.starttime is None else real.starttime - 1
-        )
-        ledger.write(path, [closure.Target("ava-agent-1-shell-5-recycled", stale, (stale, real))])
-
-        outcome = ledger.sweep(path)
-
-        assert [closed.name for closed in outcome.closed] == ["ava-agent-1-shell-5-recycled"]
-    finally:
-        bystander.kill()
-        bystander.wait(timeout=10)
 
 
 def test_a_crashed_service_keeps_local_evidence_without_notifying_or_replaying(

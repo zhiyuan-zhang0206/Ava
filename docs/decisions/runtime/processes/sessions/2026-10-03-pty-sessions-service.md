@@ -44,8 +44,8 @@ long-lived process is a member of the root's tree.
    live shell's identity and the members of its session last seen alive, rewritten as sessions come
    and go and every ten seconds. A crash closes the masters, which hangs up every shell; what ignored
    the hangup is closed at the next start (or by a stop that finds no service) from the ledger, each
-   process verified by birth before a signal. That sweep returns the busy sessions it closed in the
-   closure's own shape, so a later change can write their owners' notices; today it logs them.
+   process verified by birth before a signal. That sweep logs the sessions it closed; it notifies
+   no owner.
 5. A shell's base environment is the service's, minus `AVA_PROCESS_PROFILE` and `VIRTUAL_ENV`, overlaid
    by the caller's forwarded env. A variable that only the creating process held (an agent's
    `SSH_AUTH_SOCK`) no longer rides into the shell unless it is forwarded.

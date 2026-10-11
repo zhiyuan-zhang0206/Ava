@@ -78,9 +78,6 @@ def _transition_terminated_to_unclaimed_idling(
         unowned_termination,
     )
     if trigger_inbound_id is not None:
-        from base.agents.incarnation.lifecycle_acceptance import (
-            FAILED_RESTART_FOR_CURRENT_TARGET,
-        )
         from base.agents.recovery.breaker import RECOVERY_BREAKER_CLEAR
 
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
@@ -92,7 +89,6 @@ def _transition_terminated_to_unclaimed_idling(
                 "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL "
                 "WHERE id = %s AND status = %s AND {} "
                 "AND pid IS NULL AND lifecycle_command_id IS NULL "
-                "AND NOT {} "
                 "AND {} "
                 "AND EXISTS ("
                 "  SELECT 1 FROM inbound_messages m "
@@ -103,7 +99,6 @@ def _transition_terminated_to_unclaimed_idling(
                 ") RETURNING status_changed_at"
             ).format(
                 sql.SQL(_RESURRECTION_TARGET),
-                sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET),
                 sql.SQL("TRUE" if trigger_inbound_kind == "chat" else RECOVERY_BREAKER_CLEAR),
             ),
             (*base_params, trigger_inbound_id, trigger_inbound_kind),

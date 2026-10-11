@@ -47,7 +47,6 @@ __all__ = [
     "LoopbackDialUrlRefused",
     "MachineGatewayUrlMissing",
     "MachineNotRegistered",
-    "clear_stopped_marker",
     "gateway_url",
     "is_paused",
     "list_agent_runners",
@@ -550,33 +549,6 @@ def set_staging(db: Database, name: str, *, is_staging: bool) -> bool:
             (is_staging, name),
         )
         return cur.rowcount > 0
-
-
-def clear_stopped_marker(db: Database, name: str) -> bool:
-    """Clear the composed `machines` row's `stopped_at` for `name`; True if a row
-    changed.
-
-    The reconcile write for a stale stop latch. `stopped_at` on the composed row
-    means "no unit of this machine is live", and a live probe answering at that
-    row's own dial URL is direct evidence to the contrary — so the marker, not the
-    probe, is what must give way.
-
-    Only the composed row is cleared. The per-unit `machine_units.stopped_at`
-    markers are left alone on purpose: the probe proves that SOME unit answers at
-    the machine's dial URL, not which one, and blanket-clearing the unit rows would
-    resurrect the capabilities of a peer unit that really is stopped. The live
-    unit's next `register_self()` is what reconciles its own unit row; until then
-    an unrelated recompute (a peer unit stopping) may legitimately re-stamp the
-    composed row.
-    """
-    with db.write_transaction() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE machines SET stopped_at = NULL WHERE name = %s AND stopped_at IS NOT NULL",
-            (name,),
-        )
-        changed = cur.rowcount > 0
-        conn.commit()
-    return changed
 
 
 def pause(db: Database, name: str, reason: str | None = None) -> bool:

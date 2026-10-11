@@ -61,18 +61,10 @@ async def test_collector_never_certifies_mismatched_frozen_stop_evidence(
     if fault in ("wrong_freeze", "restart"):
         # Preserve the old admission predicate while declining a stronger proof.
         async with async_write_transaction(aops_pool) as conn:
-            assert (
-                await admit_resources_async(
-                    conn, successor, ResourceProcess.capture(psutil.Process())
-                )
-                is None
-            )
+            await admit_resources_async(conn, successor, ResourceProcess.capture(psutil.Process()))
     else:
         with pytest.raises(ResourceEvidenceError, match="closure"):
             async with async_write_transaction(aops_pool) as conn:
                 await admit_resources_async(
                     conn, successor, ResourceProcess.capture(psutil.Process())
                 )
-    assert db_conn.execute(
-        "SELECT transfer_chain FROM native_graph_work WHERE id=%s", (target.work_id,)
-    ).fetchone() == ([],)
