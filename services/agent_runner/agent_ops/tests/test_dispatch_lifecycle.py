@@ -50,7 +50,7 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
     status, result = await daemon._dispatch(
         "lifecycle",
         {
-            "path": "/api/agents/42/resurrect-if-pending-work-v2",
+            "path": "/api/agents/42/resurrect-if-pending-work",
             "body": {"resurrected_by": "system"},
             "trigger_inbound_id": 123,
             "trigger_inbound_kind": "chat",
@@ -65,7 +65,7 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
     assert status == "completed"
     # _dispatch serializes the lifecycle response model to a JSON dict for the wire.
     assert result == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
-    assert captured["path"] == "/api/agents/42/resurrect-if-pending-work-v2"
+    assert captured["path"] == "/api/agents/42/resurrect-if-pending-work"
     assert captured["body"] == {"resurrected_by": "system"}
     assert captured["trigger_inbound_id"] == 123
     assert captured["trigger_inbound_kind"] == "chat"
@@ -167,7 +167,7 @@ async def test_dispatch_resurrect_refusal_fails_with_its_reason(
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)
     status, result = await daemon._dispatch(
         "lifecycle",
-        {"path": "/api/agents/7/resurrect-explicit-v2", "body": {}},
+        {"path": "/api/agents/7/resurrect-explicit", "body": {}},
         active_ops={},
         workers=set(),
         pool=dispatch_pool,

@@ -51,7 +51,7 @@ def test_resurrect_brings_back_terminated_agent(
                     target_machine=original[1],
                     kind="lifecycle",
                     payload={
-                        "path": f"/api/agents/{agent_id}/resurrect-explicit-v2",
+                        "path": f"/api/agents/{agent_id}/resurrect-explicit",
                         "body": {"resurrected_by": "user", "prompt": "wake up"},
                     },
                 ),

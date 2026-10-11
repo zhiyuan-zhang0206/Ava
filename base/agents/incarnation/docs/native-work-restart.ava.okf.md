@@ -36,7 +36,7 @@ Invalid pairs return the existing `invalid_overlay` refusal. Receipt-first
 replay retains the original acceptance without revalidating changed defaults.
 
 The Gateway uses `/api/keyed/v1/agents/{agent_id}/restart-work`, forwarding the
-same scoped key through `/api/agents/{agent_id}/restart-work-v1`. It requires the
+same scoped key through `/api/agents/{agent_id}/restart-work`. It requires the
 versioned typed response and a matching actual durable receipt. Unsupported
 responses fail closed without legacy fallback. The dedicated path bypasses only
 the generic Ops response claim; it cannot free or replay arbitrary Ops claims.

@@ -112,7 +112,7 @@ async def test_ops_route_failed_status_is_still_http_200(
     status, body, _ = await daemon._ops_route(
         json.dumps(
             {
-                "kind": "spawn-launch-v2",
+                "kind": "spawn-launch",
                 "payload": {
                     "launch_attempt_id": "00000000-0000-0000-0000-000000000001",
                     "agent_id": 1,
@@ -196,7 +196,7 @@ async def test_ops_route_crash_becomes_failed_result(
     status, body, _ = await daemon._ops_route(
         json.dumps(
             {
-                "kind": "spawn-launch-v2",
+                "kind": "spawn-launch",
                 "payload": {
                     "launch_attempt_id": "00000000-0000-0000-0000-000000000001",
                     "agent_id": 1,
@@ -269,7 +269,7 @@ async def test_ops_route_semaphore_caps_concurrency(
     bodies = [
         json.dumps(
             {
-                "kind": "spawn-launch-v2",
+                "kind": "spawn-launch",
                 "payload": {
                     "launch_attempt_id": "00000000-0000-0000-0000-000000000001",
                     "agent_id": i,
@@ -459,7 +459,7 @@ async def test_ops_route_dedupes_by_envelope_key(
 
     body = json.dumps(
         {
-            "kind": "spawn-launch-v2",
+            "kind": "spawn-launch",
             "payload": {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
             "idempotency_key": "route-key",
         }
@@ -511,7 +511,7 @@ async def test_ops_route_without_key_does_not_dedupe(
 
     body = json.dumps(
         {
-            "kind": "spawn-launch-v2",
+            "kind": "spawn-launch",
             "payload": {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
         }
     ).encode()

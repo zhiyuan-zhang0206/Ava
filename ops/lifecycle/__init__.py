@@ -354,11 +354,10 @@ async def resurrect_if_terminated(
 
     Chat delivery, compact, and the delivery watchdog pass an exact
     `trigger_inbound_id` plus its expected kind. They travel on the distinct
-    internal `resurrect-if-pending-work-v2` lifecycle path so an older runner
-    rejects the unknown path (version skew fails closed), then the home runner's
+    internal `resurrect-if-pending-work` lifecycle path, then the home runner's
     final terminated -> idling UPDATE verifies that exact work is still
     pending, newer than the current termination, and above the force-intent
-    fence. Explicit manual resurrection uses `resurrect-explicit-v2`; crash and
+    fence. Explicit manual resurrection uses `resurrect-explicit`; crash and
     wedged recovery use their exact controller claims in the local runner.
 
     Returns the agent's status after the attempt: the post-resurrect status when
@@ -426,7 +425,7 @@ async def resurrect_if_terminated(
         home = await asyncio.to_thread(get_agent_machine, db, agent_id)
         try:
             lifecycle_payload: dict[str, object] = {
-                "path": f"/api/agents/{agent_id}/resurrect-if-pending-work-v2",
+                "path": f"/api/agents/{agent_id}/resurrect-if-pending-work",
                 "body": body.model_dump(),
                 "trigger_inbound_id": trigger_inbound_id,
                 "trigger_inbound_kind": trigger_inbound_kind,
@@ -620,7 +619,7 @@ async def recover_crash_marked_if_stalled(
         home = await asyncio.to_thread(get_agent_machine, db, agent_id)
         try:
             payload: dict[str, object] = {
-                "path": f"/api/agents/{agent_id}/recover-crash-marked-v2",
+                "path": f"/api/agents/{agent_id}/recover-crash-marked",
                 "body": {},
             }
             forwarded = await _cluster_rpc.dispatch_to_machine(
@@ -659,8 +658,8 @@ async def recover_crash_marked_if_stalled(
 
 _LIFECYCLE_PATH = re.compile(
     r"^/api/agents/(?P<id>\d+)/"
-    r"(?P<action>terminate|resurrect-explicit-v2|"
-    r"resurrect-if-pending-work-v2|resurrect-billing-v1|recover-crash-marked-v2|restart|restart-work-v1)$"
+    r"(?P<action>terminate|resurrect-explicit|"
+    r"resurrect-if-pending-work|resurrect-billing|recover-crash-marked|restart|restart-work)$"
 )
 
 
@@ -687,10 +686,10 @@ async def lifecycle_op(
     the appropriate per-action op. Returns the per-action response model (the
     ops server serializes it into the /ops response).
 
-    Path shapes accepted: terminate/restart plus the versioned internal
-    `resurrect-explicit-v2`, guarded `resurrect-if-pending-work-v2`,
-    billing-guarded `resurrect-billing-v1` (task #3919), and
-    `recover-crash-marked-v2` (the stalled-corpse harvest) paths.
+    Path shapes accepted: terminate/restart plus the internal
+    `resurrect-explicit`, guarded `resurrect-if-pending-work`,
+    billing-guarded `resurrect-billing` (task #3919), and
+    `recover-crash-marked` (the stalled-corpse harvest) paths.
     Anything else raises ValueError — the ops server converts that to a failed
     op result.
     """
@@ -701,11 +700,11 @@ async def lifecycle_op(
     action = m.group("action")
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
-    if action != "resurrect-if-pending-work-v2" and trigger_inbound_id is not None:
+    if action != "resurrect-if-pending-work" and trigger_inbound_id is not None:
         raise ValueError(
-            f"trigger inbound is only valid for resurrect-if-pending-work-v2, not {action!r}"
+            f"trigger inbound is only valid for resurrect-if-pending-work, not {action!r}"
         )
-    if action == "restart-work-v1":
+    if action == "restart-work":
         from ops.lifecycle.native_restart import restart_native_work_op
 
         return await restart_native_work_op(
@@ -715,11 +714,11 @@ async def lifecycle_op(
         return await terminate_agent_op(
             db, bus, agent_id, TerminateAgentRequest.model_validate(body), db_pool
         )
-    if action == "resurrect-explicit-v2":
+    if action == "resurrect-explicit":
         return await resurrect_agent_op(
             db, bus, agent_id, ResurrectAgentRequest.model_validate(body)
         )
-    if action == "resurrect-if-pending-work-v2":
+    if action == "resurrect-if-pending-work":
         request = _pending_work_resurrection_request(body, trigger_inbound_id)
         return await resurrect_agent_op(
             db,
@@ -729,11 +728,11 @@ async def lifecycle_op(
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
         )
-    if action == "resurrect-billing-v1":
+    if action == "resurrect-billing":
         from ops.lifecycle.billing_recovery import resurrect_billing_agent_op
 
         return await resurrect_billing_agent_op(db, bus, agent_id)
-    if action == "recover-crash-marked-v2":
+    if action == "recover-crash-marked":
         return await recover_crash_marked_op(db, bus, agent_id)
     if action == "restart":
         return await restart_agent_op(
@@ -747,8 +746,8 @@ def _pending_work_resurrection_request(
 ) -> ResurrectAgentRequest:
     """Keep the guarded resurrection boundary independent of action routing."""
     if trigger_inbound_id is None:
-        raise ValueError("resurrect-if-pending-work-v2 requires trigger inbound")
+        raise ValueError("resurrect-if-pending-work requires trigger inbound")
     request = ResurrectAgentRequest.model_validate(body)
     if request.resurrected_by != "system":
-        raise ValueError("resurrect-if-pending-work-v2 requires resurrected_by='system'")
+        raise ValueError("resurrect-if-pending-work requires resurrected_by='system'")
     return request

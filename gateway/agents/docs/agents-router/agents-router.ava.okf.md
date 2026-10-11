@@ -20,8 +20,8 @@ and spawn live in `router.py`; lifecycle actions live in `lifecycle.py`; message
 and state reads live in `state.py`; `forward.py` provides the cross-machine
 forwarding helpers. The billing batch-recovery entry is `POST /api/agents/resurrect-billing`
 (a read-only preview unless the body sets `execute`; orchestration in
-`ops/lifecycle/billing_recovery.py`, per-agent dispatch via the versioned
-`resurrect-billing-v1` home action). `ops/rpc_schemas/billing_recovery.py` owns
+`ops/lifecycle/billing_recovery.py`, per-agent dispatch via the
+`resurrect-billing` home action). `ops/rpc_schemas/billing_recovery.py` owns
 the distinct `BillingRecoveryHomeResult` and per-agent `BillingRecoveryOutcome` enums,
 plus run-level `BillingRecoveryMode` (`dry_run` / `execute`) and
 `BillingRecoveryRunOutcome` (`preview` / `executed` / `refused`);

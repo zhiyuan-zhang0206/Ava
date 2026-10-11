@@ -58,7 +58,7 @@ def test_a_runner_profile_process_without_a_token_fails_the_notify_instead_of_se
     assert sent == []
 
 
-def test_native_acceptance_uses_fixed_versioned_path_and_never_falls_back_on_404(
+def test_native_acceptance_uses_fixed_path_and_never_falls_back_on_404(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from base.telemetry.alerts.native import notify_alert_group
@@ -74,7 +74,7 @@ def test_native_acceptance_uses_fixed_versioned_path_and_never_falls_back_on_404
 
     monkeypatch.setattr(httpx, "post", post)
     assert notify_alert_group(7) is False
-    assert len(calls) == 1 and calls[0][0].endswith("/send/alert-outbound-v1")
+    assert len(calls) == 1 and calls[0][0].endswith("/send/alert-outbound")
     assert calls[0][1] == {"Authorization": "Bearer machine-token"}
     assert calls[0][2] == {"group_id": 7, "source_origin": "native-v1"}
 

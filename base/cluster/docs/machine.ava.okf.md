@@ -79,7 +79,7 @@ its life promising a heartbeat these tables have never had; liveness is the live
 ([why](../../../docs/decisions/runtime/processes/health/2026-07-29-liveness-is-written-by-the-live-process.md)).
 
 Cross-machine spawn is a direct dial, not a queue: after committing the row and
-first prompt, the gateway POSTs a `spawn-launch-v2` op to the target runner's ops
+first prompt, the gateway POSTs a `spawn-launch` op to the target runner's ops
 server (address read from this table), which calls
 `ops/lifecycle/__init__.py:launch_agent_op` in-process and returns the result in
 the same response. Runners run **no** local gateway process — an agent's SDK

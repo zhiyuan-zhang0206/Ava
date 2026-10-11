@@ -71,7 +71,7 @@ async def test_completed_returns_result(monkeypatch: pytest.MonkeyPatch) -> None
     result = await cluster_rpc.dispatch_to_machine(
         _db(),
         "wsl",
-        "spawn-launch-v2",
+        "spawn-launch",
         {"agent_id": 5, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"},
         retries=0,
     )
@@ -81,13 +81,13 @@ async def test_completed_returns_result(monkeypatch: pytest.MonkeyPatch) -> None
     import json
 
     body = json.loads(req.content)
-    assert body["kind"] == "spawn-launch-v2"
+    assert body["kind"] == "spawn-launch"
     assert body["payload"] == {
         "agent_id": 5,
         "launch_attempt_id": "00000000-0000-0000-0000-000000000001",
     }
     # spawn is non-idempotent: the envelope carries the auto-generated dedup key.
-    assert body["idempotency_key"].startswith("spawn-launch-v2:")
+    assert body["idempotency_key"].startswith("spawn-launch:")
 
 
 @pytest.mark.asyncio
@@ -171,7 +171,7 @@ async def test_non_probe_unreachable_stays_warning(
         caplog.at_level(logging.DEBUG, logger="ops.cluster.rpc"),
         pytest.raises(cluster_rpc.ClusterOpUnreachable),
     ):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "spawn-launch-v2", {}, retries=0)
+        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "spawn-launch", {}, retries=0)
     recs = [r for r in caplog.records if "unreachable after" in r.getMessage()]
     assert recs and all(r.levelno == logging.WARNING for r in recs)
 
@@ -407,7 +407,7 @@ async def test_non_idempotent_kind_retries_with_stable_idempotency_key(
     result = await cluster_rpc.dispatch_to_machine(
         _db(),
         "wsl",
-        "spawn-launch-v2",
+        "spawn-launch",
         {"agent_id": 5, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"},
         retries=2,
     )
@@ -416,7 +416,7 @@ async def test_non_idempotent_kind_retries_with_stable_idempotency_key(
     keys = [json.loads(req.content)["idempotency_key"] for req in captured["requests"]]
     assert len(keys) == 2
     assert keys[0] == keys[1]
-    assert keys[0].startswith("spawn-launch-v2:")
+    assert keys[0].startswith("spawn-launch:")
 
 
 @pytest.mark.asyncio
@@ -432,7 +432,7 @@ async def test_caller_supplied_idempotency_key_rides_envelope(
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),
     )
     await cluster_rpc.dispatch_to_machine(
-        _db(), "wsl", "spawn-launch-v2", {}, idempotency_key="my-logical-op-1"
+        _db(), "wsl", "spawn-launch", {}, idempotency_key="my-logical-op-1"
     )
     body = json.loads(captured["request"].content)
     assert body["idempotency_key"] == "my-logical-op-1"
@@ -457,24 +457,24 @@ async def test_spawn_launch_defaults_to_its_agent_idempotency_key(
         ("wsl", {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000002"}),
     ):
         result = await cluster_rpc.dispatch_to_machine(
-            _db(), target, "spawn-launch-v2", payload, retries=0
+            _db(), target, "spawn-launch", payload, retries=0
         )
         assert result == {"id": 42}
 
     keys = [json.loads(request.content)["idempotency_key"] for request in captured["requests"]]
     assert keys[0] == keys[1]
-    assert keys[0].startswith("spawn-launch-v2:wsl:42:")
+    assert keys[0].startswith("spawn-launch:wsl:42:")
     assert keys[2] != keys[0]
     assert keys[3] != keys[0]
 
 
-def test_versioned_launch_key_is_stable_within_attempt_and_rotates_between_attempts() -> None:
+def test_launch_key_is_stable_within_attempt_and_rotates_between_attempts() -> None:
     first = {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"}
     second = {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000002"}
-    key = cluster_rpc._default_idempotency_key("wsl", "spawn-launch-v2", first)
-    assert key == cluster_rpc._default_idempotency_key("wsl", "spawn-launch-v2", first)
-    assert key != cluster_rpc._default_idempotency_key("wsl", "spawn-launch-v2", second)
-    assert key.startswith("spawn-launch-v2:wsl:42:")
+    key = cluster_rpc._default_idempotency_key("wsl", "spawn-launch", first)
+    assert key == cluster_rpc._default_idempotency_key("wsl", "spawn-launch", first)
+    assert key != cluster_rpc._default_idempotency_key("wsl", "spawn-launch", second)
+    assert key.startswith("spawn-launch:wsl:42:")
 
 
 @pytest.mark.asyncio
@@ -565,7 +565,7 @@ async def test_cluster_op_failed_is_not_retried(monkeypatch: pytest.MonkeyPatch)
     _pin_retry(monkeypatch)
 
     with pytest.raises(cluster_rpc.ClusterOpFailed):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "spawn-launch-v2", {}, retries=3)
+        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "spawn-launch", {}, retries=3)
 
     assert len(captured["requests"]) == 1
 
@@ -581,7 +581,7 @@ async def test_malformed_response_is_not_retried(monkeypatch: pytest.MonkeyPatch
     _pin_retry(monkeypatch)
 
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="malformed response"):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "spawn-launch-v2", {}, retries=3)
+        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "spawn-launch", {}, retries=3)
 
     assert len(captured["requests"]) == 1
 
