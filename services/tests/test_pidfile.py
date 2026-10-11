@@ -16,6 +16,8 @@ import pytest
 
 from base.config import ConfigBoot
 from base.host.proc import process_cmdline
+from services import pidfile as pidfiles
+from services.agent_runner.agent_ops import boot as ops_boot
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 
@@ -51,10 +53,13 @@ def test_daemon_guard_checks_only_current_pidfile(
         monkeypatch.setattr(resources.pidfiles, "pidfile_holds_daemon", holds_daemon)
         assert resources.is_running(process_config, runtime=runtime) is False
         assert calls == [(resources.pidfile(process_config, runtime=runtime), module_name)]
+    elif module_name == "services.agent_runner.agent_ops.daemon":
+        monkeypatch.setattr(pidfiles, "pidfile_holds_daemon", holds_daemon)
+        assert ops_boot.is_running(process_config, runtime=runtime) is False
+        assert calls == [(ops_boot.pidfile(process_config, runtime=runtime), module_name)]
     else:
         monkeypatch.setattr(daemon, "pidfile_holds_daemon", holds_daemon)
         if module_name in {
-            "services.agent_runner.agent_ops.daemon",
             "ava_builtins.plugins.ava_fleet.task_maintenance.daemon",
         }:
             assert daemon._is_running() is False

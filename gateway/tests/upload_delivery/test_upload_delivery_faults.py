@@ -259,7 +259,7 @@ async def test_unknown_remote_kind_holds(
     model_catalog: ModelCatalog,
     machine_identity: MachineIdentity,
 ):
-    from services.agent_runner.agent_ops import daemon
+    from services.agent_runner.agent_ops import boot, daemon
 
     client, agent = uploaded_agent
     request = request_for(
@@ -276,7 +276,7 @@ async def test_unknown_remote_kind_holds(
         return value != "upload-receive-v1" and original(value)
 
     monkeypatch.setattr(daemon, "is_op_kind", old_kind)
-    with daemon._op_thread_pool() as executor:
+    with boot.op_thread_pool(authority=config_authority) as executor:
         status, result = await daemon._dispatch(
             "upload-receive-v1",
             request.model_dump(),
