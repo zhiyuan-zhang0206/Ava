@@ -88,6 +88,11 @@ interface Props {
   // column. One falsy convention shared with TimelineView/HeaderBar/
   // PendingStrip: undefined, never "" (audit C2).
   maxWidthCss?: string;
+  // A drafted reply shown as grey ghost text while the input is empty: it takes
+  // the placeholder's place, so typing hides it and clearing the input brings it
+  // back. ArrowRight in the empty input accepts it (fills the input, caret at the
+  // end). Owned by use-reply-suggestion; absent/null = the normal placeholder.
+  suggestion?: string | null;
 }
 
 // One image attached to the composer, before / after its silent upload.
@@ -176,7 +181,7 @@ function readSendAttempt(agentId: number): SendAttempt | null {
   }
 }
 
-export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, children, details }: Props) {
+export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, suggestion = null, children, details }: Props) {
   const t = useTranslations("common");
   const prevAgentIdRef = useRef(agentId);
   const [value, setValue] = useState(() => {
@@ -487,6 +492,15 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     setValue(`${head}${/^\s/.test(tail) ? "" : " "}${tail}`);
   };
 
+  // The suggestion is offered only while the input is truly empty, which is also
+  // exactly when the browser shows the placeholder it replaces.
+  const offeredSuggestion = value === "" && suggestion ? suggestion : null;
+  const acceptSuggestion = (text: string) => {
+    pendingCaret.current = text.length;
+    setCaret(text.length);
+    setValue(text);
+  };
+
   // Drag-and-drop + paste. Images become native attachments on this message
   // (attachImages); any other file goes to onUploadFiles (a path notification,
   // same as the paperclip button). When no image handler is wired, images fall
@@ -668,7 +682,10 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
           ref={taRef}
           data-testid="composer-input"
           aria-label={t("composerInput")}
-          placeholder={agentTerminated ? t("composerPlaceholderResurrect") : t("composerPlaceholder")}
+          placeholder={
+            offeredSuggestion ??
+            (agentTerminated ? t("composerPlaceholderResurrect") : t("composerPlaceholder"))
+          }
           value={value}
           readOnly={composerLocked}
           onChange={(e) => {
@@ -727,6 +744,24 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
                 e.preventDefault();
                 if (ac.selectActive()) return;
               }
+            }
+            // ArrowRight is otherwise unused in an empty input, so it is free to
+            // accept the ghost suggestion. The slash dropdown cannot be open here
+            // (no `/token` in an empty value), but the check keeps that explicit.
+            if (
+              e.key === "ArrowRight" &&
+              offeredSuggestion !== null &&
+              !composing &&
+              !composerLocked &&
+              !ac?.isOpen() &&
+              !e.shiftKey &&
+              !e.ctrlKey &&
+              !e.altKey &&
+              !e.metaKey
+            ) {
+              e.preventDefault();
+              acceptSuggestion(offeredSuggestion);
+              return;
             }
             if (e.key === "Enter" && !e.shiftKey && !composing) {
               e.preventDefault();

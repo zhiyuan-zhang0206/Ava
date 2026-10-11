@@ -39,6 +39,7 @@ propagate. Configured compact-history depth still bounds accessible segments.
 - [[gateway/agents/docs/control-acceptance.ava.okf.md]] — cancel and compact acceptance, separate from native application.
 - [[gateway/agents/docs/launch-retry.ava.okf.md]] — explicit native launch retry.
 - [[gateway/agents/docs/system-note.ava.okf.md]] — system-note writes.
+- [[gateway/agents/docs/reply-suggestion.ava.okf.md]] — gated, drafted reply shown in the empty composer.
 - [[gateway/agents/docs/notice-receipts.ava.okf.md]] — notice operation receipts.
 - [[gateway/agents/docs/completion-notice-digest.ava.okf.md]] — completion notice reads and digest ownership.
 - [[gateway/agents/task_assignment/docs/task-assignment.ava.okf.md]] — compound task and agent acceptance with independent launch recovery.
