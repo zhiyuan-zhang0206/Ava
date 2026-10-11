@@ -1,8 +1,7 @@
-"""Contract: the rendered LGTM configs equal the repository's deploy/lgtm provisioning files, and the native Loki limits match the container rollback config."""
+"""Contract: the rendered LGTM configs equal the repository's deploy/lgtm provisioning files, and the native Loki template ships the noise-reducing log level."""
 
 from __future__ import annotations
 
-import copy
 from pathlib import Path
 
 import pytest
@@ -203,44 +202,10 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
     _assert_rendered_provisioning(native_dir, loki="$__env{AVA_TELEMETRY_LOKI_URL}")
 
 
-def _without_loki_transport_paths(config: dict[str, object]) -> dict[str, object]:
-    """Drop the explicitly host/container-specific Loki transport paths."""
-    comparable = copy.deepcopy(config)
-    for path in (
-        ("common", "path_prefix"),
-        ("common", "storage", "filesystem", "chunks_directory"),
-        ("common", "storage", "filesystem", "rules_directory"),
-        ("compactor", "working_directory"),
-        ("server", "http_listen_address"),
-        ("server", "grpc_listen_address"),
-        ("server", "http_listen_port"),
-        ("server", "grpc_listen_port"),
-        ("common", "ring", "instance_addr"),
-        ("frontend", "address"),
-    ):
-        parent: dict[str, object] = comparable
-        for key in path[:-1]:
-            child = parent.get(key)
-            if child is None:
-                break
-            assert isinstance(child, dict)
-            parent = child
-        else:
-            parent.pop(path[-1], None)
-    if comparable.get("frontend") == {}:
-        comparable.pop("frontend")
-    return comparable
-
-
-def test_native_loki_limits_match_the_container_rollback_config() -> None:
+def test_native_loki_template_ships_the_noise_reducing_log_level() -> None:
     repo = Path(__file__).resolve().parents[3]
-    container = yaml.safe_load((repo / "deploy/lgtm/config/loki.yaml").read_text(encoding="utf-8"))
     native = yaml.safe_load(
         (repo / "deploy/lgtm/native/config/loki.yaml").read_text(encoding="utf-8")
     )
-
-    assert _without_loki_transport_paths(native) == _without_loki_transport_paths(container)
-    # Both variants must ship the noise-reducing level (task #1978): the
-    # default info writes every flush stream per chunk into the launchd log.
-    assert container["server"]["log_level"] == "warn"
+    # The default info level writes every flush stream per chunk into the service log (task #1978).
     assert native["server"]["log_level"] == "warn"

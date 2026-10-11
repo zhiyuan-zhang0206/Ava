@@ -356,30 +356,10 @@ def _budget_files(targets: list[Path], repo_root: Path) -> set[Path]:
 
 
 def _parse_baseline(
-    shards: dict[str, str], *, renames: dict[str, str] | None = None, historical: bool = False
+    shards: dict[str, str], *, renames: dict[str, str] | None = None
 ) -> dict[str, dict[str, int]]:
-    """Validate remaining site exemptions; retired budgets cannot be reintroduced.
-
-    The comparison revision may still contain empty budget or locality sections from
-    before retirement. They convey no allowance and are discarded after validation.
-    Historical patch-target counts are parsed and discarded; current fields are forbidden.
-    """
-    retired = (
-        ("directories", "files", *quality_budget.QUALITY_SECTIONS, *locality.STRICT_SECTIONS)
-        if historical
-        else ()
-    )
-    historical_patch = ("patch_targets",) if historical else ()
-    baseline = baseline_shards.merge(shards, (*_SITE_SECTIONS, *retired, *historical_patch))
-    # Immutable comparison revisions may retain old patch debt; it grants no allowance.
-    historical_entries = baseline.pop("patch_targets", {})
-    if historical_entries:
-        locality.validate_entries(
-            "patch_targets", historical_entries, (*_SCAN_DIRS, "tests", "scripts")
-        )
-    for kind in retired:
-        if baseline.pop(kind):
-            raise ValueError(f"retired {kind} baseline must be empty")
+    """Validate the remaining site exemptions; any other section is an error."""
+    baseline = baseline_shards.merge(shards, _SITE_SECTIONS)
     for kind in _SITE_SECTIONS:
         scope = ambient_state.SCOPE if kind == ambient_state.SECTION else _SCAN_DIRS
         locality.validate_entries(kind, baseline[kind], _carried_scope(scope, renames or {}))
@@ -513,14 +493,8 @@ def _baseline_guard(
         shards = baseline_shards.read_at(repo_root, base)
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         return [f"{baseline_shards.SHARD_DIR}: {exc}"]
-    if shards is None:
-        print(
-            f"note: baseline guard skipped: {base} predates {baseline_shards.SHARD_DIR}",
-            file=sys.stderr,
-        )
-        return []
     try:
-        previous = _parse_baseline(shards, renames=renames, historical=True)
+        previous = _parse_baseline(shards, renames=renames)
     except ValueError as exc:
         return [f"{baseline_shards.SHARD_DIR}: invalid base baseline ({base}): {exc}"]
     try:

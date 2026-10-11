@@ -1,9 +1,8 @@
 # Ava alerts — webhook contact point (as code, Task #1224).
 #
 # The webhook URL uses Grafana's native $__env{} expansion (same mechanism as
-# the datasources) — the value comes from the process env, which compose
-# supplies as a static loopback default and native converge renders two-state
-# on AVA_OBSERVABILITY_URL:
+# the datasources) — the value comes from the process env, which native converge
+# renders two-state on AVA_OBSERVABILITY_URL:
 #   - empty (default) -> http://127.0.0.1:8000/api/alerts — native Grafana on
 #     the same host reaches the gateway on loopback (byte-identical default).
 #   - non-empty -> http://<gateway reachable host>:8000/api/alerts — a remote
@@ -36,8 +35,7 @@
 #   reference: provisioning expands it, and the schema layer migrates the
 #   value into encrypted secureSettings in the DB, which the notifier DOES
 #   read (verified end-to-end: header on the wire, gateway 200).
-# - The value comes from the container env (AVA_ALERTS_WEBHOOK_TOKEN,
-#   injected via docker-compose from deploy/lgtm/.env — gitignored).
+# - The value comes from the Grafana process env (AVA_ALERTS_WEBHOOK_TOKEN).
 #   It must match the gateway's webhook token (AVA_ALERTS_WEBHOOK_TOKEN);
 #   the gateway accepts it both as X-Alerts-Token and as a Bearer
 #   credential (the only form the Grafana-13 notifier can send without
