@@ -3,8 +3,8 @@
 The same startup reconcile disposes rows left claimed after a hosted abort.
 Coverage includes ownership fences, idempotency and committed-row suppression.
 Committed IDs come from claim-window message writes; normal paths do not read
-settled checkpoints. Unresolved windows and threads without writes retain their
-explicit fallback behavior.
+settled checkpoints. Interrupted claims are consumed even without commit proof,
+so an abort cannot cause execution to replay.
 """
 
 from __future__ import annotations
@@ -119,9 +119,7 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
 ) -> None:
-    """The abort settlement's reconcile finalizes the turn's rows at once:
-    committed to the flushed checkpoint -> done, fresh orphans -> pending for
-    the next claim, rows past the stale threshold -> dead-lettered."""
+    """Abort settlement consumes committed, orphaned and stale claims."""
     incarnation = await _admit(
         aops_pool, model_catalog=model_catalog, config_authority=config_authority
     )
@@ -248,15 +246,13 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
     assert [r["extra"]["reason"] for r in skips] == ["ownership_lost"]
 
 
-async def test_next_claim_does_not_re_deliver_the_committed_row(
+async def test_next_claim_does_not_re_deliver_any_interrupted_row(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
 ) -> None:
-    """At-least-once delivery still permits duplicates, but a row the
-    checkpoint committed is not re-delivered by the next claim cycle — only
-    the uncommitted orphan is."""
+    """Neither committed input nor an unproven orphan is retried after abort."""
     incarnation = await _admit(
         aops_pool, model_catalog=model_catalog, config_authority=config_authority
     )
@@ -270,8 +266,8 @@ async def test_next_claim_does_not_re_deliver_the_committed_row(
     )
     claimed = await claim_inbound_batch(aops_pool, agent, incarnation=incarnation, work=None)
 
-    assert [c.id for c in claimed] == [orphan]
-    assert _statuses(db_conn, [committed]) == {committed: "done"}
+    assert claimed == []
+    assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
 
 
 async def _seed_counting_checkpoint(
@@ -475,13 +471,13 @@ async def test_committed_and_later_removed_is_finalized_not_reset(
     assert _statuses(db_conn, [committed]) == {committed: "done"}
 
 
-async def test_pending_write_without_successor_is_reset(
+async def test_pending_write_without_successor_is_consumed(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
 ) -> None:
-    """A durable pending write alone is not a settled message commit."""
+    """A pending write cannot prove a commit or authorize execution replay."""
     incarnation = await _admit(
         aops_pool, model_catalog=model_catalog, config_authority=config_authority
     )
@@ -511,16 +507,16 @@ async def test_pending_write_without_successor_is_reset(
         inputs=configured_policy().reconcile_inputs,
     )
 
-    assert _statuses(db_conn, [claimed]) == {claimed: "pending"}
+    assert _statuses(db_conn, [claimed]) == {claimed: "done"}
 
 
-async def test_pending_write_with_unrelated_successor_is_reset(
+async def test_pending_write_with_unrelated_successor_is_consumed(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
 ) -> None:
-    """A child checkpoint that did not advance messages cannot commit a write."""
+    """An unrelated successor cannot authorize replay of an interrupted claim."""
     incarnation = await _admit(
         aops_pool, model_catalog=model_catalog, config_authority=config_authority
     )
@@ -550,7 +546,7 @@ async def test_pending_write_with_unrelated_successor_is_reset(
         inputs=configured_policy().reconcile_inputs,
     )
 
-    assert _statuses(db_conn, [claimed]) == {claimed: "pending"}
+    assert _statuses(db_conn, [claimed]) == {claimed: "done"}
 
 
 async def test_unresolved_window_falls_back_to_the_full_read(
