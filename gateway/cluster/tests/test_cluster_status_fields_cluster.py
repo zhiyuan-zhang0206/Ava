@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import pytest
@@ -333,8 +334,8 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(
 
     monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
 
-    def paused(_db: Database, *, local_machine: MachineIdentity) -> bool:
-        assert local_machine is machine_identity
+    def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
+        assert machine_name == machine_identity.name
         return True
 
     monkeypatch.setattr(status_mod, "cluster_is_paused", paused)
@@ -376,8 +377,8 @@ def test_gather_returns_rows_sorted_by_name(
     address-less row is reported offline without a dial; the roster comes back
     ordered by machine name whatever order the table gave."""
 
-    def paused(_db: Database, *, local_machine: MachineIdentity) -> bool:
-        assert local_machine is machine_identity
+    def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
+        assert machine_name == machine_identity.name
         return False
 
     monkeypatch.setattr(status_mod, "cluster_is_paused", paused)

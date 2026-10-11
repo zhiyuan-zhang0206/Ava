@@ -89,8 +89,8 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
         calls.append("schema-check")
         return 0
 
-    def adopt(*, database_factory: Callable[[], Any], machine: MachineIdentity) -> None:
-        assert isinstance(machine, MachineIdentity)
+    def adopt(*, database_factory: Callable[[], Any], machine_name: Callable[[], str]) -> None:
+        assert callable(machine_name)
         calls.append("adopt")
 
     def record_materialize(*, database_factory: Callable[[], Any]) -> None:
@@ -207,6 +207,6 @@ def test_standalone_converge_adopts_too() -> None:
     from cli.commands.converge.host import cmd_converge
 
     assert (
-        "adopt_local_extensions(database_factory=database_factory, machine=command.machine)"
+        "adopt_local_extensions(database_factory=database_factory, machine_name=command.machine.name)"
         in inspect.getsource(cmd_converge)
     )
