@@ -21,8 +21,7 @@ from base.packages.plugins.config_registration import (
     InvalidConfigOverlay,
     config_from_image,
     disk_image_path,
-    read_authority_config,
-    reconcile_config_image,
+    read_config_image,
 )
 
 
@@ -83,7 +82,7 @@ def plugin_metadata() -> list[ConfigFieldMeta]:
         names = [name for name, assigned in fields.items() if assigned.name == owner.name]
         if not names:
             continue
-        config = read_authority_config(owner.name, owner.cls, owner.path)
+        config = read_config_image(owner.cls, owner.path)
         for name in names:
             info = owner.cls.model_fields[name]
             extra = schema_extra(info)
@@ -118,7 +117,7 @@ def plugin_overrides() -> dict[str, object]:
     for owner in config_owners().values():
         if not owner.path.exists():
             continue
-        data = read_authority_config(owner.name, owner.cls, owner.path).model_dump(mode="json")
+        data = read_config_image(owner.cls, owner.path).model_dump(mode="json")
         values.update(
             {
                 name: value
@@ -157,50 +156,3 @@ def write_plugin_patch(
     except ValidationError as exc:
         raise InvalidConfigOverlay(str(exc)) from exc
     write_config_image(owner, candidate, expected_digest=captured_digest)
-
-
-def import_legacy_config(owner: PluginConfigOwner) -> bool:
-    """Import declared old env inputs once, preserving conflicts and retryability.
-
-    Reconcile the schema in memory before interpreting legacy inputs. Explicit
-    current image fields remain authority; missing fields may adopt legacy
-    values instead of the schema's new defaults. Commit the complete candidate
-    once. Removing the old aliases is a separate owned write;
-    failure leaves the imported image and legacy values available for a same-value
-    retry. No multi-file transaction is promised.
-    """
-    from base.config import schema_extra
-    from base.host.env import runtime_config
-    from base.host.env.bootstrap import consume_legacy_plugin_env, legacy_plugin_config_values
-    from base.host.env.dotenv_file import remove_env
-
-    aliases = {
-        schema_extra(info)["env_var"]: name
-        for name, info in owner.cls.model_fields.items()
-        if "env_var" in schema_extra(info)
-    }
-    legacy = legacy_plugin_config_values(tuple(aliases))
-    if not legacy:
-        return False
-    captured = owner.path.read_text() if owner.path.exists() else None
-    current, added, _removed = reconcile_config_image(owner.cls, captured, owner.path)
-    updates = {aliases[alias]: value for alias, value in legacy.items()}
-    imported = owner.cls.model_validate({**current.model_dump(), **updates})
-    if captured is not None:
-        conflicts = [
-            name
-            for name in updates
-            if name not in added and getattr(current, name) != getattr(imported, name)
-        ]
-        if conflicts:
-            raise ValueError(
-                f"plugin {owner.name!r} image conflicts with legacy env fields {sorted(conflicts)}"
-            )
-    write_config_image(
-        owner,
-        imported,
-        expected_digest=image_revision(captured.encode() if captured is not None else None),
-    )
-    remove_env(runtime_config.env_file_path(), set(legacy), expected_values=legacy)
-    consume_legacy_plugin_env(legacy)
-    return True

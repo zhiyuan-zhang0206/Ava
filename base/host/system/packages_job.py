@@ -99,8 +99,7 @@ def _unregister_macos() -> int:
 def _register_linux(*, tick_reader: Callable[[], int]) -> int:
     """Replace the refresh line in the user crontab.
 
-    Lines are matched by the marker as a substring, so a line an older version
-    wrote with a per-home suffix after the marker is replaced in place.
+    Lines are matched by the marker as a substring.
     """
     missing_rc = base.host.system.cron.require_crontab(
         "  * packages refresh: crontab not installed; the recurring refresh "

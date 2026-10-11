@@ -6,8 +6,8 @@
 On Linux, WSL2 may step `/proc/stat`'s `btime`, which makes psutil's epoch
 `create_time()` drift for a still-live pid. `starttime` records `/proc/<pid>/stat`
 field 22 instead: clock ticks since boot are monotonic and therefore the stable
-process identity when available; `create_time` remains for legacy
-records.
+process identity when available; `create_time` is the identity where
+`/proc` is unavailable (macOS).
 """
 
 from __future__ import annotations
@@ -41,12 +41,12 @@ class SessionRecord:
     """A launched background session's identity + provenance.
 
     `pid` + `starttime` are the liveness key on Linux; `create_time` is the
-    compatibility fallback for legacy records. A matching process
+    fallback where `/proc` is unavailable. A matching process
     start-time defeats pid recycling. `cmd` / `cwd` / `started_at` are diagnostic
     provenance. `generation` is the admitting allocation/runtime generation:
     PTYs use their allocation, admitted agent records their runtime incarnation.
     It is a derived observation, not permission to claim work or signal a PID.
-    Legacy and other service records leave it null.
+    Other service records leave it null.
     """
 
     pid: int
@@ -61,7 +61,7 @@ class SessionRecord:
     # setsid pgid). The durable ownership proof for a leader that already died:
     # while the group is occupied, its surviving members are still this
     # session's descendants and a stop may converge them instead of silently
-    # losing them. None on legacy records.
+    # losing them. None when no group was captured.
     pgid: int | None = None
 
     @classmethod
@@ -96,9 +96,9 @@ class SessionRecord:
     def identifies(self, pid: int) -> bool | None:
         """Whether `pid` is this record's process by its stable Linux identity.
 
-        False proves the pid is another process; None means a legacy
-        record or an unavailable `/proc` reading, whose callers fall back to
-        `create_time` where that compatibility behavior is required.
+        False proves the pid is another process; None means a record without
+        `starttime` or an unavailable `/proc` reading, whose callers fall back
+        to `create_time`.
         """
         if pid != self.pid:
             return False
