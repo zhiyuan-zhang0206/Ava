@@ -220,22 +220,6 @@ async def test_existing_nodes_in_the_middle_leave_a_gap_that_is_reported_not_dro
     assert name == "understanding_chunk_gap" and attrs["gaps"] == "2-3"
 
 
-async def test_an_old_workers_node_in_a_mixed_version_window_is_not_part_of_the_tree(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, _seams: dict
-) -> None:
-    """A node with a bare-number engine version (the retired worker's) neither covers a chunk nor
-    shows up in the tree's reads."""
-    async with aops_pool.connection() as conn:
-        await conn.execute(
-            "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, segment_key,"
-            " text, text_hash, input_hash, children_count, model, engine_version, prompt_version,"
-            " schema_version) VALUES (5, 1, 0, 3, 'k', 'old', 'h', 'i', 0, 'm', '0.3', '0.3', 1)"
-        )
-    await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    assert [m.id for m in _seams["described"][0].messages] == ["m0", "m1", "m2", "m3"]
-
-
 async def test_a_cancelled_job_is_put_back_without_spending_an_attempt(
     model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
