@@ -36,8 +36,7 @@ schemas are `gateway/cluster/schemas.py`.
 | `llm` | `llm_usage` rows (calls, tokens, latency sum, exact p50/p95/max of `latency_ms`) + LLM error-family events | latency + throughput + error rate per bucket |
 | `restarts` | `agent_restarted` + `service_started` (row counts + grouped breakdowns; agent labels from the `agents` registry) | which processes restarted, when, how often |
 
-Counts and sums are exact; p50/p95 are exact percentiles over the rows of the bucket (the
-retired Prometheus reader approximated them from a latency histogram).
+Counts and sums are exact; p50/p95 are exact percentiles over the rows of the bucket.
 
 Instrumentation points (collection layer, all on the existing loguru →
 unified emitter (`base/telemetry/emitter.py`) → OTLP export, zero schema change):

@@ -549,13 +549,11 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     1. Normalize AVA_DB_URL's port: the pooler listener (the record's `pgbouncer` port)
        when the toggle is on, the direct Postgres port (the record's `postgres` port)
        when off. Only a URL currently carrying the OTHER port of this cluster is
-       rewritten — the pre-cutover 5433 (direct) value becomes 6433 (pooler) on
-       an enabled cluster, and a kill-switch flip back is equally one line; an
+       rewritten — the direct value becomes the pooler port on an enabled
+       cluster, and a kill-switch flip back is equally one line; an
        operator stand-in URL naming neither port is left untouched. Fresh births
        already carry the toggle-matched port from derive_env.
-    2. Drop the retired AVA_PGBOUNCER_PORT key from .env — the pooler port is a
-       registry fact only (data-plane bring-up + admin plane), never an env key.
-    3. When the pooler is enabled but the binary is missing, warn with the exact
+    2. When the pooler is enabled but the binary is missing, warn with the exact
        install command; the data-plane bring-up then fail-fasts on the same
        condition, so a deliberately-enabled pooler never silently degrades to
        direct. The install itself lives in the provision scripts
@@ -565,7 +563,7 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
 
     from base.cluster import get_record
     from base.config import settings
-    from base.host.env.dotenv_file import remove_env, upsert_env
+    from base.host.env.dotenv_file import upsert_env
 
     if settings.data_plane.is_remote:
         # The pooler is a local-instance component; a remote/SaaS plane's URL
@@ -585,7 +583,6 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     )
     if normalized:
         upsert_env(env_path, {"AVA_DB_URL": normalized}, audit_site="converge_pgbouncer")
-    remove_env(env_path, {"AVA_PGBOUNCER_PORT"}, audit_site="converge_pgbouncer")
     if not settings.data_plane.pgbouncer_enabled:
         return
     binary = pgbouncer_bin()

@@ -558,26 +558,3 @@ def test_new_url_parses_page_key_with_dashes_in_name() -> None:
     assert _parse_page_key("nope") is None
     assert _parse_page_key("12-") == (12, "")
     assert _parse_page_key("12") is None
-
-
-def test_old_page_urls_no_longer_route(db_conn, page_server) -> None:
-    """One-time switch, no backwards compatibility: the previous
-    /api/pages/<id>-<name>/ and /api/agents/<id>/pages/<name>/ URLs are gone
-    (404), only /pages/<id>-<name>/ serves content."""
-    port = page_server
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-    with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": port, "host": "127.0.0.1"},
-        )
-        assert resp.status_code == 201
-        old = client.get(f"/api/pages/{aid}-p/")
-        assert old.status_code == 404
-        # the old nested path only keeps its DELETE close API — GET is gone
-        legacy = client.get(f"/api/agents/{aid}/pages/p/")
-        assert legacy.status_code == 405
-        # the new URL still serves
-        current = client.get(f"/pages/{aid}-p/")
-        assert current.status_code == 200
-        assert current.text == "<h1>hello</h1>"

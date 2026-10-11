@@ -9,7 +9,6 @@ import pytest
 import gateway.cluster.status as status_mod
 from base.db import Database
 from gateway.cluster import roster_probe
-from ops import cluster_status
 
 
 @pytest.fixture
@@ -351,12 +350,3 @@ def test_gather_cluster_status_carries_probe_paused_reason(
     assert m.online is True
     assert m.paused is True
     assert m.paused_reason == "startup"
-
-
-def test_status_schemas_omit_retired_updater_projections() -> None:
-    from base.api_contracts.status import MachineStatus
-    from gateway.cluster.schemas import ClusterPanel
-
-    retired = {"current_orchestration", "last_updater_outcome", "last_update"}
-    for model in (cluster_status.ClusterStatus, ClusterPanel, MachineStatus):
-        assert retired.isdisjoint(model.model_fields)

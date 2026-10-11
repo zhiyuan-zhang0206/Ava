@@ -192,7 +192,7 @@ def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
     if facts["dirty"] != "0":
         reasons.append(f"{alias}: $HOME/.ava/source has uncommitted changes")
     if facts["hook"] == "yes":
-        reasons.append(f"{alias}: a post-checkout hook (legacy guard recurses); move it aside")
+        reasons.append(f"{alias}: a post-checkout hook (the guard recurses); move it aside")
     if facts["active"] == "yes":
         reasons.append(f"{alias}: $HOME/.ava/updates/active names an unfinished release operation")
     # A completed, failure-free stop is what an interrupted `down` leaves; rerunning is fine.

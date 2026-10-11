@@ -12,9 +12,8 @@ from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 # Deliberately NOT in __all_for_ava__ (importable, but out of the rendered SDK
 # docs): AgentRestart / AgentTermination are framework control-flow exceptions
 # raised on the success path of restart() / terminate() — the agent never
-# catches them; InvalidConfigOverlay / UpdateError / UpdateTriggerFailed /
-# NothingToUpdate are rare outcomes whose traceback explains itself when one
-# fires.
+# catches them; InvalidConfigOverlay is a rare outcome whose traceback
+# explains itself when one fires.
 __all_for_ava__ = [
     "AGENT_ID",
     "MACHINE_SPEC",
@@ -24,7 +23,6 @@ __all_for_ava__ = [
     "pause_heartbeat",
     "restart",
     "terminate",
-    "update",
 ]
 
 # AGENT_ID is the agent-facing read of this process's identity. The canonical
@@ -105,27 +103,9 @@ def __getattr__(name: str) -> object:
 # caller actually accesses InvalidConfigOverlay.
 
 
-# ── update() Exception hierarchy ───────────────────────────────────────────
-
-
-class UpdateError(Exception): ...
-
-
-class UpdateTriggerFailed(UpdateError):  # noqa: N818
-    """The update could not be started. Nothing has changed; safe to retry."""
-
-
-class NothingToUpdate(UpdateError):  # noqa: N818
-    """Everyone is already on the latest code; there is nothing to update.
-
-    This is not a failure: no one was restarted, and retrying will not help
-    until newer code exists. Stop here rather than calling update() again.
-    """
-
-
 def _publish_self_inbound_wake() -> None:
     """Best-effort Redis wake for a self-inserted inbound (restart / terminate /
-    compact / update), over the agent's own SDK redis handle (`ava.REDIS`).
+    compact), over the agent's own SDK redis handle (`ava.REDIS`).
 
     Same contract as `base.db.publish_inbound_wake`: never raises (the claim
     loop's SELECT recheck delivers the row regardless), but a `NoPermissionError`
@@ -353,12 +333,3 @@ def compact(summary: str) -> NoReturn:
     # but ensures cross-process scenarios also receive the wake).
     _publish_self_inbound_wake()
     raise SystemHalt
-
-
-def update() -> NoReturn:
-    """Removed — updating the machines is an operator action (the operator runs
-    `python -m cli.fleet_update`); calling this raises `RuntimeError`."""
-    raise RuntimeError(
-        "ava.self.update() has been removed; a cluster update is an operator action: "
-        "run `python -m cli.fleet_update` from the operator's terminal."
-    )

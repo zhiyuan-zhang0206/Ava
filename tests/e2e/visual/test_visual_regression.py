@@ -214,7 +214,6 @@ def test_plugin_quota_rows_wrap_inside_statistics_popover(
                 "errors": 0,
                 "alert_classes_active": 0,
                 "alert_classes_dismissed": 0,
-                "total_events": 0,
                 "plugin_stats": [
                     {
                         **row,

@@ -15,9 +15,9 @@ THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
 def test_codex_requires_a_control_endpoint_without_queueing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from base.agents.impersonation import host_transport as codex_app_server
+    from base.agents.impersonation import host_transport
 
-    monkeypatch.setattr(codex_app_server, "default_control_endpoint", lambda: None)
+    monkeypatch.setattr(host_transport, "default_control_endpoint", lambda: None)
     with pytest.raises(RuntimeError, match=r"Steer.*--codex-remote"):
         adapters.resolve_adapter("codex", str(THREAD_ID))
 
@@ -47,7 +47,7 @@ def test_codex_refusal_never_falls_back_to_pending(
 def test_codex_emitter_delivers_literal_input_to_the_owning_server(
     monkeypatch: pytest.MonkeyPatch, explicit: bool
 ) -> None:
-    from base.agents.impersonation import host_transport as codex_app_server
+    from base.agents.impersonation import host_transport
 
     attempts: list[tuple[str, str, str]] = []
     endpoint = "unix:///tmp/ava-codex.sock"
@@ -56,7 +56,7 @@ def test_codex_emitter_delivers_literal_input_to_the_owning_server(
     def delivered_live(thread_id: str, text: str, *, endpoint: str) -> None:
         attempts.append((thread_id, text, endpoint))
 
-    monkeypatch.setattr(codex_app_server, "default_control_endpoint", lambda: endpoint)
+    monkeypatch.setattr(host_transport, "default_control_endpoint", lambda: endpoint)
     monkeypatch.setattr(adapters, "live_submit", delivered_live)
     adapters.resolve_adapter(
         "codex", str(THREAD_ID), codex_remote=endpoint if explicit else None

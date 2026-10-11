@@ -46,7 +46,7 @@ Claims, effects and response writes are separate commits. Exceptions, cancellati
 and result-write failures retain the pending claim; duplicates wait within a
 bounded budget, then report an uncertain outcome that requires inspection. The
 record is not a transactionally committed business receipt. Ops records are not
-TTL-pruned or stolen by HTTP response-cache claims; retiring an old command must
+TTL-pruned; retiring an old command must
 wait for domain-owned recovery and expiry rules. Inspect request_hash, original
 pending payload, op_status and completed_at in api_idempotency before recovery.
 No change here authorizes redispatch with a new key after an uncertain effect.

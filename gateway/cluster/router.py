@@ -41,6 +41,7 @@ from ops.cluster import rpc as _cluster_rpc
 from ops.cluster.pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
+from ops.rpc_schemas import OpKind
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -101,7 +102,7 @@ async def _roster_statuses(
 
 
 async def _dispatch_op(
-    db: Database, target: str, kind: _cluster_rpc.OpKind, payload: dict[str, Any]
+    db: Database, target: str, kind: OpKind, payload: dict[str, Any]
 ) -> dict[str, Any]:
     """POST one op to `target`'s ops server, mapping transport outcomes to HTTP.
 
@@ -202,15 +203,11 @@ async def get_cluster_roster(
 
 
 # --- Admin ops (token-only ops, ssh-free) -------------------------------------
-# Replaces what used to require SSH to the gateway host:
-#   - Reading service logs: query the `events` PG table directly. Daemons
-#     route stdlib logging through loguru's PG sink (see base/log/__init__.py's
-#     `_StdlibInterceptHandler` + `_postgres_sink`), so every INFO+ line from
-#     gateway / scheduler / labeler / agent-host / watchdog / memory-
-#     indexer lands here. agent processes also write here.
+#   - Reading service logs: the unified event stream (`telemetry_events`)
+#     holds every INFO+ line from gateway / scheduler / labeler / agent-host /
+#     watchdog / memory-indexer and the agent processes.
 #   - Cleaning up a stale machines row after a host is decommissioned or
-#     renamed (e.g. `laminar`→`cloud` 2026-05-25): a one-shot DELETE endpoint
-#     replaces hand-running `psql` on the gateway host.
+#     renamed: a one-shot DELETE endpoint.
 # Both endpoints bypass the paused-host 503 (so they keep working during an `ava
 # update` window). The gateway is unauthenticated (the private network is the boundary).
 

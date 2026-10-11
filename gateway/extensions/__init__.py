@@ -9,6 +9,6 @@ Package door — no imports, no re-exports; each router module is mounted in
   - `inventory.py`        — `GET|PUT /api/inventory`
   - `plugin_ui.py`        — `GET /api/plugin-ui/{plugin}/{path}`
   - `ui_contributions.py` — `GET /api/ui/contributions`
-  - `packages.py`         — `POST /api/packages/draft`
+  - `packages.py`         — `POST /api/keyed/v1/packages/draft`
   - `schemas.py`          — the surfaces' wire models
 """

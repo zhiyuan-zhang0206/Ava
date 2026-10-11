@@ -26,9 +26,8 @@ can remain available during an application-root transition. The macOS helper
 is root's platform parent, not an application service. Read-only extra checks
 live in the root diagnostic roster; they never acquire service ownership.
 ``cli.commands._repo`` re-exports ``ServiceSpec`` / ``build_services`` /
-``services_for_capabilities`` under their historical names as a cli-facing façade
-(so existing `from cli.commands._repo import ...` call sites keep working), but the
-definitions live in ``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``.
+``services_for_capabilities`` as a cli-facing façade; the definitions live in
+``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``.
 """
 
 from __future__ import annotations
@@ -358,11 +357,10 @@ class Spec:
         return services_for_capabilities_annotated(self.roles)
 
 
-# Compatibility re-export: legacy importers (`from ops.spec import
-# build_services`, tests) take the canonical roster from this module.
+# The canonical roster, used by ``services_for_capabilities_annotated`` above.
 # Placed at the BOTTOM deliberately: roster's build_services calls back into
 # this module's helpers (plugin_services /
 # _assert_unique_sessions) lazily, so this edge must not run while this module
 # is partially initialized (spec → roster at the top would be a load-time
 # edge in the opposite direction of the call-time edge — keep both lazy).
-from ops.roster import build_services as build_services  # noqa: E402 — deliberate bottom re-export
+from ops.roster import build_services  # noqa: E402 — deliberate bottom import

@@ -52,10 +52,10 @@ legacy server can ignore an unknown header. This change does not introduce
 new capability negotiation or activate new client scopes.
 
 Chat `inbound_messages` rows already own acceptance and pending processing;
-do not put another queue in front of them. `api_idempotency` is a legacy
-response cache with an execution/store crash window, not a business receipt.
-New `AT_LEAST_ONCE_WITH_KEY` declarations require transactional ownership;
-contract tests enforce this boundary.
+do not put another queue in front of them. No HTTP route uses a generic response
+cache: every `AT_LEAST_ONCE_WITH_KEY` handler owns its key in the same
+transaction as its business effect. `api_idempotency` holds agent-ops dispatch
+receipts only.
 
 ## Retry consumers
 
@@ -96,8 +96,7 @@ or delete pending records. Make pending and failed work inspectable.
 Retain receipts while delivery is pending and for the supported retry horizon.
 Never expire pending identities into fresh operations. A domain that prunes
 receipts must define an explicit expired-ID rejection/recovery policy before
-claiming retry safety; the generic response-cache seven-day TTL is not that
-policy. Domain workers own crash-window and concurrency tests.
+claiming retry safety. Domain workers own crash-window and concurrency tests.
 
 ## Write-surface inventory
 

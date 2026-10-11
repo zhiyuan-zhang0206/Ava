@@ -23,11 +23,9 @@ to `gateway/schedules/runner.py`: actor binding and plugin loading. The engine
 materializes the script, binds its actor, then opens the run-history row. SDK
 policy readers retain their normal live read timing; the gateway HTTP process
 does not construct this schedule SDK owner. The manager launches the new entrypoint
-for every new session. The retired `gateway.schedules.runner` CLI exits 1 with
-the replacement command; existing schedule processes keep their original code.
-The manager still recognizes their recorded revision and adopts matching live
-sessions without reaping or replaying them. An old manager must be replaced before
-launching new sessions from a checkout that has retired its old runner command.
+for every new session. Existing schedule processes keep their original code;
+the manager recognizes their recorded revision and adopts matching live
+sessions without reaping or replaying them.
 
 The guard starts before plugin loading. Script completion closes stall admission
 under the same lock used to claim a real stall, wakes the guard, and joins its

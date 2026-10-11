@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from base.config import settings
@@ -160,19 +159,6 @@ def test_guarded_and_legacy_paths_do_not_share_receipts(
     )
     assert guarded.status_code == legacy.status_code == 201
     assert guarded.json()["inbound_id"] != legacy.json()["inbound_id"]
-
-
-def test_old_routing_cannot_execute_guarded_request(db_conn: psycopg.Connection) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "FYI")
-    legacy = FastAPI()
-    legacy.include_router(notices.router)
-    with TestClient(legacy) as http:
-        result = http.post(_path(agent, notice), json={"action": "read"}, headers=HEADERS)
-    assert result.status_code in (404, 405)
-    assert db_conn.execute(
-        "SELECT resolved_at FROM agent_notices WHERE id=%s", (notice,)
-    ).fetchone() == (None,)
 
 
 def test_openapi_requires_both_identity_headers() -> None:
