@@ -11,7 +11,7 @@ itself, not a point fix, plus a full-tree lifecycle end-state; the three-step
 skeleton came the same day at 16:08. Draft-1 went through #1818 fact
 verification (today every chain root is detached) and #405 review; the user
 ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
-[`future/infra/lifecycle/lifecycle-final-state.md`](../../../../../future/infra/lifecycle/lifecycle-final-state.md).
+`future/infra/lifecycle/lifecycle-final-state.md` (since removed).
 
 ## Decision
 

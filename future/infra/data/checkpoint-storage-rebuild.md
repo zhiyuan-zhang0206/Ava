@@ -1,4 +1,4 @@
-# Checkpoint storage rebuild — delta-channel model + cutover plan
+# Checkpoint storage rebuild — delta-channel model
 
 Date: 2026-09-11 (revised 2026-09-14)
 Author: #6095 (checkpoint-storage-design, tasks #3097/#3181)
@@ -35,10 +35,8 @@ append-style delta storage, keep everything, and fold at read time.**
 - **Read model — fold at read time.** A read-compat layer (`base/agents/history/delta_read_compat.py`
   plus saver-level injection) folds delta threads transparently, so every reader keeps
   working across the transition (PR #2321, deployed to every machine).
-- **Cutover — reader-first and gated.** The read-compat layer is live everywhere before the
-  write model switches; machines switch in batches under a user-supervised window, each
-  batch verified against content fingerprints, with a materialize-and-rollback plan ready
-  (Section 5).
+- **Rollout — reader-first.** The read-compat layer went live everywhere before the write
+  model switched, so readers spanned both shapes throughout (Section 5).
 - **Rejected alternatives (Section 3.5):** T1 payload externalization; size caps and image
   downscaling; periodic materialization. The T1 analysis that still matters is kept
   (Section 3.2); its detail chapter was removed (Section 4).
@@ -177,8 +175,7 @@ enforced on delta writes too, so the delta log's invariants are guarded rather t
 
 Threads over 16 MiB at the 9/11 read (max blob `octet_length`): **6093 = 25.7 MiB (live),
 6089 = 23.3 MiB (dormant)**, 6041 = 9.6 MiB (watch band). With no cap they stay writable —
-slowly, across the network — until the write switch moves `messages` to delta
-(Section 6).
+slowly, across the network — until `messages` moved to delta.
 
 ## 2. Failure anatomy
 
@@ -338,8 +335,7 @@ folding as the read model.
   not need. The model analysis is retained in Section 3.2; the detailed design chapter is
   removed (Section 4 keeps the record).
 - **Size caps / image downscaling.** User-ruled out (task #3139; Section 1.5).
-- **Periodic materialization.** Rejected as a standing mechanism; one-shot materialization
-  remains a cutover / rollback tool (Section 5).
+- **Periodic materialization.** Rejected as a standing mechanism.
 - **A fully custom `BaseCheckpointSaver`.** Not chosen (the repo's "don't reinvent
   LangGraph" principle); retained as a documented fallback (Section 3.3).
 
@@ -356,82 +352,47 @@ re-decision chose the delta model instead (Section 3.5). The detailed design —
 and refs schema, extraction rules, saver-layer audit, expand-contract backfill — has been
 removed. Section 3.2 keeps the model analysis; nothing from T1 ships.
 
-## 5. Cutover plan — read-compat first, then the write switch
+## 5. Reader-first rollout (landed)
 
 No schema change: the delta model writes the same three tables through the same saver —
-`checkpoint_writes` carries the append log, `checkpoint_blobs` holds snapshots. The
-migration is a code-and-configuration rollout, ordered reader-first, reusing the drain
-semantics of the two-phase upgrade (old incumbents finish their turn; the n-step flush is
-the last old-shape write; no mixed writers on one thread; readers span both shapes
-throughout):
+`checkpoint_writes` carries the append log, `checkpoint_blobs` holds snapshots. It shipped as
+a code-and-configuration rollout ordered reader-first (old incumbents finish their turn; the
+n-step flush is the last old-shape write; no mixed writers on one thread; readers span both
+shapes throughout):
 
-1. **Read-compat layer (PR #2321, merged and deployed).** `base/agents/history/delta_read_compat.py` plus
+1. **Read-compat layer (PR #2321).** `base/agents/history/delta_read_compat.py` plus
    saver-level injection fold delta threads at read time. Coverage: pool saver
    `get_tuple`/`aget_tuple` (folded values injected); `base/agents/history/checkpoint.py` readers
    (messages / count with reconstruct fallback / segment / full / by-trace);
    `ava/external/state.py:load_snapshot`; fork chain copy (`copy_checkpoint_chain` (`base.agents.history.checkpoint_copy`), writes
    chain included); `agent/startup/__init__.py` inbound reconciliation; `scripts/data_plane_ops/restore_drill.py`;
-   the self-evolution recorder. Vanilla data passes through unchanged — verified inert on
-   real production read paths (production-clone subset, wrapped == native x5). Deployed to
-   every machine 2026-09-13 (`30df11a83`).
-2. **Wrapper retirement (PR #2322, merged and deployed).** Delta threads bypass the N-step
+   the self-evolution recorder.
+2. **Wrapper retirement (PR #2322).** Delta threads bypass the N-step
    throttle; vanilla threads keep it bit-for-bit.
-3. **Drill gate (green in the deployed shape).** Behavioral matrix + crash replay +
-   production-clone fingerprint subset; acceptance = content fingerprints (count +
-   first/last message ids + sha256 of the serialized messages), not counts or write volume.
-   Evidence lives with the author (#6095).
-4. **The write switch (user-supervised window).** `messages` becomes the delta channel. Per
-   the cutover execution card: low-activity machines first, 30-60 min observation, then the
-   rest, WSL (database host) last; every batch compares content fingerprints before and
-   after; any mismatch, read failure, or content inequality pauses the batch and triggers
-   rollback.
-5. **Observation >= 24 h, then the close-out report.**
 
-**Rollback.** Revert the code pin to the read-compat version — reads stay safe immediately
-(that version reconstructs both shapes). For any active thread the new model wrote, run the
-one-shot materializer: write one plain full-snapshot checkpoint (version monotonic,
-parent = latest, same serde, append-only) so pre-compat code reads the current state again.
-Verified in the drills (materialize + rollback flow; the x6 experiment: 24 -> 26 messages
-across both read paths). Honest boundary: materialization restores *current-state
-readability*; historical segment reads still need the fold from the code that wrote them.
+Acceptance of the write switch was content fingerprints (count + first/last message ids +
+sha256 of the serialized messages), not counts or write volume.
 
 Compatibility evidence (on the frozen pins): vanilla -> delta continuation reads and writes
-correctly (~110 steps); delta -> vanilla direct read returns empty (silent) — the case the
-materializer addresses; hybrid threads (pre-delta full snapshots + post-delta writes) stay
-reconstructible via plain-value seed discovery (re-verified on the pins).
+correctly (~110 steps); delta -> vanilla direct read returns empty (silent); hybrid threads
+(pre-delta full snapshots + post-delta writes) stay reconstructible via plain-value seed
+discovery (re-verified on the pins).
 
-## 6. Transition period and the mitigation boundary
+## 6. Housekeeping boundary and over-limit threads
 
-**Today (before the write switch).** No caps exist; over-limit threads write slowly rather
-than failing fast, and nothing is deleted (R1-R4). The incident class disappears when
-per-step bytes stop being proportional to full state. Until then, disk growth under the
-current model with deletions stopped measures about +0.75 GB physical per 30 h; disk
-headroom, alert thresholds and an owner are tracked on the cutover checklist.
+**Archive before any delete, and never delete the archive.** The target state has no
+deletion path. Should a disk emergency ever force one, the only acceptable form is
+archive-before-delete: export the doomed rows first (gz NDJSON with a manifest), fsync and
+verify, then delete only the verified-dumped set; any such dump is itself never deleted.
+"Archive" is an optional read-only export (an extra copy, never a deletion mechanism).
 
-**Housekeeping boundary — archive before any delete, and never delete the archive.** The
-target state has no deletion path. Should a disk emergency ever force one, the only
-acceptable form is archive-before-delete: export the doomed rows first (gz NDJSON with a
-manifest; the #3182 design remains the reference), fsync and verify, then delete only the
-verified-dumped set; any such dump is itself never deleted. Note the 2026-09-12 re-decision
-re-cast "archive" as an optional read-only export (an extra copy, never a deletion
-mechanism), and the scheduled archive-then-delete rework (#3182) is superseded as a task.
-
-**Over-limit threads until the switch.** 6093 (25.7 MiB, active), 6089 (23.3 MiB, dormant),
-6041 (9.6 MiB, watch band). Handling: keep writing (no cap), watch via the detection query
-below; a fork-fresh handoff stays the last-resort exit for a thread that becomes unwritable.
+**Over-limit threads.** No cap exists; an over-limit thread writes slowly rather than
+failing fast, and a fork-fresh handoff stays the last-resort exit for a thread that becomes
+unwritable (the old thread stays frozen as cold history; resumability is lost).
 
 - Detection (read-only, low frequency; 16 MiB as the rounded watch line):
   `SELECT thread_id, max(octet_length(blob)) FROM checkpoint_blobs GROUP BY 1 HAVING
   max(octet_length(blob)) > 16*1024*1024;` — route by liveness and user value.
-- Fork-fresh fallback: spawn a successor with a handoff; the old thread stays frozen (cold
-  history). Resumability is lost; last resort.
-
-(The previous revision's exits (a) offline repair (= T1), (b) limit raise and (e) guard
-extension are void: T1 is rejected and the guard was reverted.)
-
-Monsora-line constraint: the standing ruling parked the Monsora line on WSL until large
-cross-network writes are addressed; once per-step bytes move off full-state rewrites,
-re-evaluate the placement under the normal rule.
 
 ## 7. Version sensitivity, risks, open questions
 
@@ -443,7 +404,7 @@ re-evaluate the placement under the normal rule.
   re-runs the drill gate before deployment.
 - **Beta API.** `DeltaChannel` is documented beta with an explicitly unstable on-disk
   contract. Mitigations in place: pinned version, the read-compat layer as defense in
-  depth, the materialize-and-rollback plan (Section 5), the drill gate, and an independent
+  depth, the drill gate, and an independent
   adversarial review (#6143).
 - **Mixed-version window.** During the transition mixed shapes exist cluster-wide. Hard
   rules: every machine runs the read-compat layer before the write switch; readers tolerate

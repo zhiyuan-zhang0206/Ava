@@ -2,7 +2,7 @@
 
 > **Date**: 2026-06-29
 > **Status**: implemented (PR in review)
-> **Builds on**: `update-failure-recovery.md` (since removed), [commit-pinned-cluster.md](../../../../../future/infra/lifecycle/commit-pinned-cluster.md)
+> **Builds on**: `update-failure-recovery.md` (since removed), `commit-pinned-cluster.md` (since removed)
 
 ## Decision
 

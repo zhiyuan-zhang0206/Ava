@@ -162,3 +162,27 @@ def test_tiers_follow_the_declared_tier_and_severity(db_conn: psycopg.Connection
     assert _names(db_conn, tiers=["observation"]) == ["llm_usage"]
     assert _names(db_conn, tiers=["business"]) == []
     assert telemetry_rows.count_events(db_conn, tiers=["business"]) == 0
+
+
+def test_an_undeclared_historical_event_keeps_its_payload_and_filters(
+    db_conn: psycopg.Connection,
+) -> None:
+    payload = {"degraded": False, "rounds": 3, "wake_state": "healthy"}
+    historical = _put(db_conn, "idle_wake", seconds=1, attributes=payload)
+    warning = _put(db_conn, "idle_wake", seconds=2, level="warning", attributes=payload)
+
+    rows, has_more = telemetry_rows.query_events(
+        db_conn,
+        event_names=["idle_wake"],
+        tiers=["observation"],
+        attribute_filters={"wake_state": "healthy"},
+    )
+
+    assert has_more is False
+    assert [row["id"] for row in rows] == [historical]
+    assert rows[0]["event_name"] == "idle_wake"
+    assert rows[0]["attributes"] == payload
+    anomalies, _ = telemetry_rows.query_events(
+        db_conn, event_names=["idle_wake"], tiers=["anomaly"]
+    )
+    assert [row["id"] for row in anomalies] == [warning]

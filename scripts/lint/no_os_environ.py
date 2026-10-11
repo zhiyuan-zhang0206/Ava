@@ -178,9 +178,6 @@ _ALLOWED_FILES = frozenset(
     }
 )
 
-# Transitional grandfathered list is empty — all originally grandfathered files have migrated to Settings.
-_GRANDFATHERED: frozenset[str] = frozenset()
-
 # Test files — pytest fixtures mocking env is a legitimate use
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
@@ -233,7 +230,7 @@ def _scan_file(
 
     error_kind = "naked-env" (Rule 1) | "setenv-managed" (Rule 2).
     """
-    if rel_path in _ALLOWED_FILES or rel_path in _GRANDFATHERED:
+    if rel_path in _ALLOWED_FILES:
         return []
     is_test = _is_test_file(rel_path)
     try:

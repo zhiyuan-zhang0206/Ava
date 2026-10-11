@@ -469,7 +469,7 @@ itself (its own public key in its own `authorized_keys`):
   reported with their online flag and commits and never fail `up` (see the last bullet for their old processes). Then
   the gateway smoke-tests each listed agent-runner with a real agent, reading its own
   address and bearer in place; then each host runs `ava packages refresh`
-  (skills follow their channel; `ava skill update` is retired) and its summary
+  (skills follow their channel) and its summary
   line (`summary: …`) is printed. A differing local copy is replaced and
   reported — an info line names the differing files. Last, two read-only drift checks
   run, each to the end before `up` fails with the details in the

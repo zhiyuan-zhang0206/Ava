@@ -20,16 +20,6 @@ class ServiceStarted(TypedDict):
     pid: int
 
 
-class IdleWake(TypedDict):
-    """`idle_wake` payload."""
-
-    degraded: bool
-    elapsed_s: float
-    rounds: int
-    timeout_s: float
-    wake_state: str
-
-
 class AgentSpawned(TypedDict):
     """`agent_spawned` payload — ops/agents/spawn.py."""
 
@@ -226,13 +216,6 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "launch_retry": telemetry_event("launch_retry", "launch retried", retired=True),
     # agent lifecycle / state
-    "idle_wake": telemetry_event(
-        "idle_wake",
-        "agent woken from idle",
-        payload=IdleWake,
-        tier="noise",
-        persist=True,
-    ),
     "wake_degraded": telemetry_event(
         "wake_degraded",
         "RedisInboundListener wake path degraded (instant pub/sub wake off)",
