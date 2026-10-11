@@ -18,13 +18,9 @@ from real incidents; the concrete sizes and dates are illustrative.
   checkpoint threads grow without bound (a real incident: 21GB in ~12h). Orphaned
   dev-cluster homes an older version left behind (a deleted worktree whose
   cluster was never stopped; a worktree no longer owns one).
-- Response: the checkpoint reaper (events-maintenance daemon) owns retention
-  automatically: Rule B hourly trims stale threads (terminated, or inactive
-  >24h) to keep=1; Rule A on the fast loop trims overgrown active threads
-  (>20 ckpts) to keep=5. Compaction-boundary checkpoints are always kept
-  (each past compaction segment stays recoverable). Physical space still
-  needs VACUUM FULL after large trims (a 42GB→27GB trim was recovered this
-  way). Stop a leftover cluster at an orphan home with `AVA_HOME=<home> ava stop -y`
+- Response: checkpoints are never deleted automatically (never-delete ruling);
+  the events-maintenance daemon only samples table sizes and runs the blob
+  vacuum. Reclaiming space is an operator-led capacity decision. Stop a leftover cluster at an orphan home with `AVA_HOME=<home> ava stop -y`
   *then* delete the directory; delete verified-obsolete backups only with
   user approval.
 
@@ -32,8 +28,7 @@ from real incidents; the concrete sizes and dates are illustrative.
 
 - Symptoms: OOM kills, agent processes growing, slow respawns.
 - Checks: RSS per process; the checkpointer's in-memory state; whether a
-  compaction or checkpoint-trim event explains a drop (checkpoint_trim keeps
-  N — cross-thread batch deletes are the anomaly, not the norm).
+  compaction explains a drop.
 - Causes: unbounded checkpoint accumulation (same as disk), a hot loop
   holding state, a leak in a long-lived daemon.
 - Response: attribute the exact consumer and use the smallest authorized
@@ -65,8 +60,7 @@ from real incidents; the concrete sizes and dates are illustrative.
 - Checks: `ava status` (session vs probe columns), session records
   (`run/sessions/*.json`), the session-backend in use
   (`get_backend()` vs `get_shell_backend()`).
-- Causes: after the session-backend migration, **service** sessions live in
-  `PosixProcSessionBackend` while **PTY** sessions (agent shells, watchers,
+- Causes: **service** sessions live in `PosixProcSessionBackend` while **PTY** sessions (agent shells, watchers,
   schedules) live in `get_shell_backend()`. Code
   that probes sessions on the wrong backend sees an empty set and relaunches
   into live sessions — the schedule-manager regression: launch
@@ -86,10 +80,9 @@ from real incidents; the concrete sizes and dates are illustrative.
 - Checks: `schedules` table status; gateway log launch failures; runner
   process alive?; the schedule session's pane output.
 - Causes: the manager asked the wrong session backend — schedule sessions
-  run on `get_shell_backend()` (the pty-sessions service) since the migration
-  (step 2: the launch command rides the service's initial-command mechanism,
-  so a PTY login shell can run a schedule runner); before that they were raw
-  orchestration sessions. A backend mismatch (manager on one backend, session
+  run on `get_shell_backend()` (the pty-sessions service; the launch command
+  rides the service's initial-command mechanism, so a PTY login shell can run
+  a schedule runner). A backend mismatch (manager on one backend, session
   on the other) makes reconcile relaunch every tick and collide with the live
   session (`duplicate session` -> breaker trip). Also:
   a stale session from before a rollout that the new gateway cannot adopt; a

@@ -99,38 +99,28 @@ policy bug, not a preference, so the frontier is actively maintained:
 - A dominance pair is worth stating explicitly, so a later reader does not
   resurrect the dominated name out of habit.
 
-Current frontier state (user ruling 2026-09-10; id updated 2026-09-17; the V4
-names retired 2026-09-20):
+Current frontier state (user ruling 2026-09-10):
 
-- `deepseek-flash` is the current DeepSeek id. `deepseek-v4-pro`,
-  `deepseek-v4-flash`, and `deepseek-v4-flash-vision-exp` were removed from
-  the registry after retirement. `mimo-v2.5-pro-ultraspeed` was also removed
-  after Xiaomi stopped serving it. A config naming any of these ids fails
-  spawn validation as an unknown model; repair it by naming a current id from
-  the roster. Use `deepseek-flash` for the DeepSeek tier, including vision work.
+- `deepseek-flash` is the current DeepSeek id. A config naming an id that is
+  not on the roster fails spawn validation as an unknown model; repair it by
+  naming a current id from the roster. Use `deepseek-flash` for the DeepSeek
+  tier, including vision work.
 
 ## Current cost policy
 
-**One model: `deepseek-flash`** (user ruling 2026-09-10; id renamed from
-`deepseek-v4-flash` on 2026-09-17 — user report, task #3750; the V4 names are
-retired, name only `deepseek-flash` — user report 2026-09-20). Main agent and
+**One model: `deepseek-flash`** (user ruling 2026-09-10). Main agent and
 workers alike — orchestration, planning, synthesis, review, extraction, format
 transforms, scanning — run the same id on its V4.1 Flash backend.
 
 - Complexity is absorbed by **decomposition and verification waves**, not by
   upgrading the model (next section).
-- Never name the removed `deepseek-v4-pro`, `deepseek-v4-flash`,
-  `deepseek-v4-flash-vision-exp`, or `mimo-v2.5-pro-ultraspeed` ids in a new
-  configuration; vision work uses plain `deepseek-flash`.
+- Vision work uses plain `deepseek-flash`.
 - Other registered models (`gemini-*`, Claude, GLM, Qwen, …) sit outside the
   default policy: select one only when the user explicitly asks for that
   model, and confirm it is on the roster first (section above).
 - `gemini-3.8-flash` (trialed 2026-09-06, user order) is **stopped** under the
   still-valid stop ruling (pool: `model-policy-v2.3-gemini-flash-stop-20260903`)
-  — do not select it. Historical caveat: switching an existing agent into
-  `gemini-3.8-flash` (its history written by another model) still 400s with
-  "Corrupted thought signature"; only a fresh spawn ever ran clean — relevant
-  only if a cross-model switch onto it is ever explicitly ordered.
+  — do not select it.
 - An already-running agent still on a non-flash model is moved with
   `ava.self.restart(config_overlay={"llm_model": "deepseek-flash"})`.
 - Ruling record: shared-pool note `dev/ava-agent-model-flash-ruling-20260910.md`.
@@ -159,11 +149,9 @@ deepseek-flash orchestrator
 ## Don't
 
 - Don't select anything outside `deepseek-flash` for Ava-line agents
-  (workers, orchestrators, reviewers, synthesizers alike). The retired
-  `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, and
-  `mimo-v2.5-pro-ultraspeed` ids are absent from the registry and cannot be
-  requested, even as exceptions. Select another roster model only when the
-  user explicitly asks for it; vision work uses `deepseek-flash`.
+  (workers, orchestrators, reviewers, synthesizers alike). Select another
+  roster model only when the user explicitly asks for it; vision work uses
+  `deepseek-flash`.
 - Don't hand flash an open-ended judgment task and trust the output
   unverified — pair flash breadth with a flash cross-checking wave.
 - Don't scatter hardcoded model names where the cluster default would do —

@@ -18,11 +18,11 @@ agent there (`ava.agents.spawn(machine=...)`).
 
 There is deliberately **no install form in the UI**. The Skills / Plugins / MCP
 sections of `/control` take a natural-language request; `POST
-/api/packages/draft` spawns an `ava-guide.packages.install` agent that owns the whole
-lifecycle — find candidates, confirm before installing anything that runs code,
-install, verify with a test agent, judge, report. No install-by-URL field
-exists, because a user generally cannot tell a good package from a bad one,
-which is the reason an agent is in the loop at all.
+/api/keyed/v1/packages/draft` spawns an `ava-guide.packages.install` agent that owns the whole
+lifecycle — find candidates, confirm before installing code, install, verify
+with a test agent, judge, report. No install-by-URL field exists, because a
+user generally cannot tell a good package from a bad one, which is why an agent
+is in the loop.
 
 `parsers/` owns settings-free builders and handlers; `cli.parsers` composes
 them. `external_skills.py` delegates filesystem, ledger and recovery to
@@ -56,7 +56,7 @@ extension surfaces — each one's `register_*` signature rendered from the live
 object, the contract a contributor must satisfy, and who is using it — then one
 line per installed plugin. With a name, it prints that plugin's every
 registration as a fact (surface, identifier, the class or function behind it) and
-diffs those against its `ava-plugin.json` declarations when it ships one.
+diffs those against its `ava-plugin.json` declarations.
 
 It answers two questions nothing else could: *what can a plugin extend* (for an
 agent writing one, which otherwise means reading framework source) and *what is

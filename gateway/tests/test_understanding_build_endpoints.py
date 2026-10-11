@@ -462,12 +462,6 @@ def test_an_agent_without_history_has_no_sessions(
     assert resp.status_code == 422
 
 
-def test_the_close_endpoint_is_gone(db_conn: psycopg.Connection) -> None:
-    agent = _seed_agent(db_conn)
-    with _client() as client:
-        assert client.post(f"/api/agents/{agent}/understanding/close").status_code in (404, 405)
-
-
 def test_a_process_without_the_agent_domain_reads_the_switch_and_chunk_size_from_the_env_file(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

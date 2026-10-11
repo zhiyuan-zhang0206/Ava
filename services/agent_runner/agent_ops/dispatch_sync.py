@@ -101,7 +101,7 @@ def dispatch_sync(
         case "upload_receive":
             ur = UploadReceivePayload.model_validate(payload)
             if pool is None:
-                raise RuntimeError("legacy upload receiver requires the native DB pool")
+                raise RuntimeError("upload receiver requires the native DB pool")
             return OpStatus.COMPLETED, uploads.upload_receive_op(ur, pool=pool).model_dump(
                 mode="json"
             )

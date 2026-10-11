@@ -1,8 +1,8 @@
 """The manifest gate: a plugin's `ava-plugin.json` and what it declares must agree.
 
-A plugin without a manifest has nothing to disagree with. With one, each key the caller gates must
-list exactly the identifiers the plugin's `PluginContributions` provides on that surface: a declared
-surface it does not deliver, and a delivered one it does not declare, both refuse. Each process
+A plugin without a manifest is refused (`load_manifest` raises). With one, each key the caller gates
+must list exactly the identifiers the plugin's `PluginContributions` provides on that surface: a
+declared surface it does not deliver, and a delivered one it does not declare, both refuse. Each process
 gates only the keys of the faces it loads (the agent registry the hooks and system prompt sections,
 the data registry the metrics and inspector widgets), so one manifest is never judged against a
 declaration the process cannot see.
@@ -27,13 +27,11 @@ class ContributionMismatch(Exception):  # noqa: N818 — a load failure of one p
 def check_manifest(
     name: str, plugin_dir: Path, contributions: PluginContributions, keys: Iterable[str]
 ) -> None:
-    """Refuse a declaration that disagrees with the plugin's manifest on `keys`.
+    """Refuse a plugin with no valid manifest, or a declaration that disagrees with it on `keys`.
 
     The key is also the attribution surface id (`Contribution.surface`).
     """
     manifest = load_manifest(plugin_dir)
-    if manifest is None:
-        return
     gated = tuple(keys)
     delivered: dict[str, set[str]] = {key: set() for key in gated}
     for record in contributions.as_records(name):

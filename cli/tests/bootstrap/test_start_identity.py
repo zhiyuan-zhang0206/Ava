@@ -719,12 +719,6 @@ def test_public_start_holds_home_lock_through_runtime_start(
     )
 
 
-def test_start_parser_rejects_retired_updater_telemetry() -> None:
-    with pytest.raises(SystemExit) as error:
-        _start_args("--updater-telemetry")
-    assert error.value.code == 2
-
-
 @pytest.mark.parametrize("result", [0, 1, 75])
 def test_public_start_publishes_boot_pid_only_after_complete_success(
     inputs: identity.IdentityInput,

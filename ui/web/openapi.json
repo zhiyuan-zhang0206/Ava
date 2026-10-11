@@ -1850,7 +1850,7 @@
     "/api/agents/{agent_id}/events": {
       "get": {
         "summary": "Get Agent Events",
-        "description": "Historical slice of this agent's `events` rows — the REST\ncounterpart to the live `…/events/stream` SSE tail (which only carries\nevents from the moment you subscribe). Backs ops / SDK / eval consumers\nthat need to query the past.\n\nFilters compose (AND):\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); `from` omitted defaults to the last\n    24h (same lower-bound contract as /api/events). Bad timestamps 422\n    (FastAPI datetime parse).\n  - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /\n    `exec` / `exec_failed`.\n  - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any\n    case accepted; the stored/returned values are LOWERCASE since the W9\n    events-table switch — `agent_events`' uppercase `INFO`/`WARNING`/\n    `ERROR` no longer appears on the wire). This is an *exact* match,\n    unlike `/api/cluster/admin/events` where `level`\n    is a minimum threshold — a per-agent history query reads more\n    predictably as \"give me exactly this level\".\n\nReturns newest-first (`ts DESC`; `id` is a stable surrogate derived\nfrom the log line, so `limit`/`offset` paging stays deterministic).\n`limit` returns the configured default window (``display.events_default_limit``\n— 100 out of the box), capped at 1000 (over-limit 422s); `offset`\npages further back and is capped at 10,000.\n\nNo agent-existence precondition (same as `…/activity` and `…/pending`):\nan unknown agent or an empty window just returns `[]`.",
+        "description": "Historical slice of this agent's `events` rows — the REST\ncounterpart to the live `…/events/stream` SSE tail (which only carries\nevents from the moment you subscribe). Backs ops / SDK / eval consumers\nthat need to query the past.\n\nFilters compose (AND):\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); `from` omitted defaults to the last\n    24h (same lower-bound contract as /api/events). Bad timestamps 422\n    (FastAPI datetime parse).\n  - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /\n    `exec` / `exec_failed`.\n  - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any\n    case accepted; the stored/returned values are LOWERCASE). This is an *exact* match,\n    unlike `/api/cluster/admin/events` where `level`\n    is a minimum threshold — a per-agent history query reads more\n    predictably as \"give me exactly this level\".\n\nReturns newest-first (`ts DESC`; `id` is a stable surrogate derived\nfrom the log line, so `limit`/`offset` paging stays deterministic).\n`limit` returns the configured default window (``display.events_default_limit``\n— 100 out of the box), capped at 1000 (over-limit 422s); `offset`\npages further back and is capped at 10,000.\n\nNo agent-existence precondition (same as `…/activity` and `…/pending`):\nan unknown agent or an empty window just returns `[]`.",
         "operationId": "get_agent_events_api_agents__agent_id__events_get",
         "parameters": [
           {
@@ -5013,49 +5013,10 @@
         }
       }
     },
-    "/api/schedules/draft": {
-      "post": {
-        "summary": "Draft Schedule",
-        "description": "Hand a natural-language request to an ava-schedule-writer agent. Spawns the\nagent (which loads ava-guide.schedules, clarifies, writes the script,\nand POSTs it back) and returns its id so the UI can open the conversation.",
-        "operationId": "draft_schedule_api_schedules_draft_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ScheduleDraftRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScheduleDraftResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/keyed/v1/schedules/draft": {
       "post": {
         "summary": "Guarded Draft Schedule",
-        "description": "Replay one raw draft intent and its original birth without legacy fallback.",
+        "description": "Hand a natural-language request to an ava-schedule-writer agent. Spawns the\nagent (which loads ava-guide.schedules, clarifies, writes the script,\nand POSTs it back) and returns its id so the UI can open the conversation.\nReplays one raw draft intent and its original birth.",
         "operationId": "guarded_draft_schedule_api_keyed_v1_schedules_draft_post",
         "parameters": [
           {
@@ -5303,49 +5264,10 @@
         }
       }
     },
-    "/api/guide/draft": {
-      "post": {
-        "summary": "Draft Guide",
-        "description": "Spawn an ava-guide agent for a natural-language ops request and return its\nid so the UI can open the conversation.",
-        "operationId": "draft_guide_api_guide_draft_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GuideDraftRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GuideDraftResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/keyed/v1/guide/draft": {
       "post": {
         "summary": "Guarded Draft Guide",
-        "description": "Replay one raw draft intent and its original birth without legacy fallback.",
+        "description": "Spawn an ava-guide agent for a natural-language ops request and return its\nid so the UI can open the conversation. Replays one raw draft intent and its\noriginal birth.",
         "operationId": "guarded_draft_guide_api_keyed_v1_guide_draft_post",
         "parameters": [
           {
@@ -5569,49 +5491,10 @@
         }
       }
     },
-    "/api/packages/draft": {
-      "post": {
-        "summary": "Draft Package",
-        "description": "Spawn an ava-package-installer agent for a natural-language install request\nand return its id so the UI can open the conversation. 422 on an unknown kind.",
-        "operationId": "draft_package_api_packages_draft_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PackageDraftRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PackageDraftResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/keyed/v1/packages/draft": {
       "post": {
         "summary": "Guarded Draft Package",
-        "description": "Replay one raw draft intent and its original birth without legacy fallback.",
+        "description": "Spawn an ava-package-installer agent for a natural-language install request\nand return its id so the UI can open the conversation. Replays one raw draft\nintent and its original birth; 422 on an unknown kind.",
         "operationId": "guarded_draft_package_api_keyed_v1_packages_draft_post",
         "parameters": [
           {
@@ -6735,7 +6618,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and\n  `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.alert_classes`)\n- `total_events`: archived event row count — frozen historical constant\n  (task #1281 parity run; PG events dropped; not a live gauge)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd 0.0, avg_turn_seconds None (frontend shows \"—\"). The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
+        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and\n  `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd 0.0, avg_turn_seconds None (frontend shows \"—\"). The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -8577,7 +8460,7 @@
           "payload"
         ],
         "title": "AgentEventRow",
-        "description": "One row from the unified event stream — admin event log entry (category=telemetry/log).\n\n`agent_id` is None for service-level lines (gateway / scheduler / labeler\n/ runner / etc.) and an int for agent process lines. `payload` keeps the\nfull structured record (msg, kwargs from logger.bind / kwargs from the\ncall, plus traceback fields when an exception was attached).\n`level` is LOWERCASE (`debug`/`info`/`warning`/`error`/`critical`): the\nW9 switch from the legacy `agent_events` table (loguru's uppercase `INFO`/`WARNING`/\n`ERROR`) flipped the wire values — consumers matching uppercase must\nadapt."
+        "description": "One row from the unified event stream — admin event log entry (category=telemetry/log).\n\n`agent_id` is None for service-level lines (gateway / scheduler / labeler\n/ runner / etc.) and an int for agent process lines. `payload` keeps the\nfull structured record (msg, kwargs from logger.bind / kwargs from the\ncall, plus traceback fields when an exception was attached).\n`level` is LOWERCASE (`debug`/`info`/`warning`/`error`/`critical`)."
       },
       "AgentEventsResponse": {
         "properties": {
@@ -12080,7 +11963,7 @@
           "attributes"
         ],
         "title": "EventRow",
-        "description": "One row of the unified event stream.\n\nEvery signal shares this shape (event-system design doc §1): audit\n(legacy `event_log`), telemetry and log (formerly `agent_events`) all land\nin it, written through the unified emitter (`base/telemetry/emitter.py`).\n`trace_id` is the correlation key — one turn = one trace id, every event\ninside it carries the same value. `agent_id` is None for service-level\nevents (gateway / daemons); `machine` is the host dimension. `level` is\nLOWERCASE (`debug`/`info`/`warning`/`error`/`critical`) — the retired\n`agent_events` mirror stored loguru's uppercase; the W9 read-path switch\nflipped API consumers to lowercase."
+        "description": "One row of the unified event stream.\n\nEvery signal shares this shape (event-system design doc §1): audit,\ntelemetry and log all land in it, written through the unified emitter\n(`base/telemetry/emitter.py`).\n`trace_id` is the correlation key — one turn = one trace id, every event\ninside it carries the same value. `agent_id` is None for service-level\nevents (gateway / daemons); `machine` is the host dimension. `level` is\nLOWERCASE (`debug`/`info`/`warning`/`error`/`critical`)."
       },
       "EventsMeta": {
         "properties": {
@@ -18138,7 +18021,7 @@
         "additionalProperties": false,
         "type": "object",
         "title": "SpawnAgentRequest",
-        "description": "POST /api/agents request body — for frontend / SDK; frontend does\nnot need to know checkpoint ids.\n\nIf `fork_from` is given, the gateway resolves the latest checkpoint\ninternally and passes an explicit id to the underlying create_agent_row\n(consistent with SDK `ava.agents.spawn(fork_from=N)` logic).\n\nFork config rule: a fork keeps the source's effective config so the\ninherited context stays cache-valid. The only allowed config change is\nADDING skills to `skills_to_inject_into_system_prompt` /\n`skills_to_expand_at_start` (supersets); anything else is rejected with\n`fork_config_change_not_allowed`. A fork WITHOUT config inherits the\nsource's resolved overlay + preset verbatim (the pre-2026-09-10 behavior\ndropped the source's overlay).\n\n`spawner` default \"user\" — frontend spawn button does not need to\npass it; external callers (claude-code / SDK paths `agent:N` etc.)\npass their own identifier so the frontend sidebar groups them under\na separate root section by spawner.\n\n`prompt_source` is **required only when prompt is given** —\nINSERTed into inbound_messages.source; the envelope wrap marks who\nthe message came from. Frontend passes \"user\"; SDK paths pass\nf\"agent:{my_id}\". This differs from spawner: spawner is \"who\ncreated the agent\", source is \"from whom the prompt arrived\".\n\nThe schema does not give prompt_source a default — to avoid the\n\"caller forgot to pass it and got silently tagged user,\ncontaminating envelope source\" anti-pattern (one of the\n`or default` forms AGENTS.md prohibits); both kinds of callers must\nexplicitly identify themselves."
+        "description": "POST /api/agents request body — for frontend / SDK; frontend does\nnot need to know checkpoint ids.\n\nIf `fork_from` is given, the gateway resolves the latest checkpoint\ninternally and passes an explicit id to the underlying create_agent_row\n(consistent with SDK `ava.agents.spawn(fork_from=N)` logic).\n\nFork config rule: a fork keeps the source's effective config so the\ninherited context stays cache-valid. The only allowed config change is\nADDING skills to `skills_to_inject_into_system_prompt` /\n`skills_to_expand_at_start` (supersets); anything else is rejected with\n`fork_config_change_not_allowed`. A fork WITHOUT config inherits the\nsource's resolved overlay + preset verbatim.\n\n`spawner` default \"user\" — frontend spawn button does not need to\npass it; external callers (claude-code / SDK paths `agent:N` etc.)\npass their own identifier so the frontend sidebar groups them under\na separate root section by spawner.\n\n`prompt_source` is **required only when prompt is given** —\nINSERTed into inbound_messages.source; the envelope wrap marks who\nthe message came from. Frontend passes \"user\"; SDK paths pass\nf\"agent:{my_id}\". This differs from spawner: spawner is \"who\ncreated the agent\", source is \"from whom the prompt arrived\".\n\nThe schema does not give prompt_source a default — to avoid the\n\"caller forgot to pass it and got silently tagged user,\ncontaminating envelope source\" anti-pattern (one of the\n`or default` forms AGENTS.md prohibits); both kinds of callers must\nexplicitly identify themselves."
       },
       "SpawnedAgent": {
         "properties": {
@@ -18346,11 +18229,6 @@
             "minimum": 0.0,
             "title": "Alert Classes Dismissed"
           },
-          "total_events": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Total Events"
-          },
           "plugin_stats": {
             "items": {
               "$ref": "#/components/schemas/PluginStat"
@@ -18382,11 +18260,10 @@
           "errors",
           "alert_classes_active",
           "alert_classes_dismissed",
-          "total_events",
           "plugin_stats"
         ],
         "title": "StatsDashboard",
-        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the served window in hours: the requested one.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;\n  events that pre-date the snapshot field contribute 0\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw event totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `alert_classes_active` / `alert_classes_dismissed`: how many distinct\n  (level, event_name, source, process) warning/error classes the window\n  holds, split by whether an active dismissal in `event_dismissals`\n  cancels the class — exact, or a wildcard row with an empty `process`.\n  The sidebar card shows `alert_classes_active`; the classes themselves\n  are `GET /api/stats/alert-classes`, which reads the same rows.\n- `total_events`: archived event row count (frozen — the PG events copy\n  stopped growing at the LGTM cutover; not a live gauge)\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\".\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`as_of` is the UTC time the payload's reads were assembled."
+        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the served window in hours: the requested one.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;\n  events that pre-date the snapshot field contribute 0\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw event totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `alert_classes_active` / `alert_classes_dismissed`: how many distinct\n  (level, event_name, source, process) warning/error classes the window\n  holds, split by whether an active dismissal in `event_dismissals`\n  cancels the class — exact, or a wildcard row with an empty `process`.\n  The sidebar card shows `alert_classes_active`; the classes themselves\n  are `GET /api/stats/alert-classes`, which reads the same rows.\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\".\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`as_of` is the UTC time the payload's reads were assembled."
       },
       "StatsTokens": {
         "properties": {

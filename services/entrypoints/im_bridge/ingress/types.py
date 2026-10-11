@@ -64,7 +64,6 @@ class IngressReceipt(BaseModel):
 
 
 class IngressBindingState(StrEnum):
-    HELD = "held"
     DRAINING = "draining"
     ACTIVE = "active"
 
@@ -77,10 +76,6 @@ class PollBinding(BaseModel):
     epoch: UUID
     cursor: str
     state: IngressBindingState
-
-    @property
-    def held(self) -> bool:
-        return self.state == IngressBindingState.HELD
 
 
 class IngressIdentityConflictError(ValueError):

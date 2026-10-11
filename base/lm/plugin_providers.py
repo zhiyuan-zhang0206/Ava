@@ -20,7 +20,7 @@ def _load_one(builder: CatalogBuilder, name: str, provider_py: Path, *, is_built
 
     The module registers nothing: it exports `contribute()` returning a `PluginContributions` whose
     `providers` are `ProviderContribution`s. The declaration passes the manifest gate (the
-    `providers` key of the plugin's `ava-plugin.json`, when it ships one) before anything is
+    `providers` key of the plugin's `ava-plugin.json`) before anything is
     installed.
     """
     from base.packages.plugins.data_registry import declaration_of

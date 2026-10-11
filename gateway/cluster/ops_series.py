@@ -13,8 +13,7 @@ Same report shape and the same fixed bucket grid as always (`OPS_GRID_ORIGIN`-al
   the `agents` registry).
 
 A bucket is half-open, `[start, start + bucket)`, as `meta.bucket_starts` says; the in-progress
-bucket is partial. Counts and sums are exact; percentiles are exact over the rows of the bucket
-(the retired Prometheus reader approximated them from a latency histogram).
+bucket is partial. Counts and sums are exact; percentiles are exact over the rows of the bucket.
 """
 
 from __future__ import annotations

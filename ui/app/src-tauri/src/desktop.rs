@@ -72,8 +72,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         // renders without an image.
         .tooltip("Ava")
         .menu(&menu)
-        // The menu is the tray's whole surface on Windows; on macOS a left
-        // click should still just open the window.
+        // A left click opens the window; the menu is the right-click surface.
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click { button, .. } = event {

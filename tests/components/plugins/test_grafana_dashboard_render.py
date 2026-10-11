@@ -485,13 +485,28 @@ def _metrics_module_source(name: str, title: str) -> str:
     )
 
 
-def _install_plugin(conn: psycopg.Connection, tmp_path: Path, name: str, source: str) -> None:
+def _metrics_manifest(name: str, metric: str) -> str:
+    return json.dumps(
+        {
+            "apiVersion": 2,
+            "name": name,
+            "version": "1.0.0",
+            "engines": {"ava": ">=2026.10.1"},
+            "contributions": {"metrics": [metric]},
+        }
+    )
+
+
+def _install_plugin(
+    conn: psycopg.Connection, tmp_path: Path, name: str, source: str, *, metric: str
+) -> None:
     """Enable an installed plugin row whose blob is a tree holding one `metrics.py`."""
     from base.packages.extensions import registry as registry
 
     tree = tmp_path / name
     tree.mkdir()
     (tree / "metrics.py").write_text(source)
+    (tree / "ava-plugin.json").write_text(_metrics_manifest(name, metric))
     digest = registry.put_blob(conn, registry.pack_tree(tree), name=name)
     registry.upsert(conn, name=name, kind="plugin", source="test", content_hash=digest)
 
@@ -517,8 +532,14 @@ def test_repo_supplier_reports_a_broken_plugin_loudly(
     (plugins_dir / "good_one" / "metrics.py").write_text(
         _metrics_module_source("good_one_calls", "Good")
     )
+    (plugins_dir / "good_one" / "ava-plugin.json").write_text(
+        _metrics_manifest("good_one", "good_one_calls")
+    )
     (plugins_dir / "broken_one").mkdir()
     (plugins_dir / "broken_one" / "metrics.py").write_text("raise RuntimeError('boom')\n")
+    (plugins_dir / "broken_one" / "ava-plugin.json").write_text(
+        _metrics_manifest("broken_one", "broken_one_calls")
+    )
     import base.telemetry.metrics.grafana_dashboard_supply as supply
 
     for name in ("good_one", "broken_one"):
@@ -545,6 +566,7 @@ def test_installed_supplier_loads_a_registry_row(
             tmp_path,
             "installed_demo",
             _metrics_module_source("installed_demo_calls", "Installed demo"),
+            metric="installed_demo_calls",
         )
         result = load_installed_plugin_specs(db_conn)
     assert result.failed == []
@@ -567,12 +589,14 @@ def test_collect_refuses_an_installed_plugin_claiming_a_repo_metric_name(
             tmp_path,
             "installed_thief",
             _metrics_module_source(taken.name, "Stolen"),
+            metric=taken.name,
         )
         _install_plugin(
             db_conn,
             tmp_path,
             "installed_fine",
             _metrics_module_source("installed_fine_calls", "Fine"),
+            metric="installed_fine_calls",
         )
         result = collect_plugin_specs(db_conn)
     assert result.failed == ["installed_thief"]

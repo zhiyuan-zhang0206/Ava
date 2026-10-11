@@ -1,4 +1,4 @@
-"""AtLeastOnceWithKey dedup middleware: HTTP-level retry/reconcile behavior against the real app + test DB; split from gateway/tests/test_idempotency.py (task #4922)."""
+"""Keyed chat delivery: HTTP-level retry/reconcile behavior against the real app + test DB."""
 
 from __future__ import annotations
 

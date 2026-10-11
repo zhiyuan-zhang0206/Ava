@@ -61,11 +61,10 @@ nxt = next_fire("0 3 * * *", after=datetime.now(UTC), timezone=settings.general.
 ```
 
 **Event / threshold** — read the cluster's own state. All events live in the
-unified event stream (Loki after the LGTM cutover; schema: `ts / trace_id /
+unified event stream (Loki; schema: `ts / trace_id /
 agent_id / machine / cluster / process / category / event_name / level /
 source / target_agent_id / attributes`; `category` = audit | telemetry |
-log). The legacy `agent_events` / `event_log` tables and the PG `events`
-archive are gone — do not query Postgres for events:
+log). Events are not in Postgres — do not query it for them:
 - tokens: `llm_usage` events — sum `in_total + out_total`.
 - agents spawned: count of `spawn` events (`category='audit'`).
 - memory growth: `ava.shell.run("cd ~/.ava/memory && git diff --numstat | awk '{s+=$1+$2} END{print s+0}'")`.

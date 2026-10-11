@@ -94,9 +94,7 @@ def get_agent_events(
       - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /
         `exec` / `exec_failed`.
       - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any
-        case accepted; the stored/returned values are LOWERCASE since the W9
-        events-table switch — `agent_events`' uppercase `INFO`/`WARNING`/
-        `ERROR` no longer appears on the wire). This is an *exact* match,
+        case accepted; the stored/returned values are LOWERCASE). This is an *exact* match,
         unlike `/api/cluster/admin/events` where `level`
         is a minimum threshold — a per-agent history query reads more
         predictably as "give me exactly this level".

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -185,16 +185,6 @@ def test_start_marks_serving_for_live_and_cold_admission(
         == 0
     )
     assert start_serving.is_serving()
-
-
-@pytest.mark.parametrize("argument", ["release_receipt", "updater_telemetry"])
-def test_start_rejects_removed_updater_arguments(
-    argument: str, operator_database: Callable[[], Any]
-) -> None:
-    with pytest.raises(TypeError, match="unexpected keyword argument"):
-        cast(Callable[..., int], _start_commands.cmd_start)(
-            **{argument: True}, retained_children=[], database_factory=operator_database
-        )
 
 
 def test_changed_live_generation_refuses_before_selection_or_converge(
