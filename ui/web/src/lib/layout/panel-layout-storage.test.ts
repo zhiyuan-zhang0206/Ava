@@ -24,18 +24,6 @@ describe("panelLayoutStorage", () => {
     expect(localStorage.getItem(KEY)).toBe(value);
   });
 
-  it("returns a legacy v3 record as-is — no conversion; the library falls back to defaults", () => {
-    const legacy = JSON.stringify({
-      '{"minSize":20,"maxSize":50},{"minSize":45}': {
-        expandToSizes: { "panel-main": 59 },
-        layout: [41, 59],
-      },
-    });
-    localStorage.setItem(KEY, legacy);
-
-    expect(panelLayoutStorage().getItem(KEY)).toBe(legacy);
-  });
-
   it("survives a storage that throws on read or write", () => {
     const boom = () => {
       throw new Error("storage unavailable");

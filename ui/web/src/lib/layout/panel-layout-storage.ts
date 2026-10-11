@@ -1,6 +1,6 @@
-// Storage for react-resizable-panels v4 `useDefaultLayout`.
+// Storage for react-resizable-panels `useDefaultLayout`.
 //
-// v4 stores a group's layout as a single Layout map keyed by panel id under
+// A group's layout is stored as a single Layout map keyed by panel id under
 // `react-resizable-panels:<id>`:
 //
 //   { "panel-sidebar": 30, "panel-main": 70 }

@@ -14,7 +14,7 @@ the same intent; another default invocation represents a new submission.
 Only a 200 containing a positive agent ID opens the accepted conversation.
 Pending Enter presses are ignored and mutation retries are explicitly disabled.
 An HTTP rejection or uncertain transport error is surfaced without a second
-POST or legacy fallback. There is no client Outbox or automatic resend.
+POST. There is no client Outbox or automatic resend.
 
 The response is historical birth acceptance, not readiness or execution proof.
 Original-birth recovery still requires supporting Gateway generations; this

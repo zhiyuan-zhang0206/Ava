@@ -186,10 +186,8 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
         {/* Spacer to push sort to the right */}
         <span className={cn(FLEX_1)} />
 
-        {/* Sort controls — collapsed to a single icon button (user ruling,
-            #723 round 2): the toolbar row no longer carries the "Sort:" label
-            or the three key buttons inline, so a narrower sidebar no longer
-            wraps the row. Clicking the icon opens a small popover with the
+        {/* Sort controls — a single icon button so a narrow sidebar does not
+            wrap the row. Clicking the icon opens a small popover with the
             three keys; clicking the active key again flips the direction. */}
         <Popover.Root>
           <Popover.Trigger asChild>

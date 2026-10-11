@@ -58,7 +58,7 @@ describe.each(drafts)("$name guarded draft", ({ path, body, submit }) => {
     expect(keys[1]).not.toBe(keys[0]);
   });
 
-  it.each([404, 409, 500])("surfaces HTTP %i without a retry or legacy fallback", async (status) => {
+  it.each([404, 409, 500])("surfaces HTTP %i without a retry", async (status) => {
     fetchMock.mockResolvedValue(accepted({ detail: "refused" }, status));
     await expect(submit("intent-1")).rejects.toThrow("refused");
     expect(fetchMock).toHaveBeenCalledOnce();

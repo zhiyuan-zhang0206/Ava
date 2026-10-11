@@ -401,8 +401,8 @@ function HomeContent({
   // covers the whole turn including those gaps; the union is the steady
   // signal. Two consumers:
   // - Composer Stop button: available whenever the agent is running, not only
-  //   mid-action — Stop INSERTs a durable cancel inbound, so a stop pressed
-  //   between actions is still caught at the next claim pass.
+  //   mid-action — Stop observes the agent's native work and cancels it, so a
+  //   stop pressed between actions still lands.
   // - TimelineView turnActive: drives the last detail block's auto-expand and
   //   its live "Working for Xs" clock in Last mode; feeding it raw turnActive
   //   made the block collapse+re-expand (and the clock stop/start) at every
