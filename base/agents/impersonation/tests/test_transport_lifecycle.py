@@ -1,6 +1,7 @@
 """Authority, terminal receipts and recovery CAS under actual database contention."""
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from threading import Event
 from typing import Any
 from unittest.mock import Mock
@@ -105,9 +106,7 @@ def test_generation_claim_is_single_winner_and_stale_token_loses_authority(
         database, event_bus, session["id"], winner, local_machine=machine_identity.name()
     )
     assert latest["relay_generation"] == 1
-    assert latest["expires_at"] <= session["expires_at"] + __import__("datetime").timedelta(
-        seconds=1
-    )
+    assert latest["expires_at"] <= session["expires_at"] + timedelta(seconds=1)
     assert (
         relay.provision_relay(database, session["id"], owner, "loser", expected_generation=0)
         is None
