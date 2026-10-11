@@ -133,11 +133,11 @@ class WebSettings(EnvSettings):
     )
 
     web_fetch_injection_threshold: float = Field(
-        default=0.5,
+        default=0.4,
         gt=0.0,
         lt=1.0,
         alias="AVA_WEB_FETCH_INJECTION_THRESHOLD",
-        description="Probability (exclusive 0..1) at or above which a fetched page is reported as likely prompt injection. The page is judged in chunks; the highest chunk probability is compared. Lower values warn more often.",
+        description="Probability (exclusive 0..1) at or above which a fetched page is reported as likely prompt injection. The page is judged in chunks; the highest chunk probability is compared. Lower values warn more often. The default 0.4 was calibrated together with the hijack-intent question wording of `ava/sdk_surface/injection_check.py` (0 false positives on 209 benign pages, all 35 synthetic injections caught); recalibrate if either changes.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
