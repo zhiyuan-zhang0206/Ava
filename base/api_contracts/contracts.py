@@ -141,6 +141,12 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/http/auth/router.py ───────────────────────────────────
     ("POST", "/api/auth/login"): RouteContract(note="login — repeats just mint a fresh cookie"),
+    ("POST", "/api/auth/login-ticket"): RouteContract(
+        note="issue a one-time login ticket — every repeat is a distinct short-lived row"
+    ),
+    ("POST", "/api/auth/login-ticket/redeem"): RouteContract(
+        note="spend a login ticket — the atomic revoke makes a repeat a rejected replay"
+    ),
     ("POST", "/api/auth/logout"): RouteContract(note="clear session cookie — idempotent"),
     ("GET", "/api/auth/check"): RouteContract(),
     ("GET", "/api/auth/sessions"): RouteContract(),
