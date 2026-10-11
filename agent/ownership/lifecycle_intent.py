@@ -1,8 +1,7 @@
 """One durable lifecycle command pointer; no additional queue or polling loop.
 
-Process and hosted dispatch share this acceptance boundary. All old consumers
-must still be upgraded before activation: unconditional legacy claims are not
-fenced by adding nullable columns. Acceptance never asserts that a process exited.
+Process and hosted dispatch share this acceptance boundary. Acceptance never
+asserts that a process exited.
 
 The pointer's whole life lives here: acceptance, superseded settlement, and the
 admitted successor's restart observation, which clears it.

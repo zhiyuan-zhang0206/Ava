@@ -15,24 +15,10 @@ _SOURCE = "external_agent:codex:run-42"
 _CALLER = {"kind": "external_agent", "subject": "codex", "instance": "run-42"}
 
 
-def _admit_future_protocol(_source: str) -> None:
-    """Test-only seam: exercise storage beyond the independently tested fence."""
-
-
-def _admit_future_chat(_conn: psycopg.Connection, _agent_id: int, _source: str) -> None:
-    """Storage-only seam; the real generation gate has separate integration proof."""
-
-
 def test_chat_insert_and_reconcile_persist_same_structured_identity(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     publish_wake: Callable[[int, str], bool],
 ) -> None:
-    # Exercise future admitted-write storage separately from today's closed
-    # rollout fence; the tests below assert the real fence rejects every write.
-    monkeypatch.setattr(
-        "base.agents.messages.chat_delivery.require_caller_protocol", _admit_future_chat
-    )
     agent_id = create_agent(db_conn)
     key = str(uuid4())
     receipt = insert_chat_inbound_once(
@@ -62,13 +48,9 @@ def test_chat_insert_and_reconcile_persist_same_structured_identity(
 
 def test_lifecycle_insert_persists_structured_identity(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    monkeypatch.setattr(
-        "base.agents.messages.envelope.reject_unnegotiated_caller", _admit_future_protocol
-    )
     agent_id = create_agent(db_conn)
     inbound_id = insert_inbound_message(
         db_conn, agent_id, "", _SOURCE, kind="restart", bus=event_bus, database=database
@@ -106,26 +88,32 @@ def test_audit_events_carry_structured_identity() -> None:
     assert "auth_principal" not in event.attributes
 
 
-def test_internal_chat_and_lifecycle_writes_cannot_bypass_rollout_fence(
+def test_malformed_external_agent_source_is_rejected_before_insert(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
     publish_wake: Callable[[int, str], bool],
 ) -> None:
     agent_id = create_agent(db_conn)
-    with pytest.raises(ValueError, match="target runtime protocol"):
+    with pytest.raises(ValueError):
         insert_chat_inbound_once(
             db_conn,
             agent_id=agent_id,
             content="hello",
-            source=_SOURCE,
+            source="external_agent:",
             payload=None,
             client_message_id=str(uuid4()),
             publish_wake=publish_wake,
         )
-    with pytest.raises(ValueError, match="target runtime protocol"):
+    with pytest.raises(ValueError):
         insert_inbound_message(
-            db_conn, agent_id, "", _SOURCE, kind="restart", bus=event_bus, database=database
+            db_conn,
+            agent_id,
+            "",
+            "external_agent:a:b:c",
+            kind="restart",
+            bus=event_bus,
+            database=database,
         )
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,))

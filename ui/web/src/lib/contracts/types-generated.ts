@@ -4382,9 +4382,11 @@ export interface components {
          *     notices pass shell:N / watcher:N; there is no default to prevent callers
          *     from forgetting and having inbounds silently tagged as "user", muddying
          *     envelope labels. The valid set is in `base/agents/messages/envelope.py:validate_source`
-         *     (system / agent:N / user / ui:page:<name> / watcher:N / shell:N /
-         *     schedule:N); an illegal source is intercepted by 422 at the HTTP layer —
-         *     otherwise it would land in inbound_messages and the agent claim node
+         *     (system / agent:N / external_agent:<subject>[:<instance>] / user / ui:page:<name> /
+         *     watcher:N / shell:N / schedule:N). `user` delivers as the user; an
+         *     `external_agent:` declaration delivers as a message from that external
+         *     agent (self-asserted, never authenticated). An illegal source is intercepted by
+         *     422 at the HTTP layer — otherwise it would land in inbound_messages and the agent claim node
          *     would hit ValueError and kill the process.
          */
         AgentMessageIn: {

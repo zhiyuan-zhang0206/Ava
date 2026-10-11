@@ -61,8 +61,7 @@ that row still removes this identity's evidence. The primitive is not a provider
 source admission or execution guarantee. It changes no Weixin seen-set, routing,
 command uncertainty or cursor behavior.
 
-Owners: [[base/agents/messages/docs/caller_protocol.ava.okf.md]] and
-[[base/agents/messages/docs/inbound-provenance.ava.okf.md]].
+Owner: [[base/agents/messages/docs/inbound-provenance.ava.okf.md]].
 
 ## Retry consumers
 

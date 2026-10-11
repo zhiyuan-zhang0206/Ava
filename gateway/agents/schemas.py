@@ -19,7 +19,7 @@ from pydantic import (
 )
 
 from base.agents import AgentStatus
-from base.agents.messages.envelope import validate_writable_source
+from base.agents.messages.envelope import validate_source
 from base.agents.messages.kwargs import NoteTag
 from base.agents.observation.snapshot import AgentSnapshot
 from base.agents.tasks.priority import Priority
@@ -117,7 +117,7 @@ class SystemNoteIn(BaseModel):
     @field_validator("source")
     @classmethod
     def _check_envelope_source(cls, v: str) -> str:
-        validate_writable_source(v)
+        validate_source(v)
         return v
 
     @model_validator(mode="after")

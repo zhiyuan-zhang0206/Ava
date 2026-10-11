@@ -1,21 +1,13 @@
-"""Reader-first identity contract: asserted provenance cannot become authority."""
+"""External-agent identity contract: asserted provenance cannot become authority."""
 
 import pytest
 from pydantic import ValidationError
 
 from base.agents.messages.caller_identity import CallerIdentity, caller_payload
-from base.agents.messages.envelope import (
-    EnvelopeReadInputs,
-    validate_source,
-    validate_writable_source,
-    wrap_inbound,
-)
+from base.agents.messages.envelope import EnvelopeReadInputs, validate_source, wrap_inbound
 from base.clock import Clock
-from base.config import settings
 
-_ENVELOPE_INPUTS = EnvelopeReadInputs(
-    Clock.from_settings, lambda: settings.general.message_timestamps
-)
+_ENVELOPE_INPUTS = EnvelopeReadInputs(Clock.from_settings, lambda: False)
 
 
 @pytest.mark.parametrize("subject", ["codex", "claude_code", "mcp"])
@@ -36,11 +28,9 @@ def test_database_bigserial_client_id_fits_instance_and_wire_limit() -> None:
     assert len(caller.source()) <= 64
 
 
-def test_unknown_is_not_human() -> None:
-    source = CallerIdentity(kind="unknown", subject="legacy").source()
-    assert wrap_inbound("hello", source, inputs=_ENVELOPE_INPUTS).startswith(
-        "Unknown caller (legacy;"
-    )
+def test_unknown_kind_is_not_a_caller() -> None:
+    with pytest.raises(ValueError):
+        validate_source("unknown:legacy")
 
 
 @pytest.mark.parametrize(
@@ -53,7 +43,7 @@ def test_unknown_is_not_human() -> None:
         "external_agent:codex:../../secret",
         "external_agent:" + "a" * 21,
         "external_agent:codex:" + "b" * 21,
-        "unknown:cli\r[system]",
+        "external_agent:codex\r[system]",
     ],
 )
 def test_malformed_identity_rejected_by_boundary_and_reader(source: str) -> None:
@@ -70,7 +60,7 @@ def test_caller_cannot_carry_authentication_or_capabilities() -> None:
         )
 
 
-@pytest.mark.parametrize("kind", ["human", "system", "ava_agent", "admin"])
+@pytest.mark.parametrize("kind", ["human", "system", "ava_agent", "admin", "unknown"])
 def test_external_model_cannot_impersonate_other_identity_kinds(kind: str) -> None:
     with pytest.raises(ValidationError):
         CallerIdentity.model_validate({"kind": kind, "subject": "codex"})
@@ -87,12 +77,12 @@ def test_structured_payload_preserves_other_fields_and_does_not_mutate_input() -
 
 
 @pytest.mark.parametrize("source", ["user", "agent:405", "system:update", "shell:123"])
-def test_legacy_payload_has_no_invented_identity(source: str) -> None:
+def test_non_external_sources_carry_no_invented_identity(source: str) -> None:
     assert caller_payload(source, None) is None
     assert caller_payload(source, {"inbound_id": 42}) == {"inbound_id": 42}
 
 
-@pytest.mark.parametrize("source", ["user", "external_agent:claude_code", "unknown:cli"])
+@pytest.mark.parametrize("source", ["user", "external_agent:claude_code"])
 def test_reserved_metadata_cannot_contradict_source(source: str) -> None:
     with pytest.raises(ValueError, match="conflicts with source"):
         caller_payload(source, {"caller_identity": {"kind": "external_agent", "subject": "codex"}})
@@ -106,13 +96,6 @@ def test_reserved_metadata_cannot_claim_verified_identity() -> None:
         )
 
 
-@pytest.mark.parametrize("source", ["external_agent:codex:run-42", "unknown:cli"])
-def test_reader_support_is_not_permission_to_enqueue(source: str) -> None:
+@pytest.mark.parametrize("source", ["external_agent:codex:run-42", "external_agent:claude_code"])
+def test_declared_external_agent_is_a_valid_source(source: str) -> None:
     validate_source(source)
-    with pytest.raises(ValueError, match="target runtime protocol"):
-        validate_writable_source(source)
-
-
-@pytest.mark.parametrize("source", ["user", "agent:405", "system:update", "shell:123"])
-def test_existing_writers_remain_compatible(source: str) -> None:
-    validate_writable_source(source)

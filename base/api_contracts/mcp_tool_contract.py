@@ -42,10 +42,12 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         Messaging an agent that has already terminated brings it back with its
         history intact.
 
-        Explicit caller_protocol='v1' labels the authenticated MCP client as an
-        external caller. It adds no permissions and requires an already-live
-        target with negotiated v1 support; legacy/default and bootstrap behavior
-        are unchanged. Do not supply source or instance: the server owns them.
+        By default the message reaches the agent as coming from the user. Pass
+        as_external_agent=true to deliver it as a message from an external
+        agent instead, identified by your authenticated MCP client: use it when
+        you collaborate with the agent beside the user rather than speaking for
+        the user. It adds no permissions. Do not supply source or instance: the
+        server owns them.
 
         An optional idempotency_key identifies a retry of this exact message.
         The server always scopes it to your authenticated MCP client identity;
