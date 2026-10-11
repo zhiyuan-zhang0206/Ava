@@ -211,15 +211,16 @@ class IMBridgeCore(SpawnMenuMixin):
             try:
                 reply = await self._handle_chat(state, text, msg.idempotency_key)
             except NETWORK_ERRORS:
-                # The keyed send already exhausted its bounded retries. Nothing was
-                # accepted and nothing is persisted: tell the user so they can resend.
+                # Bounded keyed retries are exhausted. The gateway may or may not have
+                # accepted the message (a lost response is UNKNOWN). Nothing is persisted
+                # or replayed, so tell the user and let them decide whether to resend.
                 _log.exception(
-                    "chat enqueue failed channel=%s chat=%s - not delivered",
+                    "chat enqueue failed channel=%s chat=%s - delivery unconfirmed",
                     msg.channel,
                     msg.chat_id,
                 )
                 self._stop_typing(state)
-                await self._send(msg.channel, msg.chat_id, Reply(copy.NOT_DELIVERED_NOTICE))
+                await self._send(msg.channel, msg.chat_id, Reply(copy.DELIVERY_UNCONFIRMED_NOTICE))
                 return
         if reply:
             replies = reply if isinstance(reply, list) else [reply]

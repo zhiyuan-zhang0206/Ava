@@ -215,7 +215,7 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
     im_send_retry_delays: Annotated[list[float], NoDecode] = Field(
         default=[2.0, 4.0, 8.0, 16.0, 32.0],
         alias="AVA_IM_SEND_RETRY_DELAYS",
-        description="Comma-separated backoff delays (seconds) between gateway enqueue retries. A gateway mid-rollout is down for roughly a minute; 2+4+8+16+32 covers it. When every retry fails the error propagates and the sender is told the message was not delivered; nothing is queued or replayed.",
+        description="Comma-separated backoff delays (seconds) between gateway enqueue retries. A gateway mid-rollout is down for roughly a minute; 2+4+8+16+32 covers it. When every retry fails the error propagates and the sender is told delivery is unconfirmed; nothing is queued or replayed.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,
