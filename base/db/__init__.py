@@ -420,64 +420,6 @@ def _emit_prepared_event(event: Event | None) -> None:
         telemetry.emit_prepared(event)
 
 
-def insert_restart_completed_inbound(
-    cur: psycopg.Cursor,
-    agent_id: int,
-    *,
-    post_commit_events: list[Event],
-) -> tuple[str, str, dict[str, object] | None] | None:
-    """Trace the newest restart inbound into a restart-completed marker.
-
-    The newest row matters: an older ``system:update`` restart must not shadow
-    a newer user or self restart, or the claim node renders the wrong marker
-    wording. The payload passes through unchanged so the lifecycle marker can
-    render this restart's config diff. After claiming the marker, the new
-    process writes its full effective-config snapshot; this row guarantees the
-    original restart envelope survives until then. The caller owns the outer
-    transaction and must emit every returned ``post_commit_events`` item only
-    after that transaction commits. ``None`` means no restart inbound exists;
-    the caller owns the appropriate integrity or best-effort response.
-    """
-    cur.execute(
-        "SELECT source, content, payload FROM inbound_messages "
-        "WHERE agent_id = %s AND kind = 'restart' "
-        "ORDER BY id DESC "
-        "LIMIT 1",
-        (agent_id,),
-    )
-    row = cur.fetchone()
-    if row is None:
-        return None
-    source: str = row[0]
-    content: str = row[1]
-    payload: dict[str, object] | None = row[2]
-    cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
-    config_overlay_row = fetch_one(cur, "restart-completed: read per-agent config")
-    config_overlay: dict[str, object] | None = config_overlay_row[0]
-    cur.execute(
-        "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-        "VALUES (%s, %s, 'restart_completed', %s, %s::jsonb) RETURNING id",
-        (agent_id, content, source, json.dumps(payload) if payload else None),
-    )
-    restart_completed_row = cur.fetchone()
-    if restart_completed_row is None:
-        raise RuntimeError("restart-completed inbound INSERT returned no id")
-    from base.agents.impersonation.manifest import record_central_event
-    from base.telemetry.audit_events import prepare_event_log, record_audit
-
-    prepared_event = prepare_event_log(
-        event_type="restart_completed",
-        agent_id=agent_id,
-        source=source,
-        payload={"config_overlay": config_overlay} if config_overlay else {},
-    )
-    prepared_event = record_audit(
-        cur.connection, record_central_event(cur.connection, prepared_event)
-    )
-    post_commit_events.append(prepared_event)
-    return source, content, payload
-
-
 # A "live" agent is one currently holding a process (status running/idling) —
 # the set a cluster-wide stop-the-world (quiesce before a schema migration) must
 # drain. The three helpers below all key off this same predicate; the statuses

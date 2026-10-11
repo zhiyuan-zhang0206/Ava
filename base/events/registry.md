@@ -75,7 +75,6 @@ Emit sites and consumers: see the comments at each emit point.
 | `cancel` | in-flight turn cancelled | business | — | events |
 | `resurrect` | terminated agent woken | business | — | events |
 | `billing_resurrect` | billing batch recovery run: billing-class halt victims reinstated after the provider balance gate passed (task #3919) | business | — | events |
-| `restart_completed` | restart finished | business | — | events |
 | `hosted_legacy_adoption` | a hosted successor replaced a legacy NULL-resource owner before lease expiry on machine-local evidence (dead predecessor probe set) | business | — | events |
 | `compact` | agent context compacted | business | — | events |
 | `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue) | business | — | events |

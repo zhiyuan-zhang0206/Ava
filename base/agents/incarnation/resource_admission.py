@@ -136,27 +136,6 @@ def _next(
     )
 
 
-def admit_resources(
-    conn: psycopg.Connection, target: RuntimeIncarnation, host: ResourceProcess
-) -> None:
-    row = conn.execute(_LOCK, (target.agent_id,)).fetchone()
-    if row is None:
-        raise ResourceEvidenceError("resource admission target does not exist")
-    predecessor = False
-    if row[0] is not None:
-        state = decode_resources(row[0])
-        if isinstance(state, IncarnationResources):
-            predecessor = (
-                conn.execute(
-                    _PREDECESSOR, (target.agent_id, state.generation, state.owner)
-                ).fetchone()
-                is not None
-            )
-    value = _next(row, target, host, predecessor=predecessor)
-    if value is not None:
-        conn.execute(_STORE, (Jsonb(value.model_dump(mode="json")), target.agent_id))
-
-
 async def admit_resources_async(
     conn: psycopg.AsyncConnection,
     target: RuntimeIncarnation,

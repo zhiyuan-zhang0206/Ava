@@ -99,7 +99,6 @@ EVENTS: dict[str, EventSpec] = {
         "billing batch recovery run: billing-class halt victims reinstated after "
         "the provider balance gate passed (task #3919)",
     ),
-    "restart_completed": audit_event("restart_completed", "restart finished"),
     "hosted_legacy_adoption": audit_event(
         "hosted_legacy_adoption",
         "a hosted successor replaced a legacy NULL-resource owner before lease "

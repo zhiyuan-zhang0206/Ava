@@ -246,41 +246,6 @@ class LLMStreamCorruptedError(LLMStreamError):
     """
 
 
-class LLMStreamSilentIdleError(LLMStreamError):
-    """LLM stream produced reasoning (thinking blocks / output tokens) but
-    emitted no text content and no tool_call — the turn is a "silent idle"
-    where the agent appears stuck at reasoning but never acts.
-
-    No longer raised on the primary detection path: the node now keeps the
-    reasoning in context and returns ``halted=False`` so the claim node loops
-    straight back to the LLM (no token-wasting blind re-stream), letting the
-    ava_silent_idle plugin inject a Continue nudge before the next turn. A
-    output-token budget (``LlmLedger.silent_idle_output_tokens``, capped by
-    ``settings.lm.llm_silent_idle_max_output_tokens``) bounds a model that
-    habitually reasons without acting. Each silent idle consumes at least one
-    budget token even when a provider reports zero output tokens; at the cap
-    the node halts to idle instead of looping.
-    This class is retained as public API for external catch sites.
-
-    The fallthrough case — no reasoning AND no text AND no tool_call — is NOT a
-    silent idle; those turns remain a WARNING + halt because the model truly
-    produced nothing (no tokens at all), and looping would waste API credits on
-    a deterministic empty output.
-
-    Exposed attributes for SQL discrimination:
-    - ``output_tokens``: usage_metadata output token count at time of error
-    """
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        output_tokens: int,
-    ) -> None:
-        super().__init__(message)
-        self.output_tokens = output_tokens
-
-
 class LLMStreamUnexpectedStopReasonError(LLMStreamError):
     """LLM stream finished but the terminal reason is not in the normal-completion set.
 

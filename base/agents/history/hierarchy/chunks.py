@@ -557,13 +557,12 @@ async def covered_spans(
     Two jobs can describe overlapping stretches (a manual close and the producers' next size cut,
     a replay after a restart that lost the cut state, a retry of a job that had written its nodes):
     nodes of one level never overlap, so a later chunk is cut down to what no node covers
-    (`uncovered`). Only nodes of the chunk pipeline count (`chunk-*`): a node an old worker wrote
-    in a mixed-version window is not part of this tree.
+    (`uncovered`).
     """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT span_start, span_end FROM understanding_nodes"
-            " WHERE agent_id = %s AND depth = 1 AND engine_version LIKE 'chunk-%%'"
+            " WHERE agent_id = %s AND depth = 1"
             " AND span_start <= %s AND span_end >= %s ORDER BY span_start",
             (agent_id, span[1], span[0]),
         )
@@ -665,7 +664,7 @@ async def _request_rebuild_if_out_of_order(
     earliest_end = min(n.span[1] for n in nodes)
     await cur.execute(
         "SELECT EXISTS (SELECT 1 FROM understanding_nodes WHERE agent_id = %s AND depth = 1"
-        " AND parent_id IS NOT NULL AND engine_version LIKE 'chunk-%%'"
+        " AND parent_id IS NOT NULL"
         " AND span_start > %s AND NOT (span_start = ANY(%s)))",
         (agent_id, earliest_end, [n.span[0] for n in nodes]),
     )

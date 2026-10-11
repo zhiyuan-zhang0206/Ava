@@ -9,8 +9,9 @@ from uuid import uuid4
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
+from psycopg_pool import AsyncConnectionPool
 
-from base.agents.incarnation.resource_admission import admit_resources
+from base.agents.incarnation.resource_admission import admit_resources_async
 from base.agents.incarnation.resources import (
     ResourceEvidenceError,
     attach_exec,
@@ -19,6 +20,7 @@ from base.agents.incarnation.resources import (
 )
 from base.agents.incarnation.tests.test_resources import _admitted, _entry, _force, _process
 from base.db import Database
+from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -29,14 +31,17 @@ def restore_process_delivery() -> Iterator[None]:
         yield
 
 
-def test_successor_cannot_reset_unknown_or_unresolved_set(db_conn: psycopg.Connection) -> None:
+async def test_successor_cannot_reset_unknown_or_unresolved_set(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
     target = _admitted(db_conn)
     entry = _entry()
     with db_conn.transaction():
         register_exec(db_conn, target, entry)
     successor = RuntimeIncarnation(target.agent_id, uuid4(), uuid4())
-    with pytest.raises(ResourceEvidenceError), db_conn.transaction():
-        admit_resources(db_conn, successor, _process(999, 1.0))
+    with pytest.raises(ResourceEvidenceError):
+        async with async_write_transaction(aops_pool) as conn:
+            await admit_resources_async(conn, successor, _process(999, 1.0))
     row = db_conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
     ).fetchone()
@@ -71,15 +76,18 @@ def test_exact_terminal_consumption_survives_force_but_replay_refuses(
     assert row is not None and row[0]["requests"] == {} and row[1] == command
 
 
-def test_malformed_never_downgrades_to_legacy(db_conn: psycopg.Connection) -> None:
+async def test_malformed_never_downgrades_to_legacy(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
     target = _admitted(db_conn)
     db_conn.execute(
         "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
         (Jsonb({"version": 9}), target.agent_id),
     )
     db_conn.commit()
-    with pytest.raises(ValueError), db_conn.transaction():
-        admit_resources(db_conn, target, _process(10, 1.0))
+    with pytest.raises(ValueError):
+        async with async_write_transaction(aops_pool) as conn:
+            await admit_resources_async(conn, target, _process(10, 1.0))
 
 
 def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
