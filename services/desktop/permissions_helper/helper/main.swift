@@ -1609,8 +1609,10 @@ private let rootSeedEnvironment = "AVA_PERMISSIONS_HELPER_ROOT_SEED"
 
 /// Timing knobs of the keeper state machine, in seconds.
 private enum RootKeeperTiming {
-    static let baseBackoffS = 0.5
-    static let maxBackoffS = 30.0
+    // Three consecutive failures leave two waits (20 s, then 40 s): the budget spans a
+    // minute, so a root executable that is briefly absent during an update is retried.
+    static let baseBackoffS = 20.0
+    static let maxBackoffS = 40.0
     static let stableAfterS = 10.0
     static let conflictPollS = 5.0
     /// Consecutive unstable failures (exits before `stableAfterS`, or failed spawns)
