@@ -6724,43 +6724,6 @@
             }
           }
         }
-      },
-      "post": {
-        "summary": "Post Mcp Client",
-        "description": "Create an MCP client and reveal its plaintext token once.",
-        "operationId": "post_mcp_client_api_mcp_clients_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/McpClientCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/McpClientCreated"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
       }
     },
     "/api/mcp/clients/{client_id}/revoke": {
@@ -13073,50 +13036,6 @@
         ],
         "title": "MachineStatus",
         "description": "A machines-table row state — augmented with live probe results.\n\n`online` / `paused` come from each machine's ops `status_probe`: the last one\nthe heartbeat liveness pass made (the default read, see `observed_at`), or a\ndial within the configured roster deadline (a fresh read):\n- online=True + paused has a value: probe succeeded\n- online=False + paused=None: probe failed (network unreachable /\n  gateway down)\n- online=True + paused=None: ops server responded, but the operation failed\n  or its response did not match ClusterStatus (abnormal)"
-      },
-      "McpClientCreate": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "scope": {
-            "$ref": "#/components/schemas/McpClientScope",
-            "default": "read"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "title": "McpClientCreate"
-      },
-      "McpClientCreated": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "scope": {
-            "$ref": "#/components/schemas/McpClientScope"
-          },
-          "token": {
-            "type": "string",
-            "title": "Token"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "scope",
-          "token"
-        ],
-        "title": "McpClientCreated"
       },
       "McpClientRevoked": {
         "properties": {

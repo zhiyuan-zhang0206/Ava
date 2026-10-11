@@ -33,12 +33,20 @@ Create one credential per external client through the admin API, with the
 human cluster secret (or from a browser session logged in with it). A client
 token outlives every write generation, so a machine API token or a
 runner-minted session gets 403 here. Choose `read` for inspection only, or
-`write` when the client must spawn, message, or terminate agents. The plaintext
-token appears only in this response; the gateway stores its SHA-256 hash:
+`write` when the client must spawn, message, or terminate agents. Creation is
+keyed: send a fresh `Idempotency-Key` (1-128 characters) with
+`Idempotency-Scope: principal-v1`, and reuse that key only to retry the same
+request after an ambiguous response. The plaintext token appears only in the
+first response; a replay of the same key returns the original metadata with
+`replayed: true` and `token: null`, because the gateway stores only the SHA-256
+hash. If the first response was lost, revoke that client and create a new one
+under a new key and an unused name:
 
 ```bash
-curl -s http://<gateway-host>/api/mcp/clients \
+curl -s http://<gateway-host>/api/keyed/v1/mcp/clients \
   -H "Authorization: Bearer <cluster-secret>" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Scope: principal-v1" \
   -H "Content-Type: application/json" \
   -d '{"name":"claude","scope":"write"}'
 ```

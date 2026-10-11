@@ -36,7 +36,7 @@ from gateway.http.auth.request_principal import cluster_credential
 from gateway.http.auth.webhook import authenticate_webhook
 from ops.roster.service_spec import ServiceSpec, api_access
 from services.agent_runner.agent_ops import _boot as ops_boot
-from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
 from tests.fixtures.unit.gateway_auth import disable_default_gateway_credentials
 
 _HUMAN = "human-" + "h" * 40
@@ -342,9 +342,7 @@ def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
             {"Cookie": f"{cookie_name()}={runner_session.cookies[cookie_name()]}"},
         )
         for headers in generation_bound:
-            minted = client.post(
-                "/api/mcp/clients", json={"name": "minted", "scope": "write"}, headers=headers
-            )
+            minted = create_mcp_client(client, "minted", "write", headers=headers)
             assert minted.status_code == 403, minted.text
             assert client.get("/api/mcp/clients", headers=headers).status_code == 403
             assert client.post("/api/mcp/clients/1/revoke", headers=headers).status_code == 403
@@ -355,11 +353,7 @@ def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
             {"Cookie": f"{cookie_name()}={human_session.cookies[cookie_name()]}"},
         )
         for index, headers in enumerate(human):
-            created = client.post(
-                "/api/mcp/clients",
-                json={"name": f"human-{index}", "scope": "write"},
-                headers=headers,
-            )
+            created = create_mcp_client(client, f"human-{index}", "write", headers=headers)
             assert created.status_code == 200, created.text
             assert client.get("/api/mcp/clients", headers=headers).status_code == 200
             revoked = client.post(

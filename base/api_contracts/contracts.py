@@ -301,10 +301,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/mcp_server/router.py ─────────────────────────────
     ("GET", "/api/mcp/clients"): RouteContract(),
-    ("POST", "/api/mcp/clients"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="client creation — plaintext token is revealed once",
-    ),
     ("POST", "/api/keyed/v1/mcp/clients"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="guarded credential creation; replays recover metadata, never the one-time token",

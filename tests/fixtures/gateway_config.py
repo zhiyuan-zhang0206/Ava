@@ -14,7 +14,14 @@ from fastapi.testclient import TestClient
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from tests.fixtures.configuration import snapshot_process_config
 
-__all__ = ["SPAWN_PATH", "gateway_test_client", "post_spawn", "spawn_headers", "spawn_via_http"]
+__all__ = [
+    "SPAWN_PATH",
+    "create_mcp_client",
+    "gateway_test_client",
+    "post_spawn",
+    "spawn_headers",
+    "spawn_via_http",
+]
 
 SPAWN_PATH = "/api/keyed/v1/agents"
 
@@ -63,4 +70,23 @@ def post_spawn(gateway_url: str, body: Mapping[str, Any], *, timeout: float) -> 
     """POST one creation intent to a running gateway (e2e stacks)."""
     return httpx.post(
         f"{gateway_url}{SPAWN_PATH}", json=dict(body), headers=spawn_headers(), timeout=timeout
+    )
+
+
+def create_mcp_client(
+    client: TestClient,
+    name: str,
+    scope: str = "read",
+    *,
+    headers: Mapping[str, str] | None = None,
+) -> httpx2.Response:
+    """POST one fresh MCP client creation intent; only this first response carries the token."""
+    return client.post(
+        "/api/keyed/v1/mcp/clients",
+        json={"name": name, "scope": scope},
+        headers={
+            "Idempotency-Key": uuid.uuid4().hex,
+            SCOPE_HEADER: PRINCIPAL_SCOPE,
+            **(headers or {}),
+        },
     )
