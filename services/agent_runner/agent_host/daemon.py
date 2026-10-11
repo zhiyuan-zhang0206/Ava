@@ -36,6 +36,7 @@ from collections.abc import Callable, Collection, Coroutine, Iterable
 from pathlib import Path
 from typing import cast
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.log import logger, prepare_process_logging
 
 # The executable owns inherited SDK posture; importing this module never boots it.
@@ -737,7 +738,9 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="agent_host")
 
     def database() -> Database:
-        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
+        return Database(
+            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+        )
 
     clients = process_clients(database=database, config=config, machine=machine)
     clients_handed_off = False

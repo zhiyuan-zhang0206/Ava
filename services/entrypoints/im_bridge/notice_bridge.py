@@ -220,7 +220,7 @@ class NoticeBridge:
 
     def _unaccepted_notices(self, limit: int | None = None) -> list[dict[str, Any]]:
         """Unaccepted open notices above the immutable cutover, regardless of high ID."""
-        from base.db import NOTICE_FYI_TTL_DAYS
+        from base.agents.inbox.rows import NOTICE_FYI_TTL_DAYS
 
         if limit is None:
             limit = self._config.notices_open_default_limit
@@ -240,7 +240,7 @@ class NoticeBridge:
         direct-DB twin of the gateway's /api/notices/open query. Without an
         explicit limit the listing caps at services.im_bridge_notice_open_limit;
         callers may narrow it."""
-        from base.db import NOTICE_FYI_TTL_DAYS
+        from base.agents.inbox.rows import NOTICE_FYI_TTL_DAYS
 
         if limit is None:
             limit = self._config.im_bridge_notice_open_limit

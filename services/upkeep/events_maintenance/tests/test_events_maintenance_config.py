@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable
 from typing import Any
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -55,11 +55,11 @@ def test_database_slice_uses_the_supplied_owner_at_each_factory_call(
     captured: list[DbConfig] = []
 
     def database(
-        inputs: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+        inputs: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
     ) -> Database:
         assert gate is database_gate
         captured.append(inputs)
-        return Database(inputs, gate=gate, local_host=local_host)
+        return Database(inputs, gate=gate, direct_url=direct_url)
 
     monkeypatch.setattr(maintenance_config, "Database", database)
     maintenance_config.events_maintenance_db(

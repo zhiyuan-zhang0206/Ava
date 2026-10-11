@@ -28,10 +28,11 @@ from datetime import UTC, datetime, timedelta
 
 from psycopg_pool import ConnectionPool
 
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.recovery import pages as page_recovery
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
-from base.db import Database, publish_inbound_wake
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus

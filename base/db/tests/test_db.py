@@ -1,10 +1,4 @@
-"""`base/db/__init__.py` live-agent helpers — the SQL the fleet update's quiesce step drives.
-
-These are the relocated home of the agents_meta / inbound_messages queries the
-gateway CLI used to hand-write inline: signal_live_agents_restart (bulk
-restart), list_live_agent_ids. "Live" = status running/idling.
-Each helper opens its own connection, so it sees rows committed by the fixture.
-"""
+"""`base/db` connection policy: placeholder refusal, keepalive kwargs, direct dials and pool arming."""
 
 from __future__ import annotations
 
@@ -18,12 +12,11 @@ from psycopg_pool import AsyncConnectionPool
 
 from base import db
 from base.config import settings
-from base.db import Database, connections
+from base.db import connections
 from base.db.code_version_gate import ProcessDbGate
-from base.db.tests.live_agents import seed_agent
-from base.events.live.bus import EventBus
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
-from base.telemetry import process_name
+
+_PROCESS = "db-test"
 
 
 def _direct_url_x(_config: object = None, **_kwargs: object) -> str:
@@ -70,7 +63,7 @@ def test_async_pool_fixes_the_transport_posture(
     and the caller's subclass gets its own arguments."""
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u@127.0.0.1:1/x")
     monkeypatch.setattr(settings.data_plane, "db_sslmode", "require")
-    database_gate = ProcessDbGate(version=lambda: 7, process=process_name())
+    database_gate = ProcessDbGate(version=lambda: 7, process=_PROCESS)
     captured: dict[str, object] = {}
 
     class _FakePool:
@@ -99,7 +92,7 @@ def test_async_pool_fixes_the_transport_posture(
             "autocommit": True,
             "prepare_threshold": None,
             "sslmode": "require",
-            "application_name": f"ava:{process_name()}:v7",
+            "application_name": f"ava:{_PROCESS}:v7",
             **db.PG_KEEPALIVE_KWARGS,
         },
         "check": captured["check"],
@@ -177,9 +170,8 @@ def test_connect_unbounded_keeps_the_keepalives(
     long DDL on a remote link is the flow a dead peer would otherwise pin."""
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u:p@db.example:5432/x")
     monkeypatch.setattr(settings.data_plane, "db_sslmode", "")
-    monkeypatch.setattr(connections, "direct_db_url", _direct_url_x)
     dials = _spy_dials(monkeypatch)
-    db.connect(direct=True, unbounded=True, gate=database_gate)
+    db.connect(direct=True, unbounded=True, gate=database_gate, direct_url=_direct_url_x)
     assert dials == [
         (
             "postgresql://u:p@db:5432/x",
@@ -191,103 +183,6 @@ def test_connect_unbounded_keeps_the_keepalives(
 def test_connect_url_refuses_placeholder_url() -> None:
     with pytest.raises(db.PlaceholderDbUrlError):
         db.connect_url(PLACEHOLDER_DB_URL)
-
-
-def _inbound_rows(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT kind, source, content FROM inbound_messages WHERE agent_id = %s",
-            (agent_id,),
-        )
-        return cur.fetchall()
-
-
-def test_signal_live_agents_restart_only_live(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
-) -> None:
-    """One restart inbound (content='', the given source) per running/idling agent;
-    terminated get none. Returns the ids signalled."""
-    running = seed_agent(db_conn, "running")
-    idling = seed_agent(db_conn, "idling")
-    terminated = seed_agent(db_conn, "terminated")
-
-    ids = db.signal_live_agents_restart(database, event_bus, source="system:update")
-
-    assert sorted(ids) == sorted([running, idling])
-    assert _inbound_rows(db_conn, running) == [("restart", "system:update", "")]
-    assert _inbound_rows(db_conn, idling) == [("restart", "system:update", "")]
-    assert _inbound_rows(db_conn, terminated) == []
-
-
-def test_signal_live_agents_restart_requires_an_unexpired_lease(
-    db_conn: psycopg.Connection,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    """R1 (Task #1021): a running/idling row WITHOUT a lease (pre-lease code) or
-    with an EXPIRED one (a process that stopped renewing) is not alive — the
-    lease is the liveness authority, and the quiesce must not signal a zombie."""
-    running_no_lease = seed_agent(db_conn, "running", live_lease=False)
-    idling_no_lease = seed_agent(db_conn, "idling", live_lease=False)
-    running_fresh = seed_agent(db_conn, "running")
-
-    ids = db.signal_live_agents_restart(database, event_bus, source="system:update")
-
-    assert ids == [running_fresh]
-    assert _inbound_rows(db_conn, running_no_lease) == []
-    assert _inbound_rows(db_conn, idling_no_lease) == []
-
-
-def test_agent_is_alive_predicate() -> None:
-    """The Python half of the single alive predicate — status AND unexpired
-    lease, one definition for row-based checks."""
-    from datetime import UTC, datetime, timedelta
-
-    now = datetime.now(UTC)
-    future = now + timedelta(seconds=600)
-    past = now - timedelta(seconds=1)
-
-    assert db.agent_is_alive("running", future) is True
-    assert db.agent_is_alive("idling", future) is True
-    assert db.agent_is_alive("running", None) is False  # pre-lease row
-    assert db.agent_is_alive("running", past) is False  # expired
-    assert db.agent_is_alive("terminated", future) is False
-
-
-def test_signal_live_agents_restart_none_live(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
-) -> None:
-    """No live agents → no inbound inserted, returns []."""
-    terminated = seed_agent(db_conn, "terminated")
-    assert db.signal_live_agents_restart(database, event_bus, source="system:update") == []
-    assert _inbound_rows(db_conn, terminated) == []
-
-
-def test_signal_live_agents_restart_exclude_ids(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
-) -> None:
-    """exclude_agent_ids agents are skipped even when live — the quiesce
-    convergence loop passes its already-signalled set so a pass only signals
-    newly-live agents."""
-    already = seed_agent(db_conn, "running")
-    late = seed_agent(db_conn, "running")
-
-    ids = db.signal_live_agents_restart(
-        database, event_bus, source="system:update", exclude_agent_ids={already}
-    )
-
-    assert ids == [late]
-    assert _inbound_rows(db_conn, already) == []
-    assert _inbound_rows(db_conn, late) == [("restart", "system:update", "")]
-
-
-def test_list_live_agent_ids(db_conn: psycopg.Connection, database: Database) -> None:
-    """list_live_agent_ids lists agents with a LIVE process to act on (quiesce):
-    running/idling only."""
-    running = seed_agent(db_conn, "running")
-    idling = seed_agent(db_conn, "idling")
-    seed_agent(db_conn, "terminated")
-    assert sorted(db.list_live_agent_ids(database)) == sorted([running, idling])
 
 
 def test_pool_check_connections_flag(
@@ -310,7 +205,6 @@ def test_pool_check_connections_flag(
             captured.update(_kw)
 
     monkeypatch.setattr(connections, "ConnectionPool", _FakePool)
-    monkeypatch.setattr(connections, "direct_db_url", _direct_url_test)
     # Pooled (the default): the baseline restore is armed on configure + check.
     db.pool(gate=database_gate)
     configure = captured["configure"]
@@ -321,9 +215,9 @@ def test_pool_check_connections_flag(
     assert configure.keywords == check.keywords == {"gate": database_gate}
     captured.clear()
     # Direct: no scrub; the flag keeps arming the plain dead-connection check.
-    db.pool(direct=True, check_connections=True, gate=database_gate)
+    db.pool(direct=True, check_connections=True, gate=database_gate, direct_url=_direct_url_test)
     assert captured.get("configure") is None
     assert captured.get("check") is real_check
     captured.clear()
-    db.pool(direct=True, gate=database_gate)
+    db.pool(direct=True, gate=database_gate, direct_url=_direct_url_test)
     assert captured.get("check") is None

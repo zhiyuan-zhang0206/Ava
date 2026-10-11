@@ -9,6 +9,7 @@ from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
@@ -33,7 +34,7 @@ def run_schedule(schedule_id: int, revision: int | None = None, *, machine: Mach
     image = ava.loaded_code_image()
     version = CodeVersion(image)
     gate = ProcessDbGate(process=process_name(), version=version.get)
-    database = partial(Database.from_settings, gate=gate, local_host=machine.host)
+    database = partial(Database.from_settings, gate=gate, direct_url=ClusterDirectUrl(machine.host))
     with closing(process_clients(database=database, machine=machine)) as clients:
         return runner.run(
             schedule_id,

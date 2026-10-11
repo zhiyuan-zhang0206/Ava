@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
@@ -37,10 +38,10 @@ def test_writer_uses_one_captured_gate_and_is_joined(
         counts.append((repo, rev))
         return 22
 
-    def handle(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> Database:
+    def handle(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
         gates.append(gate)
-        hosts.append(local_host)
-        return Database(db_config_from_settings(), gate=gate, local_host=local_host)
+        hosts.append(direct_url.local_host)
+        return Database(db_config_from_settings(), gate=gate, direct_url=direct_url)
 
     def build(
         *, database: Callable[[], Database], machine: MachineIdentity, home: Path

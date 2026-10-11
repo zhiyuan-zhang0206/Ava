@@ -9,8 +9,8 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.default_config import contribute
+from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.tasks.status import TaskStatus
-from base.db import insert_inbound_message_in_transaction
 from base.db.transaction import write_transaction
 from base.packages.plugins.flags import read_declared_flag
 

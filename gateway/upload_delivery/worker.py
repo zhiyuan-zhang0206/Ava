@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from base import telemetry
 from base.agents import AgentNotFound
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.inbound import InboundKind
 from base.agents.upload_delivery import source, storage
 from base.agents.upload_delivery.models import (
@@ -26,7 +27,7 @@ from base.agents.upload_delivery.models import (
 )
 from base.agents.upload_delivery.paths import agent_upload_dir
 from base.cluster.machine import MachineIdentity
-from base.db import Database, publish_inbound_wake
+from base.db import Database
 from base.deploy.maintenance.admission import business_paused, quiesced
 from base.events.live.bus import EventBus
 from gateway.http.middleware.stopping import is_stopping

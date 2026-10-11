@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -25,8 +26,8 @@ def test_operator_handles_share_the_command_gate_without_git(
 ) -> None:
     seen: list[ProcessDbGate] = []
 
-    def from_settings(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> Database:
-        assert callable(local_host)
+    def from_settings(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
+        assert callable(direct_url.local_host)
         seen.append(gate)
         assert gate.application_name() == "ava:cli"
         assert not gate.min_read_due()
@@ -51,8 +52,8 @@ def test_separate_commands_own_separate_exempt_gates(
 ) -> None:
     seen: list[ProcessDbGate] = []
 
-    def from_settings(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> Database:
-        assert callable(local_host)
+    def from_settings(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
+        assert callable(direct_url.local_host)
         seen.append(gate)
         return MagicMock(spec=Database)
 
@@ -86,7 +87,7 @@ def test_operator_handle_preserves_the_original_constructor_error(
 ) -> None:
     error = RuntimeError("operator configuration failed")
 
-    def fail(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> Database:
+    def fail(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
         assert not gate.min_read_due()
         raise error
 
@@ -141,11 +142,11 @@ def test_recovery_url_handle_keeps_the_operator_gate_and_live_slice(
         config: DbConfig,
         *,
         gate: ProcessDbGate | None = None,
-        local_host: Callable[[], str] | None = None,
+        direct_url: ClusterDirectUrl | None = None,
     ) -> None:
         assert gate is not None and not gate.min_read_due()
         seen.append((config, gate))
-        original_init(self, config, gate=gate, local_host=local_host)
+        original_init(self, config, gate=gate, direct_url=direct_url)
 
     monkeypatch.setattr(Database, "__init__", initialize)
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
@@ -174,8 +175,8 @@ def test_borrowed_cli_context_keeps_the_original_operator_factory(
 
     seen: list[ProcessDbGate] = []
 
-    def from_settings(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> Database:
-        assert callable(local_host)
+    def from_settings(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
+        assert callable(direct_url.local_host)
         seen.append(gate)
         return MagicMock(spec=Database)
 

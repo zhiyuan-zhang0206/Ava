@@ -36,8 +36,8 @@ from pathlib import Path
 
 import psycopg
 
-from base.cluster.dataplane import walg_binary
-from base.db import Database, pg_admin
+from base.cluster.dataplane import pg_admin, walg_binary
+from base.db import Database
 from base.host.private_storage import ensure_private_dir
 from base.log import logger
 from base.native_process.os_platform import LockTimeoutError, file_lock

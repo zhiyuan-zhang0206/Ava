@@ -97,7 +97,7 @@ def _publish_self_inbound_wake() -> None:
     """Best-effort Redis wake for a self-inserted inbound (restart / terminate /
     compact), over the agent's own SDK redis handle (`ava.REDIS`).
 
-    Same contract as `base.db.publish_inbound_wake`: never raises (the claim
+    Same contract as `base.agents.inbox.wake.publish_inbound_wake`: never raises (the claim
     loop's SELECT recheck delivers the row regardless), but a `NoPermissionError`
     is logged rather than swallowed — it means this agent's redis ACL user is not
     granted its own `<prefix>:inbound:*` channel (an ACL / channel-prefix

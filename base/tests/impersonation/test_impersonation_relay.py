@@ -8,10 +8,11 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
-from base.db import Database, insert_inbound_message
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation

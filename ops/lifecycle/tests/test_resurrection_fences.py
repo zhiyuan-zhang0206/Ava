@@ -6,7 +6,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-import base.db
+from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -139,7 +139,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = base.db.insert_inbound_message(
+        trigger_id = insert_inbound_message(
             db_conn,
             agent_id,
             "work before repeated force",
@@ -190,7 +190,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = base.db.insert_inbound_message(
+        trigger_id = insert_inbound_message(
             db_conn,
             agent_id,
             "wake after first death",
@@ -254,7 +254,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = base.db.insert_inbound_message(
+        trigger_id = insert_inbound_message(
             db_conn, agent_id, "already handled", source="user", bus=event_bus, database=database
         )
         with db_conn.cursor() as cur:
@@ -303,7 +303,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = base.db.insert_inbound_message(
+        trigger_id = insert_inbound_message(
             db_conn,
             agent_id,
             "new work after death",
@@ -353,7 +353,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        compact_id = base.db.insert_inbound_message(
+        compact_id = insert_inbound_message(
             db_conn,
             agent_id,
             "",
@@ -403,7 +403,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        compact_id = base.db.insert_inbound_message(
+        compact_id = insert_inbound_message(
             db_conn,
             agent_id,
             "",
@@ -468,7 +468,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        compact_id = base.db.insert_inbound_message(
+        compact_id = insert_inbound_message(
             db_conn,
             agent_id,
             "",

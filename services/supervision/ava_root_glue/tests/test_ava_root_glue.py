@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
 from base.db import Database
@@ -293,10 +294,10 @@ async def test_reference_station_and_writer_share_one_entry_gate(
     machines: list[MachineIdentity] = []
 
     def make_database(
-        config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+        config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
     ) -> Database:
         gates.append(gate)
-        readers.append(local_host)
+        readers.append(direct_url.local_host)
         return database
 
     def diagnostics(

@@ -106,6 +106,7 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentity) -> Databas
 
     def database() -> Any:
         nonlocal gate
+        from base.cluster.dataplane.direct_url import ClusterDirectUrl
         from base.db import Database
         from base.db.code_version_gate import ProcessDbGate
         from base.db.config import db_config_from_boot
@@ -120,7 +121,7 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentity) -> Databas
         return Database(
             db_config_from_boot(config),
             gate=gate,
-            local_host=machine.host,
+            direct_url=ClusterDirectUrl(machine.host),
         )
 
     return database

@@ -11,7 +11,7 @@ hostile to interactive exploration (`SET`, prepared statements, advisory locks
 all misbehave). Derive the direct URL the way the admin plane does:
 
 ```bash
-psql "$(.venv/bin/python -c 'from base.db import direct_db_url; print(direct_db_url())')"
+psql "$(.venv/bin/python -c 'from base.cluster.dataplane.direct_url import direct_db_url; print(direct_db_url())')"
 ```
 
 Pass that URL verbatim — it already carries whatever the cluster's auth needs

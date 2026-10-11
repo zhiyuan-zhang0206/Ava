@@ -8,8 +8,8 @@ from fastapi import HTTPException, Request
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.db import insert_inbound_message_in_transaction
 from base.db.transaction import write_transaction
 from gateway.agents.schemas import NoticeCreateIn
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key

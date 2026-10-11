@@ -9,7 +9,7 @@ tags:
 
 # Effective Agent Model Configuration
 
-`base/agents/birth_config.py:resolve_default_model` resolves the DB-backed
+`base/agents/model/birth_config.py:resolve_default_model` resolves the DB-backed
 cluster default, otherwise the current config default, through the model
 catalog's declared availability fallback. The default-model API, model picker,
 birth stamp and spawn preflight share this owner. A fork preserves its inherited

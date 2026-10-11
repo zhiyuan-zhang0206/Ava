@@ -10,10 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.chat_delivery import insert_chat_inbound_once
 from base.agents.messages.inbound_provenance import InboundProvenance, source_assertion_match
 from base.config import settings
-from base.db import Database, create_agent, insert_inbound_message
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.app import app

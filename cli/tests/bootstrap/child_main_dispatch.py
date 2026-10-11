@@ -115,6 +115,7 @@ def _help_admission() -> None:
     else:
         raise AssertionError("help must exit")
     assert "base.config" not in sys.modules
+    from base.cluster.dataplane.direct_url import ClusterDirectUrl
     from base.db import Database
     from base.db.code_version_gate import ProcessDbGate
     from cli.database import operator_database_factory
@@ -129,8 +130,8 @@ def _help_admission() -> None:
     assert service.min_read_due() is True
     seen: list[ProcessDbGate] = []
 
-    def from_settings(*, gate: ProcessDbGate, local_host: str) -> object:
-        assert local_host == command.machine.host
+    def from_settings(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> object:
+        assert direct_url.local_host == command.machine.host
         assert gate.application_name() == "ava:cli"
         assert gate.min_read_due() is False
         seen.append(gate)

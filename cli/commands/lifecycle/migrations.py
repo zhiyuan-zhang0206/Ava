@@ -37,8 +37,8 @@ def cmd_migrations_apply(
     point-in-time read grant went stale; failure is raised, not returned.
     """
     from base import cluster
+    from base.cluster.dataplane import pg_admin
     from base.config import settings
-    from base.db import pg_admin
 
     # Dependency drift is a pre-DB gate: a new upstream checkpoint migration
     # must first be mirrored in an Ava migration. Failing before

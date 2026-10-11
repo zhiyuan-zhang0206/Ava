@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.db import Database
@@ -245,13 +246,15 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="pg-backup-worker")
 
     def database() -> Database:
-        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
+        return Database(
+            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+        )
 
     def database_for_url(url: str) -> Database:
         return Database(
             dataclasses.replace(db_config_from_boot(config), db_url=url),
             gate=gate,
-            local_host=machine.host,
+            direct_url=ClusterDirectUrl(machine.host),
         )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)

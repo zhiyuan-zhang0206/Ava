@@ -20,8 +20,8 @@ import pytest
 from psycopg import sql
 
 from base.cluster import _swap_db, drop_database, provision_database
+from base.cluster.dataplane.pg_admin import owner_conninfo
 from base.config import settings
-from base.db.pg_admin import owner_conninfo
 
 # provision_database creates a NOLOGIN owning role sharing the db identifier and
 # applies the schema acting as that role. The identifier is passed in full

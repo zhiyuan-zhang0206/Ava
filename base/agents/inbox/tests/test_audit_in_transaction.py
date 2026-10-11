@@ -1,4 +1,4 @@
-"""Audit facts written by `base.db` are recorded in the transaction that makes them."""
+"""Audit facts written by the inbox inserts are recorded in the transaction that makes them."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ from typing import Any
 import psycopg
 import pytest
 
-from base import db
-from base.db import Database, create_agent, insert_spawn_prompt_in_transaction
+from base.agents.inbox.compact import insert_compact_request_inbound
+from base.agents.inbox.insert import insert_inbound_message, insert_spawn_prompt_in_transaction
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.telemetry import Event
 
@@ -34,7 +35,7 @@ def test_an_inbound_and_its_audit_fact_commit_together(
 ) -> None:
     agent_id = create_agent(db_conn)
 
-    inbound_id = db.insert_inbound_message(
+    inbound_id = insert_inbound_message(
         db_conn, agent_id, "", source="user", kind="restart", bus=event_bus, database=database
     )
 
@@ -48,10 +49,10 @@ def test_an_inbound_whose_audit_fact_cannot_be_recorded_is_not_written(
     event_bus: EventBus,
 ) -> None:
     agent_id = create_agent(db_conn)
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit", _refuse)
+    monkeypatch.setattr("base.agents.inbox.insert.record_audit", _refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
-        db.insert_inbound_message(
+        insert_inbound_message(
             db_conn, agent_id, "", source="user", kind="restart", bus=event_bus, database=database
         )
     db_conn.rollback()
@@ -75,9 +76,9 @@ def test_a_compact_request_is_recorded_before_it_is_emitted(
     def emit(_event: Event | None) -> None:
         seen_at_emit.append(len(_audit(db_conn, agent_id, "compact")))
 
-    monkeypatch.setattr(db, "_emit_prepared_event", emit)
+    monkeypatch.setattr("base.agents.inbox.compact.emit_prepared_event", emit)
 
-    db.insert_compact_request_inbound(db_conn, agent_id, bus=event_bus, database=database)
+    insert_compact_request_inbound(db_conn, agent_id, bus=event_bus, database=database)
 
     assert seen_at_emit == [1]
     assert _audit(db_conn, agent_id, "compact") == [("user", None, {"compact_kind": "request"})]

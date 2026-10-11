@@ -12,11 +12,9 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig, db_config_from_settings
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
-from base.host.net.url_secret import url_with_port
-from base.log import logger
 
 # `base.config.domains.storage.data_plane`'s helpers are imported inside the dial functions
-# that call them (`connect` / `pool` / `direct_db_url`), never at module level:
+# that call them (`connect` / `pool` / `async_pool`), never at module level:
 # this module is on the exec child's boot path (`agent.db` -> `base.db` ->
 # here) and a module-level import would pull the full eager config chain
 # (pydantic_settings included) back into a lite boot (task #3621). Dialing
@@ -273,99 +271,24 @@ def _guard_db_url(url: str, *, refusal: str | None = None) -> str:
     return url
 
 
-def direct_db_url(
-    config: DbConfig | None = None, *, local_host: Callable[[], str] | None = None
-) -> str:
-    """The admin-plane Postgres URL: this cluster's `AVA_DB_URL` never routed
-    through PgBouncer.
-
-    `AVA_DB_URL` carries the pooler listener port whenever pooling is enabled
-    (the one-URL design: a normal process dials it as-is and never knows the
-    pooler exists), so the admin plane — migrations (SESSION advisory locks),
-    pg_dump (needs a real backend session), provisioning, auth probes — must
-    derive the direct Postgres URL instead. The derivation swaps ONLY the port,
-    from the pooler listener to the cluster's direct Postgres port, both read
-    from this home's own cluster record: the pooler is co-located with its
-    Postgres on the gateway box, so host and credentials are identical. When the
-    URL does not name the pooler (pooling off, an operator stand-in URL) it is
-    returned verbatim — already direct.
-
-    The record lookup matches the URL's host:port against this home's record
-    only, and only when the URL names this box. A home knows no other cluster, so
-    a unit whose URL names another home's pooler (a split agent-runner on this or
-    another box) cannot be resolved here. In that case the URL is returned as-is
-    with a WARNING:
-    the "direct" dial silently routes through the gateway's pooler (the
-    migration authority model keeps a runner from mutating the schema in
-    practice, but the exemption itself is unavailable and must not be silent).
-
-    The placeholder URL passes through byte-identical (the connect guard
-    matches it byte-for-byte), and a home with no record (no gateway capability)
-    keeps `AVA_DB_URL` as-is rather than guessing.
-    """
-    return _direct_url(
-        config or db_config_from_settings(),
-        local_host=local_host,
-    )
+# Resolves the admin-plane (direct, never pooled) URL of the cluster a `DbConfig` names. The
+# composition root supplies it: the resolution reads the home's registry record, which sits
+# above this module (`base.cluster.dataplane.direct_url.ClusterDirectUrl`).
+DirectUrlResolver = Callable[[DbConfig], str]
 
 
-def _direct_url(cfg: DbConfig, *, local_host: Callable[[], str] | None) -> str:
-    """`direct_db_url` for one resolved config."""
-    from base.cluster import get_record
-    from base.config.domains.storage.data_plane import gateway_url_host
-    from base.host.net.predicates import is_loopback_host
-    from base.paths import ava_home
-
-    url = cfg.db_url
-    if url == PLACEHOLDER_DB_URL:
-        return url
-    try:
-        parts = urlsplit(url)
-        port = parts.port
-        host = (parts.hostname or "").lower()
-    except ValueError:
-        return url
-    if port is None:
-        return url
-
-    def matches_local_host() -> bool:
-        if local_host is None:
-            raise RuntimeError(
-                "direct database host resolution requires an explicit local_host reader"
-            )
-        return host == local_host().lower()
-
-    # Only a loopback or self-named host can be resolved against this home's
-    # record — a remote host's record lives on that box, not here.
-    rec = get_record(ava_home()) if is_loopback_host(host) or matches_local_host() else None
-    if rec is not None:
-        if port == rec.ports["pgbouncer"]:
-            # URL names this cluster's pooler -> swap to its direct pg port.
-            return url_with_port(url, rec.ports["postgres"])
-        if port == rec.ports["postgres"]:
-            # URL already names Postgres (pooling off / a stand-in on a cluster
-            # port) -> already direct.
-            return url
-    # This home's record does not explain the URL's port: a local operator
-    # stand-in, or a split runner naming the gateway's pooler. A remote/SaaS plane (Task #1752)
-    # is direct by definition — no local pooler exists — so it dials silently.
-    if cfg.pgbouncer_enabled and (
-        is_loopback_host(host) or matches_local_host() or host == gateway_url_host()
-    ):
-        # Expected shape on a split agent-runner (its URL names the gateway's
-        # pooler): every `ava start` logs one, so it is INFO, not a WARNING
-        # (2026-10-03 triage).
-        logger.info(
-            "direct_db_url: AVA_DB_URL names {host}:{port}, which this home's record "
-            "does not name as its PgBouncer or Postgres port (a split agent-runner's "
-            "URL names the gateway's pooler, resolvable only on the gateway box). "
-            "Returning AVA_DB_URL as-is — the admin-plane dial routes through "
-            "PgBouncer; the migration authority model keeps a non-gateway host "
-            "from mutating the schema, but the direct exemption is unavailable here.",
-            host=host,
-            port=port,
+def require_direct_url(direct_url: DirectUrlResolver | None) -> DirectUrlResolver:
+    """The composition root's direct-URL resolver, or a loud refusal when it supplied none."""
+    if direct_url is None:
+        raise RuntimeError(
+            "a direct database dial requires the composition root's direct_url resolver"
         )
-    return url
+    return direct_url
+
+
+def _dial_url(cfg: DbConfig, *, direct: bool, direct_url: DirectUrlResolver | None) -> str:
+    """The URL to dial: the access URL, or the resolver's direct URL for an admin-plane dial."""
+    return require_direct_url(direct_url)(cfg) if direct else cfg.db_url
 
 
 def connect(
@@ -375,7 +298,7 @@ def connect(
     unbounded: bool = False,
     config: DbConfig | None = None,
     gate: ProcessDbGate,
-    local_host: Callable[[], str] | None = None,
+    direct_url: DirectUrlResolver | None = None,
 ) -> psycopg.Connection:
     """Open a new connection to the cluster Postgres.
 
@@ -389,7 +312,8 @@ def connect(
     the DDL / advisory-lock call sites that need it.
 
     `direct=True` forces the connection to the real Postgres, bypassing PgBouncer
-    (the URL is derived from the registry record — `direct_db_url`). The admin
+    (the URL comes from the composition root's `direct_url` resolver, which
+    derives it from the registry record). The admin
     plane MUST use it wherever a transaction pooler would break correctness —
     session-level state that outlives a single transaction: the migration applier
     holds a **session** advisory lock (`pg_advisory_lock`, in base.deploy.schema.migrations)
@@ -429,7 +353,7 @@ def connect(
 
     cfg = config or db_config_from_settings()
     url = _guard_db_url(
-        cfg.db_url if not direct else direct_db_url(cfg, local_host=local_host),
+        _dial_url(cfg, direct=direct, direct_url=direct_url),
         refusal=cfg.db_authority_refusal,
     )
     sslmode = sslmode_for_url(url, cfg.db_sslmode)
@@ -514,7 +438,7 @@ def pool(
     row_factory: Any | None = None,
     config: DbConfig | None = None,
     gate: ProcessDbGate,
-    local_host: Callable[[], str] | None = None,
+    direct_url: DirectUrlResolver | None = None,
 ) -> ConnectionPool:
     """Open a ConnectionPool on the cluster Postgres (opened eagerly).
 
@@ -557,7 +481,7 @@ def pool(
 
     cfg = config or db_config_from_settings()
     url = _guard_db_url(
-        cfg.db_url if not direct else direct_db_url(cfg, local_host=local_host),
+        _dial_url(cfg, direct=direct, direct_url=direct_url),
         refusal=cfg.db_authority_refusal,
     )
     min_size, max_size = resolved_pool_size(

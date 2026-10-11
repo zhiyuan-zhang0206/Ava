@@ -215,8 +215,8 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     from agent.db import claim_inbound_batch
     from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
     from agent.ownership.inbound import RuntimeOwnershipLostError
+    from base.agents.inbox.insert import insert_inbound_message
     from base.agents.incarnation.resources import ResourceBirth
-    from base.db import insert_inbound_message
 
     aid = _park(
         db_conn,
@@ -307,7 +307,7 @@ def _reaped_crash_park(
 ) -> tuple[int, int]:
     """terminated + reaper source + retained crash marker + a leftover chat
     that predates the termination (a legacy recovery-trigger shape)."""
-    from base.db import insert_inbound_message
+    from base.agents.inbox.insert import insert_inbound_message
 
     aid = _park(
         db,
@@ -398,7 +398,7 @@ def test_operator_death_still_refuses_leftover_work(
 ) -> None:
     """The crash marker alone never relaxes the fence: a user kill keeps its
     contract — the leftover chat cannot undo it."""
-    from base.db import insert_inbound_message
+    from base.agents.inbox.insert import insert_inbound_message
 
     aid = _park(
         db_conn,
@@ -542,7 +542,7 @@ def test_system_resurrect_is_not_capped_by_unconsumed_resurrect_rows(
 ) -> None:
     """There is no attempt budget: a new message still resurrects a terminated
     agent however many earlier resurrect rows were never consumed."""
-    from base.db import insert_inbound_message
+    from base.agents.inbox.insert import insert_inbound_message
 
     aid = _park(
         db_conn,
@@ -630,7 +630,7 @@ def test_historical_runtime_cannot_be_resurrected(
 ) -> None:
     """An absent command pointer cannot adopt a historical or unknown runtime."""
     from base.agents import ResurrectRefused
-    from base.db import insert_inbound_message
+    from base.agents.inbox.insert import insert_inbound_message
 
     aid = _park(
         db_conn,

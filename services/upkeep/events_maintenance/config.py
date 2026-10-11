@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from pydantic import SecretStr
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -49,4 +50,4 @@ def events_maintenance_db(
 ) -> Database:
     """The handle on the cluster database, built where the daemon (or one of its operator
     commands) starts."""
-    return Database(db_config_from_boot(config), gate=gate, local_host=local_host)
+    return Database(db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(local_host))

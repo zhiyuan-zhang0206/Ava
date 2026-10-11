@@ -51,6 +51,9 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base import telemetry
+from base.agents.inbox.insert import insert_inbound_message_in_transaction
+from base.agents.inbox.wake import publish_inbound_wake
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -60,7 +63,7 @@ from base.daemon.health import (
     stop_health_server,
 )
 from base.daemon.shutdown import install_graceful_shutdown
-from base.db import Database, insert_inbound_message_in_transaction, publish_inbound_wake
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
@@ -351,7 +354,9 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="task_maintenance", exempt=False)
 
     def database() -> Database:
-        return Database(db_config_from_boot(boot), gate=gate, local_host=machine.host)
+        return Database(
+            db_config_from_boot(boot), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+        )
 
     pipeline = telemetry.build_pipeline(database=database, machine=machine, home=ava_home())
     init_gateway_process(

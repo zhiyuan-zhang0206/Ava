@@ -7,7 +7,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from base.agents import InvalidModelConfig
-from base.agents.birth_config import set_cluster_default_model
+from base.agents.model.birth_config import set_cluster_default_model
 from base.config import Settings, settings
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent

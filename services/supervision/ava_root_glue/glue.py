@@ -13,6 +13,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from base.agents.context.clients import ClientSet
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.db import Database
@@ -65,7 +66,9 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     gate = ProcessDbGate(version=version.get, process="ava-root")
 
     def database() -> Database:
-        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
+        return Database(
+            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+        )
 
     clients = ClientSet(
         database=database,

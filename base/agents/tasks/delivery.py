@@ -7,9 +7,9 @@ from typing import LiteralString
 import psycopg
 
 from base import telemetry
+from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.messages.inbound import InboundKind
 from base.agents.tasks.owner_notifications import TaskOwnerNotification
-from base.db import insert_inbound_message_in_transaction
 
 # Watchdog eligibility; the resurrection transaction locks the same task. Alias m is
 # the inbound row; integer ids compare as text to reject malformed JSON safely.

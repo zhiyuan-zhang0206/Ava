@@ -148,7 +148,7 @@ def _postgres_receiver_block(ava_home: Path) -> str:
     """
     from base.cluster import db_identity, get_record
     from base.cluster.authority import MONITOR_ROLE
-    from base.db.pg_admin import pg_socket_path
+    from base.cluster.dataplane.pg_admin import pg_socket_path
 
     record = get_record(ava_home)
     if record is None:

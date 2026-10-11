@@ -33,9 +33,10 @@ import psycopg
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
+from base.agents.inbox.rows import NOTICE_FYI_TTL_DAYS
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.inbound import InboundKind
 from base.config import settings
-from base.db import NOTICE_FYI_TTL_DAYS, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus

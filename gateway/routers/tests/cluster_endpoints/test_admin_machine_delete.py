@@ -434,7 +434,7 @@ class TestMachinePauseResume:
             database_gate=database_gate,
             machine_identity=machine_identity,
         )
-        from base.db import insert_inbound_message
+        from base.agents.inbox.insert import insert_inbound_message
 
         old_chat_id = insert_inbound_message(
             db_conn, aid, "queued before pause", source="user", bus=event_bus, database=database

@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
@@ -33,9 +34,9 @@ def test_entry_shares_the_captured_gate_with_logging_and_actions(
 
     class Store:
         @classmethod
-        def from_settings(cls, *, gate: ProcessDbGate, local_host: Callable[[], str]) -> Store:
+        def from_settings(cls, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Store:
             gates.append(gate)
-            readers.append(local_host)
+            readers.append(direct_url.local_host)
             return cls()
 
     def capture() -> LoadedCommit:

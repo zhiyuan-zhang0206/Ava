@@ -13,8 +13,8 @@ from typing import Any
 import psycopg
 import pytest
 
-import base.db
 from base import telemetry
+from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -347,7 +347,7 @@ class TestSpawnFork:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        base.db.insert_inbound_message(
+        insert_inbound_message(
             db_conn,
             new_id,
             "",

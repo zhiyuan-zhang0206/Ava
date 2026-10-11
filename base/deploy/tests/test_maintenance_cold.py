@@ -8,8 +8,9 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
-from base.db import Database, insert_inbound_message
+from base.db import Database
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from tests.components.agent.test_maintenance import WHEN, _agent

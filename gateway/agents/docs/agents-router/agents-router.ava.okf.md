@@ -27,7 +27,7 @@ is not native application. The former `/api/cancel` and unversioned compact
 routes are removed. The CLI validates these results and billing outcomes before
 reporting acceptance. `/api/models` lists models, their declared `fast_of`
 relationships and the effective cluster default using
-`base/agents/birth_config.py:resolve_default_model`, also used by the default-model
+`base/agents/model/birth_config.py:resolve_default_model`, also used by the default-model
 endpoint, birth stamp and spawn preflight.
 `/api/agents/{id}/exited` finalizes agent exit.
 

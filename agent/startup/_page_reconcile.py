@@ -97,7 +97,7 @@ async def _close_dead_show_pages(
         # SELECT recheck delivers it within timeout_s regardless). At boot the
         # listener is not subscribed yet — the wake's SETEX breadcrumb makes
         # the listener SELECT immediately on subscribe.
-        from base.db import publish_inbound_wake
+        from base.agents.inbox.wake import publish_inbound_wake
 
         await asyncio.to_thread(publish_inbound_wake, db, bus, agent_id, "0")
         logger.bind(event="page_restore_notified", agent_id=agent_id).info(

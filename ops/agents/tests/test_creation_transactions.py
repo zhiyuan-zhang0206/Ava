@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 from base.agents import InvalidModelConfig
-from base.agents.birth_config import set_cluster_default_model
+from base.agents.model.birth_config import set_cluster_default_model
 from base.agents.tasks.creation import create_task_in_transaction
 from base.agents.tasks.model import Task
 from base.cluster.machine import MachineIdentity

@@ -83,7 +83,7 @@ class _SpyDatabase(Database):
     """A `Database` that records every explicit dial (a wake's implicit dial excluded)."""
 
     def __init__(self, source: Database, *, gate: ProcessDbGate) -> None:
-        super().__init__(source._config, gate=gate)
+        super().__init__(source._config, gate=gate, direct_url=source._direct_url)
         self.dialed: list[tuple[bool, psycopg.Connection]] = []
 
     def connect(

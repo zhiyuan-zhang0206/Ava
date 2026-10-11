@@ -36,6 +36,8 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.agents.inbox.wake import publish_inbound_wake
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
@@ -44,7 +46,7 @@ from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
-from base.db import Database, publish_inbound_wake
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
@@ -300,7 +302,7 @@ def _send_heartbeat_checkin(
     # The inbound is committed on `with` exit (the emit above is enqueued and
     # lands on the emitter's next batch — best-effort, JSONL-mirrored). The wake
     # is published after the inbound row is durable. Best-effort wake (see
-    # base.db.publish_inbound_wake); heartbeat carries no user-facing inbound
+    # base.agents.inbox.wake.publish_inbound_wake); heartbeat carries no user-facing inbound
     # id, so "0".
     publish_inbound_wake(db, bus, agent_id, "0")
 
@@ -735,7 +737,11 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="heartbeat")
 
     def database() -> Database:
-        return Database(db_config_from_boot(machine_config), gate=gate, local_host=machine.host)
+        return Database(
+            db_config_from_boot(machine_config),
+            gate=gate,
+            direct_url=ClusterDirectUrl(machine.host),
+        )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
