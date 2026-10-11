@@ -7,6 +7,7 @@ import pytest
 
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 
@@ -37,6 +38,7 @@ def spawn_agent(
     *,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
     spawner: str = "user",
     config: dict[str, object] | None = None,
     **kw: Any,
@@ -46,7 +48,7 @@ def spawn_agent(
     from base.db import publish_inbound_wake
     from ops.agents.spawn import create_agent_row
 
-    db, bus = Database.from_settings(), EventBus.from_settings()
+    db, bus = Database.from_settings(gate=database_gate), EventBus.from_settings()
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         db,
         bus,

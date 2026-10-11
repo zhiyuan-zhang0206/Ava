@@ -28,6 +28,7 @@ from tests.components.base.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record, scratch_root
+from tests.e2e.fakes.scenarios.budget_handoff import BUDGET_MODEL
 from tests.fixtures.gateway_config import post_spawn
 from tests.fixtures.model_catalog import model_catalog as model_catalog
 
@@ -38,12 +39,27 @@ _OBSERVER = (
 
 
 @pytest.fixture
-def budget_world(spawned_agent: int) -> Iterator[Path]:
+def budget_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> Iterator[int]:
+    """Choose the scenario's fixed-price model through the actual birth boundary."""
+    response = post_spawn(
+        GATEWAY_URL, {"spawner": "user", "config": {"llm_model": BUDGET_MODEL}}, timeout=30
+    )
+    response.raise_for_status()
+    owner = int(response.json()["id"])
+    try:
+        wait_for_status(owner, "idling")
+        yield owner
+    finally:
+        _terminate(owner)
+
+
+@pytest.fixture
+def budget_world(budget_agent: int) -> Iterator[Path]:
     reset_record()
     root = scratch_root("budget")
     shutil.rmtree(root, ignore_errors=True)
     root.mkdir(parents=True)
-    (root / "owner").write_text(str(spawned_agent))
+    (root / "owner").write_text(str(budget_agent))
     yield root
     shutil.rmtree(root, ignore_errors=True)
     reset_record()
@@ -73,10 +89,10 @@ def _terminate(agent_id: int) -> None:
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.budget_handoff:build")
 @pytest.mark.parametrize("role", ["goal supervisor", "dynamic workflow orchestrator"])
 def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
-    spawned_agent: int, budget_world: Path, role: str, *, model_catalog: ModelCatalog
+    budget_agent: int, budget_world: Path, role: str, *, model_catalog: ModelCatalog
 ) -> None:
-    owner = spawned_agent
-    usd_limit = cost_usd(settings.lm.llm_model, 50, 25, 0, prices=model_catalog.prices)
+    owner = budget_agent
+    usd_limit = cost_usd(BUDGET_MODEL, 50, 25, 0, prices=model_catalog.prices)
     assert usd_limit is not None and usd_limit > 0
     root = budget_world
     (root / "role").write_text(role)

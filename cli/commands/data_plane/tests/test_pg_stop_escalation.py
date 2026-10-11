@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import subprocess
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,8 +23,11 @@ import pytest
 from base.cluster import ownership
 from base.cluster import postgres as pg
 from base.native_process.ownership import capture_tree
+from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import maintenance_stop as plane
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 HUNG_SECONDS = "3617"  # a marker only this test's archive command carries
 
@@ -91,10 +94,20 @@ def _port_of(data: Path) -> int:
     return receipt.port
 
 
+def _assert_escalation_event(
+    events: list[tuple[str, dict[str, object]]], operator_pipeline: Callable[[], EventPipeline]
+) -> None:
+    """The escalation receipt reports one error through the borrowed producer."""
+    assert [kind for kind, _ in events] == ["postgres_stop_escalated"]
+    assert events[0][1]["level"] == "error"
+    assert events[0][1]["producer"] is operator_pipeline
+
+
 def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     data, port = _private_home(tmp_path, monkeypatch)
     monkeypatch.setattr(instance, "archive_pg_args", _hung_archive_args)
@@ -117,7 +130,9 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
         hung_pids = {process.pid for process in hung}
 
         started = time.monotonic()
-        stopped = plane.stop(7, notes=notes, retained_children=retained_children)
+        stopped = plane.stop(
+            7, notes=notes, retained_children=retained_children, producer=operator_pipeline
+        )
         elapsed = time.monotonic() - started
 
         assert stopped == ["postgres"]
@@ -128,8 +143,7 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
         )
         (note,) = notes
         assert "fast shutdown did not complete" in note and "immediate shutdown" in note
-        assert [kind for kind, _ in events] == ["postgres_stop_escalated"]
-        assert events[0][1]["level"] == "error"
+        _assert_escalation_event(events, operator_pipeline)
     finally:
         pg.stop(
             data, timeout=10, immediate_wait=1, kill_wait=1, retained_children=retained_children

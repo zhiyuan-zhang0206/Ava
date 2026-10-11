@@ -91,7 +91,7 @@ Emit sites and consumers: see the comments at each emit point.
 
 ## 3. Telemetry events (category=telemetry)
 
-Telemetry-side event name resolution (`base/log/__init__.py`): **explicit `event=` →
+Telemetry-side event name resolution (`base/log/process.py`): **explicit `event=` →
 default `"log"`**. Payload = logger extra fields + `msg`
 (formatted full text) + exception traceback. `(SQL)` marks writes that bypass loguru and
 write SQL directly — annotated in the registry doc field. Emit sites and

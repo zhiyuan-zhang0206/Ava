@@ -107,7 +107,7 @@ E_MODULES: dict[str, tuple[str, str, bool]] = {
         "bootstrap config source (gateway fetch or local)",
         False,
     ),
-    "base.log": ("ambient-service", "process-global loguru sinks", False),
+    "base.log.process": ("ambient-service", "process-global loguru startup and sinks", False),
     "base.db": (
         "ambient-service",
         "process-global DB connect and pool seam at the package door",

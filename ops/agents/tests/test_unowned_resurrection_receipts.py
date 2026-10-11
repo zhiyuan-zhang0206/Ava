@@ -12,6 +12,7 @@ from base.agents.incarnation.resources import ResourceEvidenceError
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import cohort, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
@@ -19,14 +20,12 @@ from base.lm.catalog import ModelCatalog
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.spawn import create_agent_row
+from tests.components.ops.resurrection_support import force, status, unowned_receipt
 from tests.components.ops.test_resurrection_admission import (
     _admitted,
-    _force,
     _managed_restarted,
     _resources,
     _restarted,
-    _status,
-    _unowned_receipt,
 )
 from tests.components.ops.test_resurrection_admission import wakes as wakes
 
@@ -39,6 +38,7 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """An idle agent its host still owns: the force targets that incarnation,
     and resurrection waits for the original host to observe it, whatever origin
@@ -51,16 +51,16 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
         authority=config_authority,
         catalog=model_catalog,
     )
-    await _admitted(aops_pool, aid)
+    await _admitted(aops_pool, aid, database_gate=database_gate)
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (aid,))
     db_conn.commit()
 
-    force = _force(aid)
+    force_receipt = force(aid)
 
-    assert not _unowned_receipt(db_conn, force)
+    assert not unowned_receipt(db_conn, force_receipt)
     with pytest.raises(ResurrectSettlementDeferredError):
         wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
-    assert _status(db_conn, aid) == ("terminated", "hosted")
+    assert status(db_conn, aid) == ("terminated", "hosted")
 
 
 async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_receipt(
@@ -73,15 +73,20 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A resurrected row is the unowned idle row it was before the force, which
     the drain parks; a terminated row carrying a receipt is outside its cohort."""
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
     resurrected = await _restarted(
-        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        aops_pool,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
-    _force(resurrected)
+    force(resurrected)
     wake.resurrect_agent(database, event_bus, resurrected, resurrected_by="user")
     ended, _, _, _ = create_agent_row(
         database,
@@ -91,7 +96,7 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
         authority=config_authority,
         catalog=model_catalog,
     )
-    assert _unowned_receipt(db_conn, _force(ended))
+    assert unowned_receipt(db_conn, force(ended))
     when = datetime(2026, 9, 29, 3, 0, tzinfo=UTC)
     holder = "ops:test:unowned"
     pause_owner.begin_maintenance(holder, when)
@@ -119,11 +124,16 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     aid = await _managed_restarted(
-        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        aops_pool,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
-    _force(aid)
+    force(aid)
     if invalid == "unapplied":
         db_conn.execute(
             "UPDATE inbound_messages SET applied_at=NULL WHERE agent_id=%s AND kind='restart'",
@@ -139,5 +149,5 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
     wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
     before = _resources(db_conn, aid)
     with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
-        await _admitted(aops_pool, aid)
+        await _admitted(aops_pool, aid, database_gate=database_gate)
     assert _resources(db_conn, aid) == before

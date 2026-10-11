@@ -8,6 +8,7 @@ import os
 import sys
 from functools import partial
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -16,6 +17,8 @@ from base.db import Database
 from base.deploy.lifecycle import home_lifecycle_locks
 from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import LockTimeoutError
 from gateway.schedules import router, session_control
 from scripts.host_ops import update_schedule_script as repair
@@ -112,6 +115,63 @@ def test_lifecycle_lock_prevents_a_competing_edit(
             script="pass\n",
             expected_sha256="0" * 64,
         )
+
+
+def test_copied_adapter_binds_the_installed_source_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "installed-source"
+    image = LoadedCommit(source_root=source, sha="installed-code")
+    captures: list[Path] = []
+    borrowed_gates: list[object] = []
+    db = MagicMock(spec=Database)
+
+    def capture(*, source_root: Path) -> LoadedCommit:
+        captures.append(source_root)
+        return image
+
+    def from_settings(*, gate: object) -> Database:
+        borrowed_gates.append(gate)
+        return db
+
+    def installed(home: Path, installed_source: Path) -> None:
+        assert home == tmp_path
+        assert installed_source == source
+
+    def version(owner: CodeVersion) -> int:
+        assert owner.loaded is image
+        return 37
+
+    monkeypatch.setattr(repair, "load_installed_runtime", installed)
+    monkeypatch.setattr(LoadedCommit, "capture", capture)
+    monkeypatch.setattr(CodeVersion, "get", version)
+    monkeypatch.setattr(Database, "from_settings", from_settings)
+
+    def replace_script(*_args: object) -> str:
+        return "updated"
+
+    monkeypatch.setattr(repair, "replace_script", replace_script)
+    publish(MaintenancePhase.STOPPED)
+    assert (
+        repair.repair_script(
+            home=tmp_path,
+            source=source,
+            schedule_id=1,
+            script="pass\n",
+            expected_sha256="0" * 64,
+        )
+        == "updated"
+    )
+    assert captures == [source]
+    assert len(borrowed_gates) == 1
+    from base.db.code_version_gate import ProcessDbGate
+
+    gate = borrowed_gates[0]
+    assert isinstance(gate, ProcessDbGate)
+    assert gate.application_name().endswith(":v37")
+    assert gate.min_read_due()
+    gate.observe_minimum(37)
+    assert not gate.min_read_due()
 
 
 def test_wrong_home_source_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

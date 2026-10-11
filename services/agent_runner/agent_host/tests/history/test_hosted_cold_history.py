@@ -21,6 +21,7 @@ from base.agents.incarnation.resources import ResourceBirth
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -49,6 +50,8 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     agent, *_ = create_agent_row(
         database,
@@ -112,7 +115,7 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
         checkpointer=saver,
         graph=graph,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
 

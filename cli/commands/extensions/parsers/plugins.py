@@ -30,7 +30,13 @@ def _h_plugins_update(_args: argparse.Namespace) -> int:
 def _h_plugins_install(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_install
 
-    return cmd_plugins_install(args.url, args.ref, args.path, accept_risk=args.accept_risk)
+    return cmd_plugins_install(
+        args.url,
+        args.ref,
+        args.path,
+        accept_risk=args.accept_risk,
+        database_factory=args.database_factory,
+    )
 
 
 def _h_plugins_uninstall(args: argparse.Namespace) -> int:
@@ -101,6 +107,7 @@ def _h_skill_install(args: argparse.Namespace) -> int:
         accept_risk=args.accept_risk,
         update_mode=args.update_mode,
         check_every=args.check_every,
+        database_factory=args.database_factory,
     )
 
 

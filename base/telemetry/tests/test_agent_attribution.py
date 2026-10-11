@@ -14,17 +14,23 @@ from base.agents.context.identity import AgentIdentity
 
 
 @pytest.fixture(autouse=True)
-def restore_process_binding() -> Generator[None, None, None]:
+def restore_process_binding() -> Generator[telemetry.EventPipeline, None, None]:
     previous = telemetry.prepare_event("log", "log")
+    pipeline = telemetry.EventPipeline(writer=lambda _batch: None)
     try:
-        yield
+        yield pipeline
     finally:
-        telemetry.init_telemetry(process=previous.process, agent_id=previous.agent_id)
+        telemetry.init_telemetry(
+            process=previous.process, agent_id=previous.agent_id, pipeline=pipeline
+        )
+        pipeline.stop(timeout=2)
 
 
 @pytest.mark.asyncio
-async def test_concurrent_events_keep_explicit_or_process_identity() -> None:
-    telemetry.init_telemetry(process="agent_host", agent_id=None)
+async def test_concurrent_events_keep_explicit_or_process_identity(
+    restore_process_binding: telemetry.EventPipeline,
+) -> None:
+    telemetry.init_telemetry(process="agent_host", agent_id=None, pipeline=restore_process_binding)
     ava.context = replace(ava.context, identity=AgentIdentity(99, True))
 
     async def record(agent_id: int):
@@ -44,7 +50,9 @@ async def test_concurrent_events_keep_explicit_or_process_identity() -> None:
         assert ordinary.process == explicit.process == "agent_host"
 
 
-def test_exec_process_identity_is_retained() -> None:
-    telemetry.init_telemetry(process="agent-exec", agent_id=7)
+def test_exec_process_identity_is_retained(
+    restore_process_binding: telemetry.EventPipeline,
+) -> None:
+    telemetry.init_telemetry(process="agent-exec", agent_id=7, pipeline=restore_process_binding)
     ava.context = replace(ava.context, identity=AgentIdentity(42, True))
     assert telemetry.prepare_event("log", "log").agent_id == 7

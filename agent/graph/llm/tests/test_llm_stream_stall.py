@@ -38,6 +38,7 @@ from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -67,7 +68,11 @@ async def _one_try(
 
 
 def _make_runtime(
-    hosted_resources: HostedTurnResources, llm: MagicMock, *, model_catalog: ModelCatalog
+    hosted_resources: HostedTurnResources,
+    llm: MagicMock,
+    *,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> Runtime[AvaContext]:
     """Same pattern as test_cancel.py: fake llm returns itself via bind_tools (chain method)."""
     llm.bind_tools.return_value = llm
@@ -79,7 +84,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
         clock_factory=Clock.from_settings,
@@ -93,6 +98,7 @@ async def test_stall_at_ttft_raises_with_ttft_marker(
     monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Server completely unresponsive (zero bytes emitted) → raise LLMStreamStallTimeoutError containing 'TTFT'."""
 
@@ -118,7 +124,10 @@ async def test_stall_at_ttft_raises_with_ttft_marker(
         await _one_try(
             state,
             _make_runtime(
-                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+                hosted_resources=hosted_resources,
+                llm=fake_llm,
+                model_catalog=model_catalog,
+                database_gate=database_gate,
             ),
         )
 
@@ -129,6 +138,7 @@ async def test_stall_mid_stream_raises_with_chunk_count(
     monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Emits N chunks then hangs → raise LLMStreamStallTimeoutError containing
     'mid-stream after N chunks'. Triage split: TTFT = server never connected,
@@ -156,7 +166,10 @@ async def test_stall_mid_stream_raises_with_chunk_count(
         await _one_try(
             state,
             _make_runtime(
-                hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog
+                hosted_resources=hosted_resources,
+                llm=fake_llm,
+                model_catalog=model_catalog,
+                database_gate=database_gate,
             ),
         )
 
@@ -167,6 +180,7 @@ async def test_normal_stream_completes_no_stall_timeout(
     monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Normal stream completes within timeout → no raise, llm_node finishes and
     returns Command. Locks the "chunk interval < timeout" path against accidental regression."""
@@ -194,7 +208,12 @@ async def test_normal_stream_completes_no_stall_timeout(
     # killed by stall timeout"
     result = await _one_try(
         state,
-        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, model_catalog=model_catalog),
+        _make_runtime(
+            hosted_resources=hosted_resources,
+            llm=fake_llm,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+        ),
     )
     assert result is not None
 

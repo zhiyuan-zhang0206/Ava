@@ -1,18 +1,25 @@
+"""Atomic skill publication: unsafe paths refuse before writes; crashes recover."""
+
 from __future__ import annotations
 
 import importlib
 import json
 import stat
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 from base.config import ConfigBoot
+from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import cleanup as bridge_cleanup
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
+from tests.factories.external_skills import client_home, skill_ctx, skill_source, target_path
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 SKILL = "operating-ava-cluster"
 
@@ -23,7 +30,9 @@ def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(module, "_SKILL_NAMES", ("operating-ava-cluster",))
 
 
-def _world(tmp_path: Path) -> tuple[Path, Path, ConvergeCtx]:
+def _world(
+    tmp_path: Path, *, operator_database: Callable[[], Any], producer: Callable[[], EventPipeline]
+) -> tuple[Path, Path, ConvergeCtx]:
     repo = tmp_path / "repo"
     source = repo / "ava_builtins" / "skills" / "platform" / SKILL
     source.mkdir(parents=True)
@@ -36,7 +45,14 @@ def _world(tmp_path: Path) -> tuple[Path, Path, ConvergeCtx]:
     return (
         source,
         client,
-        ConvergeCtx(repo=repo, ava_home=ava_home, roles=None, config=ConfigBoot()),
+        ConvergeCtx(
+            repo=repo,
+            ava_home=ava_home,
+            roles=None,
+            config=ConfigBoot(),
+            database_factory=operator_database,
+            producer=producer,
+        ),
     )
 
 
@@ -56,9 +72,14 @@ def _residues(client: Path) -> list[Path]:
 
 
 def test_restart_reconciles_stage_published_before_post_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    _, client, context = _world(tmp_path)
+    _, client, context = _world(
+        tmp_path, operator_database=operator_database, producer=operator_pipeline
+    )
     target = _target(client)
     original_rename = bridge.rename_no_replace
     interrupted = False
@@ -95,9 +116,14 @@ def test_restart_reconciles_stage_published_before_post_write(
 
 
 def test_restart_reconciles_claim_before_post_write_and_preserves_late_target(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path, operator_database=operator_database, producer=operator_pipeline
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = _target(client)
     installed_before = _ledger(context)["installed"]
@@ -138,9 +164,14 @@ def test_restart_reconciles_claim_before_post_write_and_preserves_late_target(
 
 
 def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path, operator_database=operator_database, producer=operator_pipeline
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     outside = tmp_path / "outside.md"
@@ -183,9 +214,14 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
 
 
 def test_restart_reconciles_cleanup_claim_before_post_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path, operator_database=operator_database, producer=operator_pipeline
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
@@ -241,9 +277,14 @@ def test_unsupported_cleanup_never_changes_directory_permissions(
 
 
 def test_restart_does_not_adopt_ambiguous_per_file_claim(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path, operator_database=operator_database, producer=operator_pipeline
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
@@ -284,9 +325,14 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
 
 
 def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path, operator_database=operator_database, producer=operator_pipeline
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_preserve = bridge_cleanup.preserve_claimed_tree
@@ -322,9 +368,14 @@ def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
 
 
 def test_per_file_claim_failure_is_terminal_after_private_root_claim(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path, operator_database=operator_database, producer=operator_pipeline
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
@@ -386,9 +437,14 @@ def test_cleanup_preserves_late_replacement_after_final_file_verification(
 
 
 def test_converge_terminally_records_post_verification_replacement(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path, operator_database=operator_database, producer=operator_pipeline
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     outside = tmp_path / "outside.md"
@@ -424,3 +480,103 @@ def test_converge_terminally_records_post_verification_replacement(
 
     assert late_replacement.is_symlink()
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
+
+
+@pytest.mark.parametrize("linked_component", ["client-home", "skills-root"])
+def test_linked_external_roots_are_rejected_without_following(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    linked_component: str,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
+    repo = tmp_path / "repo"
+    skill_source(repo)
+    host_home = tmp_path / "host-home"
+    host_home.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    client = host_home / ".codex"
+    if linked_component == "client-home":
+        client.symlink_to(outside, target_is_directory=True)
+    else:
+        client.mkdir()
+        (client / "skills").symlink_to(outside, target_is_directory=True)
+    bridge.converge_external_agent_skill(
+        skill_ctx(repo, tmp_path, operator_database=operator_database, producer=operator_pipeline),
+        host_home=host_home,
+    )
+
+    assert not (outside / SKILL).exists()
+    assert "Codex" in capsys.readouterr().err
+
+
+def test_linked_host_home_is_rejected_without_inspection(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
+    repo = tmp_path / "repo"
+    skill_source(repo)
+    outside_home = tmp_path / "outside-home"
+    (outside_home / ".codex").mkdir(parents=True)
+    linked_home = tmp_path / "linked-home"
+    linked_home.symlink_to(outside_home, target_is_directory=True)
+
+    bridge.converge_external_agent_skill(
+        skill_ctx(repo, tmp_path, operator_database=operator_database, producer=operator_pipeline),
+        host_home=linked_home,
+    )
+
+    assert not (outside_home / ".codex" / "skills").exists()
+    assert "host home" in capsys.readouterr().err
+
+
+def test_source_tree_link_is_fatal_before_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
+    repo = tmp_path / "repo"
+    source = skill_source(repo)
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside\n")
+    (source / "references" / "linked.md").symlink_to(outside)
+    client = client_home(tmp_path)
+    with pytest.raises(RuntimeError, match="source"):
+        bridge.converge_external_agent_skill(
+            skill_ctx(
+                repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+            ),
+            host_home=client.parent,
+        )
+
+    assert not target_path(client, tmp_path).exists()
+
+
+def test_source_path_component_link_is_fatal_before_copy(
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
+    repo = tmp_path / "repo"
+    actual_agents = tmp_path / "actual-agents"
+    source = actual_agents / "skills" / SKILL
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("operator\n")
+    repo.mkdir()
+    (repo / "ava_builtins").symlink_to(actual_agents, target_is_directory=True)
+    client = client_home(tmp_path)
+
+    with pytest.raises(RuntimeError, match="source"):
+        bridge.converge_external_agent_skill(
+            skill_ctx(
+                repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+            ),
+            host_home=client.parent,
+        )
+
+    assert not target_path(client, tmp_path).exists()

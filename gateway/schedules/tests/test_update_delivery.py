@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import base.db
+from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.schedules import router, session_control
 from tests.fixtures.gateway_config import gateway_test_client
@@ -46,10 +47,15 @@ def test_same_value_edit_preserves_version_timestamp_and_queue(
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
 
-def test_concurrent_identical_edits_append_one_version(db_conn: psycopg.Connection) -> None:
+def test_concurrent_identical_edits_append_one_version(
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+) -> None:
     with gateway_test_client(app) as client:
         sid = _create(client)
-    with base.db.pool(max_size=4) as pool, ThreadPoolExecutor(max_workers=4) as workers:
+    with (
+        base.db.pool(max_size=4, gate=database_gate) as pool,
+        ThreadPoolExecutor(max_workers=4) as workers,
+    ):
 
         def edit(_worker: int) -> tuple[tuple[object, ...], bool]:
             return router._update_blocking(pool, sid, {"script": "print(2)\n"})
@@ -63,7 +69,7 @@ def test_concurrent_identical_edits_append_one_version(db_conn: psycopg.Connecti
 
 
 def test_enqueue_failure_rolls_back_config_and_version(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     with gateway_test_client(app) as client:
         sid = _create(client)
@@ -72,7 +78,10 @@ def test_enqueue_failure_rolls_back_config_and_version(
         raise RuntimeError("queue unavailable")
 
     monkeypatch.setattr(session_control, "enqueue_in_transaction", fail)
-    with base.db.pool() as pool, pytest.raises(RuntimeError, match="queue unavailable"):
+    with (
+        base.db.pool(gate=database_gate) as pool,
+        pytest.raises(RuntimeError, match="queue unavailable"),
+    ):
         router._update_blocking(pool, sid, {"script": "print(2)\n"})
     assert db_conn.execute("SELECT script FROM schedules WHERE id = %s", (sid,)).fetchone() == (
         "print(1)\n",

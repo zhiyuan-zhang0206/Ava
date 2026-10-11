@@ -7,8 +7,10 @@ import subprocess
 import sys
 import types
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -19,6 +21,10 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_settings
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
 from services.backup.artifact import offsite, passphrase
 
@@ -28,6 +34,17 @@ assert _SPEC is not None and _SPEC.loader is not None
 restore_drill = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = restore_drill
 _SPEC.loader.exec_module(restore_drill)
+
+
+def _database_factory() -> Callable[[str], Database]:
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="backup-test")
+
+    def for_url(url: str) -> Database:
+        return Database(replace(db_config_from_settings(), db_url=url), gate=gate)
+
+    return for_url
 
 
 def _write_checkpoint(agent_id: int) -> None:
@@ -58,7 +75,9 @@ def test_verification_reports_schema_counts_and_readable_conversation(
     db_conn.commit()
     _write_checkpoint(agent_id)
 
-    report = restore_drill.verify_restored_database(settings.data_plane.db_url)
+    report = restore_drill.verify_restored_database(
+        settings.data_plane.db_url, database_for_url=_database_factory()
+    )
 
     assert report.agents == 1
     assert report.checkpoints >= 1
@@ -153,7 +172,7 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
         bucket_reader=lambda: settings.services.backup_offsite_bucket,
         credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
-    report, elapsed = restore_drill.run_drill(artifact)
+    report, elapsed = restore_drill.run_drill(artifact, database_for_url=_database_factory())
 
     assert report.agents == 1
     assert report.sample_agent_id == agent_id
@@ -197,3 +216,52 @@ def test_restore_failure_message_names_the_base_and_the_capacity_knob(
     assert "512 MiB free" in message
     assert "AVA_PG_THROWAWAY_BASE" in message
     assert "PQputCopyData: server closed the connection" in message
+
+
+def test_standalone_entry_captures_once_and_retains_gate_for_scratch_reads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from unittest.mock import Mock
+
+    image = LoadedCommit(tmp_path, "captured-drill")
+    capture = Mock(return_value=image)
+    create = Mock(side_effect=Database)
+    monkeypatch.setattr(LoadedCommit, "capture", capture)
+    monkeypatch.setattr(restore_drill, "Database", create)
+
+    def drill(
+        artifact: Path | None,
+        *,
+        database_for_url: Callable[[str], Database],
+    ) -> tuple[Any, float]:
+        create.assert_not_called()
+        database_for_url("postgresql://scratch.invalid/one")
+        monkeypatch.setattr(settings.data_plane, "db_sslmode", "verify-full")
+        database_for_url("postgresql://scratch.invalid/two")
+        return restore_drill.RestoreReport(1, 2, 3, 4, 5, 6, "owner"), 0.0
+
+    monkeypatch.setattr(restore_drill, "run_drill", drill)
+    restore_drill.main([str(tmp_path / "artifact.dump.enc")])
+    capture.assert_called_once_with()
+    calls = create.call_args_list
+    assert calls[0].kwargs["gate"] is calls[1].kwargs["gate"]
+    assert [call.args[0].db_url for call in calls] == [
+        "postgresql://scratch.invalid/one",
+        "postgresql://scratch.invalid/two",
+    ]
+    assert calls[1].args[0].db_sslmode == "verify-full"
+    assert calls[0].args[0].pgbouncer_enabled == calls[1].args[0].pgbouncer_enabled
+    assert "restore drill passed" in capsys.readouterr().out
+
+
+def test_retired_passphrase_option_is_rejected_before_process_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    capture = Mock()
+    monkeypatch.setattr(LoadedCommit, "capture", capture)
+    with pytest.raises(SystemExit) as error:
+        restore_drill.main(["--legacy-empty-secret-passphrase"])
+    assert error.value.code == 2
+    capture.assert_not_called()

@@ -15,6 +15,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry import process_name
 from base.telemetry.metrics.usage import usage_report
 
 
@@ -102,7 +106,10 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
 
 def main() -> None:
     args = parse_args()
-    database = Database.from_settings()
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process=process_name())
+    database = Database.from_settings(gate=gate)
     while True:
         with database.connect() as conn:
             conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")

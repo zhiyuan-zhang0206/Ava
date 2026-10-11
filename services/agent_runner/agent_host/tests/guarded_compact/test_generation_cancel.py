@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.interrupt import ModelInterruptedError
 from agent.tests.claim.test_inbound_ownership import _insert
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
@@ -26,6 +27,8 @@ async def test_actual_generation_cancel_has_one_attempt_closed_work_and_next_cha
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     started = asyncio.Event()
     ended = asyncio.Event()
@@ -49,7 +52,9 @@ async def test_actual_generation_cancel_has_one_attempt_closed_work_and_next_cha
             )
         },
     )
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
+    accepted = await admit(
+        db_conn, aops_pool, client, monkeypatch, catalog=model_catalog, database_gate=database_gate
+    )
     running = asyncio.create_task(accepted.host.run_turn(accepted.agent))
     await asyncio.wait_for(started.wait(), 3)
     cancellation = accept_cancel(client, accepted)

@@ -22,6 +22,7 @@ from base.agents.messages.kwargs import AvaMsgType
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -33,7 +34,7 @@ def _write_png(path: Path) -> None:
     Image.new("RGB", (1, 1)).save(path)
 
 
-def _context(model_name: str) -> AvaContext:
+def _context(model_name: str, database_gate: ProcessDbGate) -> AvaContext:
     return AvaContext(
         ops_pool=MagicMock(),
         llm=cast("BaseChatModel", SimpleNamespace(model_name=model_name)),
@@ -41,7 +42,7 @@ def _context(model_name: str) -> AvaContext:
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -54,14 +55,16 @@ def _blocks(message: HumanMessage) -> list[dict[str, Any]]:
     return cast("list[dict[str, Any]]", message.content)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_drain_builds_one_native_image_message(tmp_path: Path) -> None:
+def test_drain_builds_one_native_image_message(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     image = tmp_path / "render.png"
     _write_png(image)
     state = BaseAgentState(
         attach=AttachState(pending=[AttachEntry(path=str(image.resolve()), label="after fix")])
     )
 
-    drain = build_attach_drain(state, _context("glm-5.3-flash"))
+    drain = build_attach_drain(state, _context("glm-5.3-flash", database_gate=database_gate))
 
     assert drain is not None
     assert drain["attach"] == AttachState()
@@ -77,12 +80,14 @@ def test_drain_builds_one_native_image_message(tmp_path: Path) -> None:
     assert blocks[2]["type"] == "image_url"
 
 
-def test_drain_keeps_text_only_models_informed(tmp_path: Path) -> None:
+def test_drain_keeps_text_only_models_informed(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     image = tmp_path / "render.png"
     _write_png(image)
     state = BaseAgentState(attach=AttachState(pending=[AttachEntry(path=str(image), label=None)]))
 
-    drain = build_attach_drain(state, _context("deepseek-flash"))
+    drain = build_attach_drain(state, _context("deepseek-flash", database_gate=database_gate))
 
     assert drain is not None
     message = drain["messages"][0]
@@ -93,12 +98,17 @@ def test_drain_keeps_text_only_models_informed(tmp_path: Path) -> None:
     assert "your model cannot receive image" in blocks[1]["text"]
 
 
-def test_drain_is_noop_without_pending_attachments() -> None:
-    assert build_attach_drain(BaseAgentState(), _context("deepseek-flash")) is None
+def test_drain_is_noop_without_pending_attachments(database_gate: ProcessDbGate) -> None:
+    assert (
+        build_attach_drain(
+            BaseAgentState(), _context("deepseek-flash", database_gate=database_gate)
+        )
+        is None
+    )
 
 
 async def test_claim_drains_before_turn_boundary_wait(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database_gate: ProcessDbGate
 ) -> None:
     image = tmp_path / "render.png"
     _write_png(image)
@@ -106,7 +116,7 @@ async def test_claim_drains_before_turn_boundary_wait(
         halted=True,
         attach=AttachState(pending=[AttachEntry(path=str(image), label=None)]),
     )
-    runtime = Runtime(context=_context("glm-5.3-flash"))
+    runtime = Runtime(context=_context("glm-5.3-flash", database_gate=database_gate))
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}
 
     monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", AsyncMock(return_value=[]))
@@ -119,7 +129,7 @@ async def test_claim_drains_before_turn_boundary_wait(
 
 
 async def test_claim_does_not_drain_mid_turn(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database_gate: ProcessDbGate
 ) -> None:
     image = tmp_path / "render.png"
     _write_png(image)
@@ -127,7 +137,7 @@ async def test_claim_does_not_drain_mid_turn(
         messages=[HumanMessage(content="continue working")],
         attach=AttachState(pending=[AttachEntry(path=str(image), label=None)]),
     )
-    runtime = Runtime(context=_context("glm-5.3-flash"))
+    runtime = Runtime(context=_context("glm-5.3-flash", database_gate=database_gate))
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}
 
     monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", AsyncMock(return_value=[]))

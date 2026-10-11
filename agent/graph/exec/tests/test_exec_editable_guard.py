@@ -14,6 +14,7 @@ from agent.graph.exec import _subprocess
 from agent.graph.exec._result import ExecChildError, _ExecCrashed, _ExecDone
 from agent.graph.exec._subprocess import _run_in_subprocess
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.release import editable_install
 from tests.fixtures.pin_agent import exec_context
 
@@ -24,9 +25,10 @@ async def _run(
     tmp_path: Path,
     *,
     editable_guard: Callable[[], tuple[str, ...]] | None,
+    database_gate: ProcessDbGate,
 ) -> object:
     result, _payload = await _run_in_subprocess(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         "print('healthy child')",
         exec_context(_AGENT_ID),
         asyncio.Event(),
@@ -39,7 +41,7 @@ async def _run(
 
 
 async def test_poisoned_editable_install_refuses_without_request_file(
-    tmp_path: Path,
+    tmp_path: Path, database_gate: ProcessDbGate
 ) -> None:
     poisoned_pth = (
         tmp_path
@@ -53,7 +55,7 @@ async def test_poisoned_editable_install_refuses_without_request_file(
     deleted_worktree = tmp_path / "deleted-worktree"
     violation = f"{poisoned_pth} names {str(deleted_worktree)!r}"
 
-    result = await _run(tmp_path, editable_guard=lambda: (violation,))
+    result = await _run(tmp_path, editable_guard=lambda: (violation,), database_gate=database_gate)
 
     assert isinstance(result, _ExecCrashed)
     assert isinstance(result.exc, ExecChildError)
@@ -64,13 +66,15 @@ async def test_poisoned_editable_install_refuses_without_request_file(
     assert not list((tmp_path / "exec").rglob("*.json"))
 
 
-async def test_editable_guard_inspection_failure_tells_agent_not_to_retry(tmp_path: Path) -> None:
+async def test_editable_guard_inspection_failure_tells_agent_not_to_retry(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     failure = PermissionError("site-packages is read-only")
 
     def raise_failure() -> tuple[str, ...]:
         raise failure
 
-    result = await _run(tmp_path, editable_guard=raise_failure)
+    result = await _run(tmp_path, editable_guard=raise_failure, database_gate=database_gate)
 
     assert isinstance(result, _ExecCrashed)
     assert result.exc is failure
@@ -79,8 +83,10 @@ async def test_editable_guard_inspection_failure_tells_agent_not_to_retry(tmp_pa
     assert not list((tmp_path / "exec").rglob("*.json"))
 
 
-async def test_healthy_editable_guard_preserves_real_child_behavior(tmp_path: Path) -> None:
-    result = await _run(tmp_path, editable_guard=lambda: ())
+async def test_healthy_editable_guard_preserves_real_child_behavior(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
+    result = await _run(tmp_path, editable_guard=lambda: (), database_gate=database_gate)
 
     assert isinstance(result, _ExecDone)
     assert result.output == "healthy child\n"
@@ -130,7 +136,7 @@ def test_child_env_drops_foreign_virtual_env_but_preserves_its_own(
 
 
 async def test_default_guard_refuses_real_poison_without_repairing_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     source = tmp_path / "source"
     packages = source / ".venv" / "lib" / "python3.12" / "site-packages"
@@ -147,7 +153,7 @@ async def test_default_guard_refuses_real_poison_without_repairing_files(
     before = {path: path.read_bytes() for path in (pointer, metadata)}
     monkeypatch.setattr(editable_install, "current_interpreter_source_root", lambda: source)
 
-    result = await _run(tmp_path, editable_guard=None)
+    result = await _run(tmp_path, editable_guard=None, database_gate=database_gate)
 
     assert isinstance(result, _ExecCrashed)
     assert "no child was started" in result.output

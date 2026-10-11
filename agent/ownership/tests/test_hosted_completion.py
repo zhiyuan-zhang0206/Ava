@@ -13,7 +13,8 @@ from agent.ownership.hosted_completion import (
 )
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, observe_hosted_admission
 from agent.ownership.tests.test_lifecycle_intent import _command
-from agent.tests.claim.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, agent_row
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -25,9 +26,11 @@ async def test_completion_requires_original_applied_and_observed_receipt(
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
     kind: str,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent = _agent(db_conn)
-    original = await _admit(aops_pool, agent)
+    agent = agent_row(db_conn)
+    original = await _admit(aops_pool, agent, database_gate=database_gate)
     command = _command(db_conn, agent, kind)
     async with async_write_transaction(aops_pool) as conn:
         await accept_lifecycle_intent(conn, agent, incarnation=original)
@@ -49,7 +52,7 @@ async def test_completion_requires_original_applied_and_observed_receipt(
     )
     assert await completed_hosted_lifecycle_kind(aops_pool, original, command) == kind
     if kind == "restart":
-        replacement = await _admit(aops_pool, agent)
+        replacement = await _admit(aops_pool, agent, database_gate=database_gate)
         async with async_write_transaction(aops_pool) as conn:
             await observe_hosted_admission(conn, replacement)
         # A successor may have observed the restart before the old host reads
@@ -70,10 +73,14 @@ async def test_completion_requires_original_applied_and_observed_receipt(
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
 async def test_receipt_does_not_infer_completion_from_replacement_status(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, kind: str
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    kind: str,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent = _agent(db_conn)
-    original = await _admit(aops_pool, agent)
+    agent = agent_row(db_conn)
+    original = await _admit(aops_pool, agent, database_gate=database_gate)
     command = _command(db_conn, agent, kind)
     async with async_write_transaction(aops_pool) as conn:
         await accept_lifecycle_intent(conn, agent, incarnation=original)

@@ -41,6 +41,7 @@ from typing import Any, cast
 
 import psycopg
 
+from base.agents.context.clients import DatabaseFactory
 from base.agents.recovery.breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 from base.config import settings
 
@@ -49,14 +50,16 @@ class BalanceReadError(RuntimeError):
     """A balance read that could not produce a payload, with a sanitized reason."""
 
 
-def run_provider_guard(*, report: Callable[[str, str], None]) -> int | None:
+def run_provider_guard(
+    *, report: Callable[[str, str], None], database_factory: DatabaseFactory
+) -> int | None:
     """Run checks 9-10 for the health probe; return 1 on failure, None on pass.
 
     `report(check, message)` is the probe's failure signal
     (`cluster.health._report_failing`), passed in rather than imported so the
     caller's module attribute stays the single test seam.
     """
-    failure = provider_guard_failure()
+    failure = provider_guard_failure(database_factory=database_factory)
     if failure is not None:
         check, message = failure
         print(message, file=sys.stderr)
@@ -66,7 +69,7 @@ def run_provider_guard(*, report: Callable[[str, str], None]) -> int | None:
     return None
 
 
-def provider_guard_failure() -> tuple[str, str] | None:
+def provider_guard_failure(*, database_factory: DatabaseFactory) -> tuple[str, str] | None:
     """The first failing provider-guard check as (check name, failure line), if any.
 
     Balance first (the root cause), blocked agents second; a run reports one
@@ -75,7 +78,7 @@ def provider_guard_failure() -> tuple[str, str] | None:
     balance = _balance_failure()
     if balance is not None:
         return "provider_balance", f"FAIL: provider balance — {balance}"
-    blocked = _blocked_agents_failure()
+    blocked = _blocked_agents_failure(database_factory=database_factory)
     if blocked is not None:
         return "provider_blocked_agents", f"FAIL: provider blocked agents — {blocked}"
     return None
@@ -175,12 +178,14 @@ def _cny_balance(payload: dict[str, Any]) -> float | None:
     return None
 
 
-def _blocked_agents_failure() -> str | None:
+def _blocked_agents_failure(*, database_factory: DatabaseFactory) -> str | None:
     """Check 10: None when disabled, database-unreadable, or under threshold."""
     guard = settings.alerts
     if not guard.provider_guard_blocked_agents_enabled:
         return None
-    count = _halted_agents_count(guard.provider_guard_blocked_agents_window_hours)
+    count = _halted_agents_count(
+        guard.provider_guard_blocked_agents_window_hours, database_factory=database_factory
+    )
     if count is None:
         print(
             "  (provider blocked-agents check skipped: agent table unreachable)",
@@ -203,7 +208,7 @@ def _blocked_agents_failure() -> str | None:
     )
 
 
-def _halted_agents_count(window_hours: float) -> int | None:
+def _halted_agents_count(window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
     """Count agents halted by permanent provider rejections inside the window.
 
     `permanent_reject_streak >= HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS` is
@@ -213,10 +218,9 @@ def _halted_agents_count(window_hours: float) -> int | None:
     pair stays coherent. None when the query cannot run — the caller reports
     "cannot judge" and passes, never a guessed healthy verdict.
     """
-    from base.db import Database
 
     try:
-        with Database.from_settings().connect() as conn, conn.cursor() as cur:
+        with database_factory().connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT count(*) FROM agents_meta"
                 " WHERE permanent_reject_streak >= %s"

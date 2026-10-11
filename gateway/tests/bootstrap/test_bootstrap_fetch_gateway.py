@@ -5,7 +5,6 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base import config
 from base.config.domains.storage.data_plane import self_machine_host
@@ -13,6 +12,7 @@ from base.host.env import bootstrap
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
 from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_fetch_bootstrap_config_against_live_endpoint(
@@ -29,7 +29,7 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     # Route base.host.env.bootstrap's dial_get (base.host.net.http_dial.get) through the
     # in-process ASGI app.
     def fake_get(url, **kw):
-        with TestClient(app) as c:
+        with gateway_test_client(app) as c:
             return c.get(url.replace("http://cp", ""), **kw)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     monkeypatch.setattr(bootstrap, "dial_get", fake_get)  # pyright: ignore[reportUnknownArgumentType]

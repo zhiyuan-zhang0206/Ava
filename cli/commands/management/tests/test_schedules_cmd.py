@@ -13,13 +13,17 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import httpx
 import psycopg
 import pytest
 
+from base.telemetry import EventPipeline
 from cli.commands.management import schedules as _sched
 from cli.commands.management import schedules_verify as _verify
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 class _FakeResp:
@@ -392,12 +396,20 @@ def _verify_ports(
 
 
 def test_verify_green_prints_the_result_line_and_reports_nothing(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """All scripts clean -> the RESULT counts, rc 0, and no failure report (the
     alert resolves once reds stop recurring)."""
     ports, alerts = _verify_ports([(1, "a", "print(1)\n"), (2, "b", "print(2)\n")], lambda _s: None)
-    assert _verify.cmd_schedules_verify(ports=ports) == 0
+    assert (
+        _verify.cmd_schedules_verify(
+            ports=ports, database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert "RESULT ts=" in out
     assert "checked=2 green=2 red=0 rc=0" in out
@@ -405,7 +417,10 @@ def test_verify_green_prints_the_result_line_and_reports_nothing(
 
 
 def test_verify_red_lines_name_each_failure(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """One RED line per failing script (id/name/missing); blank scripts count
     green, never red."""
@@ -417,7 +432,12 @@ def test_verify_red_lines_name_each_failure(
     ports, alerts = _verify_ports(
         rows, lambda s: "shared.watcher" if "shared.watcher" in s else None
     )
-    assert _verify.cmd_schedules_verify(ports=ports) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            ports=ports, database_factory=operator_database, producer=operator_pipeline
+        )
+        == 1
+    )
     out = capsys.readouterr().out
     assert "checked=3 green=2 red=1 rc=1" in out
     assert "RED id=7 name=drifted missing=shared.watcher" in out
@@ -425,7 +445,10 @@ def test_verify_red_lines_name_each_failure(
 
 
 def test_verify_tool_error_when_the_table_cannot_be_read(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """A failing DB read is rc 2 with the TOOL-ERROR line, and still reports."""
 
@@ -436,7 +459,12 @@ def test_verify_tool_error_when_the_table_cannot_be_read(
     ports = _verify.VerifyPorts(
         read_rows=boom, check_script=ports.check_script, report=ports.report
     )
-    assert _verify.cmd_schedules_verify(ports=ports) == 2
+    assert (
+        _verify.cmd_schedules_verify(
+            ports=ports, database_factory=operator_database, producer=operator_pipeline
+        )
+        == 2
+    )
     out = capsys.readouterr().out
     assert "checked=0 green=0 red=0 rc=2" in out
     assert "TOOL-ERROR RuntimeError: db down" in out
@@ -444,16 +472,31 @@ def test_verify_tool_error_when_the_table_cannot_be_read(
 
 
 def test_verify_no_notify_suppresses_the_report(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     ports, alerts = _verify_ports([(7, "x", "import os\n")], lambda _s: "boom")
-    assert _verify.cmd_schedules_verify(notify=False, ports=ports) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            notify=False,
+            ports=ports,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 1
+    )
     assert "RED id=7 name=x missing=boom" in capsys.readouterr().out
     assert alerts == []
 
 
 def test_verify_rows_file_sweeps_the_dump_without_the_db_or_a_report(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """`--rows-file` replaces the table read and never reports, even with notify on."""
 
@@ -467,54 +510,107 @@ def test_verify_rows_file_sweeps_the_dump_without_the_db_or_a_report(
     monkeypatch.setattr(_verify, "_report_verify", no_report)
     rows = tmp_path / "rows.json"
     rows.write_text(json.dumps([[3, "ok", "import os\n"], [4, "stale", "import zz_ava_gone\n"]]))
-    assert _verify.cmd_schedules_verify(rows_file=str(rows)) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            rows_file=str(rows), database_factory=operator_database, producer=operator_pipeline
+        )
+        == 1
+    )
     out = capsys.readouterr().out
     assert "checked=2 green=1 red=1 rc=1" in out
     assert "RED id=4 name=stale missing=zz_ava_gone" in out
 
 
 def test_verify_rows_file_unreadable_is_a_tool_error(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     broken = tmp_path / "rows.json"
     broken.write_text("not json")
-    assert _verify.cmd_schedules_verify(rows_file=str(broken)) == 2
-    assert _verify.cmd_schedules_verify(rows_file=str(tmp_path / "missing.json")) == 2
+    assert (
+        _verify.cmd_schedules_verify(
+            rows_file=str(broken), database_factory=operator_database, producer=operator_pipeline
+        )
+        == 2
+    )
+    assert (
+        _verify.cmd_schedules_verify(
+            rows_file=str(tmp_path / "missing.json"),
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 2
+    )
     out = capsys.readouterr().out
     assert out.count("checked=0 green=0 red=0 rc=2") == 2
     assert "TOOL-ERROR JSONDecodeError" in out
 
 
 def test_verify_check_file_ok_red_and_syntax_error(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The --check-file falsification hook runs the real child: clean imports
     CHECK-OK; a module that no longer resolves / a syntax error are RED."""
     good = tmp_path / "good.py"
     good.write_text("import os\n", encoding="utf-8")
-    assert _verify.cmd_schedules_verify(check_file=str(good)) == 0
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(good), database_factory=operator_database, producer=operator_pipeline
+        )
+        == 0
+    )
     assert "CHECK-OK" in capsys.readouterr().out
 
     bad = tmp_path / "bad.py"
     bad.write_text("import zz_ava_verify_missing\n", encoding="utf-8")
-    assert _verify.cmd_schedules_verify(check_file=str(bad)) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(bad), database_factory=operator_database, producer=operator_pipeline
+        )
+        == 1
+    )
     assert "CHECK-RED missing=zz_ava_verify_missing" in capsys.readouterr().out
 
     broken = tmp_path / "broken.py"
     broken.write_text("def (:\n", encoding="utf-8")
-    assert _verify.cmd_schedules_verify(check_file=str(broken)) == 1
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(broken), database_factory=operator_database, producer=operator_pipeline
+        )
+        == 1
+    )
     assert "CHECK-RED missing=compile-error:" in capsys.readouterr().out
 
 
 def test_verify_check_file_unreadable_is_a_tool_error(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    assert _verify.cmd_schedules_verify(check_file=str(tmp_path / "missing.py")) == 2
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(tmp_path / "missing.py"),
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
+        == 2
+    )
     assert "cannot read script file" in capsys.readouterr().err
 
     binary = tmp_path / "binary.py"
     binary.write_bytes(b"\xff\xfe\x00")
-    assert _verify.cmd_schedules_verify(check_file=str(binary)) == 2
+    assert (
+        _verify.cmd_schedules_verify(
+            check_file=str(binary), database_factory=operator_database, producer=operator_pipeline
+        )
+        == 2
+    )
     assert "cannot read script file" in capsys.readouterr().err
 
 
@@ -532,30 +628,43 @@ def _capture_verify_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, ob
     return emitted
 
 
-def test_report_verify_emits_one_event_naming_the_reds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_report_verify_emits_one_event_naming_the_reds(
+    monkeypatch: pytest.MonkeyPatch, operator_pipeline: Callable[[], EventPipeline]
+) -> None:
     """A red run emits one `schedule_verify_failed` event; the counts are the
     event's metric fields and the detail names each failing script."""
     emitted = _capture_verify_events(monkeypatch)
-    _verify._report_verify(checked=2, reds=[(7, "drifted", "shared.watcher")], tool_error=None)
+    _verify._report_verify(
+        checked=2,
+        reds=[(7, "drifted", "shared.watcher")],
+        tool_error=None,
+        producer=operator_pipeline,
+    )
     (event,) = emitted
     assert event["checked"] == 2 and event["red"] == 1 and event["tool_error"] is None
     detail = str(event["detail"])
     assert "id=7" in detail and "shared.watcher" in detail
 
 
-def test_report_verify_tool_error_names_the_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_report_verify_tool_error_names_the_error(
+    monkeypatch: pytest.MonkeyPatch, operator_pipeline: Callable[[], EventPipeline]
+) -> None:
     emitted = _capture_verify_events(monkeypatch)
-    _verify._report_verify(checked=0, reds=[], tool_error="RuntimeError: db down")
+    _verify._report_verify(
+        checked=0, reds=[], tool_error="RuntimeError: db down", producer=operator_pipeline
+    )
     (event,) = emitted
     assert event["red"] == 0 and event["tool_error"] == "RuntimeError: db down"
     assert "RuntimeError: db down" in str(event["detail"])
 
 
-def test_verify_reads_all_rows_from_the_real_table(capsys: pytest.CaptureFixture[str]) -> None:
+def test_verify_reads_all_rows_from_the_real_table(
+    capsys: pytest.CaptureFixture[str], operator_database: Callable[[], Any]
+) -> None:
     """The sweep input is the DB table itself: every row including disabled /
     stopped ones, in id order."""
-    assert _sched.cmd_schedules_provision() == 0
-    rows = _verify._read_schedule_rows()
+    assert _sched.cmd_schedules_provision(database_factory=operator_database) == 0
+    rows = _verify._read_schedule_rows(database_factory=operator_database)
     names = [row[1] for row in rows]
     assert "self-evolution-weekly" in names  # enabled builtin
     assert "trace-ship-tempo" in names  # operator builtin: present but disabled
@@ -567,11 +676,13 @@ def test_verify_reads_all_rows_from_the_real_table(capsys: pytest.CaptureFixture
 
 
 def test_provision_creates_builtins(
-    db_conn: psycopg.Connection, capsys: pytest.CaptureFixture[str]
+    db_conn: psycopg.Connection,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     """`ava schedules provision` creates the repo's built-in schedules in the
     DB (product enabled, operator disabled) and is a no-op on the second run."""
-    assert _sched.cmd_schedules_provision() == 0
+    assert _sched.cmd_schedules_provision(database_factory=operator_database) == 0
     out = capsys.readouterr().out
     assert "self-evolution-weekly" in out
     assert "memory-arbiter" in out
@@ -584,7 +695,7 @@ def test_provision_creates_builtins(
     assert rows["trace-ship-tempo"] is False
 
     # Second run: idempotent, nothing created.
-    assert _sched.cmd_schedules_provision() == 0
+    assert _sched.cmd_schedules_provision(database_factory=operator_database) == 0
     assert "(all built-in schedules already present and current)" in capsys.readouterr().out
 
 

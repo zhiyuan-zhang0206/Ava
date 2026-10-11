@@ -15,6 +15,7 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.config import ConfigBoot, settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 
 
 @pytest.fixture
@@ -45,10 +46,9 @@ def test_default_sql_refuses_a_missing_resource_before_dial(
 
 
 def test_process_custom_database_is_independent_of_the_default(
-    monkeypatch: pytest.MonkeyPatch,
-    config_boot: ConfigBoot,
+    monkeypatch: pytest.MonkeyPatch, config_boot: ConfigBoot, database_gate: ProcessDbGate
 ) -> None:
-    database = Database.from_settings()
+    database = Database.from_settings(gate=database_gate)
     custom = process_clients(database=lambda: database, config=config_boot)
     default = process_clients(config=config_boot)
     config_boot.set_field("db_url", "")

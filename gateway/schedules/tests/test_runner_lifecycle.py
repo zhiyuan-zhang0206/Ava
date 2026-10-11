@@ -7,12 +7,15 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import psycopg
 import pytest
 
 from base.config import settings
+from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules import runner as sr
 from gateway.schedules.tests.runner_inputs import run_schedule as run
 
@@ -30,7 +33,9 @@ def _fast_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.001)
 
 
-def test_close_rejects_a_stall_sample_already_in_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_close_rejects_a_stall_sample_already_in_progress(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+) -> None:
     _fast_guard(monkeypatch)
     sampled = threading.Event()
     release = threading.Event()
@@ -50,7 +55,7 @@ def test_close_rejects_a_stall_sample_already_in_progress(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(sr._StallGuard, "_sample", sample)
     monkeypatch.setattr(sr, "_stall_action", action)
-    guard = sr._start_stall_guard(Database.from_settings(), 1, None)
+    guard = sr._start_stall_guard(Database.from_settings(gate=database_gate), 1, None)
 
     def release_on_stop() -> None:
         assert guard.stop.wait(2)
@@ -72,7 +77,9 @@ def test_close_rejects_a_stall_sample_already_in_progress(monkeypatch: pytest.Mo
         guard.close()
 
 
-def test_close_collects_an_admitted_stall_action(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_close_collects_an_admitted_stall_action(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+) -> None:
     _fast_guard(monkeypatch)
     admitted = threading.Event()
     release = threading.Event()
@@ -88,7 +95,7 @@ def test_close_collects_an_admitted_stall_action(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(sr._StallGuard, "_sample", sample)
     monkeypatch.setattr(sr, "_stall_action", action)
-    guard = sr._start_stall_guard(Database.from_settings(), 1, None)
+    guard = sr._start_stall_guard(Database.from_settings(gate=database_gate), 1, None)
 
     def release_on_stop() -> None:
         assert guard.stop.wait(2)
@@ -110,7 +117,9 @@ def test_close_collects_an_admitted_stall_action(monkeypatch: pytest.MonkeyPatch
 
 
 def test_guard_unknown_error_is_visible_and_rethrown(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+    database_gate: ProcessDbGate,
 ) -> None:
     _fast_guard(monkeypatch)
     failed = threading.Event()
@@ -121,7 +130,7 @@ def test_guard_unknown_error_is_visible_and_rethrown(
         raise error
 
     monkeypatch.setattr(sr._StallGuard, "_sample", sample)
-    guard = sr._start_stall_guard(Database.from_settings(), 1, None)
+    guard = sr._start_stall_guard(Database.from_settings(gate=database_gate), 1, None)
     assert failed.wait(2)
     with pytest.raises(WorkerFailure) as caught:
         guard.close()
@@ -132,7 +141,9 @@ def test_guard_unknown_error_is_visible_and_rethrown(
 
 
 def test_late_recorder_error_remains_owned_after_deadline(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+    database_gate: ProcessDbGate,
 ) -> None:
     started = threading.Event()
     release = threading.Event()
@@ -151,7 +162,7 @@ def test_late_recorder_error_remains_owned_after_deadline(
         second_writes.append(1)
 
     monkeypatch.setattr(sr, "_record_run_end", record_end)
-    recorder = sr._StallRecorder(Database.from_settings(), 1, "stall", None)
+    recorder = sr._StallRecorder(Database.from_settings(gate=database_gate), 1, "stall", None)
     try:
         assert started.wait(2)
         assert recorder.close() is False
@@ -169,7 +180,9 @@ def test_late_recorder_error_remains_owned_after_deadline(
     assert second_writes == []
 
 
-def test_recorder_does_not_start_second_write_after_close(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recorder_does_not_start_second_write_after_close(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+) -> None:
     started = threading.Event()
     release = threading.Event()
     second_writes: list[int] = []
@@ -185,7 +198,7 @@ def test_recorder_does_not_start_second_write_after_close(monkeypatch: pytest.Mo
         second_writes.append(1)
 
     monkeypatch.setattr(sr, "_record_run_end", record_end)
-    recorder = sr._StallRecorder(Database.from_settings(), 1, "stall", None)
+    recorder = sr._StallRecorder(Database.from_settings(gate=database_gate), 1, "stall", None)
     try:
         assert started.wait(2)
         assert recorder.close() is False
@@ -204,6 +217,7 @@ def test_script_failure_stays_primary_when_guard_close_fails(
     tmp_path: Path,
     loguru_records: list[dict[str, Any]],
     primary: BaseException,
+    database_gate: ProcessDbGate,
 ) -> None:
     _fast_guard(monkeypatch)
     failed = threading.Event()
@@ -234,11 +248,14 @@ def test_script_failure_stays_primary_when_guard_close_fails(
     monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: None)
     with pytest.raises(type(primary)) as caught:
         sr._run_python_script(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             1,
             None,
             tmp_path / "script.py",
             load_plugins=ava.ensure_plugins_loaded,
+            inputs=ScheduleInputs(
+                lambda: Database.from_settings(gate=database_gate), Mock(), ava.loaded_code_image()
+            ),
         )
     assert caught.value is primary
     assert sys.argv is argv
@@ -252,7 +269,9 @@ def test_script_failure_stays_primary_when_guard_close_fails(
 
 
 def test_blocked_guard_close_is_finite_and_collects_its_late_error(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+    database_gate: ProcessDbGate,
 ) -> None:
     _fast_guard(monkeypatch)
     started = threading.Event()
@@ -265,7 +284,7 @@ def test_blocked_guard_close_is_finite_and_collects_its_late_error(
         raise error
 
     monkeypatch.setattr(sr._StallGuard, "_sample", sample)
-    guard = sr._start_stall_guard(Database.from_settings(), 1, None)
+    guard = sr._start_stall_guard(Database.from_settings(gate=database_gate), 1, None)
     try:
         assert started.wait(2)
         with pytest.raises(RuntimeError, match="stall guard did not stop"):
@@ -282,7 +301,9 @@ def test_blocked_guard_close_is_finite_and_collects_its_late_error(
 
 
 def test_stall_action_keeps_hard_exit_when_cleanup_fails(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+    database_gate: ProcessDbGate,
 ) -> None:
     error = WorkerFailure("cleanup implementation failed")
     exits: list[int] = []
@@ -293,7 +314,7 @@ def test_stall_action_keeps_hard_exit_when_cleanup_fails(
     monkeypatch.setattr(sr.base.host.proc, "kill_process_tree", cleanup)
     monkeypatch.setattr(sr.os, "_exit", exits.append)
     with pytest.raises(WorkerFailure) as caught:
-        sr._stall_action(Database.from_settings(), 1, "stall", None)
+        sr._stall_action(Database.from_settings(gate=database_gate), 1, "stall", None)
     assert caught.value is error
     assert exits == [1]
     assert "stall action failed" in _log_text(loguru_records)

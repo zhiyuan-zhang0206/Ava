@@ -23,6 +23,7 @@ from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -40,23 +41,25 @@ def _permanent_rejection() -> FatalProviderError:
     )
 
 
-def _context(pool: AsyncConnectionPool) -> AvaContext:
+def _context(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> AvaContext:
     return AvaContext(
         ops_pool=pool,
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=configured_policy().clock_factory,
     )
 
 
-async def _reject(pool: AsyncConnectionPool, agent_id: int) -> None:
+async def _reject(
+    pool: AsyncConnectionPool, agent_id: int, *, database_gate: ProcessDbGate
+) -> None:
     await _handle_fatal_llm_error(
         _permanent_rejection(),
-        _context(pool),
+        _context(pool, database_gate=database_gate),
         agent_id=agent_id,
         occurred_at=datetime(2026, 9, 16, 6, 0, tzinfo=UTC),
     )
@@ -75,6 +78,7 @@ async def test_streak_write_failure_keeps_its_traceback(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Branch 1: the streak write failed — the warning keeps the cause (task #4979)."""
 
@@ -84,7 +88,14 @@ async def test_streak_write_failure_keeps_its_traceback(
     monkeypatch.setattr("base.agents.recovery.breaker.record_permanent_reject_turn", _boom)
 
     await _reject(
-        aops_pool, spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+        aops_pool,
+        spawn_agent(
+            spawner="user",
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+        ),
+        database_gate=database_gate,
     )
 
     record = _sole_record(loguru_records, "failed to record a permanent-rejection streak")
@@ -99,6 +110,7 @@ async def test_halt_suppression_failure_keeps_its_traceback(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Branch 2: suppressing automatic wakes failed (task #4979)."""
 
@@ -116,7 +128,14 @@ async def test_halt_suppression_failure_keeps_its_traceback(
     monkeypatch.setattr("agent.db.enqueue_fatal_provider_report_to_nearest_alive_ancestor", _noop)
 
     await _reject(
-        aops_pool, spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+        aops_pool,
+        spawn_agent(
+            spawner="user",
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+        ),
+        database_gate=database_gate,
     )
 
     record = _sole_record(loguru_records, "failed to suppress automatic wakes")
@@ -131,6 +150,7 @@ async def test_ancestor_report_failure_keeps_its_traceback(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Branch 3: enqueueing the recovery-halt report failed (task #4979)."""
 
@@ -148,7 +168,14 @@ async def test_ancestor_report_failure_keeps_its_traceback(
     monkeypatch.setattr("agent.db.enqueue_fatal_provider_report_to_nearest_alive_ancestor", _boom)
 
     await _reject(
-        aops_pool, spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+        aops_pool,
+        spawn_agent(
+            spawner="user",
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+        ),
+        database_gate=database_gate,
     )
 
     record = _sole_record(loguru_records, "failed to enqueue the recovery-halt report")

@@ -12,6 +12,7 @@ from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import recorded_tree
@@ -30,9 +31,9 @@ def _agent(conn: psycopg.Connection) -> RuntimeIncarnation:
     return owner
 
 
-def _status(owner: RuntimeIncarnation) -> dict[str, Any]:
+def _status(owner: RuntimeIncarnation, *, database_gate: ProcessDbGate) -> dict[str, Any]:
     result = leases.native_status(
-        Database.from_settings(), EventBus.from_settings(), owner.agent_id, owner
+        Database.from_settings(gate=database_gate), EventBus.from_settings(), owner.agent_id, owner
     )
     assert result is not None
     return result
@@ -44,12 +45,13 @@ def _request(
     authority: ConfigAuthority,
     provider: str = "codex",
     thread: str | None = None,
+    database_gate: ProcessDbGate,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
     if provider == "codex":
         kwargs["relay_thread_id"] = thread or str(uuid4())
     return leases.request(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         owner.agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
@@ -62,15 +64,19 @@ def _request(
     )
 
 
-def _active(owner: RuntimeIncarnation, *, authority: ConfigAuthority) -> dict[str, Any]:
-    lease = _request(owner, authority=authority)
+def _active(
+    owner: RuntimeIncarnation, *, authority: ConfigAuthority, database_gate: ProcessDbGate
+) -> dict[str, Any]:
+    lease = _request(owner, authority=authority, database_gate=database_gate)
     leases.accept(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         lease["id"],
         owner.agent_id,
         owner,
         "Handoff brief",
     )
-    leases.activate(Database.from_settings(), EventBus.from_settings(), lease["id"], owner)
+    leases.activate(
+        Database.from_settings(gate=database_gate), EventBus.from_settings(), lease["id"], owner
+    )
     return lease

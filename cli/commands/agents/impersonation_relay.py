@@ -24,6 +24,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 import base.events.live.redis_listener
+from base.agents.context.clients import DatabaseFactory
 from base.agents.impersonation import RELAY_HEARTBEAT_SECONDS
 from base.agents.impersonation.delivery import reserve_delivery
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
@@ -546,7 +547,7 @@ async def _heartbeat_completion(db: Database, lease_id: UUID, token: str) -> Exc
     return None
 
 
-def cmd_relay(args: argparse.Namespace) -> int:
+def cmd_relay(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     """Run a native relay until lease release/expiry, failure, or interruption.
 
     The first heartbeat is written before the inbox loop, so the accepting
@@ -559,7 +560,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
         from base.agents.impersonation import relay_get
         from base.agents.impersonation.history import resolve
 
-        db = Database.from_settings()
+        db = database_factory()
         bus = EventBus.from_settings()
         if args.lease_id is None:
             lease_id = UUID(str(resolve(db, args.agent_id, args.session_id)["id"]))

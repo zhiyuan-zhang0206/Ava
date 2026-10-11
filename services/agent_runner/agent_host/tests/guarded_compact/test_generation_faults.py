@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.tests.claim.test_inbound_ownership import _insert
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
@@ -25,6 +26,8 @@ async def test_generation_unknown_or_short_never_repeats_and_next_chat_runs(
     add_bindings: AddBindings,
     failure: str,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     calls: list[str] = []
 
@@ -48,7 +51,9 @@ async def test_generation_unknown_or_short_never_repeats_and_next_chat_runs(
             )
         },
     )
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
+    accepted = await admit(
+        db_conn, aops_pool, client, monkeypatch, catalog=model_catalog, database_gate=database_gate
+    )
     if failure != "short":
         with pytest.raises(Exception, match="unknown provider response"):
             await accepted.host.run_turn(accepted.agent)

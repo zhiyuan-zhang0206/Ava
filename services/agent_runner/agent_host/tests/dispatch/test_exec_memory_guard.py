@@ -16,6 +16,7 @@ from loguru import logger
 from agent.graph.exec._result import _ExecCrashed, _ExecDone
 from agent.graph.exec._subprocess import _result_from_payload, _run_in_subprocess
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.host.memory_pressure import PressureLevel
 from base.host.proc import kill_process_tree
 from base.native_process.exec_kill_notice import notice_path, read_notice
@@ -186,9 +187,9 @@ class _CriticalOs:
         return psutil.Process(pid).memory_info().rss
 
 
-async def _run(tmp_path: Path, code: str) -> Any:
+async def _run(tmp_path: Path, code: str, *, database_gate: ProcessDbGate) -> Any:
     result, _payload = await _run_in_subprocess(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         code,
         exec_context(424242),
         asyncio.Event(),
@@ -213,7 +214,7 @@ async def _gone(pid: int) -> bool:
 
 
 async def test_a_real_exec_is_killed_with_its_reason_and_the_host_keeps_serving(
-    tmp_path: Path,
+    tmp_path: Path, *, database_gate: ProcessDbGate
 ) -> None:
     """At critical pressure the guard finds the real running exec domain by itself,
     kills it, and the owning run reports why; the descendant is reaped and the next
@@ -233,7 +234,7 @@ async def test_a_real_exec_is_killed_with_its_reason_and_the_host_keeps_serving(
 
     guard = ExecMemoryGuard(source, domains=lambda: find_exec_domains(os.getpid(), source))
     descendant_pid: int | None = None
-    run = asyncio.create_task(_run(tmp_path, code))
+    run = asyncio.create_task(_run(tmp_path, code, database_gate=database_gate))
     try:
         deadline = time.monotonic() + 30.0
         while not pid_file.exists() and time.monotonic() < deadline:
@@ -251,7 +252,7 @@ async def test_a_real_exec_is_killed_with_its_reason_and_the_host_keeps_serving(
         assert "without writing a result envelope" not in str(result.exc)
         assert await _gone(descendant_pid)
 
-        after = await _run(tmp_path, "print('still serving')")
+        after = await _run(tmp_path, "print('still serving')", database_gate=database_gate)
         assert isinstance(after, _ExecDone)
     finally:
         run.cancel()

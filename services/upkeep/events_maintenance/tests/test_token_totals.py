@@ -11,10 +11,15 @@ import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+from unittest.mock import Mock
 
 import psycopg
 import pytest
 
+from base.db.code_version_gate import ProcessDbGate
+from base.native_process import code_version
+from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.events_maintenance import daemon, rollup, token_totals
 
 _TODAY = date(2026, 6, 30)
@@ -137,8 +142,17 @@ def _raw_usage(db: psycopg.Connection, agent: int, day: date, tokens_in: int) ->
 
 
 def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_watermark(
-    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    db: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
+    image = LoadedCommit(tmp_path, "captured-before-checkout-moved")
+    capture = Mock(return_value=image)
+    count = Mock(return_value=7)
+    monkeypatch.setattr(LoadedCommit, "capture", capture)
+    monkeypatch.setattr(code_version, "first_parent_count", count)
+    monkeypatch.setattr(rollup, "process_name", lambda: "rollup-operator")
     agent = _agent(db)
     today = datetime.now(UTC).date()
     old = today - timedelta(days=40)
@@ -153,7 +167,12 @@ def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_wa
         def connect(self) -> Generator[psycopg.Connection]:
             yield db
 
-    monkeypatch.setattr(daemon, "events_maintenance_db", _Database)
+    def database(*, gate: ProcessDbGate) -> _Database:
+        assert isinstance(gate, ProcessDbGate)
+        assert gate.application_name() == "ava:rollup-operator:v7"
+        return _Database()
+
+    monkeypatch.setattr(daemon, "events_maintenance_db", database)
     _raw_usage(db, agent, old, 150)  # the backfilled history of a folded day
 
     recent = (today - timedelta(days=1)).strftime("%Y%m%d")
@@ -165,3 +184,6 @@ def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_wa
     rollup.main(["--from", day, "--to", day])
     assert "rebuilt agent_model_tokens_total" in capsys.readouterr().out
     assert _total(db, agent) == (150, 1)
+    assert capture.call_count == 2  # Each independent entry invocation captures once.
+    assert count.call_count == 2
+    count.assert_called_with(tmp_path, image.sha)

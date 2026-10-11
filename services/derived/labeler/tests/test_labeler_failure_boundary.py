@@ -17,6 +17,7 @@ from psycopg_pool import PoolTimeout
 from base.config.service_read import ConfigAuthority
 from base.daemon.health import Liveness
 from base.db import Database, create_agent, pool
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import usage
@@ -43,13 +44,18 @@ def _install_llm(monkeypatch: pytest.MonkeyPatch, error: Exception | None = None
 
 
 async def _generate(
-    tid: int, bus: EventBus, authority: ConfigAuthority, catalog: ModelCatalog
+    tid: int,
+    bus: EventBus,
+    authority: ConfigAuthority,
+    catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> bool | None:
     return await labeler.generate_label_async(
         tid,
         "Fix the failing labeler",
         labeler_config(),
-        labeler_db(),
+        labeler_db(database_gate=database_gate),
         bus,
         catalog=catalog,
         llm_override=authority.runtime.lm.llm_override,
@@ -96,10 +102,17 @@ async def test_trusted_invocation_failure_returns_retry_result_without_writing(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     error: Exception,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
     _install_llm(monkeypatch, error)
-    assert await _generate(tid, event_bus, config_authority, model_catalog) is False
+    assert (
+        await _generate(
+            tid, event_bus, config_authority, model_catalog, database_gate=database_gate
+        )
+        is False
+    )
     assert _label(db_conn, tid) is None
 
 
@@ -125,11 +138,15 @@ async def test_unknown_and_permanent_invocation_failure_preserves_identity(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     error: Exception,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
     _install_llm(monkeypatch, error)
     with pytest.raises(type(error)) as caught:
-        await _generate(tid, event_bus, config_authority, model_catalog)
+        await _generate(
+            tid, event_bus, config_authority, model_catalog, database_gate=database_gate
+        )
     assert caught.value is error
     assert _label(db_conn, tid) is None
 
@@ -142,6 +159,8 @@ async def test_internal_failure_never_becomes_a_generation_retry(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     stage: str,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
     error = psycopg.ProgrammingError("CAS schema drift") if stage == "cas" else TypeError(stage)
@@ -159,7 +178,9 @@ async def test_internal_failure_never_becomes_a_generation_retry(
     owner, name = targets[stage]
     monkeypatch.setattr(owner, name, fail)
     with pytest.raises(type(error)) as caught:
-        await _generate(tid, event_bus, config_authority, model_catalog)
+        await _generate(
+            tid, event_bus, config_authority, model_catalog, database_gate=database_gate
+        )
     assert caught.value is error
     assert _label(db_conn, tid) is None
 
@@ -172,6 +193,8 @@ async def test_transport_shaped_failure_outside_invocation_is_not_recovered(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     stage: str,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
     error = httpx.ReadTimeout(stage)
@@ -188,7 +211,9 @@ async def test_transport_shaped_failure_outside_invocation_is_not_recovered(
     owner, name = targets[stage]
     monkeypatch.setattr(owner, name, fail)
     with pytest.raises(httpx.ReadTimeout) as caught:
-        await _generate(tid, event_bus, config_authority, model_catalog)
+        await _generate(
+            tid, event_bus, config_authority, model_catalog, database_gate=database_gate
+        )
     assert caught.value is error
 
 
@@ -198,6 +223,8 @@ async def test_notification_failure_cannot_uncommit_or_reselect_a_written_label(
     event_bus: EventBus,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -214,7 +241,9 @@ async def test_notification_failure_cannot_uncommit_or_reselect_a_written_label(
 
     monkeypatch.setattr(labeler, "publish_label_updated", fail)
     with pytest.raises(TypeError) as caught:
-        await _generate(tid, event_bus, config_authority, model_catalog)
+        await _generate(
+            tid, event_bus, config_authority, model_catalog, database_gate=database_gate
+        )
     assert caught.value is error
     assert _label(db_conn, tid) == "Fix label generation"
     with db_conn.cursor() as cur:
@@ -229,6 +258,8 @@ async def test_dispatch_failure_stops_the_batch_without_rewriting_inbounds(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     error: Exception,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     first = create_agent(db_conn)
     second = create_agent(db_conn)
@@ -262,12 +293,12 @@ async def test_dispatch_failure_stops_the_batch_without_rewriting_inbounds(
 
     monkeypatch.setattr(daemon, "_select_unlabeled", select)
     monkeypatch.setattr(daemon, "generate_label_async", fail)
-    p = pool()
+    p = pool(gate=database_gate)
     try:
         with pytest.raises(type(error)) as caught:
             await daemon._dispatch_loop(
                 p,
-                labeler_db(),
+                labeler_db(database_gate=database_gate),
                 event_bus,
                 Liveness(120.0),
                 labeler_config(),
@@ -303,6 +334,8 @@ async def test_poll_failure_reaches_service_owner_without_retry(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     error: Exception,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(daemon, "_POLL_INTERVAL_S", 0.0)
     polls = 0
@@ -315,12 +348,12 @@ async def test_poll_failure_reaches_service_owner_without_retry(
         raise error
 
     monkeypatch.setattr(daemon, "_select_unlabeled", fail)
-    p = pool()
+    p = pool(gate=database_gate)
     try:
         with pytest.raises(type(error)) as caught:
             await daemon._dispatch_loop(
                 p,
-                labeler_db(),
+                labeler_db(database_gate=database_gate),
                 event_bus,
                 Liveness(120.0),
                 labeler_config(),
@@ -340,6 +373,8 @@ async def test_invocation_cancellation_propagates(
     event_bus: EventBus,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
     cancellation = asyncio.CancelledError()
@@ -353,6 +388,8 @@ async def test_invocation_cancellation_propagates(
 
     monkeypatch.setattr(labeler, "build_chat_model", build)
     with pytest.raises(asyncio.CancelledError) as caught:
-        await _generate(tid, event_bus, config_authority, model_catalog)
+        await _generate(
+            tid, event_bus, config_authority, model_catalog, database_gate=database_gate
+        )
     assert caught.value is cancellation
     assert _label(db_conn, tid) is None

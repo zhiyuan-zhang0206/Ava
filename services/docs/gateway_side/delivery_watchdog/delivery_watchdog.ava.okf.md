@@ -23,3 +23,7 @@ Entry points are `services/wake/delivery_watchdog/daemon.py` and
 `services/wake/delivery_watchdog/dead_letter.py`. See
 [[services/docs/gateway_side/delivery_watchdog/jobs/jobs.ava.okf.md]] and
 [[agent/db/docs/db.ava.okf.md]].
+
+The executable entry captures one loaded image and supplies one ProcessDbGate-backed
+database factory to both its event pipeline and scan pool. The health server uses
+the same image; importing the module does not initialize process logging.
