@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Ava App
-description: Thin Tauri 2 app that loads the remote Ava console on macOS, Windows, and Android, adding native residency, login, notification, and update behavior.
+description: Thin Tauri 2 app that loads the remote Ava console on macOS and Android, adding native residency, login, notification, and update behavior.
 tags:
   - frontend
   - desktop
@@ -13,7 +13,7 @@ tags:
 
 ## What it is
 
-`ui/app/` is one Tauri 2 application for macOS, Windows, and Android. It bundles
+`ui/app/` is one Tauri 2 application for macOS and Android. It bundles
 only the small onboarding/retry/settings surface in `app-ui/`; the product UI
 is always the remote gate-served [[../../web/docs/web.ava.okf.md|Next.js console]]. The
 app owns the native window and capabilities that a browser tab cannot supply.
@@ -68,7 +68,7 @@ does not block the Android main looper.
 `src-tauri/src/desktop.rs` provides one-instance behavior, tray open/quit,
 close-to-tray, launch-at-login, and Tauri updater checks. The app ships without
 branding icons: the bundle declares none, the tray item renders without an
-image, and `icons/` keeps only the blank `.png`/`.ico` placeholders the
+image, and `icons/` keeps only the blank `.png` placeholder the
 toolchain requires. Auto-login reads the
 local `$AVA_HOME/.env` secret, performs the gateway login outside web content,
 and reloads after its native cookie store receives the session.
@@ -103,8 +103,8 @@ silent installs.
 it exactly — the release workflows fail on mismatch — so a release starts by
 bumping `Cargo.toml`. `.github/workflows/ci-app.yml` path-filters
 Rust format/clippy, Android-target checking, and overlay/manifest tests.
-`release-app.yml` builds universal macOS DMG and Windows NSIS; `release-android.yml` builds the Android APK (`android-v*` tags)
-artifacts for `app-v*` tags. OS signing and updater signing activate only for
+`release-app.yml` builds the universal macOS DMG; `release-android.yml` builds the Android APK (`android-v*` tags)
+artifacts for `app-v*` tags. Apple signing and updater signing activate only for
 complete secret groups; tag releases fail closed when any required signing
 group is absent, while manual dispatch may still produce unsigned evidence.
 `scripts/codegen/build_app_update_manifest.py` emits signed updater entries only, and

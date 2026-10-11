@@ -21,7 +21,6 @@ def test_tag_releases_fail_closed_without_every_platform_signature() -> None:
     assert 'if [ "$EVENT_NAME" = "push" ]; then' in text
     assert "Release tags require updater signing" in text
     assert "Release tags require Apple signing and notarization" in text
-    assert "Release tags require Windows code-signing" in text
 
 
 def test_android_release_workflow_is_separate_and_fails_closed() -> None:
