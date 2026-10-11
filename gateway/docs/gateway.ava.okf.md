@@ -23,7 +23,7 @@ Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopbac
 `routers/upload/`. Wire endpoints and lifecycle ownership are unchanged.
 
 HTTP admission reads the home's durable maintenance journal on each business
-request. `stopping`, `stopped`, `starting` and `ready` block it; drain phases
+request. `stopping` and `stopped` block it; drain phases
 keep SDK dependencies available to the remaining fleet. Atomic resume releases
 this same authority immediately, without a cached database posture delaying it.
 Unreadable or incomplete paused records block business requests. Control-plane

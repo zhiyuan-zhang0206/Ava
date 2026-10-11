@@ -25,9 +25,8 @@ periodic wait in its own body (a call whose name contains `sleep`, or a
 `wait`/`wait_for` call with a timeout), not nested inside another such loop of
 the same function — must do one of:
 
-- be gated: its enclosing function consults `admission.quiesced()` (or
-  `admission.in_stop_leg()`, the narrower slice the host's turn scan reads), so
-  a held unit skips the round and keeps beating its liveness;
+- be gated: its enclosing function consults `admission.quiesced()`, so a held
+  unit skips the round and keeps beating its liveness;
 - carry `# quiesce-exempt: <reason>` on the `while` line or the comment line right
   above it, naming why this loop needs no gate (it never touches the database, it is event-driven, or it
   deliberately runs through the window and the decision that says so).
@@ -67,7 +66,7 @@ from scripts.structure import lint_common  # noqa: E402 - standalone script
 _SCAN_DIRS = ("services", "gateway", "ops")
 
 _MARKER = "quiesce-exempt:"
-_GATES = frozenset({"quiesced", "in_stop_leg"})
+_GATE = "quiesced"
 
 _FIX = (
     "consult `admission.quiesced()` in this function so a held unit skips the round, or put "
@@ -122,8 +121,8 @@ def _waits_periodically(loop: ast.While) -> bool:
 
 def _gated(function: Function) -> bool:
     return any(
-        (isinstance(node, ast.Attribute) and node.attr in _GATES)
-        or (isinstance(node, ast.Name) and node.id in _GATES)
+        (isinstance(node, ast.Attribute) and node.attr == _GATE)
+        or (isinstance(node, ast.Name) and node.id == _GATE)
         for node in ast.walk(function)
     )
 

@@ -88,8 +88,6 @@ def test_quiesced_covers_only_the_stop_window() -> None:
         MaintenancePhase.DRAINED,
         MaintenancePhase.STOPPING,
         MaintenancePhase.STOPPED,
-        MaintenancePhase.STARTING,
-        MaintenancePhase.READY,
     ):
         current = admission.set_phase("migration", WHEN, phase)
         assert current.maintenance is not None
@@ -101,29 +99,6 @@ def test_quiesced_covers_only_the_stop_window() -> None:
         "migration", WHEN, final.maintenance, final.maintenance, resumed=True
     )
     assert not admission.quiesced()
-
-
-def test_in_stop_leg_covers_only_the_drained_to_stopped_slice() -> None:
-    assert not admission.in_stop_leg()
-
-    first = pause_owner.begin_maintenance("migration", WHEN).snapshot
-    assert first.maintenance is not None
-    assert not admission.in_stop_leg()
-
-    pause_owner.change_maintenance(
-        "migration", WHEN, first.maintenance, MaintenanceHold(MaintenancePhase.DRAINING)
-    )
-    assert not admission.in_stop_leg()
-
-    for phase in (MaintenancePhase.DRAINED, MaintenancePhase.STOPPING, MaintenancePhase.STOPPED):
-        current = admission.set_phase("migration", WHEN, phase)
-        assert current.maintenance is not None
-        assert admission.in_stop_leg(), phase
-
-    for phase in (MaintenancePhase.STARTING, MaintenancePhase.READY):
-        current = admission.set_phase("migration", WHEN, phase)
-        assert current.maintenance is not None
-        assert not admission.in_stop_leg(), phase
 
 
 def test_business_gate_tracks_the_journal_without_posture_or_time() -> None:
@@ -138,12 +113,7 @@ def test_business_gate_tracks_the_journal_without_posture_or_time() -> None:
     assert not admission.business_paused()
     admission.set_phase("migration", WHEN, MaintenancePhase.DRAINED)
     assert not admission.business_paused()  # Other hosts may still need this gateway's SDK.
-    for phase in (
-        MaintenancePhase.STOPPING,
-        MaintenancePhase.STOPPED,
-        MaintenancePhase.STARTING,
-        MaintenancePhase.READY,
-    ):
+    for phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED):
         admission.set_phase("migration", WHEN, phase)
         assert admission.business_paused(), phase
     final = admission.snapshot()
@@ -181,7 +151,6 @@ def test_windows_read_an_unreadable_owner_as_held(
 
     monkeypatch.setattr(admission, "snapshot", _unreadable)
     assert admission.quiesced()
-    assert admission.in_stop_leg()
 
 
 def test_clear_failures_drops_blocking_receipts_and_keeps_the_rest() -> None:

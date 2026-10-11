@@ -37,7 +37,7 @@ def business_paused() -> bool:
     The same durable journal that releases agent admission controls HTTP. A
     database posture projection or cached read cannot prolong a completed resume.
     Drained local agents do not imply remote continuations have finished their
-    SDK calls, so only the following stop/start phases close business requests.
+    SDK calls, so only the following stop phases close business requests.
     Unknown or incomplete pause records keep them closed until the journal is removed by hand.
     """
     try:
@@ -53,28 +53,25 @@ def business_paused() -> bool:
     return current.maintenance.phase in {
         MaintenancePhase.STOPPING,
         MaintenancePhase.STOPPED,
-        MaintenancePhase.STARTING,
-        MaintenancePhase.READY,
     }
 
 
-# The stop window's phases: the drain has landed, or the unit is mid-stop /
-# mid-start. `preparing`/`draining` stay live — an already-admitted turn may
-# still be counted down and must finish; `ready` is included so a resume's
-# last moments cannot race a background loop with the hold about to release.
+# The stop window's phases: the drain has landed and the unit is stopping or
+# held stopped. `preparing`/`draining` stay live — an already-admitted turn may
+# still be counted down and must finish.
 
 
 def quiesced() -> bool:
-    """Whether this unit is inside its stop window (`drained` .. `ready`).
+    """Whether this unit is inside its stop window (`drained` .. `stopped`).
 
     Background loops consult this before doing database work: while a unit is
-    being stopped, held stopped, or brought back up, ownership renewals, turn
-    scans, page reconciliation and pool borrows must wait — the window's whole
-    point is that the unit stops doing database work until `ava start` releases
-    the hold. `preparing`/`draining` read as NOT quiesced (in-flight
-    continuations must still run). An unreadable owner reads as quiesced: the
-    same refuse-new-work posture `snapshot` enforces by raising, held by
-    background loops instead of crashing them.
+    being stopped or held stopped, ownership renewals, turn scans, page
+    reconciliation and pool borrows must wait — the window's whole point is
+    that the unit stops doing database work until `ava start` releases the
+    hold. `preparing`/`draining` read as NOT quiesced (in-flight continuations
+    must still run). An unreadable owner reads as quiesced: the same
+    refuse-new-work posture `snapshot` enforces by raising, held by background
+    loops instead of crashing them.
     """
     try:
         current = snapshot()
@@ -83,37 +80,6 @@ def quiesced() -> bool:
     if current is None or current.maintenance is None:
         return False
     return current.maintenance.phase in CERTIFIED_PHASES
-
-
-# The stop leg of the maintenance window: drainage is complete and the unit has
-# not begun coming back up (`starting`). The host's turn scan reads this
-# narrower slice instead of the whole quiesced window: while the stop leg runs,
-# the operator's stop owns the agents and a scan would fight it, but from the
-# start leg on a booting host must drain its pending workset — recovery may
-# not wait for the hold to release, because pub/sub has no replay (task
-# #3227).
-_STOP_LEG_PHASES = frozenset(
-    {MaintenancePhase.DRAINED, MaintenancePhase.STOPPING, MaintenancePhase.STOPPED}
-)
-
-
-def in_stop_leg() -> bool:
-    """Whether the unit is in its stop leg (`drained` .. `stopped`).
-
-    `quiesced()` is the wider no-database-work window (`drained` .. `ready`);
-    this is the narrower slice where agent work must not be touched at all:
-    the drain is complete and the start has not begun. An unreadable owner
-    reads as the stop leg — the same refuse-new-work posture `quiesced()`
-    takes. The start leg (`starting`/`ready`) reads False: a host booting into
-    a still-held unit must be able to scan its pending workset.
-    """
-    try:
-        current = snapshot()
-    except (RuntimeError, OSError):
-        return True
-    if current is None or current.maintenance is None:
-        return False
-    return current.maintenance.phase in _STOP_LEG_PHASES
 
 
 def start_authorized(operation: pause_owner.PauseOwnerSnapshot | None) -> bool:
@@ -274,8 +240,6 @@ def set_phase(
         MaintenancePhase.DRAINING: MaintenancePhase.DRAINED,
         MaintenancePhase.DRAINED: MaintenancePhase.STOPPING,
         MaintenancePhase.STOPPING: MaintenancePhase.STOPPED,
-        MaintenancePhase.STOPPED: MaintenancePhase.STARTING,
-        MaintenancePhase.STARTING: MaintenancePhase.READY,
     }
     if phase != allowed.get(hold.phase):
         raise RuntimeError(f"invalid maintenance transition: {hold.phase} -> {phase}")
