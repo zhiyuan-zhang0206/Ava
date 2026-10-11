@@ -99,7 +99,9 @@ def test_eof_closes_exact_domain_before_user_code(tmp_path: Path) -> None:
     try:
         ready = _ready(tmp_path, proc)
         assert ready.allocation.owner_process is not None
-        validate_native_ready(ready, ResourceProcess.capture(psutil.Process(proc.pid)))
+        validate_native_ready(
+            ready, ResourceProcess.capture(psutil.Process(proc.pid)), tmp_path / "owner.json"
+        )
         assert ready.allocation.root_process is not None
         root = psutil.Process(ready.allocation.root_process.pid)
         assert root.ppid() == ready.allocation.owner_process.pid
@@ -132,7 +134,7 @@ def test_ready_receipt_refuses_a_different_native_launcher(tmp_path: Path) -> No
             else {"birth": launcher.birth + 0.001}
         )
         with pytest.raises(ValueError, match="birth changed"):
-            validate_native_ready(ready, different)
+            validate_native_ready(ready, different, tmp_path / "owner.json")
     finally:
         if proc.poll() is None:
             proc.kill()

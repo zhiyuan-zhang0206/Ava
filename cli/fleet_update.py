@@ -112,11 +112,11 @@ trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -f "$R"' EXIT
 git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; git -C "$S" worktree prune
 git cat-file -e "{new}^{{commit}}" || {{ echo "SKIPPED: {new} is not fetched on this host (a dry run does not fetch)"; exit 0; }}
 (umask 077; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c \\
-  'import json, sys; from cli.commands.management.schedules_verify import _read_schedule_rows as rows; json.dump(rows(), open(sys.argv[1], "w"))' "$R") \\
+  'import json, sys; from cli.database import operator_database_factory; from cli.database.runtime import CommandRuntime; command = CommandRuntime.create(); from cli.commands.management.schedules_verify import _read_schedule_rows as rows; json.dump(rows(database_factory=operator_database_factory(local_host=command.machine.host)), open(sys.argv[1], "w"))' "$R") \\
   || {{ echo "VERIFY_RC=2"; exit 0; }}
 git -C "$S" worktree add -q "$W" {new} || {{ echo "VERIFY_RC=2"; exit 0; }}
 cd "$W" && AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c \\
-  'import sys; from cli.commands.management.schedules_verify import cmd_schedules_verify as v; sys.exit(v(notify=False, rows_file=sys.argv[1]))' "$R"
+  'import sys; from cli.database import operator_database_factory; from cli.database.runtime import CommandRuntime; command = CommandRuntime.create(); from cli.commands.management.schedules_verify import cmd_schedules_verify as v; sys.exit(v(database_factory=operator_database_factory(local_host=command.machine.host), notify=False, rows_file=sys.argv[1]))' "$R"
 echo "VERIFY_RC=$?"; exit 0"""
 
 
@@ -192,7 +192,7 @@ def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
     if facts["dirty"] != "0":
         reasons.append(f"{alias}: $HOME/.ava/source has uncommitted changes")
     if facts["hook"] == "yes":
-        reasons.append(f"{alias}: a post-checkout hook (legacy guard recurses); move it aside")
+        reasons.append(f"{alias}: a post-checkout hook (the guard recurses); move it aside")
     if facts["active"] == "yes":
         reasons.append(f"{alias}: $HOME/.ava/updates/active names an unfinished release operation")
     # A completed, failure-free stop is what an interrupted `down` leaves; rerunning is fine.
@@ -333,7 +333,7 @@ def _machine_names(s: Session, aliases: list[str]) -> dict[str, str]:
     """Each listed host's own machine name (what the roster calls it), asked of the host.
 
     Asked with `-c`, so it takes `_PYTHON`, not the `python -` program that reads stdin."""
-    ask = f'{_PYTHON} -c "from base.cluster.machine import machine_name; print(machine_name())"'
+    ask = f'{_PYTHON} -c "from base.config import ConfigBoot; from base.cluster.machine.boot import machine_from_boot; print(machine_from_boot(ConfigBoot()).name())"'
     names: dict[str, str] = {}
     for alias in aliases:
         reported = s.run(alias, ask, effect=False).split()

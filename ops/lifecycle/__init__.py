@@ -49,7 +49,6 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartRefused,
 )
 from base.agents.messages.inbound import WakeTriggerKind
-from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, insert_inbound_message
 from base.events.live.announce import publish_agent_updated_sync
@@ -308,6 +307,7 @@ async def resurrect_agent_op(
     *,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
+    local_machine: str,
 ) -> ResurrectAgentResponse:
     """Commit hosted resurrection intent, then publish a wake to the home host.
 
@@ -329,6 +329,7 @@ async def resurrect_agent_op(
             prompt=body.prompt,
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
+            local_machine=local_machine,
         )
     except (ResurrectAlreadyAlive, ResurrectTriggerStaleError):
         return ResurrectAgentResponse(status=ResurrectResult.ALREADY_ALIVE)
@@ -342,6 +343,7 @@ async def resurrect_if_terminated(
     *,
     trigger_inbound_id: int,
     trigger_inbound_kind: WakeTriggerKind,
+    local_machine: str,
 ) -> AgentStatus:
     """Resurrect `agent_id` when it is terminated, so a just-delivered inbound is
     handled by a live process instead of sitting unclaimed forever.
@@ -439,7 +441,7 @@ async def resurrect_if_terminated(
             )
             result_status = ResurrectAgentResponse.model_validate(forwarded).status
         except _cluster_rpc.ClusterOpUnreachable:
-            if home == machine_name():
+            if home == local_machine:
                 # Local ops server not reachable (test / single-process):
                 # fall back to in-process resurrect.
                 result_status = (
@@ -450,6 +452,7 @@ async def resurrect_if_terminated(
                         body,
                         trigger_inbound_id=trigger_inbound_id,
                         trigger_inbound_kind=trigger_inbound_kind,
+                        local_machine=local_machine,
                     )
                 ).status
             else:
@@ -582,16 +585,18 @@ async def restart_agent_op(
 
 
 async def recover_crash_marked_op(
-    db: Database, bus: EventBus, agent_id: int
+    db: Database, bus: EventBus, agent_id: int, *, local_machine: str
 ) -> RecoverCrashMarkedResponse:
     """Local-target adjudication of a stalled crash-marked harvest — runs on
     the agent's home machine (the ops server's 'lifecycle' dispatch target).
     Off-loop: the transaction waits on the row lock."""
-    return await asyncio.to_thread(_recover_crash_marked_blocking, db, bus, agent_id)
+    return await asyncio.to_thread(
+        _recover_crash_marked_blocking, db, bus, agent_id, local_machine=local_machine
+    )
 
 
 async def recover_crash_marked_if_stalled(
-    db: Database, bus: EventBus, agent_id: int, *, stalled_inbound_id: int
+    db: Database, bus: EventBus, agent_id: int, *, stalled_inbound_id: int, local_machine: str
 ) -> tuple[CrashRecoveryResult | CrashRecoveryRequestFailure, str | None]:
     """Ask `agent_id`'s home machine to adjudicate harvesting its crash-marked
     corpse, so the stalled chat `stalled_inbound_id` stops waiting on a dead
@@ -632,10 +637,12 @@ async def recover_crash_marked_if_stalled(
             response = RecoverCrashMarkedResponse.model_validate(forwarded)
             return response.status, response.reason
         except _cluster_rpc.ClusterOpUnreachable:
-            if home == machine_name():
+            if home == local_machine:
                 # Local ops server not reachable (test / single-process):
                 # adjudicate in-process, like the other lifecycle ops.
-                response = await recover_crash_marked_op(db, bus, agent_id)
+                response = await recover_crash_marked_op(
+                    db, bus, agent_id, local_machine=local_machine
+                )
                 return response.status, response.reason
             raise
     except _cluster_rpc.ClusterOpUnreachable as exc:
@@ -659,7 +666,7 @@ async def recover_crash_marked_if_stalled(
 
 _LIFECYCLE_PATH = re.compile(
     r"^/api/agents/(?P<id>\d+)/"
-    r"(?P<action>terminate|resurrect|resurrect-explicit-v2|"
+    r"(?P<action>terminate|resurrect-explicit-v2|"
     r"resurrect-if-pending-work-v2|resurrect-billing-v1|recover-crash-marked-v2|restart|restart-work-v1)$"
 )
 
@@ -674,6 +681,7 @@ async def lifecycle_op(
     catalog: ModelCatalog,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
+    local_machine: str,
 ) -> (
     TerminateAgentResponse
     | ResurrectAgentResponse
@@ -691,10 +699,6 @@ async def lifecycle_op(
     `resurrect-explicit-v2`, guarded `resurrect-if-pending-work-v2`,
     billing-guarded `resurrect-billing-v1` (task #3919), and
     `recover-crash-marked-v2` (the stalled-corpse harvest) paths.
-    Legacy `resurrect` is recognized only to reject it. This is the
-    version-skew fail-closed boundary: an old runner rejects the v2 paths and a
-    new runner rejects every old gateway resurrection instead of guessing its
-    intent from the request body.
     Anything else raises ValueError — the ops server converts that to a failed
     op result.
     """
@@ -719,11 +723,13 @@ async def lifecycle_op(
         return await terminate_agent_op(
             db, bus, agent_id, TerminateAgentRequest.model_validate(body), db_pool
         )
-    if action == "resurrect":
-        raise ValueError("legacy /resurrect is refused; use a versioned internal path")
     if action == "resurrect-explicit-v2":
         return await resurrect_agent_op(
-            db, bus, agent_id, ResurrectAgentRequest.model_validate(body)
+            db,
+            bus,
+            agent_id,
+            ResurrectAgentRequest.model_validate(body),
+            local_machine=local_machine,
         )
     if action == "resurrect-if-pending-work-v2":
         request = _pending_work_resurrection_request(body, trigger_inbound_id)
@@ -734,13 +740,14 @@ async def lifecycle_op(
             request,
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
+            local_machine=local_machine,
         )
     if action == "resurrect-billing-v1":
         from ops.lifecycle.billing_recovery import resurrect_billing_agent_op
 
-        return await resurrect_billing_agent_op(db, bus, agent_id)
+        return await resurrect_billing_agent_op(db, bus, agent_id, local_machine=local_machine)
     if action == "recover-crash-marked-v2":
-        return await recover_crash_marked_op(db, bus, agent_id)
+        return await recover_crash_marked_op(db, bus, agent_id, local_machine=local_machine)
     if action == "restart":
         return await restart_agent_op(
             db, bus, agent_id, RestartAgentRequest.model_validate(body), db_pool, catalog=catalog

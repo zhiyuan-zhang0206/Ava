@@ -32,5 +32,16 @@ Gateway-owned background daemon (`services/upkeep/events_maintenance/daemon.py`)
 - `services/upkeep/events_maintenance/resolution.py:run_resolution_slice` — immutable Loki class resolution, marker transitions, and the unresolved/dismissed gauges
 - Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`ops/roster/healthz.py`)
 
-## Notes
-- Sidebar `total_events` is a historical parity constant (see `gateway/cluster/status.py` `ARCHIVE_TOTAL_ROWS`) — the PG archive it once counted was dropped with the task #1281/#1823 cleanup
+## Process composition
+
+The executable entry captures one `LoadedCommit` and retains its `CodeVersion`
+and `ProcessDbGate`. The work database factory and the lazy telemetry producer
+share that gate, so new handles preserve the process admission read budget.
+Logging and the existing health endpoint receive the same captured image; a
+checkout move cannot relabel the running daemon. The daemon's existing startup,
+pidfile, work and bounded-exit order remains unchanged.
+
+The standalone rollup entry captures its own image and binds an explicit,
+non-exempt gate to `events_maintenance_db(gate=...)`. Argument rejection precedes
+capture and database access; the closed-day SQL and fold-watermark rules remain
+unchanged.

@@ -39,7 +39,6 @@ _INVENTORY: dict[str, str] = {
     "base/agents/messages/chat_delivery.py::insert_chat_inbound_in_transaction": "central",
     "base/db/__init__.py::insert_inbound_message_in_transaction": "central",
     "base/db/__init__.py::insert_spawn_prompt_in_transaction": "central",
-    "base/db/__init__.py::insert_restart_completed_inbound": "central",
     "base/agents/messages/control_delivery.py::insert_compact_in_transaction": "ineligible",
     # Verified HTTP control acceptance records source=user, not a borrowed agent caller.
     "base/agents/compaction/commands.py::accept": "ineligible",

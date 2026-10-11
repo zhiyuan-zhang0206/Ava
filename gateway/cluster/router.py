@@ -21,15 +21,13 @@ from pydantic import BaseModel
 from base.api_contracts.status import MachineStatus
 from base.cluster import machines
 from base.cluster.machine import (
-    is_agent_runner,
-    is_gateway,
-    is_observability_station,
-    machine_name,
+    MachineIdentity,
 )
 from base.config import settings
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.git.cluster_drift import prod_source_head_sha
+from base.native_process.loaded_commit import LoadedCommit
 from gateway.cluster import snapshots
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.schemas import AgentMachineRow, MachineDeleteResponse
@@ -41,24 +39,25 @@ from ops.cluster import rpc as _cluster_rpc
 from ops.cluster.pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
+from ops.rpc_schemas import OpKind
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
 
-def _local_snapshot_blocking(db: Database) -> ClusterStatus:
+def _local_snapshot_blocking(
+    db: Database, *, image: LoadedCommit, local_machine: MachineIdentity
+) -> ClusterStatus:
     """Sync local snapshot for a pure gateway (no ops server) — via to_thread:
     paused flag (file), orchestration liveness (session probe) and the
     prod-source HEAD (git rev-parse) are all child-process / disk reads that
     must not run on the event loop."""
-    from base.native_process import loaded_commit as _process_sha
-
-    paused = cluster_is_paused(db)
+    paused = cluster_is_paused(db, local_machine=local_machine)
     return ClusterStatus(
-        machine_name=machine_name(),
-        serve_gateway=is_gateway(),
-        serve_agent_runner=is_agent_runner(),
-        serve_observability_station=is_observability_station(),
+        machine_name=local_machine.name(),
+        serve_gateway=("gateway" in local_machine.role()),
+        serve_agent_runner=("agent-runner" in local_machine.role()),
+        serve_observability_station=("observability-station" in local_machine.role()),
         paused=paused,
         # This local snapshot resolves paused from the posture row alone, so a
         # true verdict here has exactly one possible cause.
@@ -67,8 +66,8 @@ def _local_snapshot_blocking(db: Database) -> ClusterStatus:
         # This gateway process's own frozen commit — not a disk bookmark, so a
         # gateway that outlived a checkout advance reports the old commit and the
         # roster shows the drift.
-        running_sha=_process_sha.get(),
-        schema_mismatch=schema_mismatch_status(db),
+        running_sha=image.sha,
+        schema_mismatch=schema_mismatch_status(db, local_machine=local_machine.name()),
     )
 
 
@@ -88,6 +87,8 @@ async def _roster_statuses(
     identity_log: IdentityMismatchLog,
     *,
     fresh: bool,
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> list[MachineStatus]:
     """The roster of every unpaused machine: from the heartbeat liveness pass's
     snapshot, or — when `fresh` — by dialing every runner now."""
@@ -96,12 +97,18 @@ async def _roster_statuses(
         return []
     found = None if fresh else await asyncio.to_thread(snapshots.read_all_blocking, pool)
     return await gather_cluster_status(
-        db, rows, machine_name(), identity_log=identity_log, snapshots=found
+        db,
+        rows,
+        local_machine.name(),
+        identity_log=identity_log,
+        snapshots=found,
+        image=image,
+        local_machine=local_machine,
     )
 
 
 async def _dispatch_op(
-    db: Database, target: str, kind: _cluster_rpc.OpKind, payload: dict[str, Any]
+    db: Database, target: str, kind: OpKind, payload: dict[str, Any]
 ) -> dict[str, Any]:
     """POST one op to `target`'s ops server, mapping transport outcomes to HTTP.
 
@@ -163,15 +170,23 @@ async def get_cluster_status(request: Request) -> ClusterStatus:
     roster use `/api/cluster/roster`. Bypasses 503 mode so status stays visible
     during pause — observability is always online.
     """
-    return await cluster_status_snapshot(request.app.state.db)
+    return await cluster_status_snapshot(
+        request.app.state.db,
+        image=request.app.state.process_image,
+        local_machine=request.app.state.machine,
+    )
 
 
-async def cluster_status_snapshot(db: Database) -> ClusterStatus:
+async def cluster_status_snapshot(
+    db: Database, *, image: LoadedCommit, local_machine: MachineIdentity
+) -> ClusterStatus:
     """The `/api/cluster/status` body, also read by the MCP `cluster_status` tool."""
-    if is_agent_runner():
-        result = await _dispatch_op(db, machine_name(), "status_probe", {})
+    if "agent-runner" in local_machine.role():
+        result = await _dispatch_op(db, local_machine.name(), "status_probe", {})
         return ClusterStatus.model_validate(result)
-    return await asyncio.to_thread(_local_snapshot_blocking, db)
+    return await asyncio.to_thread(
+        _local_snapshot_blocking, db, image=image, local_machine=local_machine
+    )
 
 
 @router.get("/api/cluster/roster", response_model=list[MachineStatus])
@@ -198,19 +213,17 @@ async def get_cluster_roster(
         request.app.state.db,
         request.app.state.identity_mismatch_log,
         fresh=fresh,
+        image=request.app.state.process_image,
+        local_machine=request.app.state.machine,
     )
 
 
 # --- Admin ops (token-only ops, ssh-free) -------------------------------------
-# Replaces what used to require SSH to the gateway host:
-#   - Reading service logs: query the `events` PG table directly. Daemons
-#     route stdlib logging through loguru's PG sink (see base/log/__init__.py's
-#     `_StdlibInterceptHandler` + `_postgres_sink`), so every INFO+ line from
-#     gateway / scheduler / labeler / agent-host / watchdog / memory-
-#     indexer lands here. agent processes also write here.
+#   - Reading service logs: the unified event stream (`telemetry_events`)
+#     holds every INFO+ line from gateway / scheduler / labeler / agent-host /
+#     watchdog / memory-indexer and the agent processes.
 #   - Cleaning up a stale machines row after a host is decommissioned or
-#     renamed (e.g. `laminar`→`cloud` 2026-05-25): a one-shot DELETE endpoint
-#     replaces hand-running `psql` on the gateway host.
+#     renamed: a one-shot DELETE endpoint.
 # Both endpoints bypass the paused-host 503 (so they keep working during an `ava
 # update` window). The gateway is unauthenticated (the private network is the boundary).
 
@@ -359,6 +372,8 @@ async def get_cluster_machines(
         request.app.state.db,
         request.app.state.identity_mismatch_log,
         fresh=fresh,
+        image=request.app.state.process_image,
+        local_machine=request.app.state.machine,
     )
     # This is the AGENT view: it lists only machines that can run agent processes
     # (carry the agent-runner capability). A gateway-only node is intentionally
@@ -419,7 +434,7 @@ def delete_cluster_machine(name: str, request: Request) -> MachineDeleteResponse
     on startup, so a runtime DELETE wouldn't be repaired until next
     restart).
     """
-    if name == machine_name():
+    if name == request.app.state.machine.name():
         raise HTTPException(
             status_code=400,
             detail=f"refusing to delete this host's own machines row ({name!r}); "

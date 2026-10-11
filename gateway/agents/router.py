@@ -35,7 +35,6 @@ from base.agents.labels import publish_label_updated
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
 from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
-from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -705,7 +704,7 @@ async def _create_agent_http(
         arguments["creation_key"] = key
     if immutable_birth:
         arguments["immutable_birth"] = True
-    target = body.machine if body.machine is not None else machine_name()
+    target = body.machine if body.machine is not None else request.app.state.machine.name()
     try:
         return await create_and_launch_agent(
             body,

@@ -22,7 +22,7 @@ def _is_foreign_owned(current: os.stat_result) -> bool:
     with a foreign gid (chgrp'd leftover) is still repairable, and skipping
     it would strand a 0o644 file as group-readable.
     """
-    return current.st_uid != os.geteuid()
+    return os.name != "nt" and current.st_uid != os.geteuid()
 
 
 def _dir_refusal(current: os.stat_result) -> str | None:
@@ -177,7 +177,7 @@ def _converge_tree(path: Path, skips: _SkipReport) -> None:
     if current is not None and _is_foreign_owned(current):
         # A directory owned by another account can never be chmod'd by
         # converge — warn and leave it (and its subtree) alone instead of
-        # aborting the whole converge run (2026-09-02 boot loop).
+        # aborting the whole converge run (wsl 2026-09-02 boot loop).
         logger.warning("private storage convergence skipped foreign-owned path {path}", path=path)
         return
     ensure_private_dir(path)
@@ -275,18 +275,20 @@ def create_private_bytes(path: Path, data: bytes) -> None:
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        os.fchmod(fd, 0o600)
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as file:
             fd = -1
             file.write(data)
             file.flush()
             os.fsync(file.fileno())
         os.link(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        if os.name != "nt":
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     finally:
         if fd != -1:
             os.close(fd)

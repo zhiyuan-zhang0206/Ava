@@ -18,6 +18,9 @@ import pytest
 
 from base.cluster.dataplane import pg_foreground, pg_throwaway_base, pg_tools
 from base.config import settings
+from base.native_process.os_platform import is_windows
+
+pytestmark = pytest.mark.skipif(is_windows(), reason="foreground restore ownership is POSIX")
 
 
 @pytest.fixture
@@ -182,13 +185,7 @@ def test_unreapable_foreground_retains_data_and_registration(
     monkeypatch.setattr(pg_tools, "_unregister_throwaway", unregister)
 
     with pytest.raises(subprocess.TimeoutExpired):
-        pg_tools._teardown_throwaway(
-            instance,
-            data,
-            pg_tools._Registration(-1, instance / "owner.lock"),
-            process,
-            foreground=True,
-        )
+        pg_tools._teardown_throwaway(instance, data, None, process, foreground=True)
 
     assert sentinel.read_text() == "must survive unconfirmed shutdown"
     unregister.assert_not_called()
@@ -207,14 +204,15 @@ def test_startup_timeout_keeps_the_child_handle_for_cleanup(
     registrations: list[pg_tools._Registration] = []
     register = pg_tools._register_throwaway
     unregister = pg_tools._unregister_throwaway
-    released: list[pg_tools._Registration] = []
+    released: list[pg_tools._Registration | None] = []
 
-    def capture_registration(path: Path, port: int) -> pg_tools._Registration:
+    def capture_registration(path: Path, port: int) -> pg_tools._Registration | None:
         registration = register(path, port)
-        registrations.append(registration)
+        if registration is not None:
+            registrations.append(registration)
         return registration
 
-    def release_registration(registration: pg_tools._Registration) -> None:
+    def release_registration(registration: pg_tools._Registration | None) -> None:
         released.append(registration)
         unregister(registration)
 

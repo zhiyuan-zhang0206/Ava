@@ -15,7 +15,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from gateway.app import app
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.asyncio
@@ -575,7 +577,12 @@ class TestRemoteAgentPull:
         assert runner_path in content
 
     def test_remote_agent_pull_failure_identifies_gateway_location(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Runner unreachable: the upload succeeds and its notification
         identifies the gateway-side path and download route (best-effort pull)."""
@@ -602,10 +609,9 @@ class TestRemoteAgentPull:
         assert resp.status_code == 200  # upload never fails on a failed pull
         content = _inbound_rows(db_conn, agent_id)[0][0]
         dest = tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "hello.txt"
-        from base.cluster.machine import machine_name
 
         assert str(dest) in content
-        assert f"machine: {machine_name()}" in content
+        assert f"machine: {machine_identity.name()}" in content
         assert f"gateway download: /api/agents/{agent_id}/uploads/hello.txt" in content
         assert "local copy unconfirmed on mbp-remote" in content
         with TestClient(app) as client:
@@ -651,6 +657,8 @@ class TestRemoteAgentPull:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         failed: set[str],
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Batch upload where only some files pull: the message carries the
         pulled runner paths for successes and the gateway paths for failures —
@@ -688,7 +696,6 @@ class TestRemoteAgentPull:
         assert resp.status_code == 200
         content = _inbound_rows(db_conn, agent_id)[0][0]
         base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
-        from base.cluster.machine import machine_name
 
         lines = content.splitlines()[1:]
         assert len(lines) == 3
@@ -697,7 +704,7 @@ class TestRemoteAgentPull:
             assert f"{size} bytes" in line
             if name in failed:
                 assert str(base / name) in line
-                assert f"machine: {machine_name()}" in line
+                assert f"machine: {machine_identity.name()}" in line
                 assert f"gateway download: /api/agents/{agent_id}/uploads/{name}" in line
                 assert "local copy unconfirmed on mbp-remote" in line
             else:

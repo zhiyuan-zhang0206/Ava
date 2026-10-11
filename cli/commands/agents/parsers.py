@@ -156,9 +156,7 @@ def _h_notices_clear(args: argparse.Namespace) -> int:
 
 
 def _add_timeline_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = sub.add_parser(
-        "timeline", aliases=["context"], help="read standing context and recent conversation"
-    )
+    parser = sub.add_parser("timeline", help="read standing context and recent conversation")
     parser.add_argument("agent_id", type=int)
     parser.add_argument(
         "--limit", type=int, default=None, help="recent items, 1..1000 (default: configured window)"
@@ -190,7 +188,8 @@ def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         required=True,
         type=_validated_source,
         help="provenance of the message (required). 'user' sends as the human operator; "
-        "'shell:N' / 'watcher:N' mark a machine notice; 'schedule:N' a gateway schedule",
+        "'external_agent:NAME[:INSTANCE]' declares you as an external agent distinct from the user "
+        "(self-asserted); 'shell:N' / 'watcher:N' mark a machine notice; 'schedule:N' a gateway schedule",
     )
     agents_send_p.add_argument(
         "--tail-file",

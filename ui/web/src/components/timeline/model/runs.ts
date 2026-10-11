@@ -18,6 +18,7 @@
 //    secondary items are always groupable so the first streaming chunk
 //    immediately lands inside a work block (no bare-then-wrap layout shift).
 
+import { EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
 import { orderSdkCalls, type SdkCall } from "@/lib/format/item-summary";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import enMessages from "../../../../messages/en";
@@ -52,16 +53,20 @@ const EN_TURN: TurnTranslator = (key, values) => {
 
 // Which side of the "is this an inbound message a human would read" line an
 // inbound_chat source falls on. Mirrors the envelope source model
-// (base/agents/messages/envelope.py): `agent:N` is another agent talking; `user` / `ui:page:*`
-// is a person (a page post "reads as User"); everything else — `system`,
-// `system:*`, `watcher:N`, `shell:N`, `schedule:N`, `self:update` — is a
-// framework-generated wake-up / notice. card.tsx branches on the same split.
-export function inboundKind(source: string | null): "human" | "agent" | "system" {
+// (base/agents/messages/envelope.py): `agent:N` is another agent talking;
+// `external_agent:<subject>[:<instance>]` is an agent outside Ava that declared
+// itself (distinct from the user); `user` / `ui:page:*` is a person (a page post
+// "reads as User"); everything else — `system`, `system:*`, `watcher:N`,
+// `shell:N`, `schedule:N`, `self:update` — is a framework-generated wake-up /
+// notice. card.tsx branches on the same split.
+export function inboundKind(source: string | null): "human" | "agent" | "external_agent" | "system" {
   const s = source ?? "";
   if (s.startsWith("agent:")) return "agent";
+  if (s.startsWith(EXTERNAL_AGENT_PREFIX)) return "external_agent";
   if (s === "user" || s.startsWith("ui:page:")) return "human";
   return "system";
 }
+
 
 // primary: the human-readable backbone — Ava's text replies and human inbound
 //   messages. Always rendered; never folded into a turn.
@@ -227,7 +232,8 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       compactSummaries += 1;
     } else if (it.kind === "inbound_chat") {
       // Human inbound is primary (never in a turn); agent vs system split here.
-      if (inboundKind(it.source) === "agent") agentMessages += 1;
+      const sender = inboundKind(it.source);
+      if (sender === "agent" || sender === "external_agent") agentMessages += 1;
       else systemNotes += 1;
     } else if (it.kind === "system_marker") {
       if (classifyMarker(it.source).kind === "memory") memories += 1;

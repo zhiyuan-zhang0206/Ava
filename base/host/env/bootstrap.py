@@ -405,7 +405,8 @@ def _write_config_snapshot(base_url: str, values: dict[str, str]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        os.fchmod(fd, 0o600)
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as file:
             fd = -1
             file.write(payload)

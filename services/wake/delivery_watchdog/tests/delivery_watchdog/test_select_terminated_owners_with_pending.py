@@ -6,22 +6,25 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog import (
     _backdate_chat_before_termination,
-    _make_idling_agent,
     _make_reaped_crash_agent,
-    _make_terminated_agent,
+    idling_agent,
+    terminated_agent,
 )
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog import (
-    _healthy_host_verdict as _healthy_host_verdict,
+    healthy_host_verdict as healthy_host_verdict,
 )
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog import (
     pool as pool,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestSelectTerminatedOwnersWithPending:
@@ -33,13 +36,20 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The selector uses the monotonic explicit-kill fence in addition to
         wall-clock status time: old queued work stays dead, later work wakes."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         old_chat_id = insert_inbound_message(
             db_conn, aid, "before force", source="user", bus=event_bus, database=database
@@ -77,13 +87,20 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A user's explicit kill wins over mail already waiting when they
         killed the agent; that old row must not immediately undo the kill."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = idling_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn, aid, "already waiting", source="user", bus=event_bus, database=database
@@ -113,13 +130,20 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A new chat sent after termination preserves the existing contract:
         delivery to a dead agent wakes it automatically."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn, aid, "new request", source="user", bus=event_bus, database=database
@@ -144,11 +168,18 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn, aid, "hello?", source="user", bus=event_bus, database=database
@@ -164,12 +195,19 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """250 dead letters for one agent mean ONE resurrect, not 250."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iids: list[int] = []
         for _ in range(3):
@@ -189,15 +227,26 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        live = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        live = idling_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )  # idling owner — not a resurrect case
         insert_inbound_message(db_conn, live, "hi", source="user", bus=event_bus, database=database)
-        dead = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        dead = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -217,11 +266,18 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn, aid, "hello?", source="user", bus=event_bus, database=database
@@ -240,11 +296,18 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn,
@@ -281,13 +344,20 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Issue #2049: the ghost-alive state — a terminated owner whose only
         pending chats are past the stale threshold — is not a resurrect trigger."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn, aid, "stale peer mail", source="agent:1", bus=event_bus, database=database
@@ -314,13 +384,20 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Inside the threshold the G4 retry window is unchanged: a recent
         post-termination chat still wakes its terminated owner."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn, aid, "fresh peer mail", source="agent:1", bus=event_bus, database=database
@@ -338,6 +415,9 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A chat already waiting when the SYSTEM reaped a crash-marked corpse
         is leftover work, not mail an operator's kill cancelled — the relaxed
@@ -345,7 +425,11 @@ class TestSelectTerminatedOwnersWithPending:
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_reaped_crash_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn, aid, "leftover work", source="user", bus=event_bus, database=database
@@ -362,13 +446,20 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """`reaper` alone — marker already cleared by a completed turn of the
         revived incarnation — is an ordinary system death: the fence holds."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -394,14 +485,21 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The crash marker alone never relaxes the fence: only the SYSTEM's
         own reap is not an operator decision (user/exit) and not a launch or
         integrity death (which keep their own semantics)."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -425,6 +523,9 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The relaxed fence does not bypass the automatic-recovery gates: an
         active wake suppression refuses, an expired one does not, and a
@@ -433,7 +534,11 @@ class TestSelectTerminatedOwnersWithPending:
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_reaped_crash_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn, aid, "leftover work", source="user", bus=event_bus, database=database
@@ -477,13 +582,20 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The remaining conjuncts are untouched: past the dead-letter bound
         the row is no trigger, and a later explicit force fence still wins."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_reaped_crash_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn, aid, "leftover work", source="user", bus=event_bus, database=database
@@ -517,6 +629,9 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A failed-restart target keeps its own hard fence: the relaunch
         observation must settle before any resurrection, reaped crash row or
@@ -524,7 +639,11 @@ class TestSelectTerminatedOwnersWithPending:
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_reaped_crash_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn, aid, "leftover work", source="user", bus=event_bus, database=database
@@ -558,6 +677,9 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A system-family chat is a platform notification, never a resurrect
         trigger: plain 'system' and every 'system:<subtype>' variant must not
@@ -565,8 +687,12 @@ class TestSelectTerminatedOwnersWithPending:
         the watcher-reap notice that woke 6260 twice)."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         insert_inbound_message(
             db_conn, aid, "notice", source="system", bus=event_bus, database=database
@@ -590,14 +716,21 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Machine wakeups (watcher: / shell: / schedule:) are deliberately NOT
         notices: a crash-reaped owner's watcher wake is a revival channel, so
         they must keep selecting (task #3687 boundary review)."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         wid = insert_inbound_message(
             db_conn, aid, "wake", source="watcher:3", bus=event_bus, database=database
@@ -613,6 +746,9 @@ class TestSelectTerminatedOwnersWithPending:
         event_bus: EventBus,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        *,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The watchdog's hosted-turn recovery chat is the one system-source
         chat that must stay selected: it is this scan's durable retry for a
@@ -621,8 +757,12 @@ class TestSelectTerminatedOwnersWithPending:
         "true" fails closed (task #3687 review, Ava #3242)."""
         from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         insert_inbound_message(
             db_conn,
@@ -645,79 +785,3 @@ class TestSelectTerminatedOwnersWithPending:
             database=database,
         )
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, recovery)]
-
-
-class TestSystemNoticeSourcePredicateParity:
-    """`SYSTEM_NOTICE_SOURCE` (SQL, consumed by the selector) and
-    `is_system_notice_source` (Python, consumed by the resurrect endpoint)
-    gate the same decision from two languages; they must agree on every
-    `(source, payload)` input — a one-sided edit would reopen the 6260 gap
-    from the other side (task #3687 review note: pin the pair together). The
-    payload dimension covers the hosted-turn-recovery carve-out and its
-    fail-closed marker rule: only the exact JSON boolean `true` exempts; a
-    missing key, JSON null, or any other value (even the string "true") stays
-    a notice (review requirement, Ava #3242)."""
-
-    # (label, payload, exempt-from-notice-verdict)
-    _PAYLOAD_SAMPLES: tuple[tuple[str, dict[str, object] | None, bool], ...] = (
-        ("payload-absent", None, False),
-        ("key-absent", {"content_blocks": []}, False),
-        ("json-null", {"hosted_turn_recovery": None}, False),
-        ("boolean-false", {"hosted_turn_recovery": False}, False),
-        ("string-false", {"hosted_turn_recovery": "false"}, False),
-        ("number-1", {"hosted_turn_recovery": 1}, False),
-        ("string-1", {"hosted_turn_recovery": "1"}, False),
-        ("string-true", {"hosted_turn_recovery": "true"}, False),
-        ("boolean-true", {"hosted_turn_recovery": True}, True),
-    )
-
-    def test_sql_fragment_and_python_twin_agree(self, db_conn: psycopg.Connection) -> None:
-        from psycopg import sql
-        from psycopg.types.json import Jsonb
-
-        from base.agents.incarnation.lifecycle_acceptance import (
-            SYSTEM_NOTICE_SOURCE,
-            is_system_notice_source,
-        )
-
-        sources = [
-            "system",
-            "system:",
-            "system:notice-reply",
-            "system:warn-error-audit",
-            "systemwarn",
-            "system%d",
-            "system_x",
-            "System",
-            " system",
-            "system :x",
-            "",
-            "user",
-            "agent:1",
-            "ui:web",
-            "watcher:3",
-            "shell:0",
-            "schedule:2",
-        ]
-        with db_conn.cursor() as cur:
-            for source in sources:
-                for label, payload, _exempt in self._PAYLOAD_SAMPLES:
-                    cur.execute(
-                        sql.SQL(
-                            "SELECT {} FROM (SELECT %s::text AS source, %s::jsonb AS payload) AS m"
-                        ).format(sql.SQL(SYSTEM_NOTICE_SOURCE)),
-                        (source, Jsonb(payload) if payload is not None else None),
-                    )
-                    row = cur.fetchone()
-                    assert row is not None, (source, label)
-                    assert row[0] == is_system_notice_source(source, payload), (source, label)
-
-    def test_only_the_exact_boolean_true_marker_exempts(self) -> None:
-        from base.agents.incarnation.lifecycle_acceptance import is_system_notice_source
-
-        for source in ("system", "system:notice-reply"):
-            for label, payload, exempt in self._PAYLOAD_SAMPLES:
-                expected = not exempt
-                assert is_system_notice_source(source, payload) is expected, (source, label)
-        # The marker only ever applies inside the system family.
-        assert is_system_notice_source("watcher:3", {"hosted_turn_recovery": True}) is False

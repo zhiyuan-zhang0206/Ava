@@ -32,6 +32,7 @@ from ava_builtins.plugins.ava_fleet.tests.registry_support import (
     set_fleet_configuration,
 )
 from base.agents.observation.snapshot import select_one
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -65,7 +66,7 @@ def _seed_agent(db: psycopg.Connection) -> int:
 
 
 @pytest.fixture(autouse=True)
-def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
+def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity):
     """The notice SDK now goes through the unified gateway write API (R3 door
     ④): route the SDK's gateway client at the in-process app so notify /
     edit_notice / dismiss_notice hit the real endpoints against the test DB."""
@@ -73,7 +74,10 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     from gateway.app import app
     from tests.fixtures.gateway_config import gateway_test_client
 
-    with gateway_test_client(app, base_url="http://test-gateway") as tc, use_client(tc):
+    with (
+        gateway_test_client(app, base_url="http://test-gateway", machine=machine_identity) as tc,
+        use_client(tc),
+    ):
         yield
 
 

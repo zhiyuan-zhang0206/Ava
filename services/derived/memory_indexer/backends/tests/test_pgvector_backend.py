@@ -22,6 +22,7 @@ from psycopg import sql as pgsql
 
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.db.tests.fakes import fake_database
 from services.derived.memory_indexer.backends.pgvector import (
     _TABLE,
@@ -51,9 +52,11 @@ def _fresh_table(db_conn: psycopg.Connection) -> None:
 
 
 @pytest.fixture
-def backend(db_conn: psycopg.Connection) -> Iterator[PGVectorBackend]:
+def backend(
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+) -> Iterator[PGVectorBackend]:
     prepare_table(db_conn, _DIM)
-    b = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
+    b = PGVectorBackend(Database.from_settings(gate=database_gate), dim=_DIM, fingerprint=_FP)
     b.connect()
     try:
         yield b
@@ -107,7 +110,9 @@ def test_prepare_table_creates_table_at_provider_dim(db_conn: psycopg.Connection
     assert _table_dim(db_conn) == _DIM
 
 
-def test_prepare_table_drops_and_recreates_on_dim_mismatch(db_conn: psycopg.Connection) -> None:
+def test_prepare_table_drops_and_recreates_on_dim_mismatch(
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+) -> None:
     """A table at another provider's dim (or missing a column) is a stale cache — dropped and
     recreated at the current dim (cold-start rebuilds the rows)."""
     _create_stale_table(db_conn, _DIM // 4)
@@ -115,7 +120,7 @@ def test_prepare_table_drops_and_recreates_on_dim_mismatch(db_conn: psycopg.Conn
     prepare_table(db_conn, _DIM)
 
     assert _table_dim(db_conn) == _DIM
-    fresh = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
+    fresh = PGVectorBackend(Database.from_settings(gate=database_gate), dim=_DIM, fingerprint=_FP)
     fresh.connect()
     fresh.close()
 
@@ -137,9 +142,13 @@ def test_prepare_table_leaves_database_without_extension_alone(
         db_conn.commit()
 
 
-def test_runtime_connect_never_creates_the_table(db_conn: psycopg.Connection) -> None:
+def test_runtime_connect_never_creates_the_table(
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+) -> None:
     """Runtime connections validate only: a missing table fails connect()."""
-    writable = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
+    writable = PGVectorBackend(
+        Database.from_settings(gate=database_gate), dim=_DIM, fingerprint=_FP
+    )
 
     with pytest.raises(RuntimeError, match="is missing"):
         writable.connect()
@@ -148,10 +157,14 @@ def test_runtime_connect_never_creates_the_table(db_conn: psycopg.Connection) ->
     assert _table_dim(db_conn) is None
 
 
-def test_runtime_connect_never_rebuilds_a_stale_table(db_conn: psycopg.Connection) -> None:
+def test_runtime_connect_never_rebuilds_a_stale_table(
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+) -> None:
     """A dim mismatch is refused at connect(), and the stale table survives."""
     _create_stale_table(db_conn, _DIM // 4)
-    writable = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
+    writable = PGVectorBackend(
+        Database.from_settings(gate=database_gate), dim=_DIM, fingerprint=_FP
+    )
 
     with pytest.raises(RuntimeError, match="vector dimension 2, expected 8"):
         writable.connect()
@@ -172,12 +185,12 @@ def test_validate_schema_refuses_dim_mismatch_without_dropping_rows(
 
 
 def test_readonly_connect_forwards_validation_and_closes_pool_on_mismatch(
-    db_conn: psycopg.Connection, backend: PGVectorBackend
+    db_conn: psycopg.Connection, backend: PGVectorBackend, *, database_gate: ProcessDbGate
 ) -> None:
     """connect() preserves the read-only mismatch guarantee and pool cleanup."""
     backend.upsert("/survives.md", 1.0, "hash", _vec(0))
     readonly_backend = PGVectorBackend(
-        Database.from_settings(), dim=_DIM + 1, fingerprint=_FP, readonly=True
+        Database.from_settings(gate=database_gate), dim=_DIM + 1, fingerprint=_FP, readonly=True
     )
 
     with pytest.raises(RuntimeError, match="vector dimension 8, expected 9"):
@@ -242,8 +255,10 @@ def test_upsert_many_inserts_all_rows_and_overwrites(
     assert len(_rows(db_conn)) == 2
 
 
-def test_readonly_upsert_many_raises_before_connect() -> None:
-    backend = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP, readonly=True)
+def test_readonly_upsert_many_raises_before_connect(*, database_gate: ProcessDbGate) -> None:
+    backend = PGVectorBackend(
+        Database.from_settings(gate=database_gate), dim=_DIM, fingerprint=_FP, readonly=True
+    )
     with pytest.raises(RuntimeError, match="read-only"):
         backend.upsert_many([("/a.md", 1.0, "ha", _vec(0), "body", 0)])
 
@@ -292,7 +307,9 @@ def test_search_topk_async_matches_sync(backend: PGVectorBackend) -> None:
     assert async_result == sync == ["/a.md", "/b.md"]
 
 
-def test_backend_without_connect_uses_short_lived_connections(db_conn: psycopg.Connection) -> None:
+def test_backend_without_connect_uses_short_lived_connections(
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+) -> None:
     """The gateway path never calls connect(): each operation dials a
     short-lived connection, and close() is a no-op. The table pre-exists
     (gateway start prepared it)."""
@@ -309,7 +326,7 @@ def test_backend_without_connect_uses_short_lived_connections(db_conn: psycopg.C
             ).format(dim=pgsql.Literal(_DIM))
         )
     db_conn.commit()
-    backend = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
+    backend = PGVectorBackend(Database.from_settings(gate=database_gate), dim=_DIM, fingerprint=_FP)
     ones = np.ones(_DIM, dtype=np.float32)
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     assert backend.search_topk(ones, k=5) == ["/a.md"]

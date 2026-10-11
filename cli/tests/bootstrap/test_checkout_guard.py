@@ -17,7 +17,12 @@ from pathlib import Path
 import pytest
 
 from base.host.env.dotenv_boot import home_checkout_error
+from base.paths import ava_home
 from cli import fleet_update, init_intent, preflight, start_intent
+from cli.database import OperatorDatabaseFactory, operator_event_pipeline
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _home_with_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -95,6 +100,7 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
         ["cluster", "db-authority", "issue-unit"],
         ["config", "set", "A=B"],
         ["config", "unset", "A"],
+        ["boot"],
         ["some-verb-nobody-has-heard-of"],
         # Help of a verb is a command like any other: a development checkout that
         # wants to read it names a temporary AVA_HOME.
@@ -102,8 +108,9 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
         ["status", "-h"],
         ["--help", "start"],
         ["-h", "--help"],
-        # `--help` as data after `--`.
+        # `--help` as data after `--`, and `boot`, which never reaches argparse.
         ["config", "unset", "--", "--help"],
+        ["boot", "--help"],
     ],
 )
 def test_gate_refuses_every_command_from_a_foreign_checkout(
@@ -141,7 +148,7 @@ def test_gate_passes_bare_ava_and_a_lone_help_flag(
 
 
 @pytest.mark.parametrize(
-    "argv", [["status"], ["stop"], ["start", "--help"], ["config", "set", "A=B"]]
+    "argv", [["status"], ["stop"], ["boot"], ["start", "--help"], ["config", "set", "A=B"]]
 )
 def test_gate_passes_everything_for_the_homes_own_checkout(
     argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -151,7 +158,7 @@ def test_gate_passes_everything_for_the_homes_own_checkout(
 
 
 @pytest.mark.parametrize(
-    "argv", [["status"], ["stop"], ["start", "--help"], ["config", "set", "A=B"]]
+    "argv", [["status"], ["stop"], ["boot"], ["start", "--help"], ["config", "set", "A=B"]]
 )
 def test_gate_passes_everything_for_a_home_without_a_source(
     argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -164,8 +171,15 @@ def test_gate_passes_everything_for_a_home_without_a_source(
 
 
 def test_start_refuses_a_foreign_checkout_before_reading_the_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
+    producer = operator_event_pipeline(
+        operator_database, machine=command_runtime.machine, home=ava_home()
+    )
     home = _home_with_source(tmp_path, monkeypatch)
     monkeypatch.setattr(start_intent, "_checkout", lambda: tmp_path / "dev")
 
@@ -173,9 +187,14 @@ def test_start_refuses_a_foreign_checkout_before_reading_the_home(
         raise AssertionError("a refused start must not reach the home's admission")
 
     monkeypatch.setattr(start_intent, "require_initialized", _never_reached)
-    args = argparse.Namespace()
+    args = argparse.Namespace(runtime=command_runtime)
 
-    assert start_intent.run_start(args, retained_children=[]) == 1
+    assert (
+        start_intent.run_start(
+            args, retained_children=[], database_factory=operator_database, producer=producer
+        )
+        == 1
+    )
 
     assert "source checkout" in capsys.readouterr().err
     assert sorted(path.name for path in home.iterdir()) == ["source"], "nothing may be written"

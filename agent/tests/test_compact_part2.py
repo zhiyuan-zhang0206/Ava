@@ -33,12 +33,14 @@ from langgraph.runtime import Runtime
 
 from agent.hooks.compact import (
     auto_compact_for_llm,
+    generate_summary,
 )
 from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -125,7 +127,7 @@ def _fake_llm_seq(*summaries: str) -> Any:
     return llm
 
 
-def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
+def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[AvaContext]:
     # These unit tests have no DB. ops_pool=None is the container-mode value:
     # the post-compact checkpoint trim treats it as a no-op (real-pool trimming is covered by
     # base/agents/history/tests/test_checkpoint_cleanup.py and the aops_pool compact tests below).
@@ -136,7 +138,7 @@ def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -150,6 +152,52 @@ def _fake_config() -> RunnableConfig:
 
 
 # --- generate_summary tests ---
+
+
+async def test_generate_summary_returns_summary():
+    """generate_summary returns summary text (from LLM), no longer returns tail."""
+    msgs: list[AnyMessage] = [HumanMessage(content=f"msg{i}") for i in range(8)]
+
+    slices = AgentSlices.resolve(
+        None, default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+    )
+    llm = _fake_llm(summary_text="a synthetic summary")
+    summary = await generate_summary(msgs, llm, slices, catalog=build_model_catalog())
+
+    assert summary == "a synthetic summary"
+
+
+async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
+    """The summary carries the compaction call's provider input, model and instruction size --
+    what the boundary checkpoint stores so the sealed segment's tail can be priced."""
+    from agent.hooks.compact_anchor import closing_of
+    from base.agents.history.closing_request import ClosingRequest
+
+    msgs: list[AnyMessage] = [HumanMessage(content=f"msg{i}") for i in range(8)]
+    slices = AgentSlices.resolve(
+        None, default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+    )
+    response = AIMessage(
+        content="a synthetic summary",
+        usage_metadata={"input_tokens": 4321, "output_tokens": 9, "total_tokens": 4330},
+        response_metadata={"model_name": "m1"},
+    )
+    summary = await generate_summary(
+        msgs, _fake_llm(response=response), slices, catalog=build_model_catalog()
+    )
+
+    closing = closing_of(summary)
+    assert closing is not None
+    assert (closing.input_tokens, closing.model) == (4321, "m1")
+    assert closing.extra_tokens > 0  # the compaction instruction message
+    assert closing == ClosingRequest(4321, closing.extra_tokens, "m1")
+    assert summary == "a synthetic summary"  # still the plain text everywhere else
+
+    bare = await generate_summary(
+        msgs, _fake_llm("no usage"), slices, catalog=build_model_catalog()
+    )
+    assert closing_of(bare) is None
+    assert closing_of("an agent-written summary") is None
 
 
 # --- auto_compact_for_llm hook tests ---
@@ -243,7 +291,7 @@ def _insert_compact_summary(db: psycopg.Connection, tid: int, content: str) -> N
     db.commit()
 
 
-def _make_runtime(ops_pool=None, llm=None):
+def _make_runtime(ops_pool=None, llm=None, *, database_gate: ProcessDbGate):
     if ops_pool is None:
         ops_pool = AsyncMock()
     if llm is None:
@@ -255,7 +303,7 @@ def _make_runtime(ops_pool=None, llm=None):
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -269,7 +317,9 @@ def _config(tid: int) -> RunnableConfig:
     return {"configurable": {"thread_id": str(tid)}}
 
 
-async def test_auto_compact_summary_message_carries_msg_type(monkeypatch: pytest.MonkeyPatch):
+async def test_auto_compact_summary_message_carries_msg_type(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+):
     """Task #1017: the auto-compact summary message must carry the same
     ava_msg_type stamp the claim-node (force) compact path writes. Without it
     the timeline read side classifies the HumanMessage as a catch-all
@@ -279,7 +329,9 @@ async def test_auto_compact_summary_message_carries_msg_type(monkeypatch: pytest
     state = _over_threshold_state()
 
     fake_llm = _fake_llm(_LONG_SUMMARY)
-    result = await auto_compact_for_llm(state, _runtime_with_llm(fake_llm), _fake_config())
+    result = await auto_compact_for_llm(
+        state, _runtime_with_llm(fake_llm, database_gate=database_gate), _fake_config()
+    )
     assert result is not None
 
     tail = result["context_reset"].tail  # pyright: ignore[reportUnknownMemberType]

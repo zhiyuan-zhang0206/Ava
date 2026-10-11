@@ -118,7 +118,8 @@ allocation lock.
 
 ## Boundaries
 
-- POSIX-only (`pty.fork`).
+- POSIX-only (`pty.fork`; see
+  [Windows host guidance](../../../../../docs/conventions/operations/windows-setup.md)).
 - One pty per session counts against the host-wide `kern.tty.ptmx_max`
   ceiling (macOS default 511) — see `base/native_process/os_platform.py`. The
   service raises its soft descriptor limit toward 10240 at start.

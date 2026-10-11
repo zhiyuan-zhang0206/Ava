@@ -21,10 +21,11 @@ that reaches the drain thread; the mirror is replayed into `telemetry_events`).
 Startup init (`init_telemetry`) is the one place that fails loud — a process
 whose event pipeline cannot come up should not start silently blind.
 
-Import discipline: this module imports `base.log` and `base.db` lazily
+Import discipline: this module imports `base.log`, `base.db`, and `base.paths` lazily
 (inside functions) — `base/db/__init__.py` imports `base/log/__init__.py` at module scope
-for `logger`, so a top-level import of either from here is a circular-import
-failure for any process that reaches `base.db` first.
+for `logger`, so a top-level import of log or DB from here is a circular-import
+failure for any process that reaches `base.db` first. Mirror path resolution stays
+inside its write/prune operations so entry inputs can be typed before Settings admission.
 """
 
 from __future__ import annotations
@@ -37,11 +38,12 @@ import sys
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
+from pathlib import Path
 from typing import Any
 
+from base.cluster.machine import MachineIdentity
 from base.events.contract import EVENTS
 from base.events.contract import category_for_kind as registry_category
-from base.paths import logs_dir
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import (
     Category,
@@ -129,30 +131,25 @@ def capture_trace_ids() -> tuple[str | None, str | None]:
 
 
 def _resolve_machine(name_reader: Callable[[], str] | None = None) -> str:
-    """The machine dimension. `machine_name()` is the real identity (set on
-    multi-machine units); anything without one (tests, ad-hoc scripts) falls
-    back to the hostname so a row always carries the dimension.
+    """Resolve this event's machine dimension from its explicit owner reader.
+    Ordinary diagnostics without a reader use the hostname so a row always
+    carries the dimension.
 
     Only the documented absence (`MachineNameMissing`) falls back silently.
-    Any OTHER failure is a programming error and must not be folded into
-    hostname — it would pin the process's whole telemetry lifetime to a
-    wrong dimension with zero trace (audit 2026-08-08 P2: a transient early
-    failure split one machine's metric series into two)."""
-    from base.cluster.machine import MachineNameMissing, machine_name
-    from base.log import logger
+    Any OTHER failure propagates rather than pinning the owner to a wrong
+    dimension. An unbound ordinary diagnostic uses the hostname; it never
+    discovers a configured machine through a process-global identity reader."""
+    from base.cluster.machine import MachineNameMissing
 
     try:
-        return (name_reader or machine_name)()
+        return name_reader() if name_reader is not None else socket.gethostname()
     except MachineNameMissing:
-        return socket.gethostname()
-    except Exception:
-        logger.exception("machine_name() failed unexpectedly — falling back to hostname")
         return socket.gethostname()
 
 
 # ── pipeline state (per-process singleton) ────────────────────────────────────
 
-# The emitter pipeline; None until first init/emit. Dict mutation avoids ruff
+# The emitter pipeline; None until explicit process initialization. Dict mutation avoids ruff
 # PLW0603 the same way base/telemetry/tracing.py does.
 _state: dict[str, Any] = {
     "pipeline": None,
@@ -171,6 +168,8 @@ def _prune_jsonl_mirror() -> None:
     durable fallback for audit events; log-stream lines are also held by the
     loguru file sinks, so the mirror's own retention is what bounds its disk
     footprint."""
+    from base.paths import logs_dir
+
     cutoff = (datetime.now(UTC) - timedelta(days=_JSONL_RETENTION_DAYS)).strftime("%Y%m%d")
     # `.rollup.jsonl` is the retired filtered tier; leftovers age out with the full mirror.
     for path in (
@@ -196,6 +195,8 @@ def _append_jsonl(events: list[Event]) -> None:
     otherwise degrade it without a trace. Single write() per line with
     O_APPEND semantics (opened in append mode) keeps concurrent processes
     from interleaving."""
+    from base.paths import logs_dir
+
     day = datetime.now(UTC).strftime("%Y%m%d")
     try:
         lines = [
@@ -226,20 +227,6 @@ def _append_jsonl(events: list[Event]) -> None:
                 _prune_jsonl_mirror()
 
 
-def _export_otlp(events: list[Event]) -> None:
-    """Best-effort dual-write of a batch to the OTLP backend (logs + metrics).
-
-    Runs on the drain thread right after the JSONL mirror write. The OTLP
-    side is fully failure-isolated (bounded queue, drop semantics, SDK-owned
-    export threads — see `base.telemetry.otlp.telemetry_otlp`), and this call is
-    isolated end to end, so even a programming error there must not cost
-    the batch its mirror copy or raise into the drain thread — it is reported."""
-    with failure_isolated("otlp export"):
-        from base.telemetry.otlp import telemetry_otlp  # deferred — heavy OTel imports
-
-        telemetry_otlp.export_batch(events)
-
-
 # ── drain-thread failure visibility ─────────────────────────────────────────
 #
 # The drain thread's mirror write failures used to be invisible (whole batch
@@ -251,7 +238,7 @@ _jsonl_failures = 0
 
 # Loguru extra key marking the emitter's own diagnostics. Records carrying it
 # are filtered OUT of the emitter adapter's sink (see
-# `base.log.add_postgres_sink`) so they reach stderr / JSONL file sinks only
+# `base.log.process.add_postgres_sink`) so they reach stderr / JSONL file sinks only
 # and never re-enter this pipeline — a mirror-down process would otherwise loop
 # failure → warning → emit → failure forever.
 _NO_EMITTER = "_no_emitter"
@@ -289,7 +276,7 @@ _sink_failures: dict[str, int] = {}
 
 def report_sink_failure(sink: str, exc: BaseException) -> None:
     """Report a failure of a best-effort side channel (an emitter sink export,
-    the lazy pipeline init, an exit-time close, SDK-call or billing telemetry)
+    a missing producer, an exit-time close, SDK-call or billing telemetry)
     with its traceback — the first and every 50th per `sink`, like the JSONL
     mirror: a seam that fails on every call must be loud without flooding the
     log. Goes through the `_no_emitter` path, so a failing telemetry pipeline
@@ -316,12 +303,15 @@ def failure_isolated(sink: str) -> Generator[None]:
         report_sink_failure(sink, exc)
 
 
-def _write_batch(events: list[Event], *, database: Callable[[], Any]) -> None:
+def _write_batch(
+    events: list[Event], *, database: Callable[[], Any], export: Callable[[list[Event]], None]
+) -> None:
     """Mirror first, then the telemetry_events record, the compact metric projection
     and OTLP export.
 
-    Every sink is failure-isolated. The projection cannot turn an observation into a
-    billing proof; the telemetry_events sink reports its own failures.
+    Persistence and exporter transport failures retain their sink isolation.
+    Required identity defects propagate to the writer's failure receipt. The
+    projection cannot turn an observation into a billing proof.
     """
     if not events:
         return
@@ -336,21 +326,24 @@ def _write_batch(events: list[Event], *, database: Callable[[], Any]) -> None:
         project_events(database(), events)
     except Exception as exc:
         report_no_pipeline("[observed-metrics] sink unavailable: {err}", err=repr(exc))
-    _export_otlp(events)
+    export(events)
 
 
-def build_pipeline(*, database: Callable[[], Any]) -> EventPipeline:
-    """Construct the single writer with its root's original database factory."""
-    return EventPipeline(writer=lambda events: _write_batch(events, database=database))
+def build_pipeline(
+    *, database: Callable[[], Any], machine: MachineIdentity, home: Path
+) -> EventPipeline:
+    """Own the writer and lazy exporter with the root's database and machine."""
+    from base.telemetry.otlp.telemetry_otlp import (
+        ExportingEventPipeline,
+        observability_export_allowed,
+    )
 
-
-def _open_pipeline() -> EventPipeline:
-    """Build the process pipeline: queue + drain thread. Startup does not depend on the
-    DB: the `telemetry_events` sink connects lazily on the drain thread and backs off
-    when the database does not answer, and the JSONL mirror is written first."""
-    from base.db import Database
-
-    return build_pipeline(database=Database.from_settings)
+    return ExportingEventPipeline(
+        writer=lambda events, exporter: _write_batch(
+            events, database=database, export=exporter.export_batch
+        ),
+        export_allowed=lambda: observability_export_allowed(machine, home=home),
+    )
 
 
 def process_name() -> str:
@@ -366,7 +359,7 @@ def init_telemetry(
     *,
     process: str = "unknown",
     agent_id: int | None = None,
-    pipeline: EventPipeline | None = None,
+    pipeline: EventPipeline,
     machine_reader: Callable[[], str] | None = None,
 ) -> None:
     """Bind process identity and bring up the event pipeline. Idempotent.
@@ -374,12 +367,17 @@ def init_telemetry(
     Called from the loguru `init_*` entry points (the single boot seam every
     process shares): `init_gateway_process(name)` → process=name; the exec
     child's `add_postgres_sink` → process="agent-exec" plus its agent id. The
-    first call opens the drain thread; later calls only refresh the identity
-    binding. Startup never depends on the DB (the `telemetry_events` sink connects
+    entry supplies its owned writer; later calls reuse that same resource and
+    refresh the identity binding. Startup never depends on the DB (the `telemetry_events` sink connects
     lazily on the drain thread)."""
     bound = _state["pipeline"]
-    if pipeline is not None and bound is not None and bound is not pipeline:
-        raise RuntimeError("this process already binds another event pipeline")
+    if bound is not None and bound is not pipeline:
+        if not bound.stopped:
+            raise RuntimeError("this process already binds another event pipeline")
+        # A completed owner may leave its process binding behind. Collect its
+        # original failure before admitting the next concrete entry resource.
+        bound.stop(timeout=0)
+        _state["pipeline"] = pipeline
     _state["process"] = process
     _state["agent_id"] = agent_id
     if machine_reader is not None or _state["machine"] is None:
@@ -387,22 +385,12 @@ def init_telemetry(
     if _state["cluster"] is None:
         _state["cluster"] = cluster_label()
     if _state["pipeline"] is None:
-        _state["pipeline"] = pipeline if pipeline is not None else _open_pipeline()
+        _state["pipeline"] = pipeline
 
 
 def _ambient_agent_id() -> int | None:
     """Default identity established at process startup, if this process owns an agent."""
     return _state["agent_id"]
-
-
-def _ensure_pipeline() -> EventPipeline | None:
-    """Lazy-init fallback for emit-before-init callers. Best-effort: a process
-    whose pipeline init fails degrades to dropping (never raises, never
-    blocks)."""
-    if _state["pipeline"] is None:
-        with failure_isolated("pipeline init"):
-            init_telemetry()
-    return _state["pipeline"]
 
 
 def _as_utc(ts: datetime | None) -> datetime:
@@ -434,6 +422,7 @@ def emit(
     target_agent_id: int | None = None,
     attributes: dict[str, Any] | None = None,
     ts: datetime | None = None,
+    machine_reader: Callable[[], str] | None = None,
     capture: Callable[[Event], Event] | None = None,
     producer: Callable[[], EventPipeline] | None = None,
 ) -> None:
@@ -471,6 +460,7 @@ def emit(
         target_agent_id=target_agent_id,
         attributes=attributes,
         ts=ts,
+        machine_reader=machine_reader,
     )
     emit_prepared(event, capture=capture, producer=producer)
 
@@ -485,10 +475,13 @@ def prepare_event(
     target_agent_id: int | None = None,
     attributes: dict[str, Any] | None = None,
     ts: datetime | None = None,
+    machine_reader: Callable[[], str] | None = None,
 ) -> Event:
     """Construct one Event without enqueueing it.
 
-    Transactional producers stage this exact immutable object before their
+    ``machine_reader`` attributes this event to its explicit context without
+    rebinding the process or another attachment. Transactional producers stage
+    this exact immutable object before their
     database commit, then call :func:`emit_prepared` only after commit.  That
     preserves one canonical byte representation across their manifest receipt
     and the eventually exported telemetry line.
@@ -511,7 +504,11 @@ def prepare_event(
         trace_id=trace_id,
         span_id=span_id,
         agent_id=agent_id if agent_id is not None else _ambient_agent_id(),
-        machine=_state["machine"] or _resolve_machine(),
+        machine=(
+            _resolve_machine(machine_reader)
+            if machine_reader is not None
+            else _state["machine"] or _resolve_machine()
+        ),
         cluster=_state["cluster"] or cluster_label(),
         process=_state["process"],
         category=category,
@@ -533,9 +530,12 @@ def emit_prepared(
     if capture is not None:
         event = capture(event)
     with failure_isolated("emit"):
-        pipeline = producer() if producer is not None else _ensure_pipeline()
-        if pipeline is not None:
-            pipeline.enqueue(event)
+        pipeline = producer() if producer is not None else _state["pipeline"]
+        if pipeline is None:
+            raise RuntimeError(
+                "event emission requires an initialized process pipeline or producer"
+            )
+        pipeline.enqueue(event)
 
 
 def flush() -> DrainResult:
@@ -583,9 +583,6 @@ def _drain_on_exit() -> None:
         from base.telemetry.event_store import close_store
 
         close_store()
-    from base.telemetry.otlp import telemetry_otlp
-
-    telemetry_otlp.shutdown()
 
 
 atexit.register(_drain_on_exit)

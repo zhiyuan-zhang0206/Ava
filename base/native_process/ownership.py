@@ -23,7 +23,7 @@ from base.native_process import native_boot_id, pid_starttime_ticks, pidfd, proc
 # the uncorrected kernel value, elsewhere the public create_time(). The public
 # macOS value re-derives from the wall clock with a boot-time correction
 # quantized to whole seconds (measured 2026-09-12: one live process read
-# 1.000000s apart by two import epochs), and wall-clock steps move the
+# 1.000000s apart by two import epochs), and WSL wall-clock steps move the
 # Linux value too. Linux uses its starttime tick; other native birth readings
 # compare exactly. Legacy records are not silently adopted across this boundary.
 

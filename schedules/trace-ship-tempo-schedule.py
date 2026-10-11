@@ -9,9 +9,10 @@ import time
 from datetime import UTC, datetime
 
 import ava
-from base.db import Database
 from schedules.catchup import catch_up, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
+from base.daemon.schedules.inputs import ScheduleInputs
+from schedules.entry import fresh_schedule_entry, schedule_entry
 
 CRON = "*/5 * * * *"
 TIMEZONE = "UTC"
@@ -25,8 +26,8 @@ def ship_traces(_slot: datetime, _trigger: None) -> None:
         print(f"trace ship failed: {exc}")
 
 
-def main() -> None:
-    db = Database.from_settings()
+def main(*, inputs: ScheduleInputs) -> None:
+    db = inputs.database()
     catch_up(db, [(CRON, None)], timezone=TIMEZONE, fire=ship_traces)
     while True:
         nxt = next_fire(CRON, after=datetime.now(UTC), timezone=TIMEZONE)
@@ -36,4 +37,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    if entry_inputs is None:
+        from base.log import prepare_process_logging
+
+        prepare_process_logging()
+    with fresh_schedule_entry() if entry_inputs is None else schedule_entry(entry_inputs) as inputs:
+        main(inputs=inputs)

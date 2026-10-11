@@ -2,8 +2,10 @@
 
 import importlib
 import os
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -12,18 +14,27 @@ from fastapi.testclient import TestClient
 
 from base import config
 from base.cluster.authority.api import telemetry_token
+from base.cluster.machine import MachineIdentity
 from base.config.domains.observability.settings import ObservabilitySettings
 from base.config.service_read import ConfigAuthority
 from base.host.env import runtime_config
 from cli.commands.observability import otel_collector as collector
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 from gateway.app import app
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 @pytest.mark.parametrize(("gateway_port", "local_port"), [(4318, 4319), (54318, 4318)])
 def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
-    db_conn, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, gateway_port: int, local_port: int
+    db_conn,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    gateway_port: int,
+    local_port: int,
+    operator_database: Callable[[], Any],
+    command_machine: MachineIdentity,
 ) -> None:
-    """The current split and a mirrored-loopback migration both keep local ports."""
+    """The current split and mirrored Windows/WSL migration both keep local ports."""
     (tmp_path / ".env").write_text(
         f"AVA_DB_URL={config.settings.data_plane.db_url}\n"
         "AVA_RUNNER_DB_PASSWORD=relay-test-password\n"
@@ -62,7 +73,7 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
         }
     )
     monkeypatch.setattr(config.settings, "observability", settings)
-    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "relay-test-runner")
+    command_machine.set(name="relay-test-runner")
     # The runner renders its relay from its capability's telemetry token (the
     # gateway derived it from its secret); the runner holds no human secret.
     telemetry = telemetry_token("relay-test-token")
@@ -75,7 +86,11 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     rendered = yaml.safe_load(
         collector.generate_config(
-            Path(__file__).resolve().parents[3], tmp_path, roles=frozenset({"agent-runner"})
+            Path(__file__).resolve().parents[3],
+            tmp_path,
+            roles=frozenset({"agent-runner"}),
+            database_factory=operator_database,
+            machine=command_machine,
         )
     )
     assert settings.telemetry_otlp_endpoint == local

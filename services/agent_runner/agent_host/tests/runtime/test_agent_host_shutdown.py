@@ -28,8 +28,12 @@ from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry import process_name
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.components.services.daemon_shutdown_test_support import (
@@ -37,6 +41,7 @@ from tests.components.services.daemon_shutdown_test_support import (
     KILL_SLACK_S,
     spawn_child,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _note_pidfile_removed(events: list[str], _path: object) -> None:
@@ -93,6 +98,14 @@ def _assert_boot_primary(exc: BaseException, failure: str) -> None:
 
 
 def _exercise_shutdown(failure: str) -> None:
+    """Run real signal/asyncio unwinding in a disposable child interpreter."""
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    database_gate = ProcessDbGate(version=version.get, process=process_name(), exempt=False)
+    _run_shutdown(failure, database_gate=database_gate)
+
+
+def _run_shutdown(failure: str, *, database_gate: ProcessDbGate) -> None:
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
     from agent import graph, process_boot
 
@@ -194,7 +207,9 @@ def _exercise_shutdown(failure: str) -> None:
             )
             asyncio.run(
                 daemon.run(
-                    config=_shutdown_config(), database=Database.from_settings, machine=machine
+                    config=_shutdown_config(),
+                    database=lambda: Database.from_settings(gate=database_gate),
+                    machine=machine,
                 )
             )
         except (
@@ -282,6 +297,10 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
         assert events.index("turns_drained") < events.index("beat_stopped")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX SIGTERM path; Windows stops route through the private console",
+)
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
     """SIGTERM exits within the bound while a wedged default-executor job stands."""
     # The exit bound only matters relative to the stop budget it protects:
@@ -314,6 +333,9 @@ class _UnreachablePool:
 async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachable(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A/B/A run 6: with the pooler gone, the stop path's ownership release waited
     out the control pool's 30 s acquire timeout, so ava-root's 10 s TERM window
@@ -321,15 +343,16 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
     from ... import host as host_mod
 
     monkeypatch.setattr(host_mod, "_RELEASE_OWNER_TIMEOUT_S", 0.05)
+    machine_identity.set(name="this-box")
     host = host_mod.AgentHost(
         policy=configured_policy(),
         pool=cast(Any, _UnreachablePool()),
         checkpointer=cast(Any, object()),
         graph=cast(Any, object()),
-        machine="this-box",
+        machine=machine_identity,
         catalog=model_catalog,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
     )
     started = time.monotonic()
     with pytest.raises(TimeoutError, match="ownership release"):

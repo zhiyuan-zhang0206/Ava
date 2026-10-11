@@ -7,7 +7,7 @@ executes in-process against the `ops` op clusters and returns {status, result}.
 
 Usage: .venv/bin/python -m services.agent_runner.agent_ops.daemon — a per-machine
 singleton via pidfile, supervised by the application root. Registers
-its own unit in `machines` once serving (`_register_boot`).
+its own unit in `machines` once serving (`boot.register_boot`).
 
 Idempotency keys: an envelope carrying `idempotency_key` is deduplicated
 against the shared `api_idempotency` table (method='ops' rows — migration
@@ -33,6 +33,9 @@ from pathlib import Path
 if __name__ == "__main__":
     # Reject unknown argv before imports can load Settings or touch local state.
     argparse.ArgumentParser(description=__doc__).parse_args()
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
 
 
 import asyncio
@@ -42,6 +45,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -51,21 +55,28 @@ from pydantic import ValidationError
 
 from base import paths
 from base.agents import AvaAgentError, ResurrectRefused
+from base.agents.context.clients import ClientSet
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.cluster.transport_encryption import verify_transport_encryption
-from base.config import Settings, ensure_eager, settings
+from base.config import ConfigBoot, Settings, settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import write_transaction
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
-from base.log import init_gateway_process
+from base.log.process import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.config_registration import InvalidConfigOverlay
+from base.telemetry import build_pipeline
 from ops import lifecycle
 from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import (
@@ -76,15 +87,8 @@ from ops.rpc_schemas import (
     OpStatus,
     is_op_kind,
 )
-from services.agent_runner.agent_ops import health, outbox_flusher
+from services.agent_runner.agent_ops import boot, health, outbox_flusher
 from services.agent_runner.agent_ops import maintenance as maintenance_activity
-from services.agent_runner.agent_ops._boot import (
-    _open_db_pool,
-    _ops_acceptance,
-    _ops_bind_host,
-    _ops_handles,
-    _register_boot,
-)
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
@@ -178,12 +182,14 @@ async def _run_arm(
     pool: ConnectionPool,
     executor: ThreadPoolExecutor,
     authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> tuple[OpStatus, dict[str, object]]:
-    """`_dispatch_sync` on this daemon's executor, with its explicit DB pool.
+    """Run a blocking arm on this invocation's executor and database pool.
 
-    An arm must not read contextvars: `run_in_executor` does not propagate context,
-    so anything set per-request on the loop side (a request id, a trace span) reads
-    as its default in the worker. Pass what an arm needs through its `payload`.
+    The worker borrows explicit authority, image and machine; its inputs do not
+    depend on loop or worker ambient context.
     """
     loop = asyncio.get_running_loop()
     active = (kind, time.monotonic())
@@ -191,7 +197,16 @@ async def _run_arm(
     try:
         future = loop.run_in_executor(
             executor,
-            functools.partial(_dispatch_sync, kind, payload, pool=pool, authority=authority),
+            functools.partial(
+                _dispatch_sync,
+                kind,
+                payload,
+                pool=pool,
+                authority=authority,
+                database=database,
+                image=image,
+                local_machine=local_machine,
+            ),
         )
         maintenance_activity.track_worker(future, workers=workers)
         return await asyncio.shield(future)
@@ -201,15 +216,28 @@ async def _run_arm(
 
 
 def _dispatch_sync(
-    kind: str, payload: dict[str, Any], *, pool: ConnectionPool, authority: ConfigAuthority
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    pool: ConnectionPool,
+    authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> tuple[OpStatus, dict[str, object]]:
-    """The blocking op arms, bound to this daemon's shared pool.
+    """Bind blocking arms to this invocation's pool, authority, image and machine.
 
-    The arms live in `services.agent_runner.agent_ops.dispatch_sync` (split at the file-size
-    ceiling, task #4129 I4). The binding stays here so `_run_arm` and the
-    worker's explicit pool binding stay in this daemon.
+    `_run_arm` retains these inputs across the executor boundary.
     """
-    return dispatch_sync(kind, payload, pool=pool, db=_ops_handles()[0], authority=authority)
+    return dispatch_sync(
+        kind,
+        payload,
+        pool=pool,
+        db=boot.ops_handles(database=database)[0],
+        authority=authority,
+        image=image,
+        local_machine=local_machine,
+    )
 
 
 async def _dispatch(
@@ -222,6 +250,9 @@ async def _dispatch(
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op in-process by calling the `ops` op clusters.
 
@@ -253,9 +284,14 @@ async def _dispatch(
     try:
         match kind:
             case "spawn-launch-v2":
-                db, bus = _ops_handles()
+                db, bus = boot.ops_handles(database=database)
                 spawned = await lifecycle.launch_agent_op(
-                    db, bus, LaunchAgentRequest.model_validate(payload), pool, catalog=catalog
+                    db,
+                    bus,
+                    LaunchAgentRequest.model_validate(payload),
+                    pool,
+                    catalog=catalog,
+                    local_machine=local_machine.name(),
                 )
                 # `exclude_none`: the settlement receipt is present only when a
                 # withdrawn model was rewritten (task #4306) — the common wire
@@ -264,14 +300,18 @@ async def _dispatch(
             case "launch-reconcile-v1":
                 from ops.lifecycle.launch_reconcile import reconcile_launch_op
 
-                db, bus = _ops_handles()
+                db, bus = boot.ops_handles(database=database)
                 result = await reconcile_launch_op(
-                    db, bus, LaunchReconcileRequest.model_validate(payload), pool
+                    db,
+                    bus,
+                    LaunchReconcileRequest.model_validate(payload),
+                    pool,
+                    local_machine=local_machine.name(),
                 )
                 return OpStatus.COMPLETED, result.model_dump(mode="json")
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
-                db, bus = _ops_handles()
+                db, bus = boot.ops_handles(database=database)
                 resp = await lifecycle.lifecycle_op(
                     db,
                     bus,
@@ -281,6 +321,7 @@ async def _dispatch(
                     trigger_inbound_id=lc.trigger_inbound_id,
                     trigger_inbound_kind=lc.trigger_inbound_kind,
                     catalog=catalog,
+                    local_machine=local_machine.name(),
                 )
                 return OpStatus.COMPLETED, resp.model_dump(mode="json")
             case _:
@@ -292,6 +333,9 @@ async def _dispatch(
                     pool=pool,
                     executor=executor,
                     authority=authority,
+                    database=database,
+                    image=image,
+                    local_machine=local_machine,
                 )
     except AvaAgentError as exc:
         # Carry both detail and the wire `reason` enum value so the
@@ -326,6 +370,9 @@ async def _dispatch_idempotent(
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Dispatch one op with a dedup key, retrying a pass that dies on a
     closed DB connection.
@@ -351,6 +398,9 @@ async def _dispatch_idempotent(
                 executor=executor,
                 catalog=catalog,
                 authority=authority,
+                database=database,
+                image=image,
+                local_machine=local_machine,
             )
         except psycopg.OperationalError:
             if attempt + 1 >= _DISPATCH_RETRY_ATTEMPTS:
@@ -375,6 +425,9 @@ async def _dispatch_idempotent_pass(
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Replay one immutable request; unresolved execution never frees its identity.
 
@@ -403,6 +456,9 @@ async def _dispatch_idempotent_pass(
             executor=executor,
             catalog=catalog,
             authority=authority,
+            database=database,
+            image=image,
+            local_machine=local_machine,
         )
     request_hash = hashlib.sha256(
         json.dumps([kind, payload], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
@@ -427,6 +483,9 @@ async def _dispatch_idempotent_pass(
             executor=executor,
             catalog=catalog,
             authority=authority,
+            database=database,
+            image=image,
+            local_machine=local_machine,
         )
         status = OpStatus(status)
         with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -472,6 +531,9 @@ async def _ops_route(
     executor: ThreadPoolExecutor,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> tuple[int, bytes, str]:
     """POST /ops route handler — parse {kind, payload}, dispatch, return result.
 
@@ -518,6 +580,9 @@ async def _ops_route(
                         executor=executor,
                         catalog=catalog,
                         authority=authority,
+                        database=database,
+                        image=image,
+                        local_machine=local_machine,
                     )
                 else:
                     status, result = await _dispatch(
@@ -529,6 +594,9 @@ async def _ops_route(
                         executor=executor,
                         catalog=catalog,
                         authority=authority,
+                        database=database,
+                        image=image,
+                        local_machine=local_machine,
                     )
         except Exception as exc:
             _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
@@ -545,8 +613,14 @@ async def _ops_route(
     )
 
 
-async def _main() -> None:
-    ensure_eager()
+async def _main(
+    *,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
+    config: ConfigBoot,
+) -> None:
+    config.ensure_eager()
     catalog = build_model_catalog()
     authority = ConfigAuthority(
         runtime=settings,
@@ -564,7 +638,7 @@ async def _main() -> None:
 
     dispatch_sem = asyncio.Semaphore(settings.services.ops_concurrency)
 
-    our_machine = machine_name()
+    our_machine = local_machine.name()
 
     # Schema-current assertion: if the central DB is ahead of this checkout,
     # abort before serving any op that assumes its columns.
@@ -579,9 +653,9 @@ async def _main() -> None:
         )
         sys.exit(1)
 
-    pool = _open_db_pool()
+    pool = boot.open_db_pool(database=database)
     executor = _op_thread_pool()
-    db, bus = _ops_handles()
+    db, bus = boot.ops_handles(database=database)
     # Redeliver recorded delivery failures whenever the data plane allows
     # (task #3757): a resident loop that outlives every sender process, owned with
     # the server by the TaskGroup below.
@@ -593,8 +667,8 @@ async def _main() -> None:
     try:
         # Every /ops dial presents a machine API token of this generation; an
         # open cluster serves /ops unauthenticated on loopback.
-        acceptance = _ops_acceptance()
-        bind_host = _ops_bind_host(acceptance)
+        acceptance = boot.ops_acceptance()
+        bind_host = boot.ops_bind_host(acceptance)
         if bind_host != "127.0.0.1":
             verify_transport_encryption(bind_host, authenticated=acceptance is not None)
         endpoint = _endpoint()
@@ -605,6 +679,8 @@ async def _main() -> None:
             extra_routes={
                 ("POST", "/ops"): functools.partial(
                     _ops_route,
+                    database=database,
+                    image=image,
                     executor=executor,
                     catalog=catalog,
                     authority=authority,
@@ -613,6 +689,7 @@ async def _main() -> None:
                     requests=requests,
                     workers=workers,
                     pool=pool,
+                    local_machine=local_machine,
                 )
             },
             liveness=liveness,
@@ -624,6 +701,7 @@ async def _main() -> None:
                 ),
             },
             auth_digests=acceptance,
+            image=image,
         )
         _log.info(
             "ava-ops up, machine=%s serving POST /ops on %s:%d",
@@ -631,7 +709,13 @@ async def _main() -> None:
             bind_host,
             endpoint.health_port,
         )
-        _register_boot()
+        boot.register_boot(
+            database=database,
+            config=config,
+            machine=local_machine,
+            ops_port=endpoint.health_port,
+            home=paths.ava_home(),
+        )
         try:
             # One TaskGroup owns the server and the outbox loop: a loop that raises
             # cancels the server and ends the process, and the supervisor restarts it.
@@ -659,28 +743,55 @@ def _shutdown_op_pool(executor: ThreadPoolExecutor) -> None:
 
 def main(*, argv: list[str] | None = None) -> None:
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
-    # Task #3621: ops is on the full-validation whitelist — build the eager
-    # config chain at the entry, before serving.
-    from base.config import ensure_eager
+    image = LoadedCommit.capture()
+    config = ConfigBoot()
+    config.boot()
+    config.ensure_eager()
+    machine = machine_from_boot(config)
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="ops", exempt=False)
 
-    ensure_eager()
-    init_gateway_process(name="ops")
-    install_graceful_shutdown("ops")
+    def database() -> Database:
+        return Database.from_settings(gate=gate, local_host=machine.host)
+
+    clients = ClientSet(
+        database=database,
+        pipeline_factory=lambda: build_pipeline(
+            database=database, machine=machine, home=paths.ava_home().resolve()
+        ),
+    )
     code = 0
+    primary: BaseException | None = None
     # Drain async cleanup explicitly; Runner.close also joins the default
     # executor, which may contain a stuck worker and must not delay this exit.
-    runner = asyncio.Runner()
     try:
-        runner.run(_main())
-    except KeyboardInterrupt:
-        _log.info("[ops] interrupted, shutting down")
-        failures = cancel_and_drain(runner)
-        if failures:
-            _log.error("[ops] async shutdown failed: %r", failures)
+        init_gateway_process(
+            name="ops", producer=clients.event_pipeline, machine_reader=machine.name, image=image
+        )
+        install_graceful_shutdown("ops")
+        runner = asyncio.Runner()
+        try:
+            runner.run(_main(database=database, image=image, local_machine=machine, config=config))
+        except KeyboardInterrupt as exc:
+            primary = exc
+            _log.info("[ops] interrupted, shutting down")
+            failures = cancel_and_drain(runner)
+            if failures:
+                _log.error("[ops] async shutdown failed: %r", failures)
+                code = 1
+        except Exception as exc:
+            primary = exc
+            _log.exception("[ops] daemon crashed — uncaught exception escaped _main()")
             code = 1
-    except Exception:
-        _log.exception("[ops] daemon crashed — uncaught exception escaped _main()")
-        code = 1
+    finally:
+        failure = primary if primary is not None else sys.exception()
+        try:
+            clients.close(pipeline_timeout=2)
+        except Exception as exc:
+            if failure is not None:
+                failure.add_note(f"ops event pipeline shutdown failed: {exc!r}")
+            _log.exception("[ops] event pipeline shutdown failed")
+            code = 1
     _hard_exit(code)
 
 

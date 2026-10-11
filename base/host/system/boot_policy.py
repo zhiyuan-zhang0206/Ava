@@ -33,6 +33,10 @@ it must not replace a healthy generation just because another unit is unready.
 Unready critical services keep a nonzero result and remain visible in the boot
 log. Root owns service revival, so retries do not create another service owner
 or claim readiness before the application's probes pass.
+
+Deliberately import-free: `cli.boot_retry` is dispatched by `cli.main` before
+the settings-gated `cli.commands` import (the first-start dispatch slot), so anything it
+reaches must not build `Settings()`.
 """
 
 from __future__ import annotations

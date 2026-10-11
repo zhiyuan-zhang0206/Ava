@@ -29,7 +29,6 @@ from base.agents.history.context_response import (
     context_breakdown_response,
     resolve_agent_model,
 )
-from base.agents.messages.caller_protocol import CallerProtocolUnavailableError
 from base.agents.messages.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_image_urls
@@ -44,7 +43,7 @@ from base.daemon.schedules.completion_notices import (
 )
 from base.db import agent_exists, list_pending_inbounds
 from gateway.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
-from gateway.agents.eval_guard import caller_eval_isolation, deny_isolated_result_read
+from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.schemas import (
     AgentMessageEnqueued,
@@ -68,10 +67,6 @@ _log = logging.getLogger(__name__)
 # guard, not an external protocol limit (KEEP, task #3696 exception inventory;
 # the default *window* is config: settings.display.messages_default_limit).
 _MAX_MESSAGE_CONTENT_BYTES = 1_048_576
-
-# Compatibility re-export for callers and tests that used this lookup before
-# result-read enforcement was centralized.
-__all__ = ["caller_eval_isolation"]
 
 
 def _validate_image_ref(agent_id: int, url: str) -> None:
@@ -256,6 +251,7 @@ async def post_agent_message(
                 content=normalized_text,
                 source=body.source,
                 payload=normalized_payload,
+                local_machine=request.app.state.machine.name(),
             )
         except ClientMessageConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -288,11 +284,10 @@ async def post_agent_message(
             payload=payload,
             client_message_id=idempotency_key,
             provenance=provenance,
+            local_machine=request.app.state.machine.name(),
         )
     except ClientMessageConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except CallerProtocolUnavailableError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
 
 
@@ -370,6 +365,7 @@ async def post_agent_system_note(
             agent_id,
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind=note_kind,
+            local_machine=request.app.state.machine.name(),
         )
     else:
         status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
@@ -405,6 +401,7 @@ async def reconcile_agent_message(
             content=text,
             source=body.source,
             payload=payload,
+            local_machine=request.app.state.machine.name(),
         )
     except ClientMessageConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

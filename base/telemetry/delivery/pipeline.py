@@ -62,6 +62,14 @@ class EventPipeline:
         self._thread = threading.Thread(target=self._drain, daemon=True, name="event-emitter")
         self._thread.start()
 
+    @property
+    def stopped(self) -> bool:
+        """True only after requested shutdown has joined this owned worker.
+
+        Completion does not erase a terminal error; repeated stop collects it.
+        """
+        return self._stop_requested.is_set() and not self._thread.is_alive()
+
     def enqueue(self, event: Event) -> None:
         """Producer path: shed full, closed or failed admission without waiting on writes."""
         if not self._admit(event):
@@ -88,7 +96,7 @@ class EventPipeline:
         if due:
             from base.telemetry.loss import report_loss
 
-            report_loss(event, 1, "emitter")
+            report_loss(event, 1, "emitter", record_metric=self.record_export_loss)
 
     def flush(self) -> DrainResult:
         """Acknowledge queued and held records through the sole drain writer."""
@@ -161,6 +169,22 @@ class EventPipeline:
             raise RuntimeError("event drain cannot join itself")
         self._thread.join(timeout=max(0.0, deadline - time.monotonic()))
         return self._result(completed=not self._thread.is_alive(), phase=DrainPhase.STOP)
+
+    def defer_exports(self) -> None:
+        """Writer-only pipelines have no downstream exporter to defer."""
+
+    def finalize_exports(self) -> None:
+        """Writer-only pipelines have no downstream exporter to finalize."""
+
+    def warmup_exports(self) -> None:
+        """Writer-only pipelines have no downstream exporter to prepare."""
+
+    def exports_deferred(self) -> bool:
+        """Writer-only pipelines never hold a downstream exporter backlog."""
+        return False
+
+    def record_export_loss(self, report: Event) -> None:
+        """Writer-only pipelines have no independent exporter loss metric."""
 
     def _flush(self, batch: list[Event]) -> None:
         """Write loss summaries directly; a saturated queue cannot shed its own alarm."""

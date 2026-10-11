@@ -9,7 +9,7 @@ shell-level management surface: list / get / create / update / delete plus the c
 Most verbs forward to an existing route under `/api/schedules` and render the
 result — the gateway owns the effect (script syntax check, version snapshot,
 session reconcile), the CLI adds only arg parsing + rendering. This is the
-operator/agent primitive form: `POST /api/schedules/draft` (hand a natural-
+operator/agent primitive form: `POST /api/keyed/v1/schedules/draft` (hand a natural-
 language request to a schedule_writer agent) is deliberately NOT exposed here —
 the CLI writes a script it already has, it does not run a conversation. Two
 verbs never touch the gateway: `provision` (restores the built-ins) and
@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+
+from base.agents.context.clients import DatabaseFactory
 
 _TIMEOUT_S = 15.0
 
@@ -348,7 +350,7 @@ def cmd_schedules_runs(identifier: str, limit: int) -> int:
 # ── helpers ──
 
 
-def cmd_schedules_provision() -> int:
+def cmd_schedules_provision(*, database_factory: DatabaseFactory) -> int:
     """`ava schedules provision` — bring the built-in schedules in line with this
     checkout's schedules/manifest.json: create the missing ones (product schedules —
     self-evolution, memory — enabled; cluster-operator schedules — e.g.
@@ -363,9 +365,8 @@ def cmd_schedules_provision() -> int:
     existing schedule are never modified, and a schedule that is not in the manifest
     (an agent-created one) is never read."""
     from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
-    from base.db import Database
 
-    with Database.from_settings().write_transaction() as conn:
+    with database_factory().write_transaction() as conn:
         result = provision_builtin_schedules(conn)
     if result.created:
         print(f"provisioned built-in schedules: {', '.join(result.created)}")
@@ -531,4 +532,4 @@ def h_schedules_runs(args: argparse.Namespace) -> int:
 
 
 def h_schedules_provision(_args: argparse.Namespace) -> int:
-    return cmd_schedules_provision()
+    return cmd_schedules_provision(database_factory=_args.database_factory)

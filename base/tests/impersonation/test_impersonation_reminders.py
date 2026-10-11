@@ -6,10 +6,13 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.tests.impersonation._impersonation_helpers import _active, _agent
+from base.tests.impersonation.support import accept_controller, create_native_owner
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.impersonation_support import attested_caller
 
 
@@ -19,19 +22,26 @@ def test_reminder_is_inserted_once_per_lease_and_wakes(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    owner = _agent(db_conn)
-    lease = _active(owner, authority=config_authority)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '4 minutes' "
         "WHERE id=%s",
         (lease["id"],),
     )
     db_conn.commit()
-    with pool(max_size=2) as reaper_pool:
+    with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
         # Idempotent: a second scan in the same window inserts nothing new.
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 0
@@ -54,6 +64,8 @@ def test_reminder_ack_suppresses_further_reminders(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Issue #2054: an ACKed reminder still counts for the once-per-lease rule.
 
@@ -62,18 +74,24 @@ def test_reminder_ack_suppresses_further_reminders(
     the window (the old NOT EXISTS only excluded 'pending' rows, so each cycle
     re-inserted — a nag storm with urgent pushes and re-delivery on top).
     """
+    local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    owner = _agent(db_conn)
-    lease = _active(owner, authority=config_authority)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '4 minutes' "
         "WHERE id=%s",
         (lease["id"],),
     )
     db_conn.commit()
-    with pool(max_size=2) as reaper_pool:
+    with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
     reminder_row = db_conn.execute(
         "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
@@ -87,9 +105,16 @@ def test_reminder_ack_suppresses_further_reminders(
         (lease["id"], reminder_id),
     )
     db_conn.commit()
-    leases.ack(database, event_bus, lease["id"], attested_caller(lease), [reminder_id])
+    leases.ack(
+        database,
+        event_bus,
+        lease["id"],
+        attested_caller(lease),
+        [reminder_id],
+        local_machine=local_machine,
+    )
     db_conn.commit()
-    with pool(max_size=2) as reaper_pool:
+    with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 0
     assert db_conn.execute(
         "SELECT count(*), max(status) FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
@@ -103,19 +128,26 @@ def test_reminder_skips_leases_outside_the_window(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    owner = _agent(db_conn)
-    _active(owner, authority=config_authority)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '30 minutes' "
         "WHERE agent_id=%s",
         (owner.agent_id,),
     )
     db_conn.commit()
-    with pool(max_size=2) as reaper_pool:
+    with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 0
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
@@ -129,21 +161,36 @@ def test_release_dismisses_its_pending_reminder(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
+    local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    owner = _agent(db_conn)
-    lease = _active(owner, authority=config_authority)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '2 minutes' "
         "WHERE id=%s",
         (lease["id"],),
     )
     db_conn.commit()
-    with pool(max_size=2) as reaper_pool:
+    with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
-    leases.release(database, event_bus, lease["id"], attested_caller(lease), "Done before expiry")
+    leases.release(
+        database,
+        event_bus,
+        lease["id"],
+        attested_caller(lease),
+        "Done before expiry",
+        local_machine=local_machine,
+    )
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
         (owner.agent_id,),
@@ -156,19 +203,26 @@ def test_expiry_dismisses_its_pending_reminder(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents.impersonation import maintenance as maintenance
     from base.db import pool
 
-    owner = _agent(db_conn)
-    lease = _active(owner, authority=config_authority)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '1 minute' "
         "WHERE id=%s",
         (lease["id"],),
     )
     db_conn.commit()
-    with pool(max_size=2) as reaper_pool:
+    with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert maintenance.remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
         db_conn.execute(
             "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "
@@ -206,18 +260,25 @@ def test_reminder_window_tracks_current_ttl(
     expected: int,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    lease = _active(_agent(db_conn), authority=config_authority)
+    lease = accept_controller(
+        create_native_owner(db_conn, local_machine=machine_identity.name()),
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET ttl_seconds=%s, "
         "expires_at=clock_timestamp()+make_interval(secs=>%s) WHERE id=%s",
         (ttl, remaining, lease["id"]),
     )
     db_conn.commit()
-    with pool(max_size=2) as reaper_pool:
+    with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == expected
 
 
@@ -227,17 +288,34 @@ def test_renewal_recomputes_window_and_allows_a_new_reminder(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
+    local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
-    lease = _active(_agent(db_conn), authority=config_authority)
+    lease = accept_controller(
+        create_native_owner(db_conn, local_machine=machine_identity.name()),
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     caller = attested_caller(lease)
-    with pool(max_size=2) as reaper_pool:
+    with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
-        first = leases.inbox(database, lease["id"], caller)
-        leases.ack(database, event_bus, lease["id"], caller, [m["id"] for m in first])
-        leases.renew(database, event_bus, lease["id"], caller, ttl_seconds=3600)
+        first = leases.inbox(database, lease["id"], caller, local_machine=local_machine)
+        leases.ack(
+            database,
+            event_bus,
+            lease["id"],
+            caller,
+            [m["id"] for m in first],
+            local_machine=local_machine,
+        )
+        leases.renew(
+            database, event_bus, lease["id"], caller, ttl_seconds=3600, local_machine=local_machine
+        )
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 0
         db_conn.execute(
             "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '350 seconds' "

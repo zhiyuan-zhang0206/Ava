@@ -1,16 +1,10 @@
 # pyright: reportOptionalSubscript=false
-"""mutmut gap-fix unit tests — locks down the actionable cluster in `agent/graph/llm/node.py`:
+"""Mutmut gap tests for `agent/graph/llm/node.py` (baseline PR #302).
 
-1. `_capture_ava_overview` (3 mutations, now in `agent/graph/prompt/_base_prompt.py`) — a module-load
-   helper with no dedicated unit test; directly import + call, verify that stdout capture
-   actually captures the output of `ava.help(ava)`.
-2. Cancel-detection boundary (`_llm_node_impl` mutmut_44) — `cancel_task in done`
-   vs `stream first in done` two-path invariant: the cancel branch publishes Cancelled +
-   returns halted and does not commit any message (the entire partial generation is discarded);
-   the normal branch does not publish Cancelled + calls handler.finish().
-3. Additional mutation kills for stop-reason / thinking-block validation.
-
-Baseline source: mutmut llm baseline (PR #302).
+`_capture_ava_overview` in `_base_prompt.py` captures `ava.help(ava)` stdout.
+The cancel-task/stream-first boundary discards partial generations and publishes
+Cancelled only for cancellation; normal completion calls handler.finish().
+Stop-reason and thinking-block validation cover the remaining mutation gaps.
 """
 
 from __future__ import annotations
@@ -37,6 +31,7 @@ from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
@@ -158,6 +153,7 @@ def _make_runtime(
     llm=None,
     event_publisher=None,
     execution_info: ExecutionInfo | None = None,
+    database_gate: ProcessDbGate,
 ) -> Runtime[AvaContext]:
     """test helper: assemble Runtime the same way as test_cancel.py.
 
@@ -177,7 +173,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -202,6 +198,7 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     ledger: LlmLedger,
+    database_gate: ProcessDbGate,
 ) -> None:
     """cancel_event arrives in done set first → llm_node must enter the cancel branch:
     (a) publish a Cancelled event to settings.data_plane.events_channel
@@ -230,7 +227,12 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
     trigger = asyncio.create_task(_trigger())
     result = await llm_node(
         state,
-        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=pub),
+        _make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=pub,
+            database_gate=database_gate,
+        ),
         _CONFIG,
         ledger=ledger,
     )
@@ -258,6 +260,7 @@ async def test_stream_normal_completion_no_cancelled_event(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     ledger: LlmLedger,
+    database_gate: ProcessDbGate,
 ) -> None:
     """stream completes first (cancel_event never set) → takes stream-normal branch:
     (a) **does not** publish Cancelled event
@@ -284,7 +287,12 @@ async def test_stream_normal_completion_no_cancelled_event(
     # Note: do not set cancel_event —— stream should complete naturally
     result = await llm_node(
         state,
-        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=pub),
+        _make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=pub,
+            database_gate=database_gate,
+        ),
         _CONFIG,
         ledger=ledger,
     )
@@ -305,7 +313,7 @@ async def test_stream_normal_completion_no_cancelled_event(
 
 
 async def test_silent_idle_with_reasoning_continue_loops_not_raises(
-    hosted_resources: HostedTurnResources, ledger: LlmLedger
+    hosted_resources: HostedTurnResources, ledger: LlmLedger, database_gate: ProcessDbGate
 ) -> None:
     """No tool_call AND empty text BUT output_tokens > 0 (model produced
     reasoning) → the node no longer raises. It commits the reasoning AIMessage
@@ -326,7 +334,12 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises(
 
     result = await llm_node(
         state,
-        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _CONFIG,
         ledger=ledger,
     )
@@ -342,7 +355,10 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises(
 
 
 async def test_truly_empty_no_reasoning_halts_with_warning(
-    hosted_resources: HostedTurnResources, loguru_records, ledger: LlmLedger
+    hosted_resources: HostedTurnResources,
+    loguru_records,
+    ledger: LlmLedger,
+    database_gate: ProcessDbGate,
 ) -> None:
     """No tool_call AND empty text AND output_tokens=0 (model truly produced
     nothing, not even reasoning) → the existing WARNING + halt path still
@@ -361,7 +377,12 @@ async def test_truly_empty_no_reasoning_halts_with_warning(
 
     result = await llm_node(
         state,
-        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _CONFIG,
         ledger=ledger,
     )
@@ -425,6 +446,7 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
     ledger: LlmLedger,
+    database_gate: ProcessDbGate,
 ) -> None:
     """cancel_event set immediately (before first chunk) → cancel branch: the entire
     generation is discarded, Command(halted=True, goto=after_exec) does not commit any
@@ -444,7 +466,12 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
 
     result = await llm_node(
         state,
-        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=pub),
+        _make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=pub,
+            database_gate=database_gate,
+        ),
         _CONFIG,
         ledger=ledger,
     )
@@ -466,7 +493,7 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
 
 
 async def test_silent_idle_with_thinking_blocks_continue_loops(
-    hosted_resources: HostedTurnResources, ledger: LlmLedger
+    hosted_resources: HostedTurnResources, ledger: LlmLedger, database_gate: ProcessDbGate
 ) -> None:
     """thinking blocks present but output_tokens=0 → still judged as silent idle.
 
@@ -490,7 +517,12 @@ async def test_silent_idle_with_thinking_blocks_continue_loops(
 
     result = await llm_node(
         state,
-        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _CONFIG,
         ledger=ledger,
     )
@@ -584,8 +616,7 @@ def test_check_consecutive_error_cap_below_threshold_passes(ledger: LlmLedger) -
 
 
 async def test_silent_idle_with_deepseek_reasoning_content_continue_loops(
-    hosted_resources: HostedTurnResources,
-    ledger: LlmLedger,
+    hosted_resources: HostedTurnResources, ledger: LlmLedger, database_gate: ProcessDbGate
 ) -> None:
     """DeepSeek model's reasoning is in `additional_kwargs.reasoning_content`,
     not in Anthropic's content blocks thinking type — silent_idle detection
@@ -609,7 +640,12 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops(
 
     result = await llm_node(
         state,
-        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _CONFIG,
         ledger=ledger,
     )
@@ -626,6 +662,7 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
     hosted_resources: HostedTurnResources,
     monkeypatch: pytest.MonkeyPatch,
     ledger: LlmLedger,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Reasoning-content-only turns cannot bypass the silent-idle cost guard."""
     from base.config import settings
@@ -645,7 +682,12 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
         fake_llm.astream.return_value = _reasoning_content_only()
         result = await llm_node(
             AgentState(messages=[HumanMessage(content="hi")], halted=False),
-            _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+            _make_runtime(
+                resources=hosted_resources,
+                llm=fake_llm,
+                event_publisher=MagicMock(),
+                database_gate=database_gate,
+            ),
             _CONFIG,
             ledger=ledger,
         )
@@ -684,6 +726,7 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     hosted_resources: HostedTurnResources,
     loguru_records,
     ledger: LlmLedger,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A PERMANENT provider error (HTTP 400 — bad request / context length /
     schema) raised mid-stream becomes a FatalProviderError carrying the
@@ -701,7 +744,12 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     with pytest.raises(FatalProviderError) as exc_info:
         await llm_node(
             state,
-            _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+            _make_runtime(
+                resources=hosted_resources,
+                llm=fake_llm,
+                event_publisher=MagicMock(),
+                database_gate=database_gate,
+            ),
             _CONFIG,
             ledger=ledger,
         )

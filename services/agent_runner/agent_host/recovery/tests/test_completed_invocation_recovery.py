@@ -9,9 +9,11 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation import flush_checkpoint
-from agent.tests.claim.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.context import AvaContext
+from base.cluster.machine import MachineIdentity
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -25,6 +27,7 @@ from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure 
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("site", ["before_flush", "after_flush", "before_idle", "after_idle"])
@@ -35,9 +38,12 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
     site: str,
     model_catalog: ModelCatalog,
     hosted_resources: HostedTurnResources,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent)
+    agent = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent, database_gate=database_gate)
     replies: list[str] = []
     graph, saver, config, _history = await _prepare_graph(aops_pool, agent, 100, replies)
     await graph.aupdate_state(config, {"halted": True}, as_node="claim")
@@ -48,17 +54,19 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
         checkpointer=saver,
         graph=graph,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        machine=machine_identity,
     )
     ctx = AvaContext(
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
         clock_factory=configured_policy().clock_factory,
+        machine=machine_identity,
     )
     original_invoke = host_module.run_invocation_with_stall_guard
     original_flush = invocation_owner.flush_checkpoint
@@ -127,10 +135,15 @@ async def test_completed_idle_result_does_not_claim_next_chat_during_recovery(
 
 
 async def test_missing_lifecycle_pointer_still_invalidates_cached_runtime(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent)
+    agent = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent, database_gate=database_gate)
     graph, saver, _config, _history = await _prepare_graph(aops_pool, agent, 100, [])
     host = host_module.AgentHost(
         policy=configured_policy(),
@@ -138,17 +151,19 @@ async def test_missing_lifecycle_pointer_still_invalidates_cached_runtime(
         checkpointer=saver,
         graph=graph,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        machine=machine_identity,
     )
     ctx = AvaContext(
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
         clock_factory=configured_policy().clock_factory,
+        machine=machine_identity,
     )
     host._runtimes[agent] = MagicMock()
     # A forced or superseded lifecycle return can carry its graph flag while

@@ -24,6 +24,7 @@ changes Chrome profile data.
 
 ## Browser MCP
 
-`browser-mcp` requires the same browser prongs
-(`browser_incapability()`). The `chrome` MCP entry declares
-`requires: {display}`.
+`browser-mcp` requires the same browser prongs plus AF_UNIX
+(`browser_mcp_incapability()`), because the wrapper-to-daemon leg is a Unix
+socket. The `chrome` MCP entry uses the same gate
+(`requires: {display, unix_socket}`).

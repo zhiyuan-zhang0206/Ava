@@ -18,9 +18,10 @@ from base.agents.incarnation.resources import (
     ResourceProcess,
     decode_resources,
 )
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents.spawn import create_agent_row
@@ -33,12 +34,14 @@ async def _resurrected(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> tuple[int, int, UUID, IncarnationResources]:
     aid, _, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         authority=config_authority,
         catalog=model_catalog,
     )
@@ -51,10 +54,10 @@ async def _resurrected(
     old = await admit_hosted_runtime(
         pool,
         aid,
-        machine_name(),
+        machine_identity.name(),
         owner,
         expected_from="idling",
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
     )
     assert old is not None
     command = insert_inbound_message(
@@ -64,7 +67,7 @@ async def _resurrected(
         "self",
         kind="terminate",
         bus=EventBus.from_settings(),
-        database=Database.from_settings(),
+        database=Database.from_settings(gate=database_gate),
     )
     assert [
         item.id for item in await claim_inbound_batch(pool, aid, incarnation=old, work=None)
@@ -74,10 +77,11 @@ async def _resurrected(
         == "terminate"
     )
     resurrect_agent(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         aid,
         resurrected_by="user",
+        local_machine=machine_identity.name(),
     )
     row = db.execute("SELECT incarnation_resources FROM agents_meta WHERE id=%s", (aid,)).fetchone()
     assert row is not None
@@ -95,9 +99,16 @@ async def test_same_host_cannot_skip_missing_predecessor_evidence(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     aid, command, owner, resources = await _resurrected(
-        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        aops_pool,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     if missing == "resource_closure":
         request = uuid4()
@@ -127,7 +138,7 @@ async def test_same_host_cannot_skip_missing_predecessor_evidence(
 
     with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
         await admit_hosted_runtime(
-            aops_pool, aid, machine_name(), owner, expected_from="idling", db=database
+            aops_pool, aid, machine_identity.name(), owner, expected_from="idling", db=database
         )
 
     assert db_conn.execute(
@@ -145,11 +156,18 @@ async def test_same_pid_different_birth_requires_exact_predecessor_exit(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents.incarnation import exec_owner_recovery
 
     aid, _command, owner, resources = await _resurrected(
-        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        aops_pool,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     assert resources.host_process is not None
     prior_process = resources.host_process.model_copy(
@@ -173,7 +191,7 @@ async def test_same_pid_different_birth_requires_exact_predecessor_exit(
 
     assert (
         await admit_hosted_runtime(
-            aops_pool, aid, machine_name(), owner, expected_from="idling", db=database
+            aops_pool, aid, machine_identity.name(), owner, expected_from="idling", db=database
         )
         is None
     )

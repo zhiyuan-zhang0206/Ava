@@ -39,11 +39,14 @@ is a peer convention. The gateway/user entry point owns the security boundary.
 
 The only gate left is **platform capability** (`ops/spec.py`
 `_computer_mcp_gate_reason`): the service joins the agent-runner roster only
-when the signed permissions helper is enabled and reports capable. The
+when the signed permissions helper is enabled and reports capable, the host
+has AF_UNIX (the socket transport is POSIX-only). The
 healthcheck (`services.supervision.healthchecks.computer_mcp`) probes the daemon every
 60s with a lock-free `ping` — it never round-trips to the helper or takes the
 action lock, so a slow desktop action cannot false-kill a busy daemon — and
 the watchdog respawns it on death.
+
+Entry-owned image and database: [[services/docs/agent_runner_side/computer-mcp/process-composition.ava.okf.md]].
 
 ## Wire path
 ```

@@ -46,8 +46,8 @@ Do not hardcode any specific source names into this skill repository.
 > **Environment**: scripts run from the load dir (`$AVA_HOME/skills/`), in a
 > persistent shell session (`ava.shell.sessions.new` / `run_background`, not
 > the one-shot `ava.shell.run`): its PATH already resolves bare `python` to
-> this checkout's own venv interpreter — prod home or a dev worktree cluster
-> work the same way, no `.venv/bin/` prefix needed
+> this checkout's own venv interpreter — prod home, a dev worktree cluster, or
+> Windows all work the same way, no `.venv/bin/` / `Scripts\` prefix needed
 > (`base/sessions/env_forwarding.py::forward_env_dict`). `$AVA_HOME` is set in agent
 > processes.
 ```bash

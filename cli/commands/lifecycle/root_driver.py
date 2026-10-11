@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, cast
 
 from base.cluster.derive import runner_db_url_projection
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.log import logger
 from cli.commands._repo import ServiceSpec, session_name
@@ -86,13 +86,15 @@ def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     return extra
 
 
-def _root_tree_roster(roles: MachineRoles, launch_skip: set[str]) -> tuple[ServiceSpec, ...]:
+def _root_tree_roster(
+    roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity
+) -> tuple[ServiceSpec, ...]:
     """The capability/config-selected units for this root."""
     from cli.commands._repo import _services_for_roles_annotated
 
     return tuple(
         spec
-        for spec, reason in _services_for_roles_annotated(roles)
+        for spec, reason in _services_for_roles_annotated(roles, machine=machine)
         if reason is None and spec.session not in launch_skip
     )
 
@@ -354,6 +356,11 @@ def _bring_up_root(
     retained_children: list[subprocess.Popen[bytes]],
 ) -> dict[str, Any]:
     """Start through the required platform owner; never change ownership on failure."""
+    if sys.platform == "win32":
+        raise _RootDriverError(
+            "native Windows root supervision requires its transport and Job ownership "
+            "adapter; session service startup is no longer supported"
+        )
     if _helper_spawn_committed():
         if not _helper_wire_ok():
             raise _RootDriverError(
@@ -559,9 +566,11 @@ def _ensure_root_service_tree(
     return _classify_units(roster, status)
 
 
-def start_roster(roles: MachineRoles, launch_skip: set[str]) -> tuple[ServiceSpec, ...]:
+def start_roster(
+    roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity
+) -> tuple[ServiceSpec, ...]:
     """Return the sole root-owned service roster."""
-    return _root_tree_roster(roles, launch_skip)
+    return _root_tree_roster(roles, launch_skip, machine=machine)
 
 
 def _launch_service_tree(

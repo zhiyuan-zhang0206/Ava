@@ -15,6 +15,7 @@ from psycopg_pool import PoolTimeout
 
 from base import config
 from base.cluster.auth import bearer_header
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -39,13 +40,19 @@ def gateway_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def held(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database: Database) -> None:
+def held(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    database: Database,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "serving.json")
     pause_owner.begin_maintenance("update", WHEN)
     pause_owner.change_maintenance(
         "update", WHEN, MaintenanceHold(), MaintenanceHold(MaintenancePhase.STOPPED)
     )
-    host_deploy_state.set_posture(database, "paused")
+    host_deploy_state.set_posture(database, "paused", machine=machine_identity.name())
     start_serving.begin_start()
 
 
@@ -83,13 +90,15 @@ def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from ops import agent_pause
 
     class ProbeBoundaryError(Exception):
         pass
 
-    monkeypatch.setattr(agent_pause, "machine_role", lambda: frozenset({"agent-runner"}))
+    machine_identity.set(role="agent-runner")
     monkeypatch.setattr(agent_pause, "host_running", lambda: True)
     with TestClient(app) as client:
 
@@ -105,7 +114,7 @@ def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
         # A continued release drain: its hold is published, still preparing.
         pause_owner.begin_maintenance("fleet", WHEN)
         with pytest.raises(ProbeBoundaryError):
-            agent_pause.prepare(database, event_bus, "fleet", WHEN)
+            agent_pause.prepare(database, event_bus, "fleet", WHEN, local_machine=machine_identity)
     # Only an explicit abort releases the hold, never the drain.
     assert admission.held()
 

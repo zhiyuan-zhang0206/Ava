@@ -82,7 +82,9 @@ The native domain and close-grace constant live in `base.native_process.exec_dom
 the owner never imports `agent.graph` or its eager SDK/plugin initialization.
 Control is read nonblockingly by the owner loop itself, without a buffered-stdin
 daemon that could hold an interpreter shutdown lock. Partial/oversized records
-refuse; the original deadline still bounds reads.
+refuse; the original deadline still bounds reads. Windows roots enter the Job
+atomically at creation, including venv redirectors; attaching a redirector after
+its interpreter exists does not retroactively adopt that interpreter's children.
 
 Existing local wake and admission paths recover only entries selected by the
 complete DB map. They verify the exact immutable context, request digest,
@@ -95,7 +97,8 @@ possible detached or breakaway process. Persistent sessions remain independent.
 Every `ResourceProcess` receipt requires explicit `starttime` and `boot_id`
 fields. Local Linux custody requires PID, exact kernel start ticks, and boot
 UUID; its wall-derived creation timestamp is diagnostic. macOS requires its
-boot UUID and exact stable kernel birth. Missing historical
+boot UUID and exact stable kernel birth. Windows records explicit null ticks
+and boot scope, using its absolute native creation time. Missing historical
 native fields refuse; they cannot become evidence that a host ended. A different
 recorded boot or exact native PID reuse proves the prior process ended without
 authorizing work on its replacement. Failed identity observation remains unknown.
@@ -103,7 +106,7 @@ Fresh host and ready-handshake captures compare native births; database CAS and
 terminal receipts retain exact model equality, including the original timestamp.
 Same-host admission preserves the stored receipt rather than rewriting its facts.
 
-Owner domain closure:
+Owner domain closure and Windows Job accounting:
 [[domain-closure.ava.okf.md|domain closure]].
 
 Successful hosted admission can return its exact predecessor proof to the native

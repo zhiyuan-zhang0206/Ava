@@ -84,7 +84,7 @@ def _require_private(path: Path, info: os.stat_result, *, directory: bool) -> No
     kind_ok = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
     if stat.S_ISLNK(info.st_mode) or not kind_ok:
         raise LedgerRefusedError(f"database authority path {path} is not a real private node")
-    if info.st_mode & 0o077 or info.st_uid != os.geteuid():
+    if os.name != "nt" and (info.st_mode & 0o077 or info.st_uid != os.geteuid()):
         raise LedgerRefusedError(f"database authority path {path} is not owner-only")
 
 
@@ -175,6 +175,8 @@ def _replace(ledger: Ledger, **updates: Any) -> Ledger:
 
 
 def _fsync_dir(directory: Path) -> None:
+    if os.name == "nt":
+        return
     fd = os.open(directory, os.O_RDONLY)
     try:
         os.fsync(fd)
@@ -188,7 +190,8 @@ def _publish_exclusive(path: Path, data: bytes) -> None:
     temporary = directory / f".{path.name}.{uuid.uuid4().hex}.tmp"
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        os.fchmod(fd, 0o600)
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as stream:
             fd = -1
             stream.write(data)

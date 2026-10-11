@@ -18,8 +18,14 @@ tags:
 
 ### Identity
 - `AGENT_ID: int` — Your agent ID (read-only forwarding of an internal framework slot; `AVA_SDK_DISABLE` can remove the self namespace without affecting identity).
-- `MACHINE_SPEC: tuple[str, str]` — `(machine_name, description)` current machine name and description.
+- `MACHINE_SPEC: MachineSpec` — `MachineSpec(name, description)`, a NamedTuple (still unpacks as `name, description`) for the current machine; `description` is free prose, empty if unset.
 - `SELF_MACHINE_NAME: str` — Current machine name, also the default value for `ava.agents.spawn(machine=...)`.
+
+Both machine values resolve lazily from the bound `AvaContext.machine`. A bare SDK
+process without a context rejects these reads. An explicitly bound context can
+supply a machine without an agent, plugins, a database or execution state; a
+context without its machine owner fails at first machine use. Attachments either
+own an independent identity or borrow and restore the prior context's exact one.
 
 ### Lifecycle
 - `attach(path, label=None)` — Register a local media file for the next turn. The file is read when the current turn ends and reaches the configured model natively. Gated by the model's media capability (ruling 2026-08-28): a text-only model has no attach contract at all (SDK docs omit the member, the call raises), and a file whose modality the model's attach set excludes is rejected at registration with the allowed set — never a silent text-note delivery. Limits are 20 MiB per file, 8 files, and 48 MiB per turn.
@@ -27,7 +33,6 @@ tags:
 - `compact(summary) → NoReturn` — Replace entire conversation history with summary, irreversible. First write durable state to MEMORY.md + shared memory pool, then write summary (first person, covering Requests/Progress/In flight/Dead ends/Pitfalls/Verbatim tail).
 - `restart(config_overlay=None) → NoReturn` — Replace current process with a new process. `config_overlay` merges into persistent settings. Model/effort edits validate against the final stored overlay and birth configuration under a row lock; configuration and the restart inbound commit together. An invalid pair changes neither.
 - `terminate() → NoReturn` — End current process — the normal last step when your task is done (never idle waiting for someone else to do it); state preserved, a message resurrects you.
-- ~~`update() → NoReturn`~~ — **removed (2026-08-05, cli-only-updates ruling)**: updates are an operator action (`python -m cli.fleet_update`); the method is a removed stub (`ava/self.py:update()`).
 
 ## ava_fleet Plugin Injections
 

@@ -31,6 +31,7 @@ import psycopg
 import pytest
 
 from base.config import settings
+from base.db import Database
 from base.paths import workspace_dir
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import (
@@ -320,11 +321,11 @@ def test_system_prompt_carries_the_coding_conventions(
 # -- compaction makes the notes resurface ----------------------------------------
 
 
-def _compact_and_read_again(agent_id: int) -> tuple[Call, Call]:
+def _compact_and_read_again(agent_id: int, *, database: Database) -> tuple[Call, Call]:
     """Run the compact scenario; return the model input before the compact and after it."""
     chat_and_wait(agent_id, "set up the project")
     before = _calls(2)[1]
-    enqueue_compact_history_fixture(agent_id)
+    enqueue_compact_history_fixture(agent_id, database=database)
     # The compaction costs two more model calls: the summary, then the post-compact narration.
     poll_until(
         lambda: (len(world.model_inputs()) == 4, len(world.model_inputs())),
@@ -338,8 +339,10 @@ def _compact_and_read_again(agent_id: int) -> tuple[Call, Call]:
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.ava_code:build_after_compact")
-def test_compaction_resurfaces_context_files(spawned_agent: int, seeded_world: None) -> None:
-    before, after = _compact_and_read_again(spawned_agent)
+def test_compaction_resurfaces_context_files(
+    spawned_agent: int, seeded_world: None, database: Database
+) -> None:
+    before, after = _compact_and_read_again(spawned_agent, database=database)
     proj = world.project()
     expected = [
         f"Project AGENTS.md from {proj / 'AGENTS.md'}",
@@ -352,8 +355,10 @@ def test_compaction_resurfaces_context_files(spawned_agent: int, seeded_world: N
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.ava_code:build_after_compact")
-def test_compaction_resurfaces_project_skills(spawned_agent: int, seeded_world: None) -> None:
-    before, after = _compact_and_read_again(spawned_agent)
+def test_compaction_resurfaces_project_skills(
+    spawned_agent: int, seeded_world: None, database: Database
+) -> None:
+    before, after = _compact_and_read_again(spawned_agent, database=database)
     assert len(_notes(before, "project_skills")) == 1
     assert len(_notes(after, "project_skills")) == 1, (
         f"project skills not re-injected after compact; notes: "

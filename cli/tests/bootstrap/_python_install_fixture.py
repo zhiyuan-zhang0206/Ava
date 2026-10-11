@@ -50,7 +50,11 @@ class PythonMirror:
         )
 
     def inspect(self) -> InstalledState:
-        python = self.repo / ".venv" / "bin" / "python"
+        python = (
+            self.repo
+            / ".venv"
+            / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+        )
         result = subprocess.run(  # noqa: S603 — fixed commands against disposable test inputs
             [
                 str(python),

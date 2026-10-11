@@ -18,10 +18,14 @@ import numpy as np
 import pytest
 from pydantic import SecretStr
 
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import ConfigBoot
 from base.daemon.health import Liveness
+from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from services.derived.memory_indexer import chunking, daemon
 from services.derived.memory_indexer.backends.base import content_hash
+from services.derived.memory_indexer.checkout_refresh import refresh_gateway_checkout
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.tests.store_backend import StoreBackend
 from services.derived.memory_indexer.tests.test_memory_indexer import (
@@ -42,6 +46,7 @@ from services.derived.memory_indexer.tests.test_memory_indexer import (
 from services.derived.memory_indexer.tests.test_memory_indexer import (
     store_backend as store_backend,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
@@ -51,7 +56,9 @@ def owned_config_environment() -> Iterator[None]:
         with patch.dict(os.environ):
             yield
     finally:
-        time.tzset()
+        tzset = getattr(time, "tzset", None)
+        if tzset is not None:
+            tzset()
 
 
 def test_reconcile_embed_error_truncates_and_returns_false(
@@ -59,6 +66,8 @@ def test_reconcile_embed_error_truncates_and_returns_false(
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
     caplog: pytest.LogCaptureFixture,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Error semantics preserved from the pre-chunking reconcile (one
     try/except): an EmbeddingAPIError skips the remaining chunks and is logged
@@ -68,13 +77,23 @@ def test_reconcile_embed_error_truncates_and_returns_false(
     root.mkdir()
     for i in range(6):
         (root / f"note-{i}.md").write_text(f"content {i}")
-    monkeypatch.setattr(daemon, "_memory_root", lambda: root)
+
+    def memory_root_for_roles(*, roles: MachineRoles) -> Path:
+        assert roles == machine_identity.role()
+        return root
+
+    monkeypatch.setattr(daemon, "_memory_root", memory_root_for_roles)
     monkeypatch.setattr(daemon, "_RECONCILE_CHUNK_PATHS", 2)  # 6 files -> 3 chunks
 
     calls: list[int] = []
 
     def failing_process_paths(
-        backend: Any, paths: set[Path], provider: Any, liveness: Liveness
+        backend: Any,
+        paths: set[Path],
+        provider: Any,
+        liveness: Liveness,
+        *,
+        machine: MachineIdentity,
     ) -> None:
         calls.append(len(paths))
         raise EmbeddingAPIError("embed boom")
@@ -83,7 +102,10 @@ def test_reconcile_embed_error_truncates_and_returns_false(
 
     liveness = Liveness(600.0)
     with caplog.at_level(logging.ERROR, logger="services.derived.memory_indexer.daemon"):
-        assert daemon._reconcile(store_backend, _FakeProvider(), liveness) is False
+        assert (
+            daemon._reconcile(store_backend, _FakeProvider(), liveness, machine=machine_identity)
+            is False
+        )
 
     assert calls == [2]  # first chunk failed -> remaining chunks never ran (as before)
     expected = (
@@ -95,7 +117,11 @@ def test_reconcile_embed_error_truncates_and_returns_false(
 
 
 def test_refresh_gateway_checkout_fast_forwards(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Safety net: pulls origin/main into the gateway checkout and logs
     loudly when HEAD moved (a post-merge refresh was missed)."""
@@ -111,31 +137,49 @@ def test_refresh_gateway_checkout_fast_forwards(
 
     from base.deploy.git import memory_repo
 
-    monkeypatch.setattr(memory_repo, "gateway_memory_dir", lambda: tmp_path)
-    monkeypatch.setattr(memory_repo, "pull_main", lambda: "abc1234")
+    def memory_root_for_roles(*, roles: MachineRoles) -> Path:
+        assert roles == machine_identity.role()
+        return tmp_path
+
+    monkeypatch.setattr(memory_repo, "gateway_memory_dir", memory_root_for_roles)
+
+    def pulled(*, machine: MachineIdentity) -> str:
+        assert machine is machine_identity
+        return "abc1234"
+
+    monkeypatch.setattr(memory_repo, "pull_main", pulled)
 
     with caplog.at_level(logging.INFO, logger="services.derived.memory_indexer.daemon"):
-        daemon._refresh_gateway_checkout()
+        refresh_gateway_checkout(machine=machine_identity)
     assert "fast-forwarded" in caplog.text
     assert before != "abc1234"
 
 
 def test_refresh_gateway_checkout_failure_logs_and_does_not_raise(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A failed pull is logged at ERROR and never raised — the drain loop
     retries next cycle instead of letting the daemon die."""
     from base.deploy.git import memory_repo
 
-    monkeypatch.setattr(memory_repo, "gateway_memory_dir", lambda: tmp_path)
+    def memory_root_for_roles(*, roles: MachineRoles) -> Path:
+        assert roles == machine_identity.role()
+        return tmp_path
 
-    def _boom() -> str:
+    monkeypatch.setattr(memory_repo, "gateway_memory_dir", memory_root_for_roles)
+
+    def _boom(*, machine: MachineIdentity) -> str:
+        assert machine is machine_identity
         raise RuntimeError("network down")
 
     monkeypatch.setattr(memory_repo, "pull_main", _boom)
 
     with caplog.at_level(logging.ERROR, logger="services.derived.memory_indexer.daemon"):
-        daemon._refresh_gateway_checkout()  # must not raise
+        refresh_gateway_checkout(machine=machine_identity)  # must not raise
     assert "refresh failed" in caplog.text
 
 
@@ -214,6 +258,8 @@ def test_process_paths_indexes_desc_and_body_chunks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """One file with a description + a long body lands as 1 desc row + N body
     chunks; all_meta still reports the file once."""
@@ -229,6 +275,7 @@ def test_process_paths_indexes_desc_and_body_chunks(
         {f.resolve()},
         _FakeProvider(),
         Liveness(_liveness_timeout()),
+        machine=machine_identity,
     )
     assert str(f.resolve()) in store_backend.all_meta()
     kinds = sorted(store_backend.rows(f))
@@ -239,6 +286,8 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Issue #1946: after a file shrinks, the rows it no longer produces
     (old body tail) are gone — every remaining chunk matches current content."""
@@ -250,6 +299,7 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
         {f.resolve()},
         _FakeProvider(),
         Liveness(_liveness_timeout()),
+        machine=machine_identity,
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0), ("body", 1), ("body", 2)}
 
@@ -259,6 +309,7 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
         {f.resolve()},
         _FakeProvider(),
         Liveness(_liveness_timeout()),
+        machine=machine_identity,
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
     assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
@@ -268,6 +319,8 @@ def test_process_paths_removes_desc_row_when_description_deleted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A removed description removes its row; the body stays current."""
     f = tmp_path / "note.md"
@@ -278,6 +331,7 @@ def test_process_paths_removes_desc_row_when_description_deleted(
         {f.resolve()},
         _FakeProvider(),
         Liveness(_liveness_timeout()),
+        machine=machine_identity,
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
 
@@ -287,6 +341,7 @@ def test_process_paths_removes_desc_row_when_description_deleted(
         {f.resolve()},
         _FakeProvider(),
         Liveness(_liveness_timeout()),
+        machine=machine_identity,
     )
     assert store_backend.rows(f) == {("body", 0)}
     assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
@@ -296,6 +351,8 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """An emptied file leaves no rows behind (issue #1946)."""
     f = tmp_path / "note.md"
@@ -306,6 +363,7 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
         {f.resolve()},
         _FakeProvider(),
         Liveness(_liveness_timeout()),
+        machine=machine_identity,
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
 
@@ -315,14 +373,14 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
         {f.resolve()},
         _FakeProvider(),
         Liveness(_liveness_timeout()),
+        machine=machine_identity,
     )
     assert store_backend.rows(f) == set()
     assert backend.all_meta() == {}
 
 
 def test_process_paths_calls_upsert_many_once_across_embed_batches(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     class _RecordingBackend(StoreBackend):
         def __init__(self) -> None:
@@ -345,6 +403,7 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
         {first.resolve(), second.resolve()},
         _FakeProvider(),
         Liveness(_liveness_timeout()),
+        machine=machine_identity,
     )
 
     assert len(backend.calls) == 1
@@ -353,8 +412,7 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
 
 
 def test_partial_embedding_failure_keeps_old_rows_intact(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """A file whose embedding fails part way keeps its previous rows whole —
     all-old is the recoverable consistent state; the hash stays mismatching so
@@ -384,6 +442,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
         {note.resolve()},
         _FakeProvider(),
         Liveness(_liveness_timeout()),
+        machine=machine_identity,
     )
     old_meta = backend.all_meta()
 
@@ -395,6 +454,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
             {note.resolve()},
             _FailSecondBatchProvider(),
             Liveness(_liveness_timeout()),
+            machine=machine_identity,
         )
 
     # Nothing was written for the partially-embedded file; the old rows stand.
@@ -406,6 +466,8 @@ def test_complete_file_still_commits_when_another_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Files whose rows are ALL embedded commit even when a sibling file
     fails mid-embedding (issue #1946)."""
@@ -429,6 +491,7 @@ def test_complete_file_still_commits_when_another_fails(
             {complete.resolve(), partial.resolve()},
             _FailOnSecondFileProvider(),
             Liveness(_liveness_timeout()),
+            machine=machine_identity,
         )
 
     meta = backend.all_meta()
@@ -473,6 +536,8 @@ async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
     caplog: pytest.LogCaptureFixture,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     reconcile = Mock(wraps=daemon._reconcile)
     monkeypatch.setattr(daemon, "_reconcile", reconcile)
@@ -485,11 +550,18 @@ async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
     provider = _FlakyProvider(failures=3)
     liveness = Liveness(1.0)
     retry = daemon._ReconcileRetrySchedule(base_s=0.05, cap_s=0.1)
-    assert await asyncio.to_thread(daemon._reconcile, backend, provider, liveness) is False
+    assert (
+        await asyncio.to_thread(
+            daemon._reconcile, backend, provider, liveness, machine=machine_identity
+        )
+        is False
+    )
     retry.record_incomplete()
     with caplog.at_level(logging.INFO, logger="services.derived.memory_indexer.daemon"):
         task = asyncio.create_task(
-            daemon._drain_loop(backend, queue.Queue(), liveness, provider, retry)
+            daemon._drain_loop(
+                backend, queue.Queue(), liveness, provider, retry, machine=machine_identity
+            )
         )
         try:
             async with asyncio.timeout(5.0):
@@ -507,6 +579,8 @@ async def test_reconcile_retry_drain_failure_arms_schedule(
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
     caplog: pytest.LogCaptureFixture,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     note = tmp_path / "changed.md"
     note.write_text("new content")
@@ -517,7 +591,9 @@ async def test_reconcile_retry_drain_failure_arms_schedule(
     dirty.put(note)
     liveness = Liveness(1.0)
     retry = daemon._ReconcileRetrySchedule(base_s=0.05, cap_s=0.1)
-    task = asyncio.create_task(daemon._drain_loop(backend, dirty, liveness, provider, retry))
+    task = asyncio.create_task(
+        daemon._drain_loop(backend, dirty, liveness, provider, retry, machine=machine_identity)
+    )
     try:
         async with asyncio.timeout(5.0):
             while not retry.pending:
@@ -539,17 +615,16 @@ async def test_reconcile_retry_drain_failure_arms_schedule(
 
 
 async def test_reconcile_retry_beats_between_failed_pass_and_batch(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     completed = {"reconcile": 0, "batch": 0}
 
-    def slow_reconcile(*args: Any) -> bool:
+    def slow_reconcile(*args: Any, machine: MachineIdentity) -> bool:
         time.sleep(0.4)
         completed["reconcile"] += 1
         return False
 
-    def slow_batch(*args: Any) -> None:
+    def slow_batch(*args: Any, machine: MachineIdentity) -> None:
         time.sleep(0.4)
         completed["batch"] += 1
         raise EmbeddingAPIError("429 Too Many Requests")
@@ -563,7 +638,11 @@ async def test_reconcile_retry_beats_between_failed_pass_and_batch(
     retry.record_incomplete()
     # Either operation fits below the ceiling, but their combined tails do not.
     liveness = Liveness(0.6)
-    task = asyncio.create_task(daemon._drain_loop(Mock(), dirty, liveness, _FakeProvider(), retry))
+    task = asyncio.create_task(
+        daemon._drain_loop(
+            Mock(), dirty, liveness, _FakeProvider(), retry, machine=machine_identity
+        )
+    )
     started = time.monotonic()
     try:
         while time.monotonic() - started < 1.3:
@@ -578,7 +657,11 @@ async def test_reconcile_retry_beats_between_failed_pass_and_batch(
 
 @pytest.mark.usefixtures("owned_config_environment")
 async def test_run_unknown_provider_fails_before_health_server(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    database: Database,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     start_health_server = AsyncMock()
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
@@ -588,7 +671,12 @@ async def test_run_unknown_provider_fails_before_health_server(
     monkeypatch.setattr(boot.view.services, "embedding_backend", "unknown-provider")
 
     with pytest.raises(SystemExit) as exc:
-        await daemon.run(config=boot)
+        await daemon.run(
+            config=boot,
+            database=lambda: database,
+            image=LoadedCommit(Path(), None),
+            machine=machine_identity,
+        )
 
     assert exc.value.code == 1
     assert "FATAL: unknown embedding provider 'unknown-provider'" in capsys.readouterr().err
@@ -599,6 +687,9 @@ async def test_run_unknown_provider_fails_before_health_server(
 async def test_run_arms_retry_when_startup_reconcile_incomplete(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    database: Database,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from services.derived.memory_indexer.backends.probe import ProbeResult
 
@@ -640,7 +731,12 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
     boot.set_field("gemini_api_key", SecretStr("root-key"))
 
     with caplog.at_level(logging.WARNING, logger="services.derived.memory_indexer.daemon"):
-        await daemon.run(config=boot)
+        await daemon.run(
+            config=boot,
+            database=lambda: database,
+            image=LoadedCommit(Path(), None),
+            machine=machine_identity,
+        )
 
     assert provider_inputs == [("gemini", 17.0, "root-key")]
     reconcile.assert_called_once()
@@ -656,7 +752,7 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
 
 
 async def test_reconcile_retry_wait_keeps_liveness_and_cancels_promptly(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
     # Wait far longer than the heartbeat ceiling while keeping the test bounded.
@@ -665,7 +761,9 @@ async def test_reconcile_retry_wait_keeps_liveness_and_cancels_promptly(
     liveness = Liveness(0.15)
     backend = Mock()
     task = asyncio.create_task(
-        daemon._drain_loop(backend, queue.Queue(), liveness, _FakeProvider(), retry)
+        daemon._drain_loop(
+            backend, queue.Queue(), liveness, _FakeProvider(), retry, machine=machine_identity
+        )
     )
     started = time.monotonic()
     try:

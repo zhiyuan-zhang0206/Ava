@@ -50,18 +50,19 @@ def check_quota(
     incoming_files: int,
     max_bytes: int,
     max_files: int,
+    *,
+    local_machine: str,
 ) -> None:
     """Count receiving objects once, including their not-yet-published bytes."""
     from base.agents.upload_delivery.models import UploadQuotaExceededError
     from base.agents.upload_delivery.storage import check_quota as native_check_quota
-    from base.cluster.machine import machine_name
 
     try:
         native_check_quota(
             conn,
             agent_id,
             directory,
-            machine_name(),
+            local_machine,
             incoming_bytes,
             incoming_files,
             max_bytes,
@@ -129,6 +130,7 @@ def _claim(
     deliver: bool,
     max_bytes: int,
     max_files: int,
+    local_machine: str,
 ) -> tuple[Any, ...]:
     with write_transaction(pool) as conn:
         lock_agent(conn, agent_id)
@@ -149,6 +151,7 @@ def _claim(
             len(batch),
             max_bytes,
             max_files,
+            local_machine=local_machine,
         )
         conn.execute(
             "INSERT INTO agent_upload_batches (operation_key, agent_id, request_fingerprint, manifest) "
@@ -205,6 +208,7 @@ def save_keyed_batch(
     deliver: bool,
     max_bytes: int,
     max_files: int,
+    local_machine: str,
 ) -> UploadedBatch:
     """Claim first, then publish and commit an immutable receipt in a second transaction."""
     fingerprint = _fingerprint(batch, names, deliver=deliver)
@@ -219,6 +223,7 @@ def save_keyed_batch(
         deliver=deliver,
         max_bytes=max_bytes,
         max_files=max_files,
+        local_machine=local_machine,
     )
     if claimed[2] is not None:
         return UploadedBatch.model_validate(claimed[2])

@@ -87,7 +87,7 @@ def parse_inheritable_blocks(text: str) -> list[str]:
     NOT swept to EOF), and a close without an open or a nested open is
     ignored. An empty (or blank) block declares nothing and is skipped.
     """
-    # CRLF files (an entry written in text mode elsewhere) must split
+    # CRLF files (a Windows runner writing entries in text mode) must split
     # like LF ones: the writer's frontmatter split keys on "---\n", and the
     # fence match on a bare line.
     text = text.replace("\r\n", "\n")
@@ -153,14 +153,13 @@ def _collect_blocks(
     is skipped silently, like an empty entry.
 
     Returns (blocks, remote_ancestors)."""
-    from base.cluster import machine as host_machine
     from base.cluster.machine import MachineNameMissing
 
     chain = _ancestor_chain(agent_id, ctx)
     if chain is None:
         return [], []
     try:
-        this_machine = host_machine.machine_name()
+        this_machine = ctx.require_machine().name()
     except MachineNameMissing:
         logger.warning("[inherited-memory] this host has no machine name — inheritance skipped")
         return [], []

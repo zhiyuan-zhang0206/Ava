@@ -10,7 +10,6 @@ from base.agents import (
     AgentNotFound,
     CrashRecoveryResult,
 )
-from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
@@ -54,7 +53,7 @@ class CrashRecoveryRequestFailure(StrEnum):
 
 
 def _recover_crash_marked_blocking(
-    db: Database, bus: EventBus, agent_id: int
+    db: Database, bus: EventBus, agent_id: int, *, local_machine: str
 ) -> RecoverCrashMarkedResponse:
     """Adjudicate one `recover-crash-marked-v2` harvest (task #3618).
 
@@ -126,7 +125,7 @@ def _recover_crash_marked_blocking(
                 status=CrashRecoveryResult.REFUSED,
                 reason=f"not_settled:runtime_kind={runtime_kind}",
             )
-        if machine != machine_name():
+        if machine != local_machine:
             return RecoverCrashMarkedResponse(
                 status=CrashRecoveryResult.REFUSED, reason="wrong_machine"
             )
@@ -136,8 +135,7 @@ def _recover_crash_marked_blocking(
             )
         conn.execute(
             "UPDATE agents_meta SET status = 'terminated', "
-            "termination_source = 'reaper', lease_expires_at = NULL, "
-            "runtime_protocol_version = 0 "
+            "termination_source = 'reaper', lease_expires_at = NULL "
             "WHERE id = %s AND status = 'idling' AND last_turn_fatal_at IS NOT NULL",
             (agent_id,),
         )

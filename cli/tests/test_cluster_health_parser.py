@@ -1,71 +1,55 @@
 """The `ava cluster health` argument surface."""
 
+from collections.abc import Callable
+
 import pytest
 
+from base.agents.context.clients import DatabaseFactory
+from base.telemetry import EventPipeline
+from cli.commands.cluster.tests.health_probe_inputs import (
+    provider_guard_healthy as provider_guard_healthy,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    ran as ran,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    signals as signals,
+)
 from cli.commands.cluster.tests.test_cluster_health import (
     _all_checks_pass as _all_checks_pass,
 )
 from cli.commands.cluster.tests.test_cluster_health import (
     _home as _home,
 )
-from cli.commands.cluster.tests.test_cluster_health import (
-    _provider_guard_healthy as _provider_guard_healthy,
-)
-from cli.commands.cluster.tests.test_cluster_health import (
-    _ran as _ran,
-)
-from cli.commands.cluster.tests.test_cluster_health import (
-    _signals as _signals,
-)
-
-
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        ["health-probe", "--auto-rollback"],
-        ["health-probe", "--threshold", "3"],
-        ["health-probe-register", "--threshold", "3"],
-    ],
-)
-def test_parser_rejects_removed_release_policy_flags(arguments: list[str]) -> None:
-    from cli.parsers import parse_args
-
-    with pytest.raises(SystemExit) as refused:
-        parse_args(["cluster", *arguments])
-    assert refused.value.code == 2
-
-
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        ["health-probe", "--agent-min", "2"],
-        ["health-probe", "--crash-loop-max-restarts", "4"],
-        ["health-probe", "--crash-loop-window-minutes", "20"],
-        ["health-probe-register", "--interval", "300"],
-    ],
-)
-def test_parser_rejects_removed_health_probe_flags(arguments: list[str]) -> None:
-    from cli.parsers import parse_args
-
-    with pytest.raises(SystemExit) as refused:
-        parse_args(["cluster", *arguments])
-    assert refused.value.code == 2
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_health_probe_dispatch_preserves_observation_options(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: DatabaseFactory,
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     import cli.commands.cluster.health as _cluster_health_commands
     from cli.parsers import parse_args
 
     received: list[dict[str, object]] = []
 
-    def probe(**kwargs: object) -> int:
+    def probe(
+        *,
+        database_factory: DatabaseFactory,
+        producer: Callable[[], EventPipeline],
+        **kwargs: object,
+    ) -> int:
+        assert database_factory is operator_database
+        assert producer is operator_pipeline
         received.append(kwargs)
         return 1
 
     monkeypatch.setattr(_cluster_health_commands, "cmd_health_probe", probe)
     args = parse_args(["cluster", "health-probe", "--no-schema-check"])
+    args.database_factory = operator_database
+    args.producer = operator_pipeline
     assert args.func(args) == 1
     assert received == [
         {

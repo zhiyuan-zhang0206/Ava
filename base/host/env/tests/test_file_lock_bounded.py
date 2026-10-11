@@ -2,7 +2,7 @@
 
 The property under test is *cross-process*, so the tests spawn real interpreters.
 An in-process test of a file lock proves almost nothing: `fcntl.flock` is advisory
-per open-file-description, so two takes inside one
+per open-file-description and `msvcrt.locking` per handle, so two takes inside one
 process can pass or fail for reasons that say nothing about two processes — which
 is the case the lock exists for (a CLI converge, the gateway's config PUT and the
 ops daemon all rewriting one `.env`).

@@ -116,8 +116,7 @@ async def reap_crash_corpses(
         rows = await (
             await conn.execute(
                 "UPDATE agents_meta SET status = 'terminated', "
-                "termination_source = 'reaper', lease_expires_at = NULL, "
-                "runtime_protocol_version = 0 "
+                "termination_source = 'reaper', lease_expires_at = NULL "
                 "WHERE machine = %s AND runtime_kind = 'hosted' AND status = 'idling' "
                 "AND last_turn_fatal_at IS NOT NULL "
                 "AND last_turn_fatal_at <= now() - make_interval(secs => %s) "
@@ -221,8 +220,7 @@ async def reap_recrashed_corpse(
         rows = await (
             await conn.execute(
                 "UPDATE agents_meta SET status = 'terminated', "
-                "termination_source = 'reaper', lease_expires_at = NULL, "
-                "runtime_protocol_version = 0 "
+                "termination_source = 'reaper', lease_expires_at = NULL "
                 "WHERE id = %s AND status = 'idling' AND runtime_kind = 'hosted' "
                 "AND last_turn_fatal_at IS NOT NULL "
                 "AND runtime_generation = %s AND runtime_owner = %s "

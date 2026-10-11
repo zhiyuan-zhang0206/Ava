@@ -10,8 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.cluster import machine, port_preflight
+from base.cluster import port_preflight
 from base.cluster.authority import POOLER_ADMIN
+from base.cluster.machine import MachineIdentity
 from base.paths import ava_home
 
 
@@ -51,7 +52,9 @@ def admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0.
         return False
 
 
-def pgbouncer_public_listener_reachable(listen_port: int, role: str, cluster_secret: str) -> bool:
+def pgbouncer_public_listener_reachable(
+    listen_port: int, role: str, cluster_secret: str, *, machine: MachineIdentity
+) -> bool:
     """True when the pooler listens on the address remote consumers actually dial.
 
     The loopback probe (`pgbouncer_listener_reachable`) proves "the pooler process
@@ -75,9 +78,9 @@ def pgbouncer_public_listener_reachable(listen_port: int, role: str, cluster_sec
     host or socket table. `role` remains in the stable probe signature shared by
     the healthcheck and bring-up callers; socket inspection needs no credential."""
     del role
-    if port_preflight.bind_addrs(cluster_secret) == ["127.0.0.1"]:
+    if port_preflight.bind_addrs(cluster_secret, machine=machine) == ["127.0.0.1"]:
         return True
-    reachable = machine.reachable_host()
+    reachable = machine.host()
     addrs = port_preflight.listener_addrs(listen_port)
     return bool(addrs & {reachable, "0.0.0.0", "::", "*"})  # noqa: S104 — matching OS wildcard binds, not opening one
 

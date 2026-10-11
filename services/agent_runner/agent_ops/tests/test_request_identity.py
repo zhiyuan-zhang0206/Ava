@@ -1,7 +1,7 @@
 """Immutable ops identity and crash-window protection on real database rows."""
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import LiteralString, cast
@@ -10,17 +10,22 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
+from base.db import Database
 from base.db import pool as db_pool
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.maintenance import WorkerFutures
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool]:
-    resource = db_pool(max_size=2)
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+    resource = db_pool(max_size=2, gate=database_gate)
     try:
         yield resource
     finally:
@@ -42,7 +47,11 @@ def dispatches(monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool) -> list[di
         executor: ThreadPoolExecutor,
         catalog: ModelCatalog,
         authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+        local_machine: MachineIdentity,
     ) -> tuple[OpStatus, dict[str, object]]:
+        del local_machine
         assert pool is dispatch_pool
         calls.append({"kind": kind, "payload": payload})
         return OpStatus.COMPLETED, {"accepted": True}
@@ -69,6 +78,10 @@ async def test_changed_kind_or_payload_fails_without_dispatch(
     payload: dict[str, object],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     await daemon._dispatch_idempotent_pass(
         "status_probe",
@@ -80,6 +93,9 @@ async def test_changed_kind_or_payload_fails_without_dispatch(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     status, result = await daemon._dispatch_idempotent_pass(
         kind,
@@ -91,6 +107,9 @@ async def test_changed_kind_or_payload_fails_without_dispatch(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert status is OpStatus.FAILED
     assert "identity conflict" in str(result["error"])
@@ -103,6 +122,10 @@ async def test_key_order_does_not_change_request_identity(
     dispatches: list[dict[str, object]],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     first = await daemon._dispatch_idempotent_pass(
         "status_probe",
@@ -114,6 +137,9 @@ async def test_key_order_does_not_change_request_identity(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     second = await daemon._dispatch_idempotent_pass(
         "status_probe",
@@ -125,6 +151,9 @@ async def test_key_order_does_not_change_request_identity(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert second == first
     assert len(dispatches) == 1
@@ -138,6 +167,10 @@ async def test_effect_then_exception_keeps_uncertain_claim(
     dispatches: list[dict[str, object]],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     async def crash(
         kind: str,
@@ -149,7 +182,11 @@ async def test_effect_then_exception_keeps_uncertain_claim(
         executor: ThreadPoolExecutor,
         catalog: ModelCatalog,
         authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+        local_machine: MachineIdentity,
     ) -> tuple[OpStatus, dict[str, object]]:
+        del local_machine
         with pool.connection() as conn:
             conn.execute("INSERT INTO agents (label) VALUES ('effect-before-crash')")
             conn.commit()
@@ -167,6 +204,9 @@ async def test_effect_then_exception_keeps_uncertain_claim(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
+            local_machine=machine_identity,
         )
     status, result = await daemon._dispatch_idempotent_pass(
         "lifecycle",
@@ -178,6 +218,9 @@ async def test_effect_then_exception_keeps_uncertain_claim(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert status is OpStatus.FAILED
     assert "outcome uncertain" in str(result["error"])
@@ -196,6 +239,10 @@ async def test_owner_cancellation_never_frees_its_key(
     dispatches: list[dict[str, object]],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     started = asyncio.Event()
     calls = 0
@@ -210,7 +257,11 @@ async def test_owner_cancellation_never_frees_its_key(
         executor: ThreadPoolExecutor,
         catalog: ModelCatalog,
         authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+        local_machine: MachineIdentity,
     ) -> tuple[OpStatus, dict[str, object]]:
+        del local_machine
         nonlocal calls
         calls += 1
         started.set()
@@ -229,6 +280,9 @@ async def test_owner_cancellation_never_frees_its_key(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
+            local_machine=machine_identity,
         )
     )
     await started.wait()
@@ -245,6 +299,9 @@ async def test_owner_cancellation_never_frees_its_key(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert status is OpStatus.FAILED
     assert "outcome uncertain" in str(result["error"])
@@ -258,6 +315,10 @@ async def test_old_ops_receipt_does_not_expire_into_fresh_execution(
     dispatches: list[dict[str, object]],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     first = await daemon._dispatch_idempotent_pass(
         "status_probe",
@@ -269,6 +330,9 @@ async def test_old_ops_receipt_does_not_expire_into_fresh_execution(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     db_conn.execute("UPDATE api_idempotency SET completed_at=now()-interval '8 days'")
     db_conn.commit()
@@ -282,6 +346,9 @@ async def test_old_ops_receipt_does_not_expire_into_fresh_execution(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert second == first
     assert len(dispatches) == 1
@@ -294,6 +361,10 @@ async def test_unknown_legacy_identity_fails_closed(
     dispatches: list[dict[str, object]],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     db_conn.execute(
         "INSERT INTO api_idempotency(key,method,path,op_status,response_body) "
@@ -310,6 +381,9 @@ async def test_unknown_legacy_identity_fails_closed(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert status is OpStatus.FAILED
     assert "legacy identity unavailable" in str(result["error"])
@@ -323,6 +397,10 @@ async def test_result_write_failure_keeps_claim_without_reexecuting(
     dispatches: list[dict[str, object]],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     db_conn.execute(
         "ALTER TABLE api_idempotency ADD CONSTRAINT reject_test_result "
@@ -341,6 +419,9 @@ async def test_result_write_failure_keeps_claim_without_reexecuting(
                 executor=op_executor,
                 catalog=model_catalog,
                 authority=config_authority,
+                database=ops_database,
+                image=ops_image,
+                local_machine=machine_identity,
             )
     finally:
         db_conn.execute("ALTER TABLE api_idempotency DROP CONSTRAINT reject_test_result")
@@ -355,6 +436,9 @@ async def test_result_write_failure_keeps_claim_without_reexecuting(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert status is OpStatus.FAILED
     assert "outcome uncertain" in str(result["error"])

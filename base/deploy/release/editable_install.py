@@ -52,15 +52,17 @@ class EditableInstallRepair:
 def editable_ava_pth_paths(source_root: Path) -> tuple[Path, ...]:
     """Existing Ava editable pointers under ``source_root/.venv``.
 
-    Virtualenvs use ``lib/pythonX.Y/site-packages`` (or ``lib64``). Scan those
-    layouts explicitly rather than deriving one from the running interpreter:
-    stale Python-version directories should be repaired together rather than
-    leaving a dormant poisoned pointer.
+    POSIX virtualenvs use ``lib/pythonX.Y/site-packages`` while Windows uses
+    ``Lib/site-packages``. Scan those layouts explicitly rather than deriving
+    one from the running platform: tests and WSL management can inspect a tree
+    laid out for a different host, and stale Python-version directories should
+    be repaired together rather than leaving a dormant poisoned pointer.
     """
 
     venv = source_root / ".venv"
     matches: set[Path] = set()
     for pattern in (
+        f"Lib/site-packages/{EDITABLE_PTH_NAME}",
         f"lib/python*/site-packages/{EDITABLE_PTH_NAME}",
         f"lib64/python*/site-packages/{EDITABLE_PTH_NAME}",
     ):
@@ -79,6 +81,7 @@ def editable_direct_url_paths(source_root: Path) -> tuple[Path, ...]:
     venv = source_root / ".venv"
     matches: set[Path] = set()
     for pattern in (
+        f"Lib/site-packages/{EDITABLE_DIST_INFO_GLOB}",
         f"lib/python*/site-packages/{EDITABLE_DIST_INFO_GLOB}",
         f"lib64/python*/site-packages/{EDITABLE_DIST_INFO_GLOB}",
     ):
@@ -137,6 +140,7 @@ def editable_site_packages_dirs(source_root: Path) -> tuple[Path, ...]:
     venv = source_root / ".venv"
     matches: set[Path] = set()
     for pattern in (
+        "Lib/site-packages",
         "lib/python*/site-packages",
         "lib64/python*/site-packages",
     ):
@@ -159,6 +163,7 @@ def editable_dist_info_dirs(source_root: Path) -> tuple[Path, ...]:
     venv = source_root / ".venv"
     matches: set[Path] = set()
     for pattern in (
+        "Lib/site-packages/ava-*.dist-info",
         "lib/python*/site-packages/ava-*.dist-info",
         "lib64/python*/site-packages/ava-*.dist-info",
     ):
@@ -172,9 +177,13 @@ def protected_editable_paths(source_root: Path) -> tuple[Path, ...]:
     Earlier converge protection passes left these read-only (``0o555``) on
     existing hosts. Discover bin even if a half-uninstall removed the launcher
     or records.
+    Windows keeps its legacy dist-info write adjustment, but skips POSIX
+    site-packages/bin protection; converge itself is a no-op there.
     """
 
     dist_infos = editable_dist_info_dirs(source_root)
+    if os.name == "nt":
+        return dist_infos
     bin_dir = source_root / ".venv" / "bin"
     return (
         *editable_site_packages_dirs(source_root),
@@ -184,7 +193,7 @@ def protected_editable_paths(source_root: Path) -> tuple[Path, ...]:
 
 
 def _normalized_exact_path(path: Path) -> str:
-    """Platform-native exact path identity."""
+    """Platform-native exact path identity, including Windows case folding."""
 
     return os.path.normcase(str(path.expanduser().resolve(strict=False)))
 
@@ -472,12 +481,13 @@ def editable_install_violations(
 
 
 def venv_python(source_root: Path) -> Path | None:
-    """First existing checkout virtualenv interpreter."""
+    """First existing checkout virtualenv interpreter across supported layouts."""
 
     venv = source_root / ".venv"
     for candidate in (
         venv / "bin" / "python3",
         venv / "bin" / "python",
+        venv / "Scripts" / "python.exe",
     ):
         if candidate.exists():
             return candidate
@@ -485,12 +495,13 @@ def venv_python(source_root: Path) -> Path | None:
 
 
 def editable_console_script_violations(source_root: Path) -> tuple[str, ...]:
-    """Report a missing Ava console script beside the virtualenv's interpreter."""
+    """Report a missing Ava console script for the virtualenv's own layout."""
 
     interpreter = venv_python(source_root)
     if interpreter is None:
         return ()
-    console_script = interpreter.with_name("ava")
+    script_name = "ava.exe" if interpreter.parent.name == "Scripts" else "ava"
+    console_script = interpreter.with_name(script_name)
     if console_script.exists():
         return ()
     return (f"{console_script} editable console script missing",)
@@ -583,7 +594,8 @@ def editable_import_gate(
 def current_interpreter_source_root() -> Path | None:
     """Return this interpreter's checkout root when it is under ``.venv``.
 
-    The supported layout is ``<root>/.venv/bin/python``. A system interpreter or shim carries
+    The supported layouts are ``<root>/.venv/bin/python`` and
+    ``<root>/.venv/Scripts/python.exe``. A system interpreter or shim carries
     no checkout authority, so callers deliberately treat it as a no-op.
     """
 
@@ -596,7 +608,7 @@ def current_interpreter_source_root() -> Path | None:
         source_root = interpreter.parents[2]
     except IndexError:
         return None
-    if venv.name != ".venv" or interpreter.parent.name != "bin":
+    if venv.name != ".venv" or interpreter.parent.name not in {"bin", "Scripts"}:
         return None
     return source_root.resolve(strict=False)
 

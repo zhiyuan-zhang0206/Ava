@@ -62,9 +62,17 @@ from mcp import ClientSession, types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.log import logger
-from base.paths import chrome_mcp_socket
+from base.log.process import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.paths import ava_home, chrome_mcp_socket
+from base.telemetry import build_pipeline
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.gateway_session import (
     GatewaySession,
@@ -686,11 +694,24 @@ def main() -> None:
     # per-daemon log file plus the event pipeline, so this daemon's expiry /
     # renewal events land attributed to `browser-mcp` and an uncaught
     # traceback is postmortem-able. Idempotent.
-    from base.log import init_gateway_process
-
+    image = LoadedCommit.capture()
     config = ConfigBoot()
     config.boot()
-    init_gateway_process(name="browser-mcp")
+    machine = machine_from_boot(config)
+    process_home = ava_home().resolve()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="browser-mcp")
+
+    def database() -> Database:
+        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
+
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    init_gateway_process(
+        name="browser-mcp",
+        producer=lambda: pipeline,
+        machine_reader=machine.name,
+        image=image,
+    )
     asyncio.run(
         run(
             browser_cdp_port=config.view.services.browser_cdp_port,
@@ -700,4 +721,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
     main()

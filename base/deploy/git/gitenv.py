@@ -12,12 +12,19 @@ forever are both pure liability:
   auth) + `ConnectTimeout=10` (bounded dial).
 
 Why `GIT_SSH_COMMAND` specifically, and not a config edit: it takes precedence
-over `core.sshCommand`, so a global `~/.gitconfig` that sets one cannot loosen
-the bound, and nobody's global config is edited.
+over `core.sshCommand`, and the fleet's Windows agent-runner carries a global
+`~/.gitconfig` with `core.sshCommand = "C:/Windows/System32/OpenSSH/ssh.exe"`
+(embedded quotes and all) left behind by a hand-run debug script during the
+Windows port. It is masked today only because the repo-local `.git/config`
+overrides it. Setting the env var neutralises that at the source without editing
+anyone's global config.
 
-`ConnectTimeout` is worth setting but is **not** the bound: an ssh can wedge
-locally *before* the connect that `ConnectTimeout` governs. The only real bound
-is the caller's: `base.host.proc.run_bounded`.
+`ConnectTimeout` is worth setting but is **not** the bound. On the Windows box,
+all 66 orphaned `ssh.exe` processes had zero TCP connections — they never dialed
+GitHub, so they were wedged locally *before* the connect that `ConnectTimeout`
+governs (a 4-day-old `ssh-keyscan.exe` sat in the same state despite a hard
+5-second internal timeout). The only real bound is the caller's:
+`base.host.proc.run_bounded`.
 """
 
 from __future__ import annotations

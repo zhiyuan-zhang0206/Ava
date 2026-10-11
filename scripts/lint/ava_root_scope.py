@@ -131,7 +131,10 @@ _MACOS_PATTERNS = (
 )
 
 # ── Group 3: other platform-mechanism names ─────────────────────────────────
-_OTHER_OS_PATTERNS = (r"\bsystemd\b",)
+_OTHER_OS_PATTERNS = (
+    r"\bsystemd\b",
+    r"\bschtasks\b",
+)
 
 _FORBIDDEN_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("permission-domain", _PERMISSION_PATTERNS),

@@ -89,17 +89,23 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
         dials.append(connection)
         return connection
 
-    def active(db: Database, lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+    def active(
+        db: Database, lease_id: str, attesting: dict[str, Any], *, local_machine: str
+    ) -> dict[str, Any]:
         with db.connect(autocommit=True):
             pass
-        return require(db, lease_id, attesting)
+        return require(db, lease_id, attesting, local_machine=local_machine)
 
-    def legacy_check() -> bool:
-        raise AssertionError("an attachment must not read the module-level check timestamp")
+    checked: list[code_version_gate.ProcessDbGate] = []
+    due = code_version_gate.ProcessDbGate.min_read_due
+
+    def owner_check(owner: code_version_gate.ProcessDbGate) -> bool:
+        checked.append(owner)
+        return due(owner)
 
     monkeypatch.setattr(connections.psycopg, "connect", dial)
     monkeypatch.setattr(code_version_gate.time, "monotonic", lambda: now[0])
-    monkeypatch.setattr(connections, "min_read_due", legacy_check)
+    monkeypatch.setattr(code_version_gate.ProcessDbGate, "min_read_due", owner_check)
     monkeypatch.setattr(external.control, "require_active", active)
     (tmp_path / ".env").write_text(
         "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/attachment\n"
@@ -115,6 +121,7 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
             for timestamp in (100.0, 101.0):
                 now[0] = timestamp
                 first_dial = len(dials)
+                first_check = len(checked)
                 with external.attach("lease"):
                     first_db = _settings.database()
                     second_db = _settings.database()
@@ -125,6 +132,8 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
                     live = dials[-1]
                     assert not live.closed
                     current = dials[first_dial:]
+                    own_checks = checked[first_check:]
+                    assert own_checks and all(owner is own_checks[0] for owner in own_checks)
                     assert (
                         sum(
                             "min_code_version" in sql
@@ -138,6 +147,7 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
                     thread for thread in threading.enumerate() if thread.name == "event-emitter"
                 } == writers_before
                 assert getattr(ava, "context", None) is None
+        assert len({id(owner) for owner in checked}) == 2
     finally:
         if prior is not None:
             ava.bind_context(prior)

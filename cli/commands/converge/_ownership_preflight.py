@@ -8,11 +8,14 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.host.system.backend import get_backend
 from cli.commands.converge.spec import ConvergeCtx
 
 
 def collect_ownership_warnings(ctx: ConvergeCtx) -> list[str]:
-    """Return non-user-owned key $AVA_HOME paths."""
+    """Return non-user-owned key $AVA_HOME paths, or nothing off POSIX."""
+    if not get_backend().is_posix():
+        return []
     current_uid = os.getuid()
     warnings: list[str] = []
     for path in _key_paths(ctx.ava_home):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -15,6 +16,8 @@ from cli.commands.data_plane.tests.test_pooler_stop import native_pooler as nati
 from services.supervision.ava_root.health import ProbeRunner
 from services.supervision.ava_root_glue import diagnostic_probes as probes
 from tests._containers import _free_port, redis_server
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="native POSIX data plane")
 
 
 async def test_native_redis_diagnostic_uses_authenticated_ping_without_acl_or_config_writes(

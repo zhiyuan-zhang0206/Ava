@@ -5,7 +5,8 @@ then ends with the CLI completion notice (`ava agents send ... --source
 watcher:N`); cron/at build a script then spawn.
 
 The `pty_service` fixture (tests/path_scoped/pty_service.py) runs a real
-pty-sessions service under the tmp test home."""
+pty-sessions service under the tmp test home; the session tests are
+POSIX-only (skip on Windows — the pty-sessions service is POSIX-only)."""
 
 from __future__ import annotations
 
@@ -23,9 +24,11 @@ import pytest
 import ava
 from ava import watcher
 from ava.shell import background
+from base.native_process.os_platform import is_windows
 from tests.path_scoped.pty_shells import wait_for
 
 pytestmark = [
+    pytest.mark.skipif(is_windows(), reason="PTY supervisor is POSIX-only"),
     # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); apply it
     # module-wide here since every watcher session test needs the fake-id +
     # pty cleanup isolation. `pty_service` first — the isolation fixture's

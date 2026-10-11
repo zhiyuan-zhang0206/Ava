@@ -1,19 +1,23 @@
 """The picker receives distinct services, prices and sourced TPS references."""
 
+from base.cluster.machine import MachineIdentity
 from gateway.app import app
 from gateway.schemas.models import ModelsResponse
 from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
-def get_models() -> ModelsResponse:
-    with gateway_test_client(app) as client:
+def get_models(*, local_machine: MachineIdentity) -> ModelsResponse:
+    with gateway_test_client(app, machine=local_machine) as client:
         response = client.get("/api/models")
     assert response.status_code == 200, response.text
     return ModelsResponse.model_validate(response.json())
 
 
-def test_fast_services_have_separate_picker_prices_and_tps() -> None:
-    catalog = get_models()
+def test_fast_services_have_separate_picker_prices_and_tps(
+    *, machine_identity: MachineIdentity
+) -> None:
+    catalog = get_models(local_machine=machine_identity)
     standard = catalog.models["gpt-5.6-sol"]
     fast = catalog.models["gpt-5.6-sol-fast"]
     assert standard.pricing is not None and fast.pricing is not None
@@ -30,16 +34,18 @@ def test_fast_services_have_separate_picker_prices_and_tps() -> None:
     assert wire["models"]["gpt-5.6-sol-fast"]["reference_tps"]["display"] == ">80"
 
 
-def test_picker_exposes_declared_fast_relationships() -> None:
-    catalog = get_models()
+def test_picker_exposes_declared_fast_relationships(*, machine_identity: MachineIdentity) -> None:
+    catalog = get_models(local_machine=machine_identity)
     assert catalog.models["gpt-5.6-sol-fast"].fast_of == "gpt-5.6-sol"
     assert catalog.models["gpt-5.6-sol"].fast_of is None
     # Xiaomi's native SKU does not use a speed switch or a served-speed receipt.
     assert catalog.models["mimo-v2.6-pro-ultraspeed"].fast_of is None
 
 
-def test_picker_exposes_served_service_cache_write_rates() -> None:
-    catalog = get_models()
+def test_picker_exposes_served_service_cache_write_rates(
+    *, machine_identity: MachineIdentity
+) -> None:
+    catalog = get_models(local_machine=machine_identity)
     standard = catalog.models["claude-opus-5-5"].pricing
     fast = catalog.models["claude-opus-5-5-fast"].pricing
     assert standard is not None and fast is not None

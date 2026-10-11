@@ -34,8 +34,6 @@ Overview of the Agent subsystem.
   - **resurrect** — bring a `terminated` agent back (history preserved), deliver a `kind='resurrect'` marker
     telling the model "you are resurrected" rather than continuing the previous context. Any new message to a
     terminated agent resurrects it the same way (there is no closed state).
-  - **respawn** — the durable restarter replaces the process and `respawn_agent` delivers
-    `kind='restart_completed'`; when restarted from idle, only commit the marker, no need to wake the model.
   - **fork** — new agent + inherit state of a checkpoint (including history), deliver `kind='fork'` identity marker
     correcting "who I am".
   - **terminate / force** — graceful exit (deliver `kind='terminate'`, graph goes to END, process exits naturally)

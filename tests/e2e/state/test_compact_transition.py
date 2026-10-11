@@ -13,6 +13,7 @@ import pytest
 from playwright.sync_api import Request
 
 from base.agents import AgentStatus
+from base.db import Database
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
 from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fakes.scenarios.compact_transition import (
@@ -93,8 +94,8 @@ def _send(env: E2EEnv, message: str, reply: str) -> None:
     wait_for_status(env.agent_id, AgentStatus.IDLING.value)
 
 
-def _compact(env: E2EEnv, narration: str) -> None:
-    enqueue_compact_history_fixture(env.agent_id)
+def _compact(env: E2EEnv, narration: str, *, database: Database) -> None:
+    enqueue_compact_history_fixture(env.agent_id, database=database)
     env.page.get_by_text(narration, exact=False).wait_for(timeout=45_000)
     wait_for_status(env.agent_id, AgentStatus.IDLING.value)
 
@@ -187,7 +188,9 @@ def _assert_retained_frames(
 
 @pytest.mark.parametrize("retention", [-1, 0], ids=["all", "zero"])
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.compact_transition:build")
-def test_two_compact_painted_history_transition(transition_env: E2EEnv, retention: int) -> None:
+def test_two_compact_painted_history_transition(
+    transition_env: E2EEnv, retention: int, database: Database
+) -> None:
     env = transition_env
     before_requests = _prepare_history_view(env, retention)
     _send(env, "first message", FIRST_REPLY)
@@ -195,14 +198,14 @@ def test_two_compact_painted_history_transition(transition_env: E2EEnv, retentio
     env.page.evaluate(_FRAMES_JS)
     first_position = _place_nonsticky_reply(env, retention, FIRST_REPLY)
     env.page.evaluate("window.__compactTransitionFrames.phase = 'first'")
-    _compact(env, FIRST_NARRATION)
+    _compact(env, FIRST_NARRATION, database=database)
     _assert_settled_anchor(env, retention, "1,0", FIRST_REPLY, first_position)
     env.page.evaluate("window.__compactTransitionFrames.phase = 'between'")
     _send(env, "between message", BETWEEN_REPLY)
     _send(env, "between tail message", BETWEEN_TAIL)
     between_position = _place_nonsticky_reply(env, retention, BETWEEN_REPLY)
     env.page.evaluate("window.__compactTransitionFrames.phase = 'second'")
-    _compact(env, SECOND_NARRATION)
+    _compact(env, SECOND_NARRATION, database=database)
     _assert_settled_anchor(env, retention, "2,1,0", BETWEEN_REPLY, between_position)
     frames: list[dict[str, Any]] = env.page.evaluate(
         "() => { const state = window.__compactTransitionFrames; state.active = false; return state.frames; }"

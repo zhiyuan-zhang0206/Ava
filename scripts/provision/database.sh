@@ -4,7 +4,7 @@
 # install-system.sh and evaluation images. Linux: PGDG pg17 + redis-server;
 # macOS: brew. Gateway data-plane processes run on POSIX hosts.
 #
-# Without sudo: a Linux host that already carries the whole data plane
+# WSL without sudo: a Linux host that already carries the whole data plane
 # (pg17 binaries under /usr/lib/postgresql/17/bin, redis-server, pgbouncer)
 # skips apt entirely — the keyring/apt-sources writes need root, and the
 # runtime provisions its own per-cluster instance under $AVA_HOME/pg from a
@@ -80,6 +80,13 @@ case "$OS" in
     # (cli/commands/data_plane/cluster_instance.py) and drives pg via pg_ctl, not brew
     # services.
     brew install postgresql@17 redis@8.2 pgbouncer pgvector
+    ;;
+  windows)
+    # A native Windows unit carries agent-runner only and owns no data plane; a
+    # gateway on Windows hardware runs inside WSL2, where the linux branch
+    # applies (docs/conventions/operations/windows-setup.md).
+    prov_log "Windows: no local data plane; run a gateway inside WSL2 through the Linux path"
+    exit 0
     ;;
 esac
 prov_log "postgres 17 + redis + pgbouncer installed"

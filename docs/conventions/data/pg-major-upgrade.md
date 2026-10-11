@@ -16,7 +16,7 @@ expanded — a new tree beside the old, never an in-place swap):
   artifact pins, and the pgvector artifact pins;
 - `base/cluster/dataplane/pg_runtime.py` — the installed-runtime acceptance
   (`_require_pg17`) must admit 18 while 17 still runs;
-- `base/cluster/dataplane/pg_tools.py` — `PG_BIN_LINUX`;
+- `base/cluster/dataplane/pg_tools.py` — `PG_BIN_LINUX` / `PG_BIN_WINDOWS`;
 - `base/host/system/backend.py` — the Homebrew keg name
   (`brew_prefix("postgresql@17")`);
 - `base/host/brew_pin.py` — the approved pin list; and

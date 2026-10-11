@@ -22,8 +22,10 @@ from pathlib import Path
 import pytest
 
 import base.packages.plugins.enable_config as pc
+from base.cluster.machine import MachineIdentity
 from ops import roster, spec
 from ops.roster import service_spec
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_fleet_plugin_registers_task_maintenance() -> None:
@@ -74,7 +76,9 @@ def test_discovery_ignores_agent_enable_state(monkeypatch: pytest.MonkeyPatch) -
     assert "task-maintenance" in names
 
 
-def test_plugin_gate_flows_through_annotation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_plugin_gate_flows_through_annotation(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """The plugin service's own gate is honored by ops: disabling task-maintenance
     drops it from the start roster but keeps it (with a reason) in the annotated
     view — same contract as the core config-gated services."""
@@ -84,10 +88,16 @@ def test_plugin_gate_flows_through_annotation(monkeypatch: pytest.MonkeyPatch) -
     image = disk_image_path("ava_fleet")
     image.parent.mkdir(parents=True, exist_ok=True)
     image.write_text(FleetConfig(task_maintenance_enabled=False).model_dump_json())
-    start = {s.session for s in spec.services_for_capabilities(frozenset({"gateway"}))}
+    start = {
+        s.session
+        for s in spec.services_for_capabilities(frozenset({"gateway"}), machine=machine_identity)
+    }
     assert "task-maintenance" not in start
     annotated = {
-        s.session: r for s, r in spec.services_for_capabilities_annotated(frozenset({"gateway"}))
+        s.session: r
+        for s, r in spec.services_for_capabilities_annotated(
+            frozenset({"gateway"}), machine=machine_identity
+        )
     }
     assert annotated["task-maintenance"] and "disabled" in annotated["task-maintenance"]
 
@@ -254,7 +264,10 @@ def test_absent_optional_service_face_does_not_fail_discovery(
 
 @pytest.mark.parametrize("diagnostic", [False, True])
 def test_failed_gate_never_produces_a_start_or_status_roster(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict], diagnostic: bool
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict],
+    diagnostic: bool,
+    machine_identity: MachineIdentity,
 ) -> None:
     def broken_gate() -> str | None:
         raise RuntimeError("broken gate")
@@ -271,7 +284,7 @@ def test_failed_gate_never_produces_a_start_or_status_roster(
         spec.services_for_capabilities_annotated if diagnostic else spec.services_for_capabilities
     )
     with pytest.raises(RuntimeError, match="broken gate"):
-        read(frozenset({"gateway"}))
+        read(frozenset({"gateway"}), machine=machine_identity)
     assert any("roster evaluation aborted" in r["message"] for r in loguru_records)
 
 

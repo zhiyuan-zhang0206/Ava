@@ -119,7 +119,7 @@ def test_ensure_browser_deps_does_not_install_node_for_missing_display(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Display and Chrome are host properties, so only a missing npx triggers repair."""
-    reason = "no display (headless server)"
+    reason = "no display (WSL without WSLg / headless server)"
     monkeypatch.setattr(browser_deps, "browser_deps_incapability", lambda: reason)
     monkeypatch.setattr(
         browser_deps,
@@ -145,7 +145,7 @@ def test_browser_deps_warning_explains_that_a_missing_display_needs_no_install(
 ) -> None:
     """A display-less host must not receive a Node repair instruction."""
     monkeypatch.setattr(browser_deps, "node_install_command", lambda: "install-node-here")
-    warning = browser_deps.browser_deps_warning("no display (headless server)")
+    warning = browser_deps.browser_deps_warning("no display (WSL without WSLg / headless server)")
     assert "install-node-here" not in warning
     assert "nothing to" in warning
     assert "install for ava-browser" in warning
@@ -164,7 +164,7 @@ def test_browser_deps_warning_explains_how_to_repair_missing_chrome(
 
 def test_browser_deps_notice_marks_a_displayless_host_not_applicable() -> None:
     """Fresh enrollment names the deliberate browser skip instead of a repair alarm."""
-    reason = "no display (headless server)"
+    reason = "no display (WSL without WSLg / headless server)"
     assert hasattr(browser_deps, "browser_deps_notice")
     notice = browser_deps.browser_deps_notice(reason)
     assert "not applicable" in notice

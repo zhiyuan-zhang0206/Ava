@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,8 +28,12 @@ from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP
 from base.cluster.dataplane.pg_throwaway_base import format_bytes, select_throwaway_base
 from base.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
 from base.log import logger
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry.emitter import process_name
 from services.backup import dump as backup
 
 
@@ -100,7 +105,7 @@ def _restore_failure_message(proc: subprocess.CompletedProcess[bytes], base: Pat
     """The pg_restore failure with the capacity context an operator needs.
 
     A scratch restore that outgrows its base dies server-side mid-COPY, so the
-    client-side failure carries no diagnosis of its own: the 2026-09-14 run
+    client-side failure carries no diagnosis of its own: the 2026-09-14 WSL run
     surfaced only `pg_restore exited 1` while the postmaster had been killed by
     the full tmpfs (dmesg signal 6; PQputCopyData: server closed the connection).
     Naming the base and its free space makes the next occurrence diagnosable from
@@ -115,7 +120,9 @@ def _restore_failure_message(proc: subprocess.CompletedProcess[bytes], base: Pat
     return f"{hint}\npg_restore stderr tail:\n{stderr_tail}" if stderr_tail else hint
 
 
-def verify_restored_database(db_url: str) -> RestoreReport:
+def verify_restored_database(
+    db_url: str, *, database_for_url: Callable[[str], Database]
+) -> RestoreReport:
     """Verify schema, table counts, and a readable checkpoint conversation.
 
     The sample thread is the time-newest one (`checkpoint->>'ts'`): ordering
@@ -145,7 +152,7 @@ def verify_restored_database(db_url: str) -> RestoreReport:
         raise RuntimeError("restored checkpoints contain no readable agent conversation")
 
     sample_agent_id = int(sample[0])
-    restored = Database(dataclasses.replace(db_config_from_settings(), db_url=db_url))
+    restored = database_for_url(db_url)
     messages = checkpoint_reader.load_checkpoint_messages_full(restored, sample_agent_id)
     if not messages:
         raise RuntimeError("restored checkpoint conversation has no messages")
@@ -168,7 +175,7 @@ _SCRATCH_SPACE_FACTOR = 3.0
 """Scratch space the drill reserves on the base holding the restored copy, as a
 multiple of the (decrypted) dump's size. A floor for picking the base, not a size
 prediction: the restore holds the dump's content decompressed, and in-dump zstd
-ratios vary with content mix. Measured on the daily drill: 2026-09-14 restored
+ratios vary with content mix. Measured on the WSL daily drill: 2026-09-14 restored
 >=17 GiB from a 10.16 GiB artifact (~1.7x); 2026-09-19 restored ~8 GiB from a
 ~3.0 GiB artifact (>=2.7x at 60s sampling — it outgrew the 7.8 GiB tmpfs that 2x
 had cleared, task #4033). 3x keeps margin above the observed maximum while
@@ -185,6 +192,7 @@ def _scratch_space_requirement(raw_dump: Path) -> int:
 def run_drill(
     artifact: Path | None = None,
     *,
+    database_for_url: Callable[[str], Database],
     foreground: bool = False,
     scratch_root: Path | None = None,
     legacy_empty_secret: bool = False,
@@ -217,7 +225,7 @@ def run_drill(
         with throwaway_postgres(base=base, foreground=foreground) as scratch_db_url:
             _ensure_restore_roles(scratch_db_url)
             _restore(raw_dump, scratch_db_url, base=base)
-            report = verify_restored_database(scratch_db_url)
+            report = verify_restored_database(scratch_db_url, database_for_url=database_for_url)
     return report, time.monotonic() - started
 
 
@@ -233,8 +241,17 @@ def main(argv: list[str] | None = None) -> None:
         ),
     )
     args = parser.parse_args(argv)
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process=process_name())
+
+    def database_for_url(url: str) -> Database:
+        return Database(dataclasses.replace(db_config_from_settings(), db_url=url), gate=gate)
+
     report, elapsed = run_drill(
-        args.artifact, legacy_empty_secret=args.legacy_empty_secret_passphrase
+        args.artifact,
+        database_for_url=database_for_url,
+        legacy_empty_secret=args.legacy_empty_secret_passphrase,
     )
     print(
         "restore drill passed: "

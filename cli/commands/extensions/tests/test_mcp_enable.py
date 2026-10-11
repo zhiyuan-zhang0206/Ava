@@ -86,7 +86,7 @@ def test_disable_preserves_invalid_requirements_as_a_close_operation(unit_home: 
     assert json.loads((unit_home / "mcp.json").read_text())["mcpServers"]["foo"] == spec
 
 
-@pytest.mark.parametrize("requires", [None, {}, {"display": True}])
+@pytest.mark.parametrize("requires", [None, {}, {"display": True, "unix_socket": True}])
 def test_enable_and_list_validate_declarations_without_host_probes(
     unit_home: Path, requires: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -97,6 +97,7 @@ def test_enable_and_list_validate_declarations_without_host_probes(
         pytest.fail("CLI declaration validation must not probe host capabilities")
 
     monkeypatch.setattr(cfg_mod, "display_available", unexpected_probe)
+    monkeypatch.setattr(cfg_mod, "unix_sockets_available", unexpected_probe)
     spec = json.dumps({"command": "server-foo", "requires": requires})
     assert cmd_mcp_add("foo", spec, None, [], []) == 0
     assert cmd_mcp_enable("foo") == 0

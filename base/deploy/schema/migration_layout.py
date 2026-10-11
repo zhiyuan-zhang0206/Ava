@@ -9,6 +9,7 @@ from pathlib import Path
 
 from base.deploy.schema.migration_errors import MigrationLayoutError
 from base.log import logger
+from base.native_process.os_platform import CREATE_NO_WINDOW
 
 # The squashed baseline: one sentinel row that stands in for the entire history
 # folded into db/schema.sql. Always a member of `required_migration_set()`. The
@@ -28,10 +29,10 @@ def _migrations_dir() -> Path:
 
 
 def _git_probe(args: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    """Read-only git probe: capture output, never raise.
+    """Read-only git probe: capture output, never raise, never flash a console.
 
     The three call sites share this shape (argv is repo-internal literals + a
-    resolved ref).
+    resolved ref); carries CREATE_NO_WINDOW so a Windows runner stays quiet.
     """
     return subprocess.run(  # noqa: S603
         ["git", *args],
@@ -39,6 +40,7 @@ def _git_probe(args: list[str], *, cwd: Path | None = None) -> subprocess.Comple
         capture_output=True,
         text=True,
         check=False,
+        creationflags=CREATE_NO_WINDOW,
     )
 
 

@@ -8,7 +8,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
@@ -27,12 +27,13 @@ def test_maintenance_parks_a_never_admitted_birth_without_consuming_its_marker(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent, _, _, _ = create_agent_row(
         database,
         event_bus,
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         authority=config_authority,
         catalog=model_catalog,
     )
@@ -42,7 +43,7 @@ def test_maintenance_parks_a_never_admitted_birth_without_consuming_its_marker(
     db_conn.commit()
     pause_owner.begin_maintenance("move", WHEN)
     hold = cohort.prepare(
-        db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
+        db_conn, machine=machine_identity.name(), host_owner=None, holder="move", acquired_at=WHEN
     )
     assert hold.parked == (agent,) and hold.commands == {}
     cohort.verify_drained(db_conn, hold)
@@ -50,15 +51,23 @@ def test_maintenance_parks_a_never_admitted_birth_without_consuming_its_marker(
 
 
 async def test_admission_waiting_on_real_row_lock_cannot_escape_published_hold(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any], database: Database
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn)
+    agent = _agent(db_conn, machine_name=machine_identity.name())
     # This is a real PostgreSQL lock wait, not a mocked held() return.
     async with aops_pool.connection() as blocker, blocker.transaction():
         await blocker.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent,))
         attempt = asyncio.create_task(
             admit_hosted_runtime(
-                aops_pool, agent, machine_name(), uuid4(), expected_from="idling", db=database
+                aops_pool,
+                agent,
+                machine_identity.name(),
+                uuid4(),
+                expected_from="idling",
+                db=database,
             )
         )
         try:
@@ -88,10 +97,11 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
     event_bus: EventBus,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent, owner = _agent(db_conn), uuid4()
+    agent, owner = _agent(db_conn, machine_name=machine_identity.name()), uuid4()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent, machine_name(), owner, expected_from="idling", db=database
+        aops_pool, agent, machine_identity.name(), owner, expected_from="idling", db=database
     )
     assert incarnation is not None
     assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
@@ -101,7 +111,7 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
     pause_owner.begin_maintenance("move", WHEN)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=owner,
         holder="move",
         acquired_at=WHEN,
@@ -110,7 +120,7 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
     assert (
         cohort.prepare(
             db_conn,
-            machine=machine_name(),
+            machine=machine_identity.name(),
             host_owner=owner,
             holder="move",
             acquired_at=WHEN,
@@ -119,7 +129,7 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent, machine_name(), uuid4(), expected_from="idling", db=database
+            aops_pool, agent, machine_identity.name(), uuid4(), expected_from="idling", db=database
         )
         is None
     )

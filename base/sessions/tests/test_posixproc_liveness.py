@@ -13,6 +13,7 @@ import time
 import psutil
 import pytest
 
+from base.native_process.os_platform import is_windows
 from base.sessions import posixproc
 
 
@@ -69,6 +70,7 @@ def test_unknown_group_has_no_observed_live_member(pgid: int | None) -> None:
     assert posixproc.process_group_has_live_members(pgid) is False
 
 
+@pytest.mark.skipif(is_windows(), reason="process groups require POSIX")
 def test_group_observation_of_live_then_unreaped_child() -> None:
     """An exited leader awaiting reap is not a live group member."""
     with subprocess.Popen(

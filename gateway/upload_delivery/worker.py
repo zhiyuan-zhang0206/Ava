@@ -20,6 +20,7 @@ from base.agents.upload_delivery.models import (
     UploadDeliveryConflictError,
 )
 from base.agents.upload_delivery.paths import agent_upload_dir
+from base.cluster.machine import MachineIdentity
 from base.db import Database, publish_inbound_wake
 from base.deploy.maintenance.admission import business_paused, quiesced
 from base.events.live.bus import EventBus
@@ -33,15 +34,18 @@ _log = logging.getLogger(__name__)
 class UploadRecovery:
     """A source domain round and its actual native futures; never time-based leases."""
 
-    def __init__(self, pool: ConnectionPool, db: Database, bus: EventBus) -> None:
+    def __init__(
+        self, pool: ConnectionPool, db: Database, bus: EventBus, *, machine: MachineIdentity
+    ) -> None:
         self.pool, self.db, self.bus = pool, db, bus
+        self.machine = machine
         self.stopped = asyncio.Event()
         self.wake_after = ""
         self.calls: set[asyncio.Future[Any]] = set()
         self.task: asyncio.Task[None] | None = None
 
-    async def native(self, call: Callable[..., Any], *args: Any) -> Any:
-        task = asyncio.get_running_loop().run_in_executor(None, partial(call, *args))
+    async def native(self, call: Callable[..., Any], *args: Any, **kwargs: object) -> Any:
+        task = asyncio.get_running_loop().run_in_executor(None, partial(call, *args, **kwargs))
         self.calls.add(task)
         task.add_done_callback(self.finished_call)
         # Cancellation does not stop a DB/filesystem thread. Retain it until the
@@ -90,11 +94,13 @@ class UploadRecovery:
                 await asyncio.wait_for(self.stopped.wait(), timeout=5.0)
 
     async def round(self) -> None:
-        requests = await self.native(source.due, self.pool, 4)
+        requests = await self.native(source.due, self.pool, 4, local_machine=self.machine.name())
         async with asyncio.TaskGroup() as group:
             for request in requests:
                 group.create_task(self.copy(request))
-        pending = await self.native(source.pending_wakes, self.pool, self.wake_after)
+        pending = await self.native(
+            source.pending_wakes, self.pool, self.wake_after, local_machine=self.machine.name()
+        )
         for batch_id, agent_id, inbound_id in pending:
             if (
                 self.stopped.is_set()
@@ -113,6 +119,7 @@ class UploadRecovery:
                     agent_id,
                     trigger_inbound_id=inbound_id,
                     trigger_inbound_kind=InboundKind.CHAT,
+                    local_machine=self.machine.name(),
                 )
             except Exception:
                 _log.warning(

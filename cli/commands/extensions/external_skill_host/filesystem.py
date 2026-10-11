@@ -16,6 +16,25 @@ from typing import Any
 _MARKER_NAME = ".ava-managed.json"
 
 
+def is_posix() -> bool:
+    return os.name != "nt"
+
+
+def _platform_mode(mode: int, *, is_dir: bool) -> int:
+    """Normalize a filesystem mode for cross-platform manifest comparison.
+
+    NTFS does not store POSIX permission bits; lstat reports synthetic modes
+    (0o666 writable files / 0o777 writable dirs) that never match the mode
+    requested at creation.  The bridge's manifest mode field is a POSIX
+    security-audit signal, so on non-POSIX platforms it is normalized to the
+    pipeline's canonical private modes (0o600 / 0o700).  POSIX is authoritative
+    and passed through unchanged.
+    """
+    if is_posix():
+        return mode
+    return 0o700 if is_dir else 0o600
+
+
 class SourceIntegrityError(RuntimeError):
     """The repository source cannot safely be copied."""
 
@@ -104,8 +123,10 @@ def _signature(current: os.stat_result) -> tuple[int, int, int, int, int, int, i
 
 def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
     """Compare only the identity fields shared by pathname and handle stats."""
-    # Compare the pathname and handle stat families only on identity; each
-    # family gets its own full before/after stability check in read_regular.
+    # CPython 3.12's Windows pathname stat keeps legacy st_ctime = birthtime,
+    # while fstat reports the handle's metadata-change time.  Compare the two
+    # API families only on identity; each family gets its own full before/after
+    # stability check in read_regular.
     left_identity = (left.st_dev, left.st_ino)
     right_identity = (right.st_dev, right.st_ino)
     return left_identity != (0, 0) and left_identity == right_identity
@@ -137,7 +158,7 @@ def read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
     after = inspect(path)
     if _signature(after) != _signature(before) or not _same_identity(after, opened_after):
         raise error("operator skill tree changed while being read")
-    return data, stat.S_IMODE(before.st_mode)
+    return data, _platform_mode(stat.S_IMODE(before.st_mode), is_dir=False)
 
 
 def source_snapshot(root: Path) -> SourceSnapshot:
@@ -145,7 +166,9 @@ def source_snapshot(root: Path) -> SourceSnapshot:
     root_before = source_lstat(root)
     if not stat.S_ISDIR(root_before.st_mode):
         raise SourceIntegrityError("operator skill tree root is not a directory")
-    directories: list[tuple[str, int]] = [(".", stat.S_IMODE(root_before.st_mode))]
+    directories: list[tuple[str, int]] = [
+        (".", _platform_mode(stat.S_IMODE(root_before.st_mode), is_dir=True))
+    ]
     files: list[_SourceFile] = []
     source_stats: dict[str, os.stat_result] = {".": root_before}
 
@@ -166,7 +189,7 @@ def source_snapshot(root: Path) -> SourceSnapshot:
                 directories.append(
                     (
                         relative,
-                        stat.S_IMODE(current.st_mode),
+                        _platform_mode(stat.S_IMODE(current.st_mode), is_dir=True),
                     )
                 )
                 visit(child)
@@ -211,7 +234,7 @@ def tree_manifest(
     manifest: list[dict[str, Any]] = [
         {
             "kind": "directory",
-            "mode": stat.S_IMODE(root_before.st_mode),
+            "mode": _platform_mode(stat.S_IMODE(root_before.st_mode), is_dir=True),
             "path": ".",
         }
     ]
@@ -231,7 +254,7 @@ def tree_manifest(
                 manifest.append(
                     {
                         "kind": "directory",
-                        "mode": stat.S_IMODE(current.st_mode),
+                        "mode": _platform_mode(stat.S_IMODE(current.st_mode), is_dir=True),
                         "path": relative,
                     }
                 )
@@ -273,7 +296,7 @@ def _validate_manifest_subset(
         allowed_modes = {expected_mode, cleanup_mode}
         if item["kind"] == "directory":
             allowed_modes.add(stat.S_IRWXU)
-        if int(item["mode"]) not in allowed_modes:
+        if is_posix() and int(item["mode"]) not in allowed_modes:
             raise ClientConflictError("transaction residue metadata was modified")
         if item["kind"] == "file" and item["sha256"] != wanted["sha256"]:
             raise ClientConflictError("transaction residue content was modified")
@@ -281,7 +304,9 @@ def _validate_manifest_subset(
 
 def verify_cleanup_file(path: Path, expected: dict[str, Any]) -> None:
     data, mode = read_regular(path, source=False)
-    if hashlib.sha256(data).hexdigest() != expected["sha256"] or mode != int(expected["mode"]):
+    if hashlib.sha256(data).hexdigest() != expected["sha256"] or (
+        is_posix() and mode != int(expected["mode"])
+    ):
         raise ClientConflictError("transaction residue file changed during cleanup")
 
 

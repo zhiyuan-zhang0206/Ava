@@ -15,6 +15,10 @@ from base.native_process.os_platform import is_linux, is_macos
 
 __all__ = ["candidate_drive_dirs", "find_writable_google_drive"]
 
+# Windows drive-letter mounts surface here under WSL (e.g. /mnt/g). Module-level
+# so tests can point it at a fixture tree.
+_MNT_ROOT = Path("/mnt")
+
 
 def _macos_candidates(home: Path) -> list[Path]:
     out: list[Path] = []
@@ -34,8 +38,18 @@ def _macos_candidates(home: Path) -> list[Path]:
 
 def _linux_candidates(home: Path) -> list[Path]:
     out: list[Path] = [home / "GoogleDrive", home / "gdrive", home / "google-drive"]
+    # WSL: Google Drive for Desktop runs on the Windows side and mounts as a
+    # drive letter under /mnt (e.g. /mnt/g), bridged as a 9p `drvfs` mount (not
+    # FUSE). The drive root is not writable; its `My Drive` synced subfolder is.
+    # Any /mnt child that has a `My Drive` folder is a Google Drive mount -- that
+    # marker also keeps a plain Windows drive like /mnt/c from matching.
+    if _MNT_ROOT.is_dir():
+        for entry in sorted(_MNT_ROOT.iterdir()):
+            my_drive = entry / "My Drive"
+            if my_drive.is_dir():
+                out.append(my_drive)
     # FUSE mounts (rclone / google-drive-ocamlfuse) registered in /proc/mounts:
-    # there is no standard mount point on Linux, so discover them by
+    # there is no standard mount point on native Linux, so discover them by
     # fstype/source.
     proc_mounts = Path("/proc/mounts")
     if proc_mounts.is_file():

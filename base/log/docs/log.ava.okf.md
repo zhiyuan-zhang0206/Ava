@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Logging
-description: '`base/log/__init__.py` is the single structural logging module spanning kernel / gateway / SDK subprocesses / all daemons. A global loguru logger singleton, with per-process entry `init_*` called once to bind process-level fields and assemble three sink types: stderr / JSONL file / the unified event pipeline (`base/telemetry/emitter.py`).'
+description: '`base/log/process.py` is the concrete process logging owner spanning kernel / gateway / SDK subprocesses / all daemons. A global loguru logger singleton, with per-process entry `init_*` called once to bind process-level fields and assemble three sink types: stderr / JSONL file / the unified event pipeline (`base/telemetry/emitter.py`).'
 tags:
 - base
 - library
@@ -10,9 +10,23 @@ tags:
 
 # Logging
 
+`base.log` supplies the lightweight shared logger without importing telemetry
+or changing caller sinks. Fresh executable roots explicitly call
+`prepare_process_logging()` before configuration. The CLI console script and
+both `python -m` paths use `cli.main.entry`; embedded `main()` retains caller
+logging. The exec-child executable branch prepares before SDK/configuration,
+while direct calls to its `main()` retain the enclosing process sinks.
+`base.log.process` owns concrete startup and typed event-pipeline binding;
+executable roots import it when they actually initialize logging.
+
+The lightweight entry declares only its own `prepare_process_logging`
+operation. The compatible `base.log.logger` access borrows Loguru's unchanged
+logger; it is not an Ava definition owner or a completed public-contract
+migration of logger consumers.
+
 ## What is it
 
-`base/log/__init__.py` is the single structural logging **module** (not a package) spanning kernel / gateway / SDK subprocesses / all daemons. A global loguru logger singleton, with per-process entry `init_*` called once to bind process-level fields (`agent_id`) and assemble sinks. All `from base.log import logger` get the same logger that automatically carries these fields.
+`base/log/process.py` is the concrete process logging owner spanning kernel / gateway / SDK subprocesses / all daemons. A global loguru logger singleton, with per-process entry `init_*` called once to bind process-level fields (`agent_id`) and assemble sinks. All `from base.log import logger` get the same logger that automatically carries these fields.
 
 `agent_id` comes from an explicit caller or the process startup binding. Shared services default to the `-` sentinel (NULL in events); exec subprocesses bind their own agent. `logger.bind(agent_id=N)` and `telemetry.emit(..., agent_id=N)` provide explicit attribution. Ordinary unannotated host logs retain their process and machine dimensions, but do not appear in an agent-filtered view. Business audit, cancellation and lifecycle operations still require their explicit owner; ordinary logging is not an identity source.
 
@@ -22,7 +36,7 @@ Every log line is also an **event** in the unified event stream (event-system de
 
 ### Three process entry points
 - `init_subprocess_logger(agent_id)` — exec subprocess: **only** file sink, no stderr (subprocess stderr is captured by the parent and injected as exec_output fed to the LLM; framework logs on stderr would pollute the agent context). Writes `agent-{N}.log`.
-- `init_gateway_process(name)` — gateway and every long-running daemon, including agent-host, ops, watchdog, labeler, memory-indexer, heartbeat and maintenance services: stderr + `<name>.log` + unified event pipeline (process=`name`, agent_id NULL on rows); each daemon has its own `<name>.log` for easier postmortem. Controlled roots supply their immutable loaded image, machine reader and owned pipeline producer; compatibility callers freeze the process commit here. See `base/native_process/loaded_commit.py`.
+- `init_gateway_process(name)` — gateway and every long-running daemon, including agent-host, ops, watchdog, labeler, memory-indexer, heartbeat and maintenance services: stderr + `<name>.log` + unified event pipeline (process=`name`, agent_id NULL on rows); each daemon has its own `<name>.log` for easier postmortem. Every root supplies its immutable loaded image, machine reader and owned pipeline producer; logging does not capture Git or discover a database factory. See `base/native_process/loaded_commit.py`.
 - `init_cli_process(name)` — CLI verbs that bring a unit up (`cli-<verb>`): gateway's sinks, no `service_started` row.
 - All are **idempotent** (`_init_done` process-level guard) — `logger.add` is not idempotent; repeated calls accumulate sinks until fd exhaustion (errno 24); watchdog reusing healthcheck every 60s would hit this, the guard blocks it.
 

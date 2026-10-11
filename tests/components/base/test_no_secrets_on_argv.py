@@ -30,6 +30,7 @@ import psutil
 import pytest
 
 from base.cluster import ownership, port_preflight
+from base.native_process.os_platform import is_windows
 from tests.factories.secret_argv import (
     SECRET,
     SECRET_VALUES,
@@ -41,6 +42,10 @@ from tests.factories.secret_argv import secrets_in_creator_env as secrets_in_cre
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 from tests.path_scoped.pty_shells import output_until, type_line
+
+pytestmark = pytest.mark.skipif(
+    is_windows(), reason="POSIX launch paths only (Windows hands env to CreateProcess)"
+)
 
 # The pid the faked reparent helper reports. Every launch below drives the REAL
 # `posixproc.new_session` (only `subprocess.run` is faked), and that function

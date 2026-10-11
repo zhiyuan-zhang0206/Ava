@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json as _json
-from typing import NoReturn
+from typing import NamedTuple, NoReturn
 
 import ava
 from ava.sdk_surface import settings as _settings
@@ -12,19 +12,18 @@ from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 # Deliberately NOT in __all_for_ava__ (importable, but out of the rendered SDK
 # docs): AgentRestart / AgentTermination are framework control-flow exceptions
 # raised on the success path of restart() / terminate() — the agent never
-# catches them; InvalidConfigOverlay / UpdateError / UpdateTriggerFailed /
-# NothingToUpdate are rare outcomes whose traceback explains itself when one
-# fires.
+# catches them; InvalidConfigOverlay is a rare outcome whose traceback
+# explains itself when one fires.
 __all_for_ava__ = [
     "AGENT_ID",
     "MACHINE_SPEC",
+    "MachineSpec",
     "SELF_MACHINE_NAME",
     "attach",
     "compact",
     "pause_heartbeat",
     "restart",
     "terminate",
-    "update",
 ]
 
 # AGENT_ID is the agent-facing read of this process's identity. The canonical
@@ -38,8 +37,21 @@ __all_for_ava__ = [
 # every `ava.self.AGENT_ID` access routes to `__getattr__`.
 AGENT_ID: int
 
-MACHINE_SPEC: tuple[str, str]
-"""(name, description) of the machine this agent runs on."""
+
+class MachineSpec(NamedTuple):
+    """Identity of a machine.
+
+    Fields:
+        name: the machine's name.
+        description: free prose about what the machine is for; empty if unset.
+    """
+
+    name: str
+    description: str
+
+
+MACHINE_SPEC: MachineSpec
+"""The machine from the bound context; no context is an error."""
 
 SELF_MACHINE_NAME: str
 """Name of the machine this agent runs on — the default target for
@@ -52,28 +64,23 @@ def __getattr__(name: str) -> object:
         # placeholder before bootstrap). `ava.help(ava.self)` still documents
         # the name from the AnnAssign + PEP 224 docstring above — a bare value
         # routes through the doc-carrying constant renderer there.
-        # Local import: the MACHINE_SPEC branch's `import ava` makes `ava` a
+        # Local import: the SELF_MACHINE_NAME branch's `import ava` makes `ava` a
         # function-local name, so reach the bootstrap slot explicitly here.
         import ava.sdk_surface.agent_identity
 
         return ava.sdk_surface.agent_identity.agent_id()
     if name == "MACHINE_SPEC":
         import ava
-        from base.cluster.machine import machine_description, machine_name
 
-        return ava.const(
-            (machine_name(), machine_description() or ""),
-            doc=(
-                "(name, description) of the machine this agent runs on; "
-                "description is free prose, empty if unset."
-            ),
-        )
+        machine = ava.context.require_machine()
+        return MachineSpec(machine.name(), machine.description() or "")
     if name == "SELF_MACHINE_NAME":
         import ava
-        from base.cluster.machine import machine_name
+
+        machine = ava.context.require_machine()
 
         return ava.const(
-            machine_name(),
+            machine.name(),
             doc=(
                 "Name of the machine this agent runs on; the default target "
                 "for `ava.agents.spawn` when `machine` is omitted."
@@ -105,27 +112,9 @@ def __getattr__(name: str) -> object:
 # caller actually accesses InvalidConfigOverlay.
 
 
-# ── update() Exception hierarchy ───────────────────────────────────────────
-
-
-class UpdateError(Exception): ...
-
-
-class UpdateTriggerFailed(UpdateError):  # noqa: N818
-    """The update could not be started. Nothing has changed; safe to retry."""
-
-
-class NothingToUpdate(UpdateError):  # noqa: N818
-    """Everyone is already on the latest code; there is nothing to update.
-
-    This is not a failure: no one was restarted, and retrying will not help
-    until newer code exists. Stop here rather than calling update() again.
-    """
-
-
 def _publish_self_inbound_wake() -> None:
     """Best-effort Redis wake for a self-inserted inbound (restart / terminate /
-    compact / update), over the agent's own SDK redis handle (`ava.REDIS`).
+    compact), over the agent's own SDK redis handle (`ava.REDIS`).
 
     Same contract as `base.db.publish_inbound_wake`: never raises (the claim
     loop's SELECT recheck delivers the row regardless), but a `NoPermissionError`
@@ -353,12 +342,3 @@ def compact(summary: str) -> NoReturn:
     # but ensures cross-process scenarios also receive the wake).
     _publish_self_inbound_wake()
     raise SystemHalt
-
-
-def update() -> NoReturn:
-    """Removed — updating the machines is an operator action (the operator runs
-    `python -m cli.fleet_update`); calling this raises `RuntimeError`."""
-    raise RuntimeError(
-        "ava.self.update() has been removed; a cluster update is an operator action: "
-        "run `python -m cli.fleet_update` from the operator's terminal."
-    )

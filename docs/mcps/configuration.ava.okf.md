@@ -18,7 +18,7 @@ Enable control: `~/.ava/mcp_enabled.json` — `ava mcp enable/disable` per-machi
 ## `requires` preconditions
 `.mcp.json` entries may declare an optional `requires` precondition map.
 Missing, `null` or an empty object means no requirements. Otherwise the only
-key is `display`, and its value must be a JSON boolean.
+keys are `display` and `unix_socket`, and each value must be a JSON boolean.
 Unknown keys, non-object maps and non-boolean values raise `MCPError` through
 the shared `ava/mcp_config.py:validate_requirements` boundary before host probes.
 

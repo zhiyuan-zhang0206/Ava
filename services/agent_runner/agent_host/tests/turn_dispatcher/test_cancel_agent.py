@@ -24,10 +24,10 @@ from services.agent_runner.agent_host.tests.test_turn_dispatcher import (
     _Recorder,
     _releasing_stuck_turn,
     _scan_dispatcher,
-    _ScanScheduler,
     _settle,
     _StuckTurn,
 )
+from services.agent_runner.agent_host.tests.turn_dispatcher.scan_setup import ScanScheduler
 
 
 class TestCancelAgent:
@@ -286,7 +286,7 @@ class TestDispatcherMessageHandling:
 class TestPendingScan:
     async def test_scan_wakes_pending_inbound_even_when_pubsub_missed_it(self) -> None:
         """Redis notification loss may cost latency, never durable work."""
-        scheduler = _ScanScheduler()
+        scheduler = ScanScheduler()
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return [dispatcher.PendingInboundWake(agent_id=23, stale=False)]
@@ -310,7 +310,7 @@ class TestPendingScan:
         state = {"in_stop_leg": True}
         monkeypatch.setattr(admission, "in_stop_leg", lambda: state["in_stop_leg"])
         scanner_calls: list[int] = []
-        scheduler = _ScanScheduler()
+        scheduler = ScanScheduler()
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             scanner_calls.append(1)
@@ -332,7 +332,7 @@ class TestPendingScan:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Old pending work and an actually stalled turn allow recovery."""
-        scheduler = _ScanScheduler({23})
+        scheduler = ScanScheduler({23})
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return [dispatcher.PendingInboundWake(agent_id=23, stale=True)]
@@ -352,7 +352,7 @@ class TestPendingScan:
         Exiting is the only safe recovery: scheduling another task beside it
         would let one agent claim and mutate its checkpoint concurrently.
         """
-        scheduler = _ScanScheduler({23}, unwinds_on_cancel=False)
+        scheduler = ScanScheduler({23}, unwinds_on_cancel=False)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return [dispatcher.PendingInboundWake(agent_id=23, stale=True)]
@@ -396,7 +396,7 @@ class TestStallRestartEscalation:
     ) -> None:
         pubsub = _QueueingPubSub()
         _patch_redis(monkeypatch, pubsub)
-        scheduler = _ScanScheduler(restart_required=True)
+        scheduler = ScanScheduler(restart_required=True)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
@@ -424,7 +424,7 @@ class TestTurnLevelStaleScan:
     async def test_stale_in_flight_turn_is_cancelled_and_rescheduled(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        scheduler = _ScanScheduler({23})
+        scheduler = ScanScheduler({23})
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
@@ -439,7 +439,7 @@ class TestTurnLevelStaleScan:
     async def test_a_fresh_in_flight_turn_is_left_alone(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        scheduler = _ScanScheduler({23})
+        scheduler = ScanScheduler({23})
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
@@ -457,7 +457,7 @@ class TestTurnLevelStaleScan:
         """A fresh host has no clock entry for anyone: nothing means "no turn
         has ever marked progress", which must not cancel turns it knows nothing
         about — the same reading the uncancellable report uses for None."""
-        scheduler = _ScanScheduler({23})
+        scheduler = ScanScheduler({23})
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
@@ -472,7 +472,7 @@ class TestTurnLevelStaleScan:
     async def test_stale_turn_that_will_not_unwind_requires_a_host_restart(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        scheduler = _ScanScheduler({23}, unwinds_on_cancel=False)
+        scheduler = ScanScheduler({23}, unwinds_on_cancel=False)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
@@ -537,7 +537,7 @@ class TestAdmissionWaitExemption:
     async def test_a_queued_turn_is_exempt_from_the_turn_level_scan(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        scheduler = _ScanScheduler({23})
+        scheduler = ScanScheduler({23})
         admission = TurnAdmission(1)
         admission._waiting[23] = 0.0
 
@@ -553,7 +553,7 @@ class TestAdmissionWaitExemption:
     async def test_a_queued_stale_candidate_is_not_cancelled_before_its_wake(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        scheduler = _ScanScheduler({17})
+        scheduler = ScanScheduler({17})
         admission = TurnAdmission(1)
         admission._waiting[17] = 0.0
 

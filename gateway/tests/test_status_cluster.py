@@ -15,13 +15,16 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from gateway.app import app
 from gateway.cluster import roster_probe
 from gateway.cluster import status as status_router
+from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import StatusCache
 from ops.cluster import rpc as cluster_rpc
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _OPS_URL = "http://runner-a:18121"
 
@@ -49,7 +52,7 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     pause with a file."""
     flag = tmp_path / "cluster_paused"
 
-    def paused(_db: Database) -> bool:
+    def paused(_db: Database, *, local_machine: MachineIdentity) -> bool:
         return flag.exists()
 
     monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", paused)
@@ -167,6 +170,8 @@ class TestClusterPanel:
         stub_machine_identity: None,
         stub_remote_probe: dict[str, tuple[bool, bool | None]],
         database: Database,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """During a pause /api/status is short-circuited to 503 by middleware; call the
         helper directly to verify the cluster sub-section correctly reflects the paused flag."""
@@ -174,7 +179,13 @@ class TestClusterPanel:
         _ = stub_machine_identity
         fake_flag.write_text("")
         with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(database, cur, IdentityMismatchLog())
+            panel = status_router._get_cluster_status(
+                database,
+                cur,
+                IdentityMismatchLog(),
+                image=LOADED_IMAGE,
+                local_machine=machine_identity,
+            )
         assert panel.current_paused is True
 
     def test_machines_list_local_plus_remote(
@@ -358,7 +369,7 @@ class TestProbeAgentRunner:
         """The probe deadline is `settings.gateway.status_probe_timeout_seconds`,
         not a hardcoded literal — a slow-but-healthy runner must not read
         offline because its snapshot outgrew a fixed 3s budget (task #1200:
-        a runner's status_snapshot measured 3.07-3.27s vs the old 3.0s, flipping
+        runner-a's status_snapshot measured 3.07-3.27s vs the old 3.0s, flipping
         it offline while /healthz answered in ~15ms)."""
         from datetime import UTC, datetime
 
@@ -573,6 +584,8 @@ class TestPanelCarriesNoFrozenPin:
         stub_machine_identity: None,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The panel reports each node's checkout and carries no cluster target or
         known-good verdict."""
@@ -581,7 +594,13 @@ class TestPanelCarriesNoFrozenPin:
 
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(database, cur, IdentityMismatchLog())
+            panel = status_router._get_cluster_status(
+                database,
+                cur,
+                IdentityMismatchLog(),
+                image=LOADED_IMAGE,
+                local_machine=machine_identity,
+            )
         body = panel.model_dump()
         assert "cluster_target_sha" not in body
         assert "cluster_last_known_good_sha" not in body

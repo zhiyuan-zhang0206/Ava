@@ -84,4 +84,5 @@ def test_boot_clock_reads_keep_two_owners_and_previous_handles_separate(
         assert current.format_timestamp(moment) == "[2026-05-06 08:32:05]"
         assert old.timezone == "UTC"
         assert other.timezone == "Asia/Shanghai"
-    time.tzset()
+    if hasattr(time, "tzset"):
+        time.tzset()

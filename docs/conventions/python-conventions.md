@@ -20,8 +20,8 @@ Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
 A `.py` file may contain at most 800 lines (`len(text.splitlines())`). Split
 larger files into focused modules. The budget covers the eight governed
 packages (`agent`, `ava`, `ava_builtins`, `gateway`, `base`, `services`, `ops`,
-`cli`) plus `tests/` and `scripts/`. The TYPE_CHECKING ban and machine_role()
-allowlist still apply only to the eight packages.
+`cli`) plus `tests/` and `scripts/`. The TYPE_CHECKING ban and retired ambient machine_role()
+call rejection apply only to the eight packages.
 
 A script shipped with a skill or plugin gets no exemption. When one outgrows
 the budget, its logic moves into a governed package the script imports
@@ -368,6 +368,17 @@ into a new SDK method. If size limits or shared implementation require a governe
 keep the workflow entry in the skill and the helper internal; placement under
 `ava/` alone does not justify adding it to `__all_for_ava__`.
 
+## SDK return shapes
+
+A public SDK function or constant that returns a record (a fixed set of
+meaningful fields) returns a `NamedTuple`, never a bare `tuple[A, B]` whose
+meaning depends on position. The type must be listed in `__all_for_ava__` of the
+namespace that returns it, so `help()` renders its fields; document each field in
+the class docstring. Use `tuple[T, ...]` or a list for a variable-length
+sequence of one type, and a frozen dataclass when the record has many fields,
+optional fields or is expected to change. A constant of a `NamedTuple` type
+cannot be wrapped with `ava.const()`; document it with a PEP 224 docstring.
+
 ## Import layering
 
 Which package may import which, and how it is enforced:
@@ -444,15 +455,16 @@ running. Use `base.host.proc.run_bounded(argv, timeout=...)` instead — same sh
 but it kills the whole tree (descendants enumerated *before* the parent dies)
 and still raises `TimeoutExpired`, so caller control flow is unchanged.
 
-The gap is invisible for a well-behaved child and load-bearing when the
-spawned process is a launcher for the real work (git, ssh): orphaned `git` +
-`ssh` + `sh` processes accumulated below a killed launcher. Anything with a
-shell in the middle (`shell=True`, a `-lc` wrapper) has the same shape.
+The gap is invisible on POSIX for a well-behaved child and load-bearing on
+Windows, where `C:\Program Files\Git\cmd\git.exe` is a launcher stub for the real
+git: the fleet's Windows agent-runner accumulated 66 orphaned `git.exe` + 66
+`ssh.exe` + 63 `sh.exe`, all below a killed stub. Anything with a shell in the
+middle (`shell=True`, a `-lc` wrapper) has the same shape on every platform.
 
 Git specifically: pass `env=base.deploy.git.gitenv.git_env()` so a credential prompt
 errors instead of blocking on a terminal that does not exist, and ssh neither
 asks nor dials unbounded. Note that `ConnectTimeout` is not the bound — an
-`ssh` process can reach a state where its own timeout never fires, so the
+`ssh.exe` on that box reached a state where its own timeout never fired, so the
 caller's bound is the only real one.
 
 Not lint-enforced repo-wide yet; the modules that drive git are guarded by
@@ -531,7 +543,7 @@ data, classify the surface and scope it:
 
 - **role-neutral** — applies to every host; no filter.
 - **agent-runner-only** — filter `'agent-runner' = ANY(role)`, guard host-side op.
-- **gateway-only** — guard `is_gateway()` (`'gateway' in machine_role()`).
+- **gateway-only** — guard `'gateway' in machine.role()` using the explicit root-owned `MachineIdentity`.
 
 The roster (`/api/cluster/roster`) legitimately lists every host — it shows
 `role` as a column, not agent-runner-only data.

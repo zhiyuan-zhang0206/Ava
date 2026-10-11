@@ -3,6 +3,7 @@ session's tmp AVA_HOME. Each test explicitly builds its own catalog after writin
 
 from __future__ import annotations
 
+import json
 import shutil
 from collections.abc import Callable, Generator
 
@@ -111,6 +112,18 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
         # Discovery is keyed on plugin.py — a provider plugin ships one (an
         # empty stub here; it contributes nothing agent-side).
         (plugin_dir / "plugin.py").write_text("# provider plugin stub")
+        # Every plugin ships a manifest; this one declares the single provider prefix it contributes.
+        (plugin_dir / "ava-plugin.json").write_text(
+            json.dumps(
+                {
+                    "apiVersion": 2,
+                    "name": dir_name,
+                    "version": "1.0.0",
+                    "engines": {"ava": ">=2026.1.1"},
+                    "contributions": {"providers": [prefix]},
+                }
+            )
+        )
 
     try:
         yield _write

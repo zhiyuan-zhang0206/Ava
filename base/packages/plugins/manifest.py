@@ -1,11 +1,14 @@
 """`ava-plugin.json` manifest — parse, validate, range algebra, host checks.
 
 The contract layer of plugin spec v2 (S0-S2, task #1244). Normative spec:
-`docs/conventions/extensions/plugin-spec-v2.md`. Install-time only: nothing here runs at agent
-runtime, and packages without a manifest keep flowing through the legacy
-detection paths untouched.
+`docs/conventions/extensions/plugin-spec-v2.md`. The parse and range checks are install-time; the
+load-time plugin gate (`base/packages/plugins/gate.py`) reads the same manifest.
 
-A package root may carry `ava-plugin.json` declaring identity
+Every Ava plugin (a directory with a `plugin.py`) ships `ava-plugin.json` at its package root;
+`load_manifest` refuses one without it. Bare skill and MCP packages, whose formats are foreign to
+Ava, may ship one (`load_optional_manifest`).
+
+A package root's `ava-plugin.json` declares identity
 (name/version/`engines.ava` range, optional `requires_commit`), dependencies
 (`plugins` / `pythonPackages` / `hostCapabilities`), contribution surfaces,
 and lifecycle shape. This module turns that file into a validated
@@ -549,17 +552,22 @@ def _validate(data: dict[str, Any]) -> PluginManifest:
     )
 
 
-def load_manifest(pkg_dir: Path) -> PluginManifest | None:
-    """Load and validate `pkg_dir`/`ava-plugin.json`; None when the package
-    ships no manifest (the legacy detection paths take over).
+def load_manifest(pkg_dir: Path) -> PluginManifest:
+    """Load and validate `pkg_dir`/`ava-plugin.json`.
 
-    Raises `ManifestError` listing every problem — invalid JSON, unknown
-    fields, bad ranges, unbounded pythonPackages entries. A manifest is a
-    contract: a package that ships one either validates or is refused.
+    Raises `ManifestError` listing every problem — a missing file, invalid JSON,
+    unknown fields, bad ranges, unbounded pythonPackages entries. A manifest is a
+    contract: an Ava plugin either ships one that validates or is refused.
     """
     path = pkg_dir / MANIFEST_FILENAME
     if not path.is_file():
-        return None
+        raise ManifestError(
+            f"{path} not found: every Ava plugin ships {MANIFEST_FILENAME} at its package root. "
+            f"A plugin that contributes nothing the loader gates needs only "
+            f'{{"apiVersion": 2, "name": "<plugin name>", "version": "1.0.0", '
+            f'"engines": {{"ava": ">=<YYYY.M.D>"}}}}; one that does must also list them under '
+            f'"contributions" (docs/conventions/extensions/plugin-spec-v2.md)'
+        )
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as e:
@@ -571,6 +579,18 @@ def load_manifest(pkg_dir: Path) -> PluginManifest | None:
     if not isinstance(data, dict):
         raise ManifestError(f"{path}: manifest must be a JSON object; got {type(data).__name__}")
     return _validate(data)
+
+
+def load_optional_manifest(pkg_dir: Path) -> PluginManifest | None:
+    """`load_manifest` for a bare skill or MCP package, whose manifest is optional.
+
+    Those formats come from outside Ava (a `SKILL.md` tree, an `.mcp.json` server), so
+    a package that ships no manifest has no host contract to check and returns None.
+    One that ships a manifest is held to it exactly as `load_manifest` does.
+    """
+    if not (pkg_dir / MANIFEST_FILENAME).is_file():
+        return None
+    return load_manifest(pkg_dir)
 
 
 def host_version_from_repo(repo: Path) -> str:
@@ -613,14 +633,14 @@ def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list
 
     One home for "may THIS host load this package" (design §5.5), used by the
     install gate, the skill scan's runtime filter, and `ava packages status`:
-    reads the package's optional manifest, compares `engines.ava` against the
+    reads the package's optional manifest (a skill package's), compares `engines.ava` against the
     derived host version, and checks `requires_commit` ancestry in `repo`
     (default: this checkout). A malformed manifest returns its validation error
     (the caller drops the package; it must not crash the loader), and an
     unresolvable check is an error — never a pass.
     """
     try:
-        manifest = load_manifest(pkg_dir)
+        manifest = load_optional_manifest(pkg_dir)
     except ManifestError as exc:
         return [f"manifest invalid: {exc}"]
     if manifest is None:

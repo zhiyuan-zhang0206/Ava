@@ -330,7 +330,7 @@ class _OwnedRun:
             read_owner_bytes(self.context_path.with_suffix(".ready"))
         )
         self.ready = ready
-        validate_native_ready(ready, launcher)
+        validate_native_ready(ready, launcher, self.context_path)
         return ready
 
     async def finish_attach(self, registration: asyncio.Task[None], ready: OwnerReady) -> None:

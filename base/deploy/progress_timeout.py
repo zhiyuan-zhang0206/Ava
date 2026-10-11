@@ -9,11 +9,11 @@ dead while it is working, or alive while it is not.
 
 ## Why 900 s
 
-The value is far above the measured agent-runner leg (2-15 s across 44 samples
-on two hosts, 2026-07-01..29): the slowest legs of the production rollouts of
-2026-08-06..12 converged inside 0-11 minutes, and five rounds spent the whole
-bound. It is roughly 1.5x the longest leg observed, not a first-principles
-ceiling; the orderings it must keep
+The value is far above the measured POSIX agent-runner leg (2-15 s across 44
+samples on two hosts, 2026-07-01..29) because the Windows leg is two orders of
+magnitude slower: production rollouts of 2026-08-06..12 converged `win` inside
+0-11 minutes, and five rounds spent the whole bound. It is roughly 1.5x the
+longest leg observed, not a first-principles ceiling; the orderings it must keep
 against its neighbours are declared and checked in `base.deploy.timing`.
 
 The module also holds the agent-lease family, the `ava start` readiness

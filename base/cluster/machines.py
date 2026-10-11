@@ -35,17 +35,12 @@ import psycopg
 
 from base.agents import MachineNotRegistered
 from base.cluster.machine import (
+    GatewayApiBaseMissing,
     MachineRoles,
-    _resolve_gateway_url,
-    is_agent_runner,
-    is_gateway,
-    is_observability_station,
-    machine_description,
-    machine_name,
+    resolve_gateway_api_base,
 )
 from base.db import Database
 from base.host.net.predicates import is_loopback_host
-from base.paths import ava_home
 
 __all__ = [
     "GatewayUrlMissing",
@@ -98,28 +93,26 @@ class LoopbackDialUrlRefused(RuntimeError):  # noqa: N818 — state description;
     """
 
 
-def gateway_url() -> str:
-    """Get this host's gateway URL: `AVA_GATEWAY_URL` (the home's `.env`, which
-    `ava init` records, or the process environment), else raise.
+def gateway_url(configured: str) -> str:
+    """Validate the gateway URL supplied by this unit's configuration root.
 
-    Raises:
-        GatewayUrlMissing: `AVA_GATEWAY_URL` is empty.
-
-    Delegates resolution to base.cluster.machine._resolve_gateway_url() so this answer
-    never drifts from gateway_api_base(); only the raised exception type differs.
+    Keep the registry-facing missing-value error while sharing the canonical
+    URL normalization used by HTTP clients.
     """
-    url = _resolve_gateway_url()
-    if url is None:
+    try:
+        return resolve_gateway_api_base(configured)
+    except GatewayApiBaseMissing as exc:
         raise GatewayUrlMissing(
             "gateway URL not set — `ava init --gateway-url <url>` records it for a new home; "
             "for an initialized one set AVA_GATEWAY_URL in its `.env`."
-        )
-    return url
+        ) from exc
 
 
 def _reject_loopback_dial_url(
     url: str | None,
     *,
+    name: str,
+    gateway: str | None,
     serve_gateway: bool,
     serve_agent_runner: bool,
     serve_observability_station: bool,
@@ -155,125 +148,55 @@ def _reject_loopback_dial_url(
         return
     if not is_loopback_host(urlparse(url).hostname or ""):
         return
-    gateway = _resolve_gateway_url()
     if gateway is None or is_loopback_host(urlparse(gateway).hostname or ""):
         return
     raise LoopbackDialUrlRefused(
-        f"{machine_name()!r} would register a loopback dial URL ({url}) while its "
+        f"{name!r} would register a loopback dial URL ({url}) while its "
         f"gateway is remote ({gateway}); the gateway cannot reach it there — it would dial itself. "
         "Set AVA_MACHINE_HOST in this unit's configuration to its private-network "
         "address, then restart the unit."
     )
 
 
-def unit_dial_url(roles: MachineRoles) -> str | None:
-    """The inbound base URL a unit carrying `roles` advertises — the address the
-    rest of the cluster dials (docs/conventions/data/reachability-and-credentials.md,
-    endpoint advertisement).
+def unit_dial_url(
+    roles: MachineRoles,
+    *,
+    host: str,
+    ops_port: int,
+    gateway_port: int,
+    telemetry_otlp_port: int,
+    gateway: str | None,
+) -> str:
+    """Advertise this root's reachable address with the original capability priority.
 
-    The single definition, shared by both callers of `register_self`: `ava start`
-    (`cli/commands/_repo.py:_register_machine_or_die`, passing its resolved
-    capability set) and the ops daemon's own boot registration
-    (`services/agent_runner/agent_ops/daemon.py`, passing `machine_role()`). Two writers of one
-    row that each computed this shape themselves would be free to advertise
-    different addresses for the same unit, and the loser would be a host the
-    gateway dials at an address nothing answers on.
-
-    Every advertised URL is built on `reachable_host()` (`AVA_MACHINE_HOST`, else
-    localhost), never on the bare gateway URL and never on a
-    hardcoded loopback: a machine with a reachable identity must advertise it, or
-    the page proxy's SSRF guard (which only dials a machine's advertised
-    addresses) refuses every page server on the host (2026-08-30 serve 400).
-
-    - agent-runner + gateway (single box): `http://<reachable_host()>:<ops_port>`.
-      On a true single box `reachable_host()` resolves to localhost (no
-      `AVA_MACHINE_HOST`), so the zero-config shape is unchanged; on a
-      multi-machine cluster it is the machine's private-network address — the
-      address the rest of the cluster (and the page proxy's SSRF guard, which
-      only dials registered machine addresses) reaches it at. The old
-      unconditional-localhost special case advertised an un-dialable address on
-      a gateway box with a reachable identity (2026-08-12 serve outage).
-    - agent-runner only (split): `http://<reachable_host()>:<ops_port>`, so a
-      remote gateway can reach it. `reachable_host()` resolves env > machine_host
-      file > localhost, and a localhost fall-through here is a misconfiguration —
-      `_reject_loopback_dial_url` refuses it at write time rather than persisting
-      a dead row.
-    - gateway only (with or without a station capability): the reachable-host
-      form of its own gateway URL, `http://<reachable_host()>:<gateway port>`
-      (informational — a pure gateway runs no ops server, so nothing dials it for
-      ops; the hostname is what the page proxy's SSRF allowlist consumes). The
-      port is the gateway URL's port when one is configured, else the gateway
-      bind-port setting.
-    - observability-station only: `http://<reachable_host()>:<OTLP ingress port>`
-      — the station's bearer-authenticated OTLP ingress, the one station address
-      remote consumers (the gateway collector relay and the station health probe)
-      dial. The port follows `AVA_TELEMETRY_OTLP_PORT` (single source), so the
-      advertised address and the ingress listener can never drift apart.
-
-    The URL never raises for a missing gateway URL — the port falls back to the
-    gateway bind-port setting, and the hostname is `reachable_host()` regardless
-    (the advertisement must not depend on AVA_GATEWAY_URL being configured).
+    Runners advertise their ops endpoint, gateways their configured gateway
+    port or bind port, and a pure observability station its OTLP ingress. The
+    configured gateway hostname never replaces the root's reachable host.
     """
-    # Imported in-function, matching the call site this logic moved from: it keeps
-    # `base.cluster.machine.reachable_host` patchable by name (a module-level binding
-    # here would freeze it at import) and keeps the health-server module off
-    # `base.cluster.machines`'s import path.
-    from base.cluster.machine import reachable_host
-    from base.daemon.endpoints import ServiceEndpoints
-
     if "gateway" not in roles and "agent-runner" not in roles:
-        return _station_ingress_url()  # pure observability-station: its OTLP ingress
-    if "agent-runner" not in roles:
-        return _gateway_reachable_url()
-    host = reachable_host()
-    return f"http://{host}:{ServiceEndpoints.from_settings().of('ops').health_port}"
+        port = telemetry_otlp_port
+    elif "agent-runner" not in roles:
+        configured_port = urlparse(gateway).port if gateway else None
+        port = gateway_port if configured_port is None else configured_port
+    else:
+        port = ops_port
+    return f"http://{host}:{port}"
 
 
-def _gateway_reachable_url() -> str:
-    """The reachable-host form of a gateway unit's advertised URL.
-
-    `http://<reachable_host()>:<gateway port>` — the port is the configured
-    gateway URL's port when one is resolvable, else the gateway bind-port
-    setting. Deliberately NOT the bare `gateway_url()`: that URL may name
-    loopback while this host carries a reachable identity (machine_host set),
-    and the advertised hostname is what the page proxy's SSRF allowlist
-    consumes — a loopback advertisement on such a host makes every page
-    serve 400 (2026-08-30). The hostname comes from `reachable_host()`, so
-    the zero-config single-box shape (localhost) is unchanged.
-    """
-    from base.cluster.machine import reachable_host
-    from base.config import settings
-
-    url = _resolve_gateway_url()
-    port = urlparse(url).port if url else None
-    if port is None:
-        port = settings.gateway.gateway_port
-    return f"http://{reachable_host()}:{port}"
-
-
-def _station_ingress_url() -> str:
-    """The advertised inbound URL of a pure observability-station unit.
-
-    `http://<reachable_host()>:<OTLP ingress port>` — the station's
-    bearer-authenticated OTLP ingress (the collector's `otlp/remote`
-    receiver, `cli/commands/observability/otel_collector.py`), the one station address
-    remote consumers dial. The port follows `AVA_TELEMETRY_OTLP_PORT`
-    (single source, task #1945), so the advertisement and the listener can
-    never drift apart. Loopback falls through when the station has no
-    reachable identity — legal only when the gateway is co-located
-    (`_reject_loopback_dial_url` enforces that at write time).
-    """
-    from base.cluster.machine import reachable_host
-    from base.config import settings
-
-    return f"http://{reachable_host()}:{settings.observability.telemetry_otlp_port}"
-
-
-def register_self(db: Database, url: str | None = None) -> None:
+def register_self(
+    db: Database,
+    url: str | None = None,
+    *,
+    name: str,
+    roles: MachineRoles,
+    description: str | None,
+    home: str,
+    gateway: str | None,
+) -> None:
     """UPSERT THIS UNIT's machine_units row, then recompute the machines row.
 
-    A unit is identified by (machine_name, home) where home = this unit's
-    $AVA_HOME (`base.paths.ava_home()`). The unit contributes its own caps
+    A unit is identified by the supplied (name, home) from its actual root.
+    The root supplies its owned role, description and configured gateway URL. The unit contributes its own caps
     (serve_gateway / serve_agent_runner / serve_observability_station), its dial
     `url` (resolved by `unit_dial_url` — every unit advertises one: the ops URL
     for a runner, the reachable-host gateway URL, or the OTLP ingress for a pure
@@ -310,17 +233,16 @@ def register_self(db: Database, url: str | None = None) -> None:
         url: this unit's inbound base URL (resolved by the caller per role).
             None → store NULL (a unit that advertises no address).
 
-    Raises:
-        MachineNameMissing: machine_name() is unset.
-        MachineRoleMissing: machine_role() is unset.
+    Machine identity is validated by the owning root before this operation;
+    the registry never reads process-global identity or substitutes a remote row.
     """
-    name = machine_name()
-    home = str(ava_home())
-    serve_gateway = is_gateway()
-    serve_agent_runner = is_agent_runner()
-    serve_observability_station = is_observability_station()
+    serve_gateway = "gateway" in roles
+    serve_agent_runner = "agent-runner" in roles
+    serve_observability_station = "observability-station" in roles
     _reject_loopback_dial_url(
         url,
+        name=name,
+        gateway=gateway,
         serve_gateway=serve_gateway,
         serve_agent_runner=serve_agent_runner,
         serve_observability_station=serve_observability_station,
@@ -346,7 +268,7 @@ def register_self(db: Database, url: str | None = None) -> None:
         # the composed row exists.
         cur.execute(
             "UPDATE machines SET description = %s WHERE name = %s",
-            (machine_description(), name),
+            (description, name),
         )
         conn.commit()
 

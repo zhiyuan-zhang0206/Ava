@@ -16,16 +16,22 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.native_process import code_version
+from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.telemetry import Event
 from ops import pty_close_notices as notices
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _WHEN = datetime(2026, 9, 10, 1, 2, 3, tzinfo=UTC)
 
@@ -80,8 +86,8 @@ def _claims(db_conn: psycopg.Connection) -> list[str]:
 class _SpyDatabase(Database):
     """A `Database` that records every explicit dial (a wake's implicit dial excluded)."""
 
-    def __init__(self, source: Database) -> None:
-        super().__init__(source._config)
+    def __init__(self, source: Database, *, gate: ProcessDbGate) -> None:
+        super().__init__(source._config, gate=gate)
         self.dialed: list[tuple[bool, psycopg.Connection]] = []
 
     def connect(
@@ -205,7 +211,11 @@ def test_an_unknown_agent_gets_no_inbound(
 
 
 def test_a_hundred_session_batch_writes_every_claim_and_inbound(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A sweep-sized batch — 100 busy sessions, past the incident's ~38 truncation
     point — writes every notice, its claim and its inbound, in one call."""
@@ -228,7 +238,7 @@ def test_a_hundred_session_batch_writes_every_claim_and_inbound(
             for n in range(5)
         ]
     )
-    spied = _SpyDatabase(database)
+    spied = _SpyDatabase(database, gate=database_gate)
 
     assert notices.write_notices(spied, event_bus, batch, direct=True) == []
 
@@ -299,8 +309,10 @@ def test_an_unreachable_database_returns_every_notice_with_the_error(
     database: Database,
     event_bus: EventBus,
 ) -> None:
+    error = psycopg.OperationalError("connection refused")
+
     def refuse(**_kwargs: object) -> psycopg.Connection:
-        raise psycopg.OperationalError("connection refused")
+        raise error
 
     monkeypatch.setattr(database, "connect", refuse)
     batch = [_notice(), _notice(session_id=12)]
@@ -308,7 +320,7 @@ def test_an_unreachable_database_returns_every_notice_with_the_error(
     failed = notices.write_notices(database, event_bus, batch, direct=False)
 
     assert [n for n, _exc in failed] == batch
-    assert all("connection refused" in str(exc) for _n, exc in failed)
+    assert all(exc is error for _n, exc in failed)
 
 
 def test_no_notice_means_no_connection(
@@ -324,13 +336,18 @@ def test_no_notice_means_no_connection(
 
 @pytest.mark.parametrize("direct", [True, False])
 def test_the_connection_is_the_one_asked_for_and_is_closed(
-    direct: bool, db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    direct: bool,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A gateway unit dials Postgres directly, a runner its configured URL; the
     one connection is closed when the write returns — nothing stays connected
     into the data plane's shutdown."""
     aid = _agent(db_conn, "running")
-    spied = _SpyDatabase(database)
+    spied = _SpyDatabase(database, gate=database_gate)
 
     assert notices.write_notices(spied, event_bus, [_notice(agent_id=aid)], direct=direct) == []
 
@@ -345,12 +362,18 @@ def _ended(agent_id: int, session_id: int = 11, starttime: int = 4242) -> closur
 
 
 def test_a_crash_notice_names_the_crash_and_no_operation(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A sweep has no stop and no maintenance hold: the notice says the service ended
     uncleanly and carries neither an operation nor a hold time."""
     aid = _agent(db_conn, "running")
-    (built,) = notices.notices_for([_ended(aid)], reason=notices.CRASH_REASON)
+    (built,) = notices.notices_for(
+        [_ended(aid)], reason=notices.CRASH_REASON, local_machine=machine_identity.name()
+    )
 
     assert notices.write_notices(database, event_bus, [built], direct=False) == []
 
@@ -362,13 +385,17 @@ def test_a_crash_notice_names_the_crash_and_no_operation(
     assert record["shell_birth"] == "starttime:4242" and record["shell_pid"] == 9090
 
 
-def test_notices_for_skips_a_session_that_is_not_an_agent_shell() -> None:
+def test_notices_for_skips_a_session_that_is_not_an_agent_shell(
+    *, machine_identity: MachineIdentity
+) -> None:
     sessions = [
         closure.ClosedSession("ava-gateway", OwnedProcess(1, 1.0, 1)),
         _ended(5),
     ]
 
-    built = notices.notices_for(sessions, reason=notices.CRASH_REASON)
+    built = notices.notices_for(
+        sessions, reason=notices.CRASH_REASON, local_machine=machine_identity.name()
+    )
 
     assert [notice.agent_id for notice in built] == [5]
 
@@ -388,17 +415,22 @@ def test_a_staged_batch_round_trips_through_the_file(tmp_path: Path) -> None:
     assert notices._content(read_back) == notices._content(stopped)
 
 
-def test_staging_merges_beside_what_already_waits(tmp_path: Path) -> None:
+def test_staging_merges_beside_what_already_waits(
+    tmp_path: Path, *, machine_identity: MachineIdentity
+) -> None:
     """A next start stages its sweep beside the batch still waiting: the record
     already on disk stays (same key, first one wins) and the new session appends."""
     path = tmp_path / "pty-close-notices.json"
     (waiting,) = notices.stage_crash_notices(
-        closure.Outcome(closed=(_ended(5, session_id=7),)), path
+        closure.Outcome(closed=(_ended(5, session_id=7),)),
+        path,
+        local_machine=machine_identity.name(),
     )
 
     staged = notices.stage_crash_notices(
         closure.Outcome(closed=(_ended(5, session_id=7), _ended(5, session_id=8, starttime=9999))),
         path,
+        local_machine=machine_identity.name(),
     )
 
     assert [notice.session_id for notice in staged] == [7, 8]
@@ -407,7 +439,7 @@ def test_staging_merges_beside_what_already_waits(tmp_path: Path) -> None:
 
 
 def test_the_crash_child_writes_the_staged_batch_once_and_never_resurrects(
-    db_conn: psycopg.Connection, staged_path: Path
+    db_conn: psycopg.Connection, staged_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """The one-shot child (`python -m ops.pty_close_notices`) end to end: it writes
     the staged notices — a live owner gets one inbound, a terminated owner none — and
@@ -415,7 +447,9 @@ def test_the_crash_child_writes_the_staged_batch_once_and_never_resurrects(
     delivers nothing new."""
     live, dead = _agent(db_conn, "running"), _agent(db_conn, "terminated")
     staged = notices.notices_for(
-        [_ended(live), _ended(dead, session_id=12)], reason=notices.CRASH_REASON
+        [_ended(live), _ended(dead, session_id=12)],
+        reason=notices.CRASH_REASON,
+        local_machine=machine_identity.name(),
     )
     notices.write_pending(staged_path, staged)
 
@@ -472,8 +506,54 @@ def test_the_crash_child_with_nothing_staged_writes_nothing(
         raise AssertionError("an empty staged file dialed the database")
 
     monkeypatch.setattr(Database, "connect", never)
+    monkeypatch.setattr(Database, "from_settings", never)
+    monkeypatch.setattr(notices.LoadedCommit, "capture", never)
 
     assert notices.main() == 0
+
+
+@pytest.mark.parametrize("sha", ["captured-image", None])
+def test_the_crash_child_uses_only_its_captured_image(
+    sha: str | None,
+    staged_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    image = LoadedCommit(source_root=staged_path.parent, sha=sha)
+    capture = Mock(return_value=image)
+    count = Mock(return_value=42)
+    writer = Mock(return_value=[])
+    gates: list[ProcessDbGate] = []
+
+    def make_database(cls: type[Database], *, gate: ProcessDbGate) -> Database:
+        gates.append(gate)
+        assert gate.min_read_due(), "the crash child must remain gated"
+        assert gate.application_name() == "ava:pty-close-notices:v42"
+        assert gate.application_name() == "ava:pty-close-notices:v42"
+        return database
+
+    monkeypatch.setattr(notices.LoadedCommit, "capture", capture)
+    monkeypatch.setattr(code_version, "first_parent_count", count)
+    monkeypatch.setattr(notices, "process_name", lambda: "pty-close-notices")
+    monkeypatch.setattr(Database, "from_settings", classmethod(make_database))
+    monkeypatch.setattr(EventBus, "from_settings", lambda: event_bus)
+    monkeypatch.setattr(notices, "write_notices", writer)
+    batch = [_notice()]
+    notices.write_pending(staged_path, batch)
+
+    assert notices.main() == (0 if sha else 1)
+
+    capture.assert_called_once_with()
+    assert len(gates) == 1
+    if sha:
+        count.assert_called_once_with(image.source_root, sha)
+        writer.assert_called_once_with(database, event_bus, batch, direct=False)
+        assert not staged_path.exists()
+    else:
+        count.assert_not_called()
+        writer.assert_not_called()
+        assert notices.read_pending(staged_path) == batch
 
 
 def test_closure_receipt_stores_the_canonical_ops_status(db_conn: psycopg.Connection) -> None:

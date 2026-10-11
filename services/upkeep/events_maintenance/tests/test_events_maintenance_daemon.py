@@ -25,15 +25,19 @@ import pytest
 from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
 
+from base.cluster.machine import MachineIdentity
 from base.config.domains.daemon.settings import DaemonSettings
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import LivenessGroup, LoopProgress
+from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.events_maintenance import daemon
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 from services.upkeep.events_maintenance.tests.slices import (
     events_maintenance_config,
     events_maintenance_db,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # The pool is never touched — `_run_maintenance` / `_maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()
@@ -117,7 +121,9 @@ async def test_completed_pass_beats_once_after_worker_finishes(
     assert beat_at[0] >= finished_at
 
 
-async def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_failed_rollup_still_waits_before_retry(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """A maintenance pass that raises a transient (non-ProgrammingError) exception
     beats on completion, records the error, then waits before re-running."""
     failed_at = 0.0
@@ -149,7 +155,11 @@ async def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.Monkey
     async with asyncio.TaskGroup() as tasks:
         with pytest.raises(asyncio.CancelledError):
             await daemon._dispatch_loop(
-                _FAKE_POOL, progress, config, events_maintenance_db(), tasks=tasks
+                _FAKE_POOL,
+                progress,
+                config,
+                events_maintenance_db(local_machine=machine_identity),
+                tasks=tasks,
             )  # pool unused
 
     assert len(beat_at) == 1
@@ -159,7 +169,7 @@ async def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.Monkey
 
 
 async def test_wedged_dispatch_parks_without_entering_retry_sleep(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """A timed-out worker parks by ending its loop without entering either sleep path."""
 
@@ -185,7 +195,7 @@ async def test_wedged_dispatch_parks_without_entering_retry_sleep(
             _FAKE_POOL,
             progress,
             events_maintenance_config(),
-            events_maintenance_db(),
+            events_maintenance_db(local_machine=machine_identity),
             tasks=tasks,
         )
 
@@ -234,7 +244,9 @@ def _instrument_maintenance_slices(
     return rec
 
 
-def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_maintenance_pass_runs_unconditional_slices(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """The hourly pass always runs the metric and telemetry-event recoveries, the cost-ledger
     rollup, the size telemetry sample, and blob vacuum. Checkpoint pruning belongs only
     to the fast loop; the hourly pass must not run a second retention rule."""
@@ -254,7 +266,7 @@ def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPa
         cast(ConnectionPool, _FakePool()),
         progress,
         events_maintenance_config(),
-        events_maintenance_db(),
+        events_maintenance_db(local_machine=machine_identity),
     )  # every slice faked
 
     for name in (
@@ -353,7 +365,9 @@ def test_deadline_settings_defaults_and_env_aliases() -> None:
     assert configured.events_maintenance_resolution_deadline_s == 35.5
 
 
-def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_gives_each_loop_its_own_progress_tracker(
+    monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     """The two concurrent loops cannot share a progress stamp at the run boundary."""
 
     class _RunPool:
@@ -369,7 +383,9 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     health_components: list[Callable[[], list[dict[str, object]]]] = []
     received: dict[str, LoopProgress] = {}
 
-    async def fake_start(_name: str, _port: int, *, liveness: object, components: Any) -> object:
+    async def fake_start(
+        _name: str, _port: int, *, liveness: object, components: Any, image: LoadedCommit
+    ) -> object:
         health_liveness.append(liveness)
         health_components.append(components)
         return health
@@ -418,7 +434,11 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     monkeypatch.setattr(daemon, "_resolution_loop", resolution)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", gauge)
 
-    asyncio.run(asyncio.wait_for(daemon.run(), timeout=2.0))
+    asyncio.run(
+        asyncio.wait_for(
+            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None)), timeout=2.0
+        )
+    )
 
     assert pool.closed
     assert len(health_liveness) == 1
@@ -441,7 +461,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
 
 @pytest.mark.parametrize("crashing", ["dispatch", "resolution", "registry_gauge"])
 def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
-    monkeypatch: pytest.MonkeyPatch, crashing: str
+    monkeypatch: pytest.MonkeyPatch, database: Database, crashing: str
 ) -> None:
     """The three loops share one TaskGroup: one that raises cancels the others and
     `run` leaves with the error, so the supervisor restarts the service."""
@@ -487,14 +507,20 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", loop("registry_gauge"))
 
     with pytest.raises(ExceptionGroup) as raised:
-        asyncio.run(asyncio.wait_for(daemon.run(), timeout=5.0))
+        asyncio.run(
+            asyncio.wait_for(
+                daemon.run(database=lambda: database, image=LoadedCommit(Path(), None)), timeout=5.0
+            )
+        )
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} crashed"]
     assert sorted(cancelled) == sorted({"dispatch", "resolution", "registry_gauge"} - {crashing})
     assert sorted(closed) == ["health", "pidfile", "pool"]
 
 
-def _run_with_alert_loop(monkeypatch: pytest.MonkeyPatch, *, configured: bool) -> dict[str, object]:
+def _run_with_alert_loop(
+    monkeypatch: pytest.MonkeyPatch, database: Database, *, configured: bool
+) -> dict[str, object]:
     seen: dict[str, object] = {"alert_loop": False, "trackers": []}
 
     class _RunPool:
@@ -511,7 +537,7 @@ def _run_with_alert_loop(monkeypatch: pytest.MonkeyPatch, *, configured: bool) -
         seen["alert_loop"] = True
 
     async def fake_start(
-        _name: str, _port: int, *, liveness: LivenessGroup, components: Any
+        _name: str, _port: int, *, liveness: LivenessGroup, components: Any, image: LoadedCommit
     ) -> object:
         seen["trackers"] = sorted(liveness.snapshot())
         return object()
@@ -545,17 +571,22 @@ def _run_with_alert_loop(monkeypatch: pytest.MonkeyPatch, *, configured: bool) -
         return config
 
     monkeypatch.setattr(daemon, "events_maintenance_config", build_config)
-    asyncio.run(asyncio.wait_for(daemon.run(), timeout=5.0))
+    asyncio.run(
+        asyncio.wait_for(
+            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None)), timeout=5.0
+        )
+    )
     return seen
 
 
 def test_the_alert_reconciliation_loop_runs_only_with_the_grafana_credential(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
-    on = _run_with_alert_loop(monkeypatch, configured=True)
+    on = _run_with_alert_loop(monkeypatch, database, configured=True)
     assert on["alert_loop"] is True
     assert "alert_reconciliation" in cast(list[str], on["trackers"])
 
-    off = _run_with_alert_loop(monkeypatch, configured=False)
+    off = _run_with_alert_loop(monkeypatch, database, configured=False)
     assert off["alert_loop"] is False
     assert "alert_reconciliation" not in cast(list[str], off["trackers"])

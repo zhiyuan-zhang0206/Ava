@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
 from contextlib import suppress
@@ -115,7 +116,7 @@ class SessionKeys:
         if cached is not None and cached[0] == identity:
             return cached[1]
         problem = private_file_problem(path)
-        if problem is None and info.st_mode & 0o077:
+        if problem is None and os.name != "nt" and info.st_mode & 0o077:
             problem = "is not owner-only"
         if problem is not None:
             raise RuntimeError(f"{path}: {problem}")

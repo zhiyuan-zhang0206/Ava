@@ -390,7 +390,10 @@ def _split_cmdline_env(rest: str) -> tuple[str, str]:
 
 def _ps_rows_with_env() -> list[tuple[int, str, str]]:
     """(pid, cmdline, env) for every process — `ps eww ax` on macOS (env
-    inline), /proc on Linux."""
+    inline), /proc on Linux. Windows returns nothing: a no-op there is fine,
+    e2e on Windows is not a supported shape (POSIX-only gateway)."""
+    if sys.platform == "win32":
+        return []
     if sys.platform != "darwin":
         rows: list[tuple[int, str, str]] = []
         for entry in Path("/proc").iterdir():
@@ -429,6 +432,8 @@ def _ps_rows_with_env() -> list[tuple[int, str, str]]:
 
 
 def _cwd_of(pid: int) -> str | None:
+    if sys.platform == "win32":
+        return None
     if sys.platform != "darwin":
         try:
             # Path.readlink() returns a Path — coerce to str: callers

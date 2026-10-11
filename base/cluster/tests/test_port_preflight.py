@@ -10,8 +10,10 @@ import psutil
 import pytest
 
 from base.cluster import port_preflight
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host import proc
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @dataclass(frozen=True)
@@ -281,30 +283,42 @@ def test_strict_listeners_raises_when_lsof_is_unreachable(
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost", "ip6-localhost"])
 def test_bind_addrs_adds_nothing_for_a_loopback_reachable_host(
-    monkeypatch: pytest.MonkeyPatch, host: str
+    monkeypatch: pytest.MonkeyPatch,
+    host: str,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A single box names itself by any loopback alias; none of them is a second address
     to bind, so a secret-bearing cluster still binds loopback alone."""
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: host)
-    assert port_preflight.bind_addrs("s3cret") == ["127.0.0.1"]
+    machine_identity.set(host=host)
+    assert port_preflight.bind_addrs("s3cret", machine=machine_identity) == ["127.0.0.1"]
 
 
-def test_bind_addrs_loopback_only_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bind_addrs_loopback_only_without_secret(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """A no-secret cluster binds loopback alone, whatever the reachable address —
     an unauthenticated data plane must never be LAN-reachable."""
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
-    assert port_preflight.bind_addrs("") == ["127.0.0.1"]
+    machine_identity.set(host="10.0.0.5")
+    assert port_preflight.bind_addrs("", machine=machine_identity) == ["127.0.0.1"]
 
 
-def test_bind_addrs_includes_reachable_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bind_addrs_includes_reachable_with_secret(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """With a secret, the reachable address joins loopback as today (auth makes
     the non-loopback bind safe)."""
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
-    assert port_preflight.bind_addrs("s3cret") == ["127.0.0.1", "10.0.0.5"]
+    machine_identity.set(host="10.0.0.5")
+    assert port_preflight.bind_addrs("s3cret", machine=machine_identity) == [
+        "127.0.0.1",
+        "10.0.0.5",
+    ]
 
 
 def test_bind_addrs_follows_passed_secret_not_ambient_settings(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The bring-up passes the cluster's OWN secret (install: the decided one;
     start: the authority-passed .env value). An ambient settings value inherited
@@ -312,5 +326,18 @@ def test_bind_addrs_follows_passed_secret_not_ambient_settings(
     widen a no-secret cluster's bind to the LAN."""
     # Ambient settings carry a foreign secret — the leak Task #1113 reproduces.
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "foreign-sibling-secret")
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
-    assert port_preflight.bind_addrs("") == ["127.0.0.1"]
+    machine_identity.set(host="10.0.0.5")
+    assert port_preflight.bind_addrs("", machine=machine_identity) == ["127.0.0.1"]
+
+
+def test_no_secret_does_not_resolve_the_explicit_machine_host() -> None:
+    def unexpected_identity_read() -> str:
+        pytest.fail("a no-secret listener read machine identity")
+
+    machine = MachineIdentity(
+        name=unexpected_identity_read,
+        host=unexpected_identity_read,
+        role=lambda: frozenset({"agent-runner"}),
+        description=lambda: None,
+    )
+    assert port_preflight.bind_addrs("", machine=machine) == ["127.0.0.1"]

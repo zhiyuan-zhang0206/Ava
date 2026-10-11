@@ -26,9 +26,8 @@ can remain available during an application-root transition. The macOS helper
 is root's platform parent, not an application service. Read-only extra checks
 live in the root diagnostic roster; they never acquire service ownership.
 ``cli.commands._repo`` re-exports ``ServiceSpec`` / ``build_services`` /
-``services_for_capabilities`` under their historical names as a cli-facing façade
-(so existing `from cli.commands._repo import ...` call sites keep working), but the
-definitions live in ``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``.
+``services_for_capabilities`` as a cli-facing façade; the definitions live in
+``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``.
 """
 
 from __future__ import annotations
@@ -40,13 +39,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.host.system.probes import (
     browser_incapability,
+    browser_mcp_incapability,
     permissions_helper_incapability,
+    unix_sockets_available,
 )
 from base.log import logger
+from base.paths import ava_home
 from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
 from ops.roster.service_spec import (
     ServiceSpec as ServiceSpec,  # re-export: generated plugin fixtures
@@ -163,19 +165,22 @@ class PluginServiceError(RuntimeError):
 def _computer_mcp_gate_reason() -> str | None:
     """Why the computer-mcp service is gated out, or None when it should run.
 
-    Platform gate only: the daemon needs the permissions helper (the single
-    TCC grant-holder it executes through). There is no governance gate —
-    per-agent permission division is a prompt-level peer convention, not
-    code-enforced (user ruling 2026-08-10).
+    Platform gates only: the daemon needs the permissions helper (the single
+    TCC grant-holder it executes through), the AF_UNIX transport its socket
+    protocol uses. There is no governance gate — per-agent permission
+    division is a prompt-level peer convention, not code-enforced (user ruling
+    2026-08-10).
     """
     if not settings.services.permissions_helper_enabled:
         return "disabled (AVA_PERMISSIONS_HELPER_ENABLED off)"
     if permissions_helper_incapability() is not None:
         return permissions_helper_incapability()
+    if not unix_sockets_available():
+        return "no AF_UNIX sockets (computer-mcp's transport is POSIX-only)"
     return None
 
 
-def _otel_collector_gate_reason() -> str | None:
+def _otel_collector_gate_reason(*, machine: MachineIdentity) -> str | None:
     """Why otel-collector is gated out, or None when it should run.
 
     This is the roster sibling of ``ensure_otel_collector_step`` in
@@ -187,7 +192,10 @@ def _otel_collector_gate_reason() -> str | None:
     about which gateway owns the collector. Pure agent-runners retain their
     relay collector.
     """
-    if not collector_allowed_for_home(gateway_observability_home()):
+    home = ava_home()
+    if not collector_allowed_for_home(
+        gateway_observability_home(machine, home=home), machine=machine, unit_home=home
+    ):
         return (
             "this gateway home is not the observability station (lgtm-host "
             "marker absent, no observability-station capability); telemetry "
@@ -232,25 +240,45 @@ def _flag_gate_reason(session: str) -> str | None:
     return None
 
 
-def _browser_family_gate_reason() -> str | None:
+def _browser_family_gate_reason(session: str) -> str | None:
     if not settings.services.browser_enabled:
         return "disabled (AVA_BROWSER_ENABLED off)"
+    # Two services, two capability probes: browser-mcp needs a strict SUPERSET
+    # of what the headed browser needs (the same display / Chrome / npx prongs
+    # plus an AF_UNIX transport), so a host can legitimately run `browser` and
+    # not `browser-mcp` — which is exactly a Windows agent-runner. Sharing one
+    # probe put browser-mcp in that host's start roster with no skip
+    # annotation, and it failed every launch.
+    if session == "browser-mcp":
+        return browser_mcp_incapability()
     return browser_incapability()  # display / Chrome / npx, or None when capable
 
 
-def _core_gate_reason(session: str) -> str | None:
+def _core_gate_reason(session: str, *, machine: MachineIdentity) -> str | None:
     """The session-name-keyed half of `_gate_reason` — every core service
     without its own plugin-registered ``gate``."""
     if session in ("browser", "browser-mcp"):
-        return _browser_family_gate_reason()
+        return _browser_family_gate_reason(session)
+    if session == "mcp-daemon" and not unix_sockets_available():
+        # Same transport story as browser-mcp: the daemon binds a Unix socket
+        # (ava/mcps/_daemon.py) and its healthcheck dials it, so without AF_UNIX
+        # the service can never start and the root would judge it dead every
+        # round and log a restart failure — a Windows agent-runner, exactly.
+        return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"
+    if session == "pty-sessions" and not unix_sockets_available():
+        # The service binds a Unix socket and forks ptys: a host without them
+        # (a Windows unit, which runs no shells) cannot start it.
+        return "no AF_UNIX sockets (pty-sessions' transport is POSIX-only)"
     if session == "computer-mcp":
         return _computer_mcp_gate_reason()
     if session in {"loki", "prometheus", "grafana"}:
         from services.supervision.healthchecks.lgtm import is_lgtm_host
 
-        return None if is_lgtm_host() else "this home is not an observability station"
+        return (
+            None if is_lgtm_host(machine=machine) else "this home is not an observability station"
+        )
     if session == "otel-collector":
-        return _otel_collector_gate_reason()
+        return _otel_collector_gate_reason(machine=machine)
     return _flag_gate_reason(session)
 
 
@@ -264,7 +292,7 @@ def _plugin_gate_reason(spec: ServiceSpec) -> str | None:
     return reason
 
 
-def _gate_reason(spec: ServiceSpec) -> str | None:
+def _gate_reason(spec: ServiceSpec, *, machine: MachineIdentity) -> str | None:
     """Why a service is config/capability-gated OUT of the start roster, or None if
     it will run. The single place the gate's *reason* is computed, so the start
     path (drops it), ``ava start`` (logs it), and ``ava status`` (shows it) stay
@@ -282,11 +310,13 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
                 "gate for {} failed; roster evaluation aborted", spec.session
             )
             raise
-    return _core_gate_reason(spec.session)
+    return _core_gate_reason(spec.session, machine=machine)
 
 
 def services_for_capabilities_annotated(
     roles: MachineRoles,
+    *,
+    machine: MachineIdentity,
 ) -> tuple[tuple[ServiceSpec, str | None], ...]:
     """The union of services this host's capability set runs, each paired with its
     gate reason (None = will start, a string = gated out + why).
@@ -303,14 +333,22 @@ def services_for_capabilities_annotated(
     the roster. ``services_for_capabilities`` is the start-roster view that drops
     them.
     """
-    return tuple((s, _gate_reason(s)) for s in build_services() if s.capabilities & roles)
+    return tuple(
+        (s, _gate_reason(s, machine=machine)) for s in build_services() if s.capabilities & roles
+    )
 
 
-def services_for_capabilities(roles: MachineRoles) -> tuple[ServiceSpec, ...]:
+def services_for_capabilities(
+    roles: MachineRoles, *, machine: MachineIdentity
+) -> tuple[ServiceSpec, ...]:
     """The start roster: the capability-union services that will actually launch
     (config/capability-gated ones dropped). ``services_for_capabilities_annotated``
     is the diagnostic view that keeps the gated-out services + their reason."""
-    return tuple(s for s, reason in services_for_capabilities_annotated(roles) if reason is None)
+    return tuple(
+        s
+        for s, reason in services_for_capabilities_annotated(roles, machine=machine)
+        if reason is None
+    )
 
 
 @dataclass(frozen=True)
@@ -325,21 +363,21 @@ class Spec:
     """
 
     roles: MachineRoles
+    machine: MachineIdentity
 
     def services(self) -> tuple[ServiceSpec, ...]:
         """The start roster for this host's capabilities (gated-out dropped)."""
-        return services_for_capabilities(self.roles)
+        return services_for_capabilities(self.roles, machine=self.machine)
 
     def services_annotated(self) -> tuple[tuple[ServiceSpec, str | None], ...]:
         """The diagnostic roster — every capability-matched service + its gate reason."""
-        return services_for_capabilities_annotated(self.roles)
+        return services_for_capabilities_annotated(self.roles, machine=self.machine)
 
 
-# Compatibility re-export: legacy importers (`from ops.spec import
-# build_services`, tests) take the canonical roster from this module.
+# The canonical roster, used by ``services_for_capabilities_annotated`` above.
 # Placed at the BOTTOM deliberately: roster's build_services calls back into
 # this module's helpers (plugin_services /
 # _assert_unique_sessions) lazily, so this edge must not run while this module
 # is partially initialized (spec → roster at the top would be a load-time
 # edge in the opposite direction of the call-time edge — keep both lazy).
-from ops.roster import build_services as build_services  # noqa: E402 — deliberate bottom re-export
+from ops.roster import build_services  # noqa: E402 — deliberate bottom import

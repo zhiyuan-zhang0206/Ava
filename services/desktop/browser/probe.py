@@ -17,7 +17,7 @@ is written only for an auto-assigned port; with an explicit
 `--remote-debugging-port` it is absent. Verified against this cluster's own
 profile and a throwaway one.) So a status-code probe answers "a debuggable Chrome
 is up", never "this unit's browser is up", and any Chrome that got the port first
-— including another unit's, relayed onto this host's loopback — reads green.
+— including the WSL2 unit's, relayed onto a Windows unit's loopback — reads green.
 Agents then drive the wrong browser, which is worse than a red check because
 nothing looks wrong.
 
@@ -43,9 +43,9 @@ positive identifier — no Chrome that is not ours is launched with it — and
 restating it.
 
 The `pid` arm is the missing half: a Chrome of ours *existing* is not evidence
-that it is the process answering the port. A relayed loopback is exactly that shape —
+that it is the process answering the port. The WSL case is exactly that shape —
 the two units are in different network namespaces, so the relay and this unit's
-Chrome can both be alive while only one of them owns the loopback port,
+Chrome can both be alive while only one of them owns the Windows loopback port,
 and a Chrome that lost the bind keeps running with its DevTools endpoint dead.
 So the conjunction is: CDP answers on the port **and** a Chrome on this cluster's
 profile holds a LISTEN socket on that same port. `psutil` supplies the socket

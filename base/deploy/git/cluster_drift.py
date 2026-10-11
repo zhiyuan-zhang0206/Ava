@@ -25,9 +25,10 @@ from base.host.proc import run_bounded
 
 # These reads are local-only (rev-parse / merge-base against an existing
 # checkout), so a low ceiling is right — a status render waits on them. Bounded
-# via `run_bounded` all the same: a plain `subprocess.run` timeout kills only the
-# direct child and leaves its descendants behind on every expiry, and a status
-# probe runs often enough to accumulate them.
+# via `run_bounded` all the same: on Windows the direct child is
+# Git-for-Windows' launcher stub, so a plain `subprocess.run` timeout would kill
+# the stub and leave the real git behind on every expiry, and a status probe runs
+# often enough to accumulate them.
 _GIT_TIMEOUT_S = 5.0
 
 

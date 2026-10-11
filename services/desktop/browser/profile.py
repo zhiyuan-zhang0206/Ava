@@ -107,8 +107,11 @@ def _running_chrome_pid(src: Path) -> int | None:
     if not pid_str.isdigit():
         return None
     pid = int(pid_str)
-    # `process_alive`, not a raw `os.kill(pid, 0)`: a recycled pid owned by
-    # another user still counts as alive (running).
+    # `process_alive`, not a raw `os.kill(pid, 0)`: on Windows signal 0 is not a
+    # valid signal and `os.kill(pid, 0)` maps to TerminateProcess — a liveness
+    # probe must never kill the operator's daily Chrome. `process_alive` answers
+    # the same question via psutil there, and a recycled pid owned by another
+    # user still counts as alive (running).
     if process_alive(pid):
         return pid
     return None  # stale lock

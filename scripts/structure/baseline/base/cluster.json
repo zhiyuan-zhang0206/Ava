@@ -1,5 +1,3 @@
 {
-  "ambient_state": {
-    "base/cluster/machine.py::ambient-instance:_identity": 1
-  }
+  "ambient_state": {}
 }

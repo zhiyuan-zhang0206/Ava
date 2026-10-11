@@ -9,9 +9,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import psutil
+import pytest
 
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group contract")
 
 # A native fork after TERM may outlive the known leader.
 _FORKED_CHILD = """

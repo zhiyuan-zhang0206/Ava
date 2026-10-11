@@ -24,7 +24,9 @@ beside that target. One validated in-memory source snapshot supplies the
 manifest, digest, and staged bytes for every present client, so publication
 never re-reads a moving Git checkout or mixes source generations. Pathname and
 opened-handle metadata are compared by stable file identity across those API
-families, while full before/after signatures remain local to each family. A private per-client, per-skill ledger under
+families, while full before/after signatures remain local to each family; this
+avoids Windows metadata-representation mismatches without weakening mutation
+detection. A private per-client, per-skill ledger under
 `$AVA_HOME/configs/external-agent-skills/` records an installation identity,
 installed generation and digest, active transaction, exact cleanup records,
 and terminal private-retention records;
@@ -66,7 +68,8 @@ preserved, even if it contains a copied or fabricated marker. Content or
 permission changes are user modifications and are also preserved. Source and
 external trees reject symbolic links, junctions, reparse points, and
 non-regular or multi-link entries. Cleanup changes no file or directory mode.
-The copy model uses ordinary directories and files. Per-client
+The copy model uses ordinary directories and files, so the
+ownership contract does not require symlink support on Windows. Per-client
 path, lock, and rename failures are labelled warnings and do not abort core
 converge; source-integrity failures remain fatal.
 

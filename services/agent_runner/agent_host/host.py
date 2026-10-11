@@ -1,9 +1,7 @@
 """Run local agents through a shared graph and explicit per-turn context.
 
-The dispatcher owns single-flight; the daemon owns pools and checkpointer.
-Cold admission and database recovery repair the original task before model work.
-Lifecycle requests retain original command and resource settlement fences.
-Unknown failures propagate; expected failures settle their checkpoint.
+Each turn borrows the daemon's pools, checkpointer and machine owner. Admission and
+recovery retain task and settlement fences; expected failures settle and unknown failures propagate.
 """
 
 from __future__ import annotations
@@ -56,7 +54,7 @@ from base.agents.incarnation.native_work_models import NativeWorkTarget, NativeW
 from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.deploy.maintenance import admission
@@ -139,7 +137,7 @@ class AgentHost:
         control_pool: AsyncConnectionPool[psycopg.AsyncConnection] | None = None,
         checkpointer: AsyncPostgresSaver,
         graph: _HostGraph,
-        machine: str | None = None,
+        machine: MachineIdentity,
         bus: EventBus,
         db: Database,
         catalog: ModelCatalog,
@@ -163,7 +161,8 @@ class AgentHost:
         self._peek_lock = (
             asyncio.Lock()
         )  # one optional interrupt peek on the control pool at a time
-        self._machine = machine if machine is not None else machine_name()
+        self._machine_identity = machine
+        self._machine = machine.name()
         self._owner = uuid4()
         self._runtimes: OrderedDict[int, _AgentRuntime] = OrderedDict()
         self._rejected_configs: dict[int, str] = {}
@@ -580,6 +579,7 @@ class AgentHost:
             self._bus.async_redis(), self._bus.channel, agent_id=agent_id
         )
         ctx = AvaContext(
+            machine=self._machine_identity,
             ops_pool=self._pool,
             llm=runtime.llm,
             catalog=self._catalog,

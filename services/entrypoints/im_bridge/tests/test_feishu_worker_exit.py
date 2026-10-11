@@ -8,10 +8,13 @@ import socket
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from services.entrypoints.im_bridge import daemon
 from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
     FakeCore,
@@ -20,6 +23,8 @@ from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config
 from tests.components.services.daemon_shutdown_test_support import Child
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGTERM contract")
 
 
 def run_blocked_ws_child(markers_path: Path, *, responsive: bool = True) -> None:
@@ -52,7 +57,8 @@ def run_blocked_ws_child(markers_path: Path, *, responsive: bool = True) -> None
             mark("disconnect-requested")
             disconnect_seen.set_result(None)
 
-    async def run_ws() -> None:
+    async def run_ws(*, database: Callable[[], Database], image: LoadedCommit) -> None:
+        del database, image
         adapter = PatchingAdapter(
             FakeCore(),
             feishu_config(

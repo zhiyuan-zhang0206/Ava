@@ -88,7 +88,8 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     else:
         assert raw == b'{"a":"value","z":1}'
     assert sorted(tmp_path.iterdir()) == [path]
-    assert path.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "locks"])
@@ -144,6 +145,7 @@ def test_cli_writer_commits_utf8_without_directory_sync(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="journals skip parent fsync on Windows")
 def test_journal_directory_sync_failure_raises_after_visible_commit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -196,6 +198,7 @@ def test_concurrent_marker_writers_publish_complete_snapshots(tmp_path: Path) ->
     assert sorted(tmp_path.iterdir()) == [path]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not support directory fsync")
 def test_bytes_helper_syncs_file_then_parent_and_sets_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -211,7 +214,8 @@ def test_bytes_helper_syncs_file_then_parent_and_sets_mode(
     atomic_io.write_bytes_atomic(path, b"\x00payload", mode=0o600, sync_parent=True)
     assert path.read_bytes() == b"\x00payload"
     assert synced == ["file", "parent"]
-    assert path.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
     assert sorted(tmp_path.iterdir()) == [path]
 
 
@@ -230,6 +234,7 @@ def test_bytes_helper_can_skip_sync_without_skipping_atomic_replace(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="fchmod mode contract is POSIX-only")
 def test_text_helper_applies_requested_public_mode(tmp_path: Path) -> None:
     path = tmp_path / "pointer.pth"
     atomic_io.write_text_atomic(path, "target", mode=0o644, sync_file=False)
@@ -290,6 +295,7 @@ def test_visible_text_writers_clean_temp_after_failed_replace(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="fchmod mode contract is POSIX-only")
 @pytest.mark.parametrize(
     "writer", [editable_install._atomic_write_text, grafana_render._atomic_write]
 )
@@ -311,6 +317,7 @@ def test_visible_text_writers_set_public_mode_without_sync(
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are not Windows ACLs")
 def test_atomic_pointer_replacement_restores_read_only_mode(tmp_path: Path) -> None:
     path = tmp_path / "pointer.pth"
     path.write_text("old")

@@ -24,6 +24,7 @@ import psutil
 import pytest
 
 import base.sessions.backend as sb
+from base.native_process.os_platform import is_windows
 from base.sessions.backend import (
     PosixProcSessionBackend,
     PtySessionBackend,
@@ -42,6 +43,8 @@ from tests.path_scoped.pty_shells import (
     type_line,
     wait_for,
 )
+
+pytestmark = pytest.mark.skipif(is_windows(), reason="pty sessions are POSIX-only")
 
 _NAME = "ava-agent-1-shell-2"
 

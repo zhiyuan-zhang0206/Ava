@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import plistlib
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from base.config import ConfigBoot
+from base.cluster.machine import MachineIdentity
+from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
 from cli.commands.converge import redis_bridge as bridge
 from cli.commands.converge.spec import ConvergeCtx
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.redis_bridge import relay
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 class _StopTestError(RuntimeError):
@@ -188,6 +196,9 @@ def test_unchanged_loaded_job_is_not_restarted(
 def test_converge_retires_stale_bridge_when_it_is_no_longer_required(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     installed = home / "redis-bridge" / "relay.py"
@@ -206,14 +217,22 @@ def test_converge_retires_stale_bridge_when_it_is_no_longer_required(
             loaded = False
         return type("Result", (), {"returncode": 0 if loaded else 1, "stderr": ""})()
 
-    def _not_required(_home: Path) -> None:
-        return None
+    def _not_required(_home: Path, *, machine: MachineIdentity) -> None:
+        assert machine is command_runtime.machine
 
     monkeypatch.setattr(bridge.sys, "platform", "darwin")
     monkeypatch.setattr(bridge, "_bridge_config", _not_required)
     monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
     monkeypatch.setattr(bridge, "_launchctl", _launchctl)
-    ctx = ConvergeCtx(repo=tmp_path / "repo", ava_home=home, roles=None, config=ConfigBoot())
+    ctx = ConvergeCtx(
+        repo=tmp_path / "repo",
+        ava_home=home,
+        roles=None,
+        config=command_runtime.config,
+        machine=command_runtime.machine,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
 
     bridge.ensure_redis_bridge(ctx)
 
@@ -248,6 +267,7 @@ def test_retire_preserves_artifacts_when_launchd_job_does_not_exit(
 def test_probe_uses_authenticated_redis_ping_through_bridge(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    command_machine: MachineIdentity,
 ) -> None:
     calls: list[tuple[str, dict[str, float]]] = []
 
@@ -262,7 +282,8 @@ def test_probe_uses_authenticated_redis_ping_through_bridge(
         calls.append((url, kwargs))
         return _Client()
 
-    def _config(_home: Path) -> bridge.RedisBridgeConfig:
+    def _config(_home: Path, *, machine: MachineIdentity) -> bridge.RedisBridgeConfig:
+        assert machine is command_machine
         return bridge.RedisBridgeConfig("10.64.0.7", 16380)
 
     monkeypatch.setattr(bridge, "_bridge_config", _config)
@@ -274,7 +295,7 @@ def test_probe_uses_authenticated_redis_ping_through_bridge(
     )
     monkeypatch.setattr("redis.Redis.from_url", _from_url)
 
-    status = bridge.probe_redis_bridge(tmp_path)
+    status = bridge.probe_redis_bridge(tmp_path, machine=command_machine)
 
     assert status.serving
     assert status.supervised
@@ -289,6 +310,7 @@ def test_probe_uses_authenticated_redis_ping_through_bridge(
 def test_probe_does_not_accept_a_loaded_job_when_ping_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    command_machine: MachineIdentity,
 ) -> None:
     class _DeadClient:
         def ping(self) -> None:
@@ -297,7 +319,8 @@ def test_probe_does_not_accept_a_loaded_job_when_ping_fails(
         def close(self) -> None:
             return
 
-    def _config(_home: Path) -> bridge.RedisBridgeConfig:
+    def _config(_home: Path, *, machine: MachineIdentity) -> bridge.RedisBridgeConfig:
+        assert machine is command_machine
         return bridge.RedisBridgeConfig("10.64.0.7", 16380)
 
     monkeypatch.setattr(bridge, "_bridge_config", _config)
@@ -309,7 +332,7 @@ def test_probe_does_not_accept_a_loaded_job_when_ping_fails(
     )
     monkeypatch.setattr("redis.Redis.from_url", lambda *_a, **_kw: _DeadClient())  # pyright: ignore[reportUnknownArgumentType]
 
-    status = bridge.probe_redis_bridge(tmp_path)
+    status = bridge.probe_redis_bridge(tmp_path, machine=command_machine)
 
     assert status.required
     assert not status.serving
@@ -320,6 +343,7 @@ def test_probe_does_not_accept_a_loaded_job_when_ping_fails(
 def test_probe_reports_unconfigured_when_registry_record_is_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(bridge.sys, "platform", "darwin")
     monkeypatch.setattr(bridge.settings.data_plane, "cluster_secret", "cluster-secret")
@@ -337,11 +361,11 @@ def test_probe_reports_unconfigured_when_registry_record_is_missing(
     def _missing_record(_home: Path) -> None:
         return None
 
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.64.0.7")
+    command_machine.set(host="10.64.0.7")
     monkeypatch.setattr("base.cluster.get_record", _missing_record)
     monkeypatch.setattr(bridge, "_job_loaded", lambda: False)
 
-    status = bridge.probe_redis_bridge(tmp_path)
+    status = bridge.probe_redis_bridge(tmp_path, machine=command_machine)
 
     assert status.required
     assert not status.serving
@@ -366,14 +390,24 @@ def test_bridge_step_is_gateway_prod_host_only() -> None:
 def test_ensure_bridge_uses_resolved_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    command_runtime: CommandRuntime,
 ) -> None:
     ctx = ConvergeCtx(
-        repo=tmp_path / "repo", ava_home=tmp_path / "home", roles=None, config=ConfigBoot()
+        repo=tmp_path / "repo",
+        ava_home=tmp_path / "home",
+        roles=None,
+        config=command_runtime.config,
+        machine=command_runtime.machine,
+        database_factory=operator_database,
+        producer=operator_pipeline,
     )
     config = bridge.RedisBridgeConfig("10.64.0.7", 16380)
     calls: list[tuple[Path, Path, bridge.RedisBridgeConfig]] = []
 
-    def _config(_home: Path) -> bridge.RedisBridgeConfig:
+    def _config(_home: Path, *, machine: MachineIdentity) -> bridge.RedisBridgeConfig:
+        assert machine is ctx.machine
         return config
 
     def _ensure(

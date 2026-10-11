@@ -41,6 +41,7 @@ def emit(
     sampling_policy: SamplingPolicy | None = None,
     admission: SdkCaptureAdmission | None = None,
     producer: Callable[[], Any] | None = None,
+    machine_reader: Callable[[], str] | None = None,
 ) -> None:
     """Write one ``sdk_call`` event; invalid input and emitter errors propagate.
     ``detail`` is omitted from the payload when empty, so a plain call stays ``{fn}``;
@@ -67,6 +68,8 @@ def emit(
     capture_args: dict[str, Any] = {} if admission is None else {"capture": admission.capture}
     if producer is not None:
         capture_args["producer"] = producer
+    if machine_reader is not None:
+        capture_args["machine_reader"] = machine_reader
     telemetry.emit(
         "telemetry",
         SDK_CALL_EVENT,
@@ -95,6 +98,7 @@ def _measure(
     capture_owner: SdkCaptureOwner | None,
     sampling_owner: SamplingPolicyOwner,
     producer: Callable[[], Any] | None,
+    machine_reader: Callable[[], str] | None,
 ) -> Generator[None, None, None]:
     from base.agents.sdk.call_policy import policy
 
@@ -122,6 +126,7 @@ def _measure(
                     sampling_owner=sampling_owner,
                     sampling_policy=snapshot,
                     producer=producer,
+                    machine_reader=machine_reader,
                     **capture_args,
                 )
             except BaseException as secondary:
@@ -150,9 +155,10 @@ def run_metered(
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
     producer: Callable[[], Any] | None = None,
+    machine_reader: Callable[[], str] | None = None,
 ) -> Any:
     """Validate each public entry before execution and retain its call-local snapshots."""
-    with _measure(fn, identity, tally, capture_owner, sampling_owner, producer):
+    with _measure(fn, identity, tally, capture_owner, sampling_owner, producer, machine_reader):
         return original(*args, **kwargs)
 
 
@@ -167,9 +173,10 @@ async def run_metered_async(
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
     producer: Callable[[], Any] | None = None,
+    machine_reader: Callable[[], str] | None = None,
 ) -> Any:
     """Validate when awaited, preserving cancellation and the call's own admission."""
-    with _measure(fn, identity, tally, capture_owner, sampling_owner, producer):
+    with _measure(fn, identity, tally, capture_owner, sampling_owner, producer, machine_reader):
         return await original(*args, **kwargs)
 
 

@@ -129,7 +129,7 @@ template into a running cluster without a restart of the manager, run
   rename leftover the imports alone cannot see; conservative: any binding
   counts, annotations are not read, `from x import *` disables it), and an
   `inspect.signature().bind` of every call the script makes into repo code
-  (`catch_up(...)`, `schedules.catchup.fire_slot_once(...)`, `Database.from_settings()`;
+  (`catch_up(...)`, `schedules.catchup.fire_slot_once(...)`, `inputs.database()`;
   the argument shape only, so a call it cannot bind statically — `*args`, an
   instance method, a rebound name, the plugin-wrapped `ava.*` SDK — is skipped,
   never guessed). Nothing is started, stopped, or written. The drift classes that
@@ -206,3 +206,13 @@ contracts; the current static verifier does not prove callback arity by checking
 only the outer call. Do not release the hold or launch old schedule code after
 installing scripts that require the new callback contract. Finish the normal
 whole-cluster update to the approved target before admission resumes.
+
+Runner-hosted templates receive immutable `ScheduleInputs` through `runpy.init_globals`:
+one loaded image, the entry's database/pipeline builders and its `MachineIdentity`.
+Templates use `schedule_entry(inputs)` to borrow these resources without closing
+them or changing the shared SDK context. A fresh executable shell explicitly uses
+`fresh_schedule_entry()` to own its lazy machine, SDK context, gate and cold writer.
+Exit restores the prior SDK context and closes constructed clients within two
+seconds while preserving an original loop failure. Callable entry helpers require
+explicit inputs or an explicitly supplied fresh-entry factory. C9/debt callbacks
+initialize logging at the original reporting point; debt dry runs assemble no root.

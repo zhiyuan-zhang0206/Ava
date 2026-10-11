@@ -38,6 +38,8 @@ let idSeq = 1;
 describe("inboundKind", () => {
   it("maps agent / human / system sources", () => {
     expect(inboundKind("agent:42")).toBe("agent");
+    expect(inboundKind("external_agent:claude_code")).toBe("external_agent");
+    expect(inboundKind("external_agent:codex:run-42")).toBe("external_agent");
     expect(inboundKind("user")).toBe("human");
     expect(inboundKind("ui:page:board")).toBe("human");
     expect(inboundKind("system")).toBe("system");
@@ -59,6 +61,7 @@ describe("classifyItem", () => {
 
   it("agent + system inbound are secondary", () => {
     expect(classifyItem(item("inbound_chat", "agent:5"))).toBe("secondary");
+    expect(classifyItem(item("inbound_chat", "external_agent:claude_code"))).toBe("secondary");
     expect(classifyItem(item("inbound_chat", "system"))).toBe("secondary");
     expect(classifyItem(item("inbound_chat", "watcher:1"))).toBe("secondary");
   });

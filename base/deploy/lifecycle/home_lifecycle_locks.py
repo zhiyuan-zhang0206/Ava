@@ -51,6 +51,8 @@ def _last_holder(path: Path) -> str:
 
 
 def _fsync_parent(path: Path) -> None:
+    if os.name == "nt":
+        return
     fsync_parent(path)
 
 

@@ -72,11 +72,25 @@ def otlp_receiver() -> Any:
 # (`sync()`), then emit the tail record and return — the exit drain is the
 # only thing left that can carry it.
 _CHILD = """
+from functools import partial
 from base import telemetry
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.config import ConfigBoot
+from base.cluster.machine.boot import machine_from_boot
+from base.paths import ava_home
 
 MARKER = {marker!r}
 
-telemetry.init_telemetry(process="exit-seam-probe")
+image = LoadedCommit.capture()
+version = CodeVersion(image)
+gate = ProcessDbGate(process="exit-seam-probe", version=version.get)
+config = ConfigBoot()
+config.read_process_environment()
+pipeline = telemetry.build_pipeline(database=partial(Database.from_settings, gate=gate), machine=machine_from_boot(config), home=ava_home())
+telemetry.init_telemetry(process="exit-seam-probe", pipeline=pipeline)
 telemetry.emit("log", "log", attributes={{"seq": "early", "marker": MARKER}})
 telemetry.sync()
 telemetry.emit("log", "log", attributes={{"seq": "tail", "marker": MARKER}})

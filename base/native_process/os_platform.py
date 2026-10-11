@@ -1,6 +1,7 @@
 """Host-platform facts and POSIX process primitives below the import graph.
 
 Platform predicates query Python's current platform without import-time probes.
+Subprocess constants remain while native Windows runtime is retired.
 """
 
 from __future__ import annotations
@@ -8,11 +9,17 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
 from collections.abc import Generator
 from pathlib import Path
+
+
+def is_windows() -> bool:
+    """Whether this process runs on Windows, queried directly from Python."""
+    return sys.platform == "win32"
 
 
 def is_macos() -> bool:
@@ -119,6 +126,28 @@ def _parent_pid(pid: int) -> int | None:
         return None
 
 
+# --- Kill signals -----------------------------------------------------------
+# Windows' `signal` module defines neither SIGKILL nor SIGHUP. Code that names
+# them for `os.kill` / handler registration would AttributeError at import or
+# call time. On Windows we fall back to SIGTERM, which Python's `os.kill` maps
+# to TerminateProcess (an immediate, uncatchable kill — the SIGKILL intent) and
+# which the daemons already handle for graceful shutdown (the SIGHUP intent).
+SIGKILL = getattr(signal, "SIGKILL", signal.SIGTERM)
+SIGHUP = getattr(signal, "SIGHUP", signal.SIGTERM)
+
+
+# --- Child-process window suppression ---------------------------------------
+# On Windows, a console-less parent (the agent runner under ConPTY, daemons
+# started detached) that spawns a child without a creation flag gets a brand-new
+# console window flashed on the interactive desktop for every subprocess call —
+# the agent's shell runs, git calls, schtasks invocations all pop a terminal for
+# ~1s. CREATE_NO_WINDOW (0x08000000) starts the child with no console at all.
+# POSIX has no such flag and no console-window problem; the constant is 0 there,
+# so a call site that always passes `creationflags=CREATE_NO_WINDOW` is a no-op
+# on every non-Windows host.
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def raise_fd_limit(desired: int) -> None:
     """Raise this process's soft RLIMIT_NOFILE toward `desired` (best-effort).
 
@@ -143,7 +172,7 @@ def pty_max() -> int | None:
     configured" and the agent never launches. Unlike the fd limit it cannot be
     raised per-process (`sysctl -w kern.tty.ptmx_max=...`, root, host-wide).
 
-    Returns the sysctl value on macOS, or None on Linux (Linux's
+    Returns the sysctl value on macOS, or None on Linux/Windows (Linux's
     `kernel.pty.max` defaults to 4096, comfortably above any single-box fleet, so
     it is not a binding constraint here) and on any read failure — callers treat
     None as "no known PTY ceiling to check against".
@@ -289,8 +318,11 @@ def ensure_line_buffered_stdio() -> None:
 def primary_disk_path() -> str:
     """The most meaningful filesystem path for this host's disk-usage sampling.
 
-    macOS: the data volume (not the sealed system volume). Any other host: the
-    root filesystem.
+    macOS: the data volume (not the sealed system volume). WSL: the distro's own
+    ext4 rootfs (`/`) — NOT the auto-mounted Windows `/mnt/c`, which reflects the
+    Windows host's C: drive (often near-full) and has nothing to do with how much
+    space this Linux machine is actually using. Windows: the system drive. Any
+    other POSIX host: the root filesystem.
     """
     if is_macos():
         return "/System/Volumes/Data"

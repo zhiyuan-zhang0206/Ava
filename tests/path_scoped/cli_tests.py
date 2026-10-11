@@ -9,70 +9,72 @@ boundaries remain guarded by the root fixtures.
 from __future__ import annotations
 
 import pathlib
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 from base.deploy.lifecycle import service_selection as ds
+from base.paths import ava_home
+from base.telemetry import EventPipeline
+from cli.database import (
+    OperatorDatabaseFactory,
+    OperatorEventPipeline,
+    operator_database_factory,
+    operator_event_pipeline,
+)
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
 
 @pytest.fixture
-def _installed_machine_identity(unit_home: pathlib.Path) -> Iterator[None]:
-    """Give this test's unit home a machine identity, as a real install has.
+def operator_database(command_runtime: CommandRuntime) -> OperatorDatabaseFactory:
+    """Borrow one real operator factory for this case's explicit CLI inputs."""
+    return operator_database_factory(local_host=command_runtime.machine.host)
 
-    `unit_home` is deliberately a bare directory — several tests model a home
-    that has never been through `ava start` and assert exactly that (see
-    `test_start_arg_writes_to_file_for_persistence`, whose premise is "files
-    also do not exist"). So the identity cannot be pre-written there.
 
-    But an install that lands content into the CLUSTER registry records
-    `local:<machine>` provenance for a local-path source, which needs a machine
-    name — and a home doing `ava skill install` is by definition an installed
-    unit, not a virgin one. Modules exercising the install paths opt in with
-    `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
-    """
-    from base.cluster.machine import reset_identity, set_identity
+@pytest.fixture
+def operator_pipeline(
+    operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
+) -> Generator[OperatorEventPipeline]:
+    """Borrow one lazy writer for the same command's work and reporter inputs."""
+    producer = operator_event_pipeline(
+        operator_database, machine=command_runtime.machine, home=ava_home()
+    )
+    try:
+        yield producer
+    finally:
+        producer.close()
 
-    set_identity(name="unit-test-machine")
-    yield
-    reset_identity()
+
+@pytest.fixture
+def _installed_machine_identity(command_runtime: CommandRuntime) -> MachineIdentity:
+    """Give this case's explicit owner the provenance of an installed unit."""
+    command_runtime.machine.set(name="unit-test-machine")
+    return command_runtime.machine
 
 
 @pytest.fixture
 def as_machine(
     monkeypatch: pytest.MonkeyPatch,
-) -> Callable[[pathlib.Path], AbstractContextManager[pathlib.Path]]:
-    """Run a block as the machine whose `$AVA_HOME` is the given directory.
-
-    A "machine" in these tests IS its `$AVA_HOME`: `skills_dir()`, the
-    `installed.json` install registry and `machine_name` all hang off it, so
-    pointing `AVA_HOME` at a second directory gives a genuinely
-    distinct machine to every path under test while the Postgres URL is
-    untouched. Two homes, one PG.
-
-    `reset_identity()` on BOTH edges is the load-bearing part, not the home
-    swap: `machine_name()` caches, and a stale cache would let the second home
-    claim to be the first — which would make a cross-machine test pass for the
-    wrong reason, since rows record `local:<machine>`.
-
-    Shared rather than copied because it is exactly the kind of helper whose
-    subtle half (the cache reset) gets dropped in the copy.
-    """
-    from base.cluster.machine import reset_identity, set_identity
+) -> Callable[[pathlib.Path], AbstractContextManager[MachineIdentity]]:
+    """Borrow a fresh machine owner for each real home in a cross-home test."""
 
     @contextmanager
-    def _enter(home: pathlib.Path) -> Generator[pathlib.Path]:
+    def _enter(home: pathlib.Path) -> Generator[MachineIdentity]:
         home.mkdir(parents=True, exist_ok=True)
         with monkeypatch.context() as m:
             m.setenv("AVA_HOME", str(home))
-            reset_identity()
-            set_identity(name=home.name)
-            try:
-                yield home
-            finally:
-                reset_identity()
+            config = ConfigBoot()
+            config.read_process_environment()
+            machine = machine_from_boot(config)
+            machine.set(name=home.name)
+            yield machine
 
     return _enter
 
@@ -117,8 +119,10 @@ def cli_log_sinks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """
     opened: list[str] = []
 
-    def record(*, name: str) -> None:
+    def record(
+        *, name: str, producer: Callable[[], EventPipeline], machine_reader: Callable[[], str]
+    ) -> None:
         opened.append(name)
 
-    monkeypatch.setattr("base.log.init_cli_process", record)
+    monkeypatch.setattr("base.log.process.init_cli_process", record)
     return opened

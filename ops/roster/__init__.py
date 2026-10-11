@@ -237,8 +237,14 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # — the watchdog respawn (services/supervision/healthchecks/frontend.py) builds the
             # SAME string, so the two launch paths cannot drift (they did once: the
             # respawn lost its `exec`, the session validator rejected the command,
-            # and a dead frontend could never self-heal).
+            # and a dead frontend could never self-heal). On Windows the supervisor
+            # runs the `&&` chain via `cmd /c` — cmd cannot do bash-style inline
+            # `VAR=val cmd`; use `set "VAR=val" && ...` instead.
             # (NEXT_PUBLIC_* is build-time-inlined, so it must reach `npm run build`.)
+            # Those inner quotes reach cmd intact only because the supervisor hands
+            # the shell branch a verbatim command line: through a Popen argv list,
+            # list2cmdline would escape them to \" , which cmd reads as a literal
+            # backslash plus a quote toggle, setting a variable named `\`.
             cmd=frontend_service_cmd(_fe_port),
             capabilities=_GATEWAY,
             # Next.js reaches data only through the gateway HTTP API — no pg client in
@@ -306,7 +312,8 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ),
         # browser-mcp: shared chrome-devtools-mcp upstream. Speaks MCP over a
         # Unix socket — no HTTP/TCP probe; its healthcheck dials the socket
-        # directly.
+        # directly, and that transport is why its gate is browser's PLUS AF_UNIX
+        # (POSIX-only; see `_gate_reason`).
         ServiceSpec(
             session="browser-mcp",
             cmd=".venv/bin/python -m services.desktop.browser.mcp_daemon",
@@ -335,7 +342,9 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # mcp-daemon: ONE shared MCP daemon for every agent on this machine
         # (replaces one ~12MB daemon child per agent). Sessions are isolated per
         # client connection, so sharing the process shares no state; its data
-        # plane is the Unix socket plus per-server stdio children.
+        # plane is the Unix socket plus per-server stdio children. The socket
+        # transport is why its gate is AF_UNIX (POSIX-only; see `_gate_reason`)
+        # — the same story as browser-mcp, keeping it out of a Windows roster.
         ServiceSpec(
             session="mcp-daemon",
             cmd=".venv/bin/python -m ava.mcps._daemon",

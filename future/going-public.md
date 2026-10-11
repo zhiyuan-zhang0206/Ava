@@ -24,7 +24,7 @@ Status of the gaps left by the swap:
 
 - ~~**No native-app job.**~~ Closed: `.github/workflows/ci-app.yml` is a
   path-filtered hosted lane for the Tauri app. It runs Rust format/clippy on
-  Ubuntu and macOS; builds an installable Android debug APK after the
+  Ubuntu, macOS, and Windows; builds an installable Android debug APK after the
   generated-project overlay; and tests the overlay and updater-manifest builder.
   Signed platform packaging remains covered by the independent `app-v*` release
   workflow.

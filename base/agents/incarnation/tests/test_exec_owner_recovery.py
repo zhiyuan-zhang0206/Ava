@@ -117,10 +117,12 @@ def test_boot_observation_failure_cannot_prove_exit(
     assert not process_ended(original)
 
 
-def test_darwin_native_timestamp_is_exact(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(proc_tree.sys, "platform", "darwin")
-    monkeypatch.setattr(native_process, "native_boot_id", lambda: _BOOT)
-    original = ResourceProcess(pid=psutil.Process().pid, birth=100.0, starttime=None, boot_id=_BOOT)
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_nonlinux_native_timestamp_is_exact(monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
+    monkeypatch.setattr(proc_tree.sys, "platform", platform)
+    boot = None if platform == "win32" else _BOOT
+    monkeypatch.setattr(native_process, "native_boot_id", lambda: boot)
+    original = ResourceProcess(pid=psutil.Process().pid, birth=100.0, starttime=None, boot_id=boot)
     assert original.same_birth(original.model_copy())
     assert not original.same_birth(original.model_copy(update={"birth": 100.001}))
 
@@ -201,8 +203,66 @@ def test_ready_handshake_uses_retained_native_launcher_and_child(
 
     monkeypatch.setattr(ResourceProcess, "capture", capture)
     monkeypatch.setattr(exec_owner_protocol.psutil, "Process", process)
+    from pathlib import Path
+
     if changed is None:
-        validate_native_ready(ready, launcher)
+        validate_native_ready(ready, launcher, Path("/private/owner.json"))
     else:
         with pytest.raises(ValueError, match=r"birth changed|direct child"):
-            validate_native_ready(ready, launcher)
+            validate_native_ready(ready, launcher, Path("/private/owner.json"))
+
+
+@pytest.mark.parametrize("changed", [None, "parent", "argv"])
+def test_windows_redirector_still_requires_exact_owner_ancestry(
+    monkeypatch: pytest.MonkeyPatch, changed: str | None
+) -> None:
+    from datetime import UTC, datetime, timedelta
+    from pathlib import Path
+
+    from base.agents.incarnation import exec_owner_protocol
+    from base.agents.incarnation.exec_owner_protocol import OwnerReady, validate_native_ready
+    from base.agents.incarnation.resources import ExecAllocation
+
+    monkeypatch.setattr(proc_tree.sys, "platform", "win32")
+    identities = {
+        pid: ResourceProcess(pid=pid, birth=float(pid), starttime=None, boot_id=None)
+        for pid in (40, 41, 42)
+    }
+    ready = OwnerReady(
+        allocation=ExecAllocation(
+            request=uuid4(),
+            domain=uuid4(),
+            request_digest="a" * 64,
+            deadline=datetime.now(UTC) + timedelta(seconds=30),
+            owner_process=identities[41],
+            root_process=identities[42],
+        )
+    )
+    context = Path("/private/owner.json")
+    argv = [
+        "python",
+        "-I",
+        "-B",
+        "-X",
+        "utf8",
+        "-m",
+        "agent.execution.domain_owner",
+        "--context",
+        str(context),
+    ]
+
+    def capture(process: psutil.Process) -> ResourceProcess:
+        return identities[process.pid]
+
+    def process(pid: int) -> SimpleNamespace:
+        parent = 41 if pid == 42 else 99 if changed == "parent" else 40
+        arguments = ["wrong"] if changed == "argv" and pid == 41 else argv
+        return SimpleNamespace(pid=pid, ppid=lambda: parent, cmdline=lambda: arguments)
+
+    monkeypatch.setattr(ResourceProcess, "capture", capture)
+    monkeypatch.setattr(exec_owner_protocol.psutil, "Process", process)
+    if changed is None:
+        validate_native_ready(ready, identities[40], context)
+    else:
+        with pytest.raises(ValueError, match="redirector"):
+            validate_native_ready(ready, identities[40], context)

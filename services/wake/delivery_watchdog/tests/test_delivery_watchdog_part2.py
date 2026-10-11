@@ -11,9 +11,11 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog.daemon import (
@@ -23,6 +25,7 @@ from services.wake.delivery_watchdog.daemon import (
     scan_once,
     select_alerted_ids,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _THRESHOLD_S = 30.0
 _DISPATCH_THRESHOLD_S = 1.0
@@ -41,7 +44,12 @@ def pool():
 
 
 def _make_idling_agent(
-    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """spawn_agent creates the agents_meta row (create_agent does not — that
     is the spawn path's job); the alert filter reads owner status, so tests
@@ -49,7 +57,13 @@ def _make_idling_agent(
     tests)."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=local_machine,
+    )
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (aid,))
     db.commit()
@@ -57,18 +71,31 @@ def _make_idling_agent(
 
 
 def _make_running_agent(
-    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=local_machine,
+    )
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (aid,))
     db.commit()
     return aid
 
 
-def _insert_old_inbound(db: psycopg.Connection, agent_id: int, *, age_s: float) -> int:
+def _insert_old_inbound(
+    db: psycopg.Connection, agent_id: int, *, age_s: float, database_gate: ProcessDbGate
+) -> int:
     """Insert a chat inbound backdated `age_s` (timestamp-only UPDATE — the
     inbound table has no triggers on created_at). Returns the inbound id."""
     iid = insert_inbound_message(
@@ -77,7 +104,7 @@ def _insert_old_inbound(db: psycopg.Connection, agent_id: int, *, age_s: float) 
         "stale",
         source="user",
         bus=EventBus.from_settings(),
-        database=Database.from_settings(),
+        database=Database.from_settings(gate=database_gate),
     )
     with db.cursor() as cur:
         cur.execute(
@@ -96,11 +123,11 @@ def _set_host_verdict(
     agent_host: bool = True,
     age_s: float = 0.0,
     machine: str | None = None,
+    local_machine: MachineIdentity,
 ) -> None:
     """Upsert the `machine_probe` verdict the dispatch host gate reads."""
-    from base.cluster.machine import machine_name
 
-    name = machine or machine_name()
+    name = machine or local_machine.name()
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_probe (machine_name, online, agent_host_online, "
@@ -116,22 +143,35 @@ def _set_host_verdict(
 
 
 @pytest.fixture(autouse=True)
-def _healthy_host_verdict(db_conn: psycopg.Connection) -> None:
+def _healthy_host_verdict(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """Normal dispatch condition: a fresh reachable machine with a live host.
 
     Host-gate tests override the verdict inside the test body."""
-    _set_host_verdict(db_conn)
+    _set_host_verdict(db_conn, local_machine=machine_identity)
 
 
 # ── Terminated-owner resurrect retry (Task #689 G4) ───────────────────────────
 
 
 def _make_terminated_agent(
-    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=local_machine,
+    )
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'terminated', termination_source = 'exit' "
@@ -143,11 +183,22 @@ def _make_terminated_agent(
 
 
 def _make_reaped_crash_agent(
-    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """A `terminated` row the SYSTEM reaped after a crash: reaper source plus
     the retained crash marker (task #3617's relaxed-trigger population)."""
-    aid = _make_terminated_agent(db, model_catalog=model_catalog, config_authority=config_authority)
+    aid = _make_terminated_agent(
+        db,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+        local_machine=local_machine,
+    )
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET termination_source = 'reaper', "
@@ -216,14 +267,25 @@ def _insert_pending_resurrect_row(
 
 
 def _make_crash_marked_agent(
-    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """An idling row with the corpse marker set — the corpse reaper's own
     predicate (`last_turn_fatal_at IS NOT NULL` on an idling row).
     spawn_agent leaves the marker NULL, so the scenario stamps it."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=local_machine,
+    )
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = 'idling', last_turn_fatal_at = now() WHERE id = %s",
@@ -246,11 +308,17 @@ class TestAlertDedupPersistence:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
 
         # First daemon life: alert once, persist the delta.
         newly, alerted = scan_once(pool, _THRESHOLD_S, set())
@@ -271,13 +339,23 @@ class TestAlertDedupPersistence:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         # FK -> inbound_messages: only real inbound ids can be persisted.
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        iid_a = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
-        iid_b = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid_a = _insert_old_inbound(
+            db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate
+        )
+        iid_b = _insert_old_inbound(
+            db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate
+        )
         persist_alerted(pool, {iid_a, iid_b})
         assert select_alerted_ids(pool) == {iid_a, iid_b}
         # A second persist of the same ids is a no-op (ON CONFLICT DO NOTHING).
@@ -291,11 +369,17 @@ class TestAlertDedupPersistence:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         _, alerted = scan_once(pool, _THRESHOLD_S, set())
         persist_alerted(pool, alerted)
 
@@ -325,11 +409,17 @@ class TestAlertDedupPersistence:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         persist_alerted(pool, {iid})
         # Backdate the row beyond the TTL (2h) — as if it were alerted long ago
         # and the inbound left pending while the daemon was down.
@@ -366,30 +456,50 @@ class TestStalledCrashMarkedRecovery:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.delivery_watchdog import stall_recovery as sr
 
         zombie = _make_crash_marked_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        zombie_inbound = _insert_old_inbound(db_conn, zombie, age_s=_THRESHOLD_S + 5)
+        zombie_inbound = _insert_old_inbound(
+            db_conn, zombie, age_s=_THRESHOLD_S + 5, database_gate=database_gate
+        )
         healthy = _make_idling_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        _insert_old_inbound(db_conn, healthy, age_s=_THRESHOLD_S + 5)
+        _insert_old_inbound(db_conn, healthy, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         running = _make_running_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET last_turn_fatal_at = now() WHERE id = %s", (running,)
             )
         db_conn.commit()
-        _insert_old_inbound(db_conn, running, age_s=_THRESHOLD_S + 5)
+        _insert_old_inbound(db_conn, running, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         fresh = _make_crash_marked_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        _insert_old_inbound(db_conn, fresh, age_s=1.0)
+        _insert_old_inbound(db_conn, fresh, age_s=1.0, database_gate=database_gate)
 
         rows = sr.select_stalled_crash_marked(pool, _THRESHOLD_S)
         assert [(r[0], r[1]) for r in rows] == [(zombie_inbound, zombie)]
@@ -401,19 +511,31 @@ class TestStalledCrashMarkedRecovery:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A tripped recovery breaker (durable streak) or a live suppression
         window keeps the scan from starting a recovery — task #3617's halt."""
         from services.wake.delivery_watchdog import stall_recovery as sr
 
         tripped = _make_crash_marked_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        _insert_old_inbound(db_conn, tripped, age_s=_THRESHOLD_S + 5)
+        _insert_old_inbound(db_conn, tripped, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         suppressed = _make_crash_marked_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        _insert_old_inbound(db_conn, suppressed, age_s=_THRESHOLD_S + 5)
+        _insert_old_inbound(
+            db_conn, suppressed, age_s=_THRESHOLD_S + 5, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET permanent_reject_streak = 2 WHERE id = %s", (tripped,)

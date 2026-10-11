@@ -8,7 +8,8 @@
 # Source it from a sibling script:
 #   . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 #
-# Supported platforms: Linux (Debian/Ubuntu, via apt) and macOS (via brew).
+# Supported platforms: Linux (Debian/Ubuntu/WSL, via apt), macOS (via brew),
+# and Windows (Git Bash).
 set -euo pipefail
 
 # Provisioning must never upgrade formulae without explicit operator approval.
@@ -24,7 +25,7 @@ prov_os() {
   case "$(uname -s)" in
     Linux)
       command -v apt-get >/dev/null 2>&1 \
-        || prov_die "Linux without apt-get is unsupported (Debian/Ubuntu only)"
+        || prov_die "Linux without apt-get is unsupported (Debian/Ubuntu/WSL only)"
       echo linux
       ;;
     Darwin)
@@ -32,8 +33,11 @@ prov_os() {
         || prov_die "macOS without Homebrew — install it first (https://brew.sh)"
       echo macos
       ;;
+    CYGWIN*|MINGW*|MSYS*)
+      echo windows
+      ;;
     *)
-      prov_die "unsupported platform $(uname -s) (Linux/Debian-Ubuntu or macOS)"
+      prov_die "unsupported platform $(uname -s) (Linux/Debian-Ubuntu/WSL, macOS, or Windows/Git-Bash)"
       ;;
   esac
 }
@@ -43,7 +47,7 @@ prov_os() {
 # to run initdb as root, so the install itself must run non-root). Uses
 # passwordless sudo (`sudo -n`); when sudo is absent or password-gated, runs
 # the command bare so the callers' existing failure branches (warn + skip)
-# keep degrading gracefully.
+# keep degrading gracefully — exactly today's WSL-without-sudo behavior.
 prov_sudo() {
     if [ "$(id -u)" != 0 ] \
         && command -v sudo >/dev/null 2>&1 \

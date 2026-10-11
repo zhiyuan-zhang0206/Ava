@@ -205,7 +205,7 @@ def capture_survivor(
             cmdline = " ".join(process.cmdline()) or None
         except (psutil.Error, OSError):
             ppid = status = cmdline = None
-        if pgid is None:
+        if pgid is None and os.name == "posix":
             try:
                 pgid = os.getpgid(identity.pid)
             except OSError:

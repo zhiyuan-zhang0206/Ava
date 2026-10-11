@@ -282,7 +282,7 @@ def _write_atomic(path: Path, entry: OutboxEntry) -> None:
     write_text_atomic(
         path,
         json.dumps(entry.as_dict(), separators=(",", ":"), sort_keys=True),
-        sync_parent=True,
+        sync_parent=os.name != "nt",
         suppress_cleanup_error=True,
     )
 
@@ -531,7 +531,6 @@ def _deliver(
     authority: ConfigAuthority,
 ) -> int | None:
     """Commit one entry through the canonical chat-inbound path; returns the id."""
-    from base.agents.messages.caller_protocol import CallerProtocolUnavailableError
     from base.agents.messages.chat_delivery import (
         ClientMessageConflictError,
         insert_chat_inbound_once,
@@ -568,8 +567,6 @@ def _deliver(
             )
     except ClientMessageConflictError as exc:
         raise PermanentDeliveryError("key_conflict", detail=str(exc)) from exc
-    except CallerProtocolUnavailableError as exc:
-        raise PermanentDeliveryError("caller_protocol", detail=str(exc)) from exc
     # A same-key receipt (a previous attempt or flush already committed) can
     # still be pending — heal the wake tail, mirroring `deliver_chat_inbound`.
     if not receipt.inserted and receipt.pending:

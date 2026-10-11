@@ -8,8 +8,7 @@ targets the one registered machine.
 
 These assert in-process (the surface is not chosen at import time, so there is
 nothing to vary across subprocess envs). `MACHINE_SPEC` / `SELF_MACHINE_NAME`
-resolve machine_name() lazily from the session $AVA_HOME (tests/fixtures/env_bootstrap.py
-writes it), so the access succeeds.
+resolve from the explicit context machine owner, independently of plugins.
 """
 
 from __future__ import annotations
@@ -46,9 +45,24 @@ def test_self_exports_machine_consts() -> None:
     """ava.self exports both machine identity constants."""
     assert "MACHINE_SPEC" in ava.self.__all_for_ava__
     assert "SELF_MACHINE_NAME" in ava.self.__all_for_ava__
-    # Both resolve lazily via module __getattr__ against the session $AVA_HOME.
-    assert ava.self.MACHINE_SPEC is not None
-    assert isinstance(str(ava.self.SELF_MACHINE_NAME), str)
+    from base.agents.context import AvaContext
+    from base.cluster.machine import MachineIdentity
+
+    machine = MachineIdentity(
+        name=lambda: "test",
+        role=lambda: frozenset({"gateway"}),
+        host=lambda: "localhost",
+        description=lambda: None,
+    )
+    prior = getattr(ava, "context", None)
+    ava.bind_context(AvaContext(machine=machine))
+    try:
+        assert ava.self.MACHINE_SPEC == ("test", "")
+        assert isinstance(str(ava.self.SELF_MACHINE_NAME), str)
+    finally:
+        ava.unbind_context()
+        if prior is not None:
+            ava.bind_context(prior)
 
 
 @pytest.mark.usefixtures("sdk_model_owner")

@@ -1,7 +1,7 @@
 """The plugin scaffold hook — how a plugin owns its own host-side state.
 
-A plugin opts in by shipping `setup.py` beside `plugin.py` with a zero-argument
-`scaffold()`. The explicit `ava memory init` command runs it for every enabled
+A plugin opts in by shipping `setup.py` beside `plugin.py` with a required
+`scaffold(*, machine: MachineIdentity)`. The explicit `ava memory init` command runs it for every enabled
 plugin, so runtime memory state is never touched by converge or startup.
 
 `setup.py` is loaded on its own, NOT through `plugin.py`: plugin modules import
@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
+from base.cluster.machine import MachineIdentity
+
 
 @dataclass(frozen=True)
 class ScaffoldResult:
@@ -29,8 +31,8 @@ class ScaffoldResult:
     ran: list[str]
 
 
-def run_plugin_scaffolds() -> ScaffoldResult:
-    """Call `scaffold()` on every enabled plugin that defines one.
+def run_plugin_scaffolds(*, machine: MachineIdentity) -> ScaffoldResult:
+    """Call `scaffold(machine=machine)` on every enabled plugin that defines one.
 
     Loading a plugin's `setup.py` is fail-soft (user ruling 2026-09-11): a file
     that fails to import is skipped with a loud report
@@ -64,7 +66,7 @@ def run_plugin_scaffolds() -> ScaffoldResult:
         if scaffold is None:
             continue
         print(f"  · {name}")
-        scaffold()
+        scaffold(machine=machine)
         ran.append(name)
     return ScaffoldResult(ran=ran)
 

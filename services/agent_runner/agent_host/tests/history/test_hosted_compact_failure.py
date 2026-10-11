@@ -21,11 +21,12 @@ from agent.graph.claim.node import claim_node
 from agent.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
-from agent.tests.claim.test_inbound_ownership import _agent
+from agent.tests.claim.test_inbound_ownership import agent_row
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.projection import Error
 from base.events.live.publisher import AgentEventPublisher
@@ -34,7 +35,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 from ...host import AgentHost
 from ...runtime import TurnOutcome
@@ -106,15 +107,17 @@ def _build_host_driving_invoke_until_done(
     graph: Any,
     ctx: AvaContext,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> AgentHost:
     host = AgentHost(
         policy=configured_policy(),
         pool=pool,
         checkpointer=saver,
         graph=graph,
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=ctx.require_catalog(),
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
@@ -221,8 +224,10 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     interval: int,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent = _agent(db_conn)
+    agent = agent_row(db_conn)
     provider_error = RuntimeError("compaction provider unavailable")
     summary = AsyncMock(side_effect=provider_error)
     monkeypatch.setattr("agent.hooks.compact.generate_summary", summary)
@@ -239,12 +244,14 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
         event_publisher=publisher,
         llm=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=configured_policy().clock_factory,
     )
-    host = _build_host_driving_invoke_until_done(aops_pool, saver, graph, ctx, monkeypatch)
+    host = _build_host_driving_invoke_until_done(
+        aops_pool, saver, graph, ctx, monkeypatch, database_gate=database_gate
+    )
     original_failure: CompactionFailedError | None = None
     async with asyncio.TaskGroup() as tasks:
         try:

@@ -1,6 +1,6 @@
 """Durable source acceptance and retained single-inbound delivery outcome."""
 
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from psycopg import Connection
@@ -75,9 +75,13 @@ def _claim(
     names: list[str],
     batch: list[tuple[str, bytes, str]],
     provenance: InboundProvenance,
+    *,
+    local_machine: str,
 ) -> tuple[Any, ...]:
     fingerprint = request_hash(names, batch)
-    source = current_unit()
+    source = current_unit(
+        local_machine=local_machine,
+    )
     directory = agent_upload_dir(agent_id, create=False).resolve()
     with write_transaction(pool) as conn:
         storage.lock_agent(conn, agent_id)
@@ -135,11 +139,23 @@ def accept(
     names: list[str],
     batch: list[tuple[str, bytes, str]],
     provenance: InboundProvenance,
+    *,
+    local_machine: str,
 ) -> Acceptance:
-    claimed = _claim(pool, key, agent_id, names, batch, provenance)
+    claimed = _claim(
+        pool,
+        key,
+        agent_id,
+        names,
+        batch,
+        provenance,
+        local_machine=local_machine,
+    )
     if claimed[4] is not None:
         return Acceptance.model_validate(claimed[4])
-    if UnitIdentity.model_validate(claimed[2]) != current_unit():
+    if UnitIdentity.model_validate(claimed[2]) != current_unit(
+        local_machine=local_machine,
+    ):
         raise UploadDeliveryConflictError("receiving source belongs to another native unit")
     manifest = Manifest.model_validate(claimed[1])
     directory = agent_upload_dir(agent_id, create=False).resolve()
@@ -191,7 +207,12 @@ def status(pool: ConnectionPool, agent_id: int, batch_id: str) -> DeliveryStatus
 
 
 def served_object(
-    pool: ConnectionPool, agent_id: int, batch_id: str, ordinal: int
+    pool: ConnectionPool,
+    agent_id: int,
+    batch_id: str,
+    ordinal: int,
+    *,
+    local_machine: str,
 ) -> tuple[Path, Object]:
     with pool.connection() as conn:
         row = conn.execute(
@@ -199,7 +220,9 @@ def served_object(
             "WHERE agent_id=%s AND batch_id=%s AND ready_at IS NOT NULL",
             (agent_id, batch_id),
         ).fetchone()
-    if row is None or UnitIdentity.model_validate(row[1]) != current_unit():
+    if row is None or UnitIdentity.model_validate(row[1]) != current_unit(
+        local_machine=local_machine,
+    ):
         raise UploadDeliveryConflictError("source object is not ready on this native unit")
     manifest = Manifest.model_validate(row[0])
     if not 0 <= ordinal < len(manifest.objects):
@@ -210,13 +233,25 @@ def served_object(
     return path, item
 
 
-def due(pool: ConnectionPool, limit: int = 8) -> list[ReceiveRequest]:
+def due(
+    pool: ConnectionPool,
+    limit: int = 8,
+    *,
+    local_machine: str,
+) -> list[ReceiveRequest]:
     with pool.connection() as conn:
         rows = conn.execute(
             "SELECT manifest, source_unit, target_unit FROM upload_delivery_batches "
             "WHERE state='pending' AND next_attempt_at<=now() AND source_unit=%s "
             "ORDER BY next_attempt_at, batch_id LIMIT %s",
-            (Jsonb(current_unit().model_dump()), limit),
+            (
+                Jsonb(
+                    current_unit(
+                        local_machine=local_machine,
+                    ).model_dump()
+                ),
+                limit,
+            ),
         ).fetchall()
     return [
         ReceiveRequest(
@@ -254,7 +289,11 @@ def record_failure(pool: ConnectionPool, batch_id: str, reason: str, *, hold: bo
 
 
 def _proof_paths(proof: CopyProof, manifest: Manifest) -> list[str]:
-    native_directory = PurePosixPath(proof.directory)
+    native_directory = (
+        PurePosixPath(proof.directory)
+        if PurePosixPath(proof.directory).is_absolute()
+        else PureWindowsPath(proof.directory)
+    )
     if (
         native_directory.name != manifest.batch_id
         or native_directory.parent.name != NAMESPACE
@@ -328,7 +367,11 @@ def complete(pool: ConnectionPool, request: ReceiveRequest, proof: CopyProof) ->
 
 
 def pending_wakes(
-    pool: ConnectionPool, after: str = "", limit: int = 32
+    pool: ConnectionPool,
+    after: str = "",
+    limit: int = 32,
+    *,
+    local_machine: str,
 ) -> list[tuple[str, int, int]]:
     with pool.connection() as conn:
         return conn.execute(
@@ -336,5 +379,13 @@ def pending_wakes(
             "JOIN inbound_messages i ON i.id=d.inbound_id WHERE d.state='accepted' "
             "AND i.agent_id=d.agent_id AND i.status='pending' AND d.source_unit=%s "
             "ORDER BY (d.batch_id<=%s), d.batch_id LIMIT %s",
-            (Jsonb(current_unit().model_dump()), after, limit),
+            (
+                Jsonb(
+                    current_unit(
+                        local_machine=local_machine,
+                    ).model_dump()
+                ),
+                after,
+                limit,
+            ),
         ).fetchall()

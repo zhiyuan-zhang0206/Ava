@@ -10,6 +10,7 @@ import psycopg
 import pytest
 
 from base.api_contracts.status import MachineStatus, SchemaMismatchKind, SchemaMismatchStatus
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.schema.migration_errors import MigrationLayoutError
 from base.deploy.schema.migrations import applied_migration_names
@@ -64,13 +65,13 @@ def _assert_status_is_visible(status: SchemaMismatchStatus) -> None:
 
 
 def test_status_and_cli_expose_current_diagnosis_only(
-    monkeypatch: pytest.MonkeyPatch, database: Database
+    monkeypatch: pytest.MonkeyPatch, database: Database, *, machine_identity: MachineIdentity
 ) -> None:
     mismatch = schema_mismatch.classify({"base", "new"}, {"base"})
     assert mismatch is not None
     monkeypatch.setattr(schema_mismatch, "detect", lambda _db: mismatch)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(schema_mismatch, "machine_name", lambda: "gateway")
-    status = schema_mismatch.status(database)
+    machine_identity.set(name="gateway")
+    status = schema_mismatch.status(database, local_machine=machine_identity.name())
     assert status is not None
     assert status.model_dump() == {
         "kind": "schema-ahead-of-code",
@@ -81,17 +82,26 @@ def test_status_and_cli_expose_current_diagnosis_only(
 
 
 def test_malformed_real_catalog_is_invalid_in_status_and_cli(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     original = applied_migration_names(db_conn)
     monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: original)
-    assert schema_mismatch.status(database, conn=db_conn) is None
+    assert (
+        schema_mismatch.status(database, conn=db_conn, local_machine=machine_identity.name())
+        is None
+    )
 
     with db_conn.transaction(force_rollback=True):
         db_conn.execute("ALTER TABLE schema_migrations RENAME COLUMN name TO unexpected_name")
         with pytest.raises(MigrationLayoutError, match="unrecognized shape"):
             applied_migration_names(db_conn)
-        status = schema_mismatch.status(database, conn=db_conn)
+        status = schema_mismatch.status(
+            database, conn=db_conn, local_machine=machine_identity.name()
+        )
         assert status is not None
         assert status.kind == "invalid-migration-layout"
         assert "DB migration catalog is invalid" in status.detail
@@ -99,20 +109,29 @@ def test_malformed_real_catalog_is_invalid_in_status_and_cli(
         _assert_status_is_visible(status)
 
     assert applied_migration_names(db_conn) == original
-    assert schema_mismatch.status(database, conn=db_conn) is None
+    assert (
+        schema_mismatch.status(database, conn=db_conn, local_machine=machine_identity.name())
+        is None
+    )
 
 
 @pytest.mark.parametrize(
     "error", [psycopg.OperationalError("offline"), psycopg.errors.QueryCanceled()]
 )
 def test_query_failure_is_explicitly_unavailable(
-    monkeypatch: pytest.MonkeyPatch, error: psycopg.Error, database: Database
+    monkeypatch: pytest.MonkeyPatch,
+    error: psycopg.Error,
+    database: Database,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     def failed(_conn: object) -> set[str]:
         raise error
 
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", failed)
-    status = schema_mismatch.status(database, conn=cast(psycopg.Connection, object()))
+    status = schema_mismatch.status(
+        database, conn=cast(psycopg.Connection, object()), local_machine=machine_identity.name()
+    )
     assert status is not None
     assert status.kind == "unavailable"
     assert type(error).__name__ in status.detail
@@ -120,7 +139,7 @@ def test_query_failure_is_explicitly_unavailable(
 
 
 def test_invalid_image_layout_is_not_a_set_divergence(
-    monkeypatch: pytest.MonkeyPatch, database: Database
+    monkeypatch: pytest.MonkeyPatch, database: Database, *, machine_identity: MachineIdentity
 ) -> None:
     def applied(_conn: object) -> set[str]:
         return {"base"}
@@ -130,7 +149,9 @@ def test_invalid_image_layout_is_not_a_set_divergence(
 
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied)
     monkeypatch.setattr(schema_mismatch, "required_migration_set", invalid)
-    status = schema_mismatch.status(database, conn=cast(psycopg.Connection, object()))
+    status = schema_mismatch.status(
+        database, conn=cast(psycopg.Connection, object()), local_machine=machine_identity.name()
+    )
     assert status is not None
     assert status.kind == "invalid-migration-layout"
     assert "image migration layout is invalid" in status.detail

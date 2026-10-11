@@ -12,6 +12,8 @@ import pytest
 
 from base.native_process import group_closure
 
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+
 _LATE = 0x7FFFFFFF  # A member forked after the signal; never signalled by number.
 
 

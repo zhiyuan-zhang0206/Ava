@@ -1,6 +1,7 @@
 """Exec-owner admission synchronization for the cross-component force race proof."""
 
 import threading
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -31,8 +32,12 @@ def admitted_owner_ready(
     ready = threading.Event()
     force_done = threading.Event()
 
-    def validate_then_wait(receipt: OwnerReady, launcher: ResourceProcess) -> None:
-        original_validate(receipt, launcher)
+    def validate_then_wait(
+        receipt: OwnerReady,
+        launcher: ResourceProcess,
+        context_path: Path,
+    ) -> None:
+        original_validate(receipt, launcher, context_path)
         ready.set()
         assert force_done.wait(10)
 

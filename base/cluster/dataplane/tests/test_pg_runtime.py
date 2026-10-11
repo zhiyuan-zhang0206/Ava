@@ -151,6 +151,7 @@ def test_vendored_platform_support_follows_the_artifact_table(
         ("Linux", "x86_64", True),
         ("Darwin", "arm64", True),
         ("Linux", "aarch64", False),
+        ("Windows", "AMD64", False),
     ):
         monkeypatch.setattr("platform.system", lambda system=system: system)
         monkeypatch.setattr("platform.machine", lambda machine=machine: machine)

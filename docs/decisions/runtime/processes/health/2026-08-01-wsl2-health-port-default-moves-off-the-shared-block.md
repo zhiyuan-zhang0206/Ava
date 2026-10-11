@@ -113,5 +113,3 @@ loopback namespace with something else.
   call. `run_enroll` now reads any existing block before the replace and
   restores it verbatim when this call states nothing new — closing the gap for
   every platform, not only WSL2.
-
-Superseded in part by: [decisions/2026-10-11-remove-windows-and-wsl-support.md](../../hosts/2026-10-11-remove-windows-and-wsl-support.md) — Windows and WSL support is removed.

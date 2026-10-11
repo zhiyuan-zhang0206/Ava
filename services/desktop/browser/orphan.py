@@ -83,8 +83,8 @@ _USER_DATA_DIR = "--user-data-dir="
 # the browser process carries `--user-data-dir` and no `--type`, its GPU helper
 # carries both.
 _CHILD_TYPE = "--type="
-# Substring, not an exact set: the browser process is `Google Chrome` on macOS,
-# and `chrome` / `google-chrome-stable` / `chromium` /
+# Substring, not an exact set: the browser process is `chrome.exe` on Windows,
+# `Google Chrome` on macOS, and `chrome` / `google-chrome-stable` / `chromium` /
 # `chromium-browser` on Linux. Matching loosely here is safe because this test only
 # narrows — the profile token is what authorizes the kill.
 _CHROME_NAME_MARKER = "chrom"
@@ -111,8 +111,8 @@ def is_cluster_chrome(name: str, cmdline: Sequence[str] | None, profile: Path) -
         if not arg.startswith(_USER_DATA_DIR):
             continue
         # Compare as paths, not strings: `Path` folds a trailing separator away,
-        # which a literal string match would get wrong in the false-negative
-        # direction.
+        # and on Windows it compares case-insensitively — both of which a literal
+        # string match would get wrong in the false-negative direction.
         if Path(arg[len(_USER_DATA_DIR) :]) == profile:
             return True
     # Chrome also accepts the flag split across two argv entries

@@ -71,7 +71,7 @@ class ServiceHealthPortFields:
     ops_health_port: int | None = health_port_field("ops", capability="agent-runner")
     # `writable`: the one official repair surface for a hosted-runner port that
     # collides on a mirrored localhost namespace (`.env` hand-edits were the only
-    # fix during the 2026-09-02 8114 incident). Host scope stays
+    # fix during the 2026-09-02 win/wsl 8114 incident). Host scope stays
     # host-writable; remote_writable=False keeps a remote `--machine` set out.
     agent_host_health_port: int | None = health_port_field(
         "agent_host", capability="agent-runner", writable=True

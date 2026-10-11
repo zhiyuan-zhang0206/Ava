@@ -33,7 +33,8 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 
 from base.deploy.release.runtime_interpreter import external_plugin_read_root
-from base.host.system.probes import display_available
+from base.host.system.probes import display_available, unix_sockets_available
+from base.native_process.os_platform import is_windows
 from base.paths import ava_home, mcps_dir, repo_root
 
 
@@ -67,7 +68,7 @@ def validate_requirements(spec: dict[str, Any]) -> dict[str, bool]:
     """Validate optional host requirements without probing this host.
 
     Missing or null requirements mean no preconditions. Otherwise only boolean
-    values for display are accepted; invalid declarations raise
+    values for display and unix_socket are accepted; invalid declarations raise
     MCPError rather than becoming a host-capability verdict.
     """
     requires = spec.get("requires")
@@ -77,7 +78,7 @@ def validate_requirements(spec: dict[str, Any]) -> dict[str, bool]:
         raise MCPError("server 'requires' must be an object or null")
     validated: dict[str, bool] = {}
     for key, want in cast(dict[object, object], requires).items():
-        if not isinstance(key, str) or key != "display":
+        if not isinstance(key, str) or key not in {"display", "unix_socket"}:
             raise MCPError(f"unknown requires key {key!r} in MCP server config")
         if not isinstance(want, bool):
             raise MCPError(f"requires {key!r} must be a boolean")
@@ -93,13 +94,24 @@ def assert_requirements(spec: dict[str, Any]) -> None:
     failure (e.g. chrome-devtools-mcp's bare "connection refused" on a host with
     no display). Unknown requirement keys fail fast.
 
-    One host capability is recognized: `display`, what a headed browser draws on.
+    Two host capabilities are recognized. `display` is what a headed browser
+    draws on. `unix_socket` is for a server whose transport is an AF_UNIX socket:
+    `chrome` is one — it fronts the `browser-mcp` daemon, which listens with
+    `asyncio.start_unix_server` — so on Windows the entry would hand an agent a
+    tool that cannot reach a service that cannot run (`ops.spec._gate_reason`
+    gates that daemon out there over the same fact).
     """
     requires = validate_requirements(spec)
     for key, want in requires.items():
         if key == "display" and want and not display_available():
             raise MCPError(
-                "MCP server requires a display, but this host has none (headless server)"
+                "MCP server requires a display, but this host has none "
+                "(headless server / WSL without WSLg)"
+            )
+        if key == "unix_socket" and want and not unix_sockets_available():
+            raise MCPError(
+                "MCP server requires AF_UNIX sockets, which this host has none of "
+                "(Windows) — the service it fronts cannot run here either"
             )
 
 
@@ -107,14 +119,24 @@ def server_capability(spec: dict[str, Any]) -> tuple[bool, str | None]:
     """Validate requirements and return this host's capability verdict.
 
     Mirrors assert_requirements but returns (ok, reason) instead of raising, for
-    a "can this host enable it?" UI gate. `display` is statically checkable
-    here. Invalid declarations raise MCPError, matching
+    a "can this host enable it?" UI gate. `display` and `unix_socket` are both
+    statically checkable here. Invalid declarations raise MCPError, matching
     connect-time validation; only an unavailable host capability returns false.
     """
     requires = validate_requirements(spec)
     if requires.get("display") and not display_available():
         return (False, "requires a display, but this host has none")
+    if requires.get("unix_socket") and not unix_sockets_available():
+        return (False, "requires AF_UNIX sockets, which this host has none of")
     return (True, None)
+
+
+# The relative interpreter path every `.mcp.json` we own is authored with. It is
+# a repo convention, not a platform fact — the file is committed once and read on
+# every platform, so the reader maps it onto this host's venv layout (the same
+# substitution `base.sessions.backend` does for supervised session commands).
+_POSIX_VENV_PYTHON = ".venv/bin/python"
+_WINDOWS_VENV_PYTHON = ".venv\\Scripts\\python.exe"
 
 
 def server_url(spec: dict[str, Any]) -> str | None:
@@ -154,6 +176,21 @@ def server_url(spec: dict[str, Any]) -> str | None:
     if oauth and headers:
         raise MCPError("server declares both 'oauth' and 'headers' — pick one auth mode")
     return url
+
+
+def resolve_command(cmd: str) -> str:
+    """Map the repo's `.venv/bin/python` convention onto this host's venv layout.
+
+    Both layers we own (built-in `ava_builtins/mcps/`, installed `$AVA_HOME/mcps/`)
+    spawn their server with a relative `.venv/bin/python`, resolved against the
+    cwd `server_cwd` pins. That path does not exist on Windows, where a venv puts
+    the interpreter at `.venv\\Scripts\\python.exe`. Anything else — a plugin or
+    machine entry's own command line — is returned untouched: those are a third
+    party's argv and must not be reinterpreted.
+    """
+    if is_windows() and cmd == _POSIX_VENV_PYTHON:
+        return _WINDOWS_VENV_PYTHON
+    return cmd
 
 
 def machine_config_path() -> Path:

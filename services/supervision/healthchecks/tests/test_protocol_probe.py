@@ -17,6 +17,8 @@ from services.supervision.healthchecks import protocol_probe as probe
 
 @contextlib.contextmanager
 def unix_server(payload: bytes) -> Generator[Path]:
+    if sys.platform == "win32":
+        pytest.skip("Unix socket fixture")
     with tempfile.TemporaryDirectory(prefix="ava-ping-", dir="/tmp") as directory:
         path = Path(directory) / "socket"
         code = """

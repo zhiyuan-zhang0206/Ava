@@ -197,6 +197,30 @@ class PlatformBackend(abc.ABC):
         """
         ...
 
+    # -- capability queries -------------------------------------------------
+
+    def supports_ava_symlink(self) -> bool:
+        """``True`` when the ``~/.local/bin/ava`` symlink model works."""
+        return True
+
+    def supports_shell_rc(self) -> bool:
+        """``True`` when ``~/.zshrc`` / ``~/.bashrc`` PATH editing works."""
+        return True
+
+    def is_posix(self) -> bool:
+        """``True`` on POSIX platforms — the shell-flavored session model
+        (login-shell wrapping, POSIX signals) is available."""
+        return True
+
+    def supports_data_plane(self) -> bool:
+        """``True`` when this host can run a native per-cluster Postgres+Redis
+        data plane (``pg_ctl`` + ``redis-server`` on PATH)."""
+        return True
+
+    def npm_shell_flag(self) -> bool:
+        """Whether ``npm`` commands need ``shell=True`` (False on supported hosts)."""
+        return False
+
 
 # ---------------------------------------------------------------------------
 # macOS
@@ -306,10 +330,11 @@ class MacPlatformBackend(PlatformBackend):
 
     def force_kill(self, pid: int) -> None:
         import os
-        import signal
+
+        from base.native_process.os_platform import SIGKILL
 
         try:
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, SIGKILL)
         except ProcessLookupError:
             return
 
@@ -427,10 +452,11 @@ class LinuxPlatformBackend(PlatformBackend):
 
     def force_kill(self, pid: int) -> None:
         import os
-        import signal
+
+        from base.native_process.os_platform import SIGKILL
 
         try:
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, SIGKILL)
         except ProcessLookupError:
             return
 

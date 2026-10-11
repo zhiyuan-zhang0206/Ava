@@ -261,7 +261,7 @@ Two lessons, and the second is the load-bearing one:
 
 - A table that is not derived needs a guard for its own internal invariants, not
   just for agreement with its consumers. `FIXED_PORTS` is not in any
-  order, so "next number after
+  order (`ops` moved off 8106 to dodge a Windows service), so "next number after
   the last line" put `agent_host` on a port `ops` already held; the entire suite
   passed, because nothing asserted the table had no duplicates. That collision
   surfaced from reading a boot log, not from a test —

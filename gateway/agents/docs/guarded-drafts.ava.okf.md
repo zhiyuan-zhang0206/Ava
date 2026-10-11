@@ -11,12 +11,11 @@ description: Raw draft intent and immutable first birth receipts for guide, sche
 `Idempotency-Scope: principal-v1` and a verified principal on every request,
 including replay. Their identities include the principal, POST and exact
 versioned path. Missing or invalid admission has no birth or launch effects.
-An older router rejects these paths; never downgrade an uncertain intent to a
-legacy draft route. Automatic ambiguous transport retries remain disabled.
+Automatic ambiguous transport retries remain disabled.
 The browser's Guide, Schedule Maker and Package Installer entries use these
 paths. Each submission gets one operation key; transport helpers also accept
 an explicit caller key for same-intent replay. They require a 200 receipt with
-a positive agent ID, make one fetch, and never fall back to a legacy route.
+a positive agent ID and make one fetch.
 The entry mutations explicitly disable automatic retries and ignore Enter
 while a submission is pending. SDK and MCP draft consumers remain unchanged.
 
@@ -45,8 +44,7 @@ with the original agent ID and no launch. Replays never revert operator config,
 rotate attempts or insert prompts. A response is historical acceptance, not
 proof that the conversation currently exists, is available or executed.
 
-Legacy draft routes retain their original signatures, response shapes and
-one-shot behavior. Plain guarded creation separately retains its original birth
+Plain guarded creation separately retains its original birth
 through the same snapshot owner; its parsed request digest is unchanged. Legacy HTTP, MCP and
 task assignment continue using their existing creation namespace and digest.
 Their shared `find_creation` default still projects current placement/config/attempt from

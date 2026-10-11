@@ -509,7 +509,7 @@ class ObservabilitySettings(EnvSettings):
             "TCP port where the local OTel Collector sidecar exposes its own /metrics, "
             "baked into its Prometheus pull reader at converge. Two Ava units on one "
             "machine must use different ports or the second collector cannot start "
-            "(2026-08-24 prod/preview collision)."
+            "(2026-08-24 WSL prod/preview collision)."
         ),
         json_schema_extra={
             "restart_required": "agent",

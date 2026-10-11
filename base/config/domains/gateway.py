@@ -139,7 +139,7 @@ class GatewaySettings(EnvSettings):
             "Deadline (seconds) for one gateway -> agent-runner status_probe op: "
             "the roster panel and the heartbeat liveness pass share this budget "
             "(raised from the historical 3.0s hardcode, task #1200). A "
-            "slow-but-healthy runner's status_snapshot measured 3.07-3.27s "
+            "slow-but-healthy WSL runner's status_snapshot measured 3.07-3.27s "
             "on 2026-08-12, so a 3.0s budget flipped it offline (2 consecutive "
             "probe timeouts -> machine_probe offline) while every service on it "
             "answered /healthz in ~15ms. A genuinely offline host still refuses "

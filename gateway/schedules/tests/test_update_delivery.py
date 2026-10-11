@@ -7,9 +7,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 import base.db
+from base.cluster.machine import MachineIdentity
+from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.schedules import router, session_control
 from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _create(client: TestClient) -> int:
@@ -27,9 +30,9 @@ def _create(client: TestClient) -> int:
     ],
 )
 def test_same_value_edit_preserves_version_timestamp_and_queue(
-    db_conn: psycopg.Connection, fields: dict[str, object]
+    db_conn: psycopg.Connection, fields: dict[str, object], *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
         before = db_conn.execute(
             "SELECT updated_at FROM schedules WHERE id = %s", (sid,)
@@ -46,10 +49,15 @@ def test_same_value_edit_preserves_version_timestamp_and_queue(
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
 
-def test_concurrent_identical_edits_append_one_version(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client(app) as client:
+def test_concurrent_identical_edits_append_one_version(
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate, machine_identity: MachineIdentity
+) -> None:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
-    with base.db.pool(max_size=4) as pool, ThreadPoolExecutor(max_workers=4) as workers:
+    with (
+        base.db.pool(max_size=4, gate=database_gate) as pool,
+        ThreadPoolExecutor(max_workers=4) as workers,
+    ):
 
         def edit(_worker: int) -> tuple[tuple[object, ...], bool]:
             return router._update_blocking(pool, sid, {"script": "print(2)\n"})
@@ -63,16 +71,23 @@ def test_concurrent_identical_edits_append_one_version(db_conn: psycopg.Connecti
 
 
 def test_enqueue_failure_rolls_back_config_and_version(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
 
     def fail(conn: object, schedule_id: int) -> None:
         raise RuntimeError("queue unavailable")
 
     monkeypatch.setattr(session_control, "enqueue_in_transaction", fail)
-    with base.db.pool() as pool, pytest.raises(RuntimeError, match="queue unavailable"):
+    with (
+        base.db.pool(gate=database_gate) as pool,
+        pytest.raises(RuntimeError, match="queue unavailable"),
+    ):
         router._update_blocking(pool, sid, {"script": "print(2)\n"})
     assert db_conn.execute("SELECT script FROM schedules WHERE id = %s", (sid,)).fetchone() == (
         "print(1)\n",
@@ -83,13 +98,16 @@ def test_enqueue_failure_rolls_back_config_and_version(
 
 
 def test_response_failure_leaves_committed_convergence_work(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     async def fail(pool: object, schedule_id: int) -> None:
         raise RuntimeError("response lost")
 
     monkeypatch.setattr(session_control, "wait_consumed", fail)
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
         with pytest.raises(RuntimeError, match="response lost"):
             client.put(f"/api/schedules/{sid}", json={"script": "print(2)\n"})
@@ -103,9 +121,9 @@ def test_response_failure_leaves_committed_convergence_work(
 
 @pytest.mark.parametrize("enabled,action", [(True, "start"), (False, "stop")])
 def test_repeated_enabled_choice_does_not_enqueue(
-    db_conn: psycopg.Connection, enabled: bool, action: str
+    db_conn: psycopg.Connection, enabled: bool, action: str, *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = client.post(
             "/api/schedules", json={"name": "choice", "script": "pass", "enabled": enabled}
         ).json()["id"]
@@ -115,8 +133,10 @@ def test_repeated_enabled_choice_does_not_enqueue(
 
 
 @pytest.mark.parametrize("status", ["completed", "error"])
-def test_explicit_start_preserves_terminal_rerun(db_conn: psycopg.Connection, status: str) -> None:
-    with gateway_test_client(app) as client:
+def test_explicit_start_preserves_terminal_rerun(
+    db_conn: psycopg.Connection, status: str, *, machine_identity: MachineIdentity
+) -> None:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
         db_conn.execute("UPDATE schedules SET status = %s WHERE id = %s", (status, sid))
         db_conn.commit()

@@ -380,6 +380,7 @@ def test_helper_socket_inspection_error_retains_definition(
     assert path.read_bytes() == original
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="helper native POSIX stop contract")
 def test_helper_native_shutdown_wait_never_signals_unresponsive_owner(tmp_path: Path) -> None:
     import psutil
 

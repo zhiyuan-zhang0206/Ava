@@ -1,23 +1,28 @@
 """Stored op replay validates terminal results while NULL remains an unfinished owner."""
 
 import hashlib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
+from base.db import Database
 from base.db import pool as db_pool
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_ops import daemon
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool]:
-    resource = db_pool(max_size=2)
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+    resource = db_pool(max_size=2, gate=database_gate)
     try:
         yield resource
     finally:
@@ -41,6 +46,10 @@ async def test_replay_returns_canonical_status_without_reexecution(
     status: OpStatus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     _record(db_conn, status.value)
     actual, result = await daemon._dispatch_idempotent_pass(
@@ -53,6 +62,9 @@ async def test_replay_returns_canonical_status_without_reexecution(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert actual is status
     assert result == {}
@@ -66,6 +78,10 @@ async def test_replay_rejects_unknown_stored_status_without_reexecution(
     status: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     _record(db_conn, status)
     with pytest.raises(ValueError, match="OpStatus"):
@@ -79,6 +95,9 @@ async def test_replay_rejects_unknown_stored_status_without_reexecution(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
+            local_machine=machine_identity,
         )
     assert db_conn.execute(
         "SELECT op_status FROM api_idempotency WHERE key='status-test'"
@@ -92,6 +111,10 @@ async def test_null_still_waits_for_owner_instead_of_becoming_a_result(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     _record(db_conn, None)
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_ATTEMPTS", 1)
@@ -110,6 +133,9 @@ async def test_null_still_waits_for_owner_instead_of_becoming_a_result(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert status is OpStatus.FAILED
     assert "never completed" in str(result["error"])

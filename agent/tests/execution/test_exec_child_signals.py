@@ -22,6 +22,7 @@ from ava.sdk_surface.install import Installation
 from tests.fixtures.pin_agent import exec_context
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
     """SIGTERM -> TimeoutError inside the child -> kind=timed_out envelope with
     partial output preserved."""
@@ -61,6 +62,7 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
     assert payload.kind == "timed_out"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch: pytest.MonkeyPatch,
     model_installation: Installation,
@@ -122,12 +124,16 @@ def test_child_installs_signal_handlers_before_reading_request(
 
     try:
         from ava.sdk_surface.process_context import process_clients
+        from base.agents.context import AvaContext
+        from base.cluster.machine.boot import machine_from_boot
         from tests.fixtures.configuration import snapshot_process_config
 
         config = snapshot_process_config()
-        clients = process_clients(config=config)
+        machine = machine_from_boot(config)
+        clients = process_clients(config=config, machine=machine)
+        context = AvaContext(clients=clients, machine=machine)
         try:
-            exec_child._run("request.json", "result.json", 0.0, config=config, clients=clients)
+            exec_child._run("request.json", "result.json", 0.0, config=config, context=context)
         finally:
             clients.close()
     finally:

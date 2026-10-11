@@ -11,9 +11,10 @@ from fastapi.testclient import TestClient
 
 from ava.gateway_client import transport
 from ava_builtins.plugins.ava_fleet import task_registry
+from ava_builtins.plugins.ava_fleet.task_registry import TaskAssignment
 from base.agents import GatewayUnavailable
 from base.agents.context.identity import ExternalLease
-from base.agents.tasks.model import Task
+from base.cluster.machine import MachineIdentity
 from gateway.agents import router as agent_router
 from gateway.agents.tests.test_task_assignments import HEADERS, PATH, SECRET
 from gateway.agents.tests.test_task_assignments import body as body
@@ -21,6 +22,7 @@ from gateway.agents.tests.test_task_assignments import client as client
 from gateway.app import app
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.pin_agent import pin_agent
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _response(response: Any) -> httpx.Response:
@@ -32,7 +34,7 @@ def _response(response: Any) -> httpx.Response:
     )
 
 
-def _sdk(body: dict[str, Any], **overrides: Any) -> tuple[Task, int]:
+def _sdk(body: dict[str, Any], **overrides: Any) -> TaskAssignment:
     pin_agent(body["actor_agent_id"])
     return task_registry.create_and_assign(
         body["task"]["title"],
@@ -67,8 +69,11 @@ def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
         with pytest.raises(GatewayUnavailable):
             _sdk(body)
         assert len(captured) == 1
-        task, agent_id = _sdk(body)
+        assignment = _sdk(body)
     assert original is not None
+    assert isinstance(assignment, TaskAssignment)
+    task, agent_id = assignment
+    assert assignment.task is task and assignment.agent_id == agent_id
     assert task.id == original["task"]["id"] and agent_id == original["agent_id"]
     assert captured[0] == captured[1]
     assert captured[0][0] == PATH
@@ -76,13 +81,15 @@ def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
     assert db_conn.execute("SELECT count(*) FROM task_assignment_receipts").fetchone() == (1,)
 
 
-def test_unavailable_atomic_route_refuses_without_separate_spawn(body: dict[str, Any]) -> None:
+def test_unavailable_atomic_route_refuses_without_separate_spawn(
+    body: dict[str, Any], *, machine_identity: MachineIdentity
+) -> None:
     unavailable = FastAPI(lifespan=app.router.lifespan_context, middleware=app.user_middleware)
     unavailable.exception_handlers = app.exception_handlers.copy()
     unavailable.include_router(agent_router.router)
     http = MagicMock()
     with gateway_test_client(
-        unavailable, headers={"Authorization": f"Bearer {SECRET}"}
+        unavailable, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
     ) as endpoint:
 
         def submit(path: str, **kwargs: Any) -> httpx.Response:

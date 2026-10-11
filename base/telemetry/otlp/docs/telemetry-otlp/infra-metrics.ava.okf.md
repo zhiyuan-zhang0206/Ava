@@ -66,10 +66,11 @@ host-identity processors never touch app metrics (which already carry
   `target_info` instead of on the series, where no alert expression can select
   on it.
 
-One label has one meaning: `host` is the OS hostname (physical identity) and
-`machine_name` is the Ava roster identity (`macmini` / `macbook-air` /
-`company-mini` / ...). Per the 2026-08-24 user ruling, dashboards and alert
-rules group by `machine_name`, so units on one host remain separate series. App metrics keep their existing `machine` / `agent_id`
+One label has one meaning: `host` is the OS hostname (physical identity; the
+fleet's Windows box reports `zzy-lenovo`) and `machine_name` is the Ava roster
+identity (`macmini` / `macbook-air` / `win` / `wsl`). Per the 2026-08-24 user
+ruling, dashboards and alert rules group by `machine_name`, so Windows and WSL
+remain separate series. App metrics keep their existing `machine` / `agent_id`
 attributes because the transform sits only on `metrics/infra`.
 
 Cardinality is filtered at the source, not in Prometheus: synthetic mounts

@@ -1,7 +1,6 @@
 """Agent-host daemon — the supervised process that runs every local agent's turns.
 
-The service roster starts this process to own wake dispatch, agent turns,
-health, process boot and their shutdown.
+The service roster owns wake dispatch, turns, health, boot and shutdown through this process.
 
 Usage:
     .venv/bin/python -m services.agent_runner.agent_host.daemon
@@ -37,9 +36,11 @@ from collections.abc import Callable, Collection, Coroutine, Iterable
 from pathlib import Path
 from typing import cast
 
-# The executable entry fixes SDK posture before agent/plugin modules can inspect
-# inherited environment identity. Importing the module as a library does not boot it.
+from base.log import logger, prepare_process_logging
+
+# The executable owns inherited SDK posture; importing this module never boots it.
 if __name__ == "__main__":
+    prepare_process_logging()
     from base.native_process.child_env import inherited_process_env
 
     if "AVA_AGENT_ID" in inherited_process_env():
@@ -88,7 +89,6 @@ from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus, EventBusConfig
 from base.lm.catalog import ModelCatalog
-from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.sessions.helper_chain_guard import parent_chain_intact
 
@@ -614,7 +614,7 @@ async def run(
         local_machine = machine.name()
         await _open_host_pools(workload_pool, control_pool, local_machine)
         if clients is None:
-            clients = process_clients(database=lambda: db, config=config)
+            clients = process_clients(database=lambda: db, config=config, machine=machine)
         from agent.extensions import load_extensions
 
         installation = load_installation(
@@ -631,7 +631,7 @@ async def run(
             control_pool=control_pool,
             checkpointer=checkpointer,
             graph=build_graph(checkpointer, installation.registry),
-            machine=local_machine,
+            machine=machine,
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
@@ -746,7 +746,7 @@ def main() -> None:
     def database() -> Database:
         return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
 
-    clients = process_clients(database=database, config=config)
+    clients = process_clients(database=database, config=config, machine=machine)
     clients_handed_off = False
 
     def hand_off_clients() -> None:

@@ -2,3 +2,6 @@
 # modules here that may read the global `settings`; the rest takes its configuration as
 # constructor arguments.
 settings = ["daemon.py"]
+
+# The daemon owns the lazy telemetry database; the search server does not dial it.
+db = ["daemon.py"]

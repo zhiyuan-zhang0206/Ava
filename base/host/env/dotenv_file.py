@@ -159,7 +159,7 @@ def upsert_env(
     matches the file on disk, the call returns having changed nothing — no snapshot,
     no rewrite, no audit record. Converge runs this on every `ava start`, and a
     boot-retry storm re-runs that start per attempt; without the skip, each retry
-    manufactured an `old == new` audit record (task #3637).
+    manufactured an `old == new` audit record (task #3637, the WSL converge noise).
     The skip compares rendered BYTES, not decoded values: a quoted or oddly-spaced
     line still takes the normal write path and is normalized by that write.
 

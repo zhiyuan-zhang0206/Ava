@@ -39,6 +39,26 @@ def test_linux_backend_venv_bin_dir() -> None:
     assert backend.venv_bin_dir_name() == "bin"
 
 
+def test_mac_capability_queries() -> None:
+    """macOS supports all standard capabilities."""
+    backend = MacPlatformBackend()
+    assert backend.supports_ava_symlink() is True
+    assert backend.supports_shell_rc() is True
+    assert backend.is_posix() is True
+    assert backend.supports_data_plane() is True
+    assert backend.npm_shell_flag() is False
+
+
+def test_linux_capability_queries() -> None:
+    """Linux supports all standard capabilities."""
+    backend = LinuxPlatformBackend()
+    assert backend.supports_ava_symlink() is True
+    assert backend.supports_shell_rc() is True
+    assert backend.is_posix() is True
+    assert backend.supports_data_plane() is True
+    assert backend.npm_shell_flag() is False
+
+
 def test_backend_type_is_stable_across_calls() -> None:
     """get_backend() selects the same platform backend class on every call."""
     assert type(get_backend()) is type(get_backend())

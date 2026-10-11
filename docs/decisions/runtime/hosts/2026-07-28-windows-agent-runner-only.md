@@ -113,5 +113,3 @@ killed its self-update. Routed through `shared.proc` in the same PR as
 `cli/commands/_installed_sha.py`. -->
 
 Superseded in part by: [decisions/2026-09-28-retire-windows-docker-compose.md](2026-09-28-retire-windows-docker-compose.md) — the compose file kept here for a WSL2 gateway is deleted; that gateway runs the native Linux data plane.
-
-Superseded in part by: [decisions/2026-10-11-remove-windows-and-wsl-support.md](2026-10-11-remove-windows-and-wsl-support.md) — Windows and WSL support is removed.

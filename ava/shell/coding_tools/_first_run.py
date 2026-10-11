@@ -81,7 +81,7 @@ def _write_json_atomic(path: Path, data: dict[str, object]) -> None:
     fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     tmp = Path(raw_tmp)
     try:
-        if mode is not None:
+        if mode is not None and os.name != "nt":
             os.fchmod(fd, mode)
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")

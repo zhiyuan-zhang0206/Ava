@@ -60,3 +60,5 @@ stranger clone and run*:
 - README must state the hard macOS constraint for desktop skills: a live,
   **unlocked** GUI session (synthetic input / capture are dropped on a locked
   screen).
+- Windows hardware uses the Linux lifecycle in WSL2; a native Windows root
+  adapter remains unavailable ([setup](../docs/conventions/operations/windows-setup.md)).

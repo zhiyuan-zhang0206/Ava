@@ -41,6 +41,7 @@ from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -386,7 +387,7 @@ def test_a_spent_streak_fails_the_turn_at_node_entry_and_resets(
 # --- the loop ---
 
 
-def _runtime() -> Runtime[AvaContext]:
+def _runtime(database_gate: ProcessDbGate) -> Runtime[AvaContext]:
     ctx = AvaContext(
         ops_pool=None,
         llm=MagicMock(),
@@ -394,7 +395,7 @@ def _runtime() -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -403,7 +404,7 @@ def _runtime() -> Runtime[AvaContext]:
 
 
 def _drive(
-    monkeypatch: pytest.MonkeyPatch, outcomes: list[object]
+    monkeypatch: pytest.MonkeyPatch, outcomes: list[object], database_gate: ProcessDbGate
 ) -> tuple[list[Attempt], list[float], dict[str, Any]]:
     """Run `llm_node` over scripted per-try outcomes (an exception is raised, anything else is
     returned); returns the tries seen, the sleeps taken and the node's result or error."""
@@ -426,26 +427,28 @@ def _drive(
     monkeypatch.setattr(node, "llm_attempt", fake_attempt)
     monkeypatch.setattr(node.asyncio, "sleep", fake_sleep)
 
-    async def run() -> None:
+    async def run(database_gate: ProcessDbGate) -> None:
         try:
             result["ok"] = await node.llm_node(
                 cast(Any, object()),
-                _runtime(),
+                _runtime(database_gate=database_gate),
                 {"configurable": {"thread_id": "1000"}},
                 ledger=LlmLedger(),
             )
         except Exception as exc:
             result["error"] = exc
 
-    asyncio.run(run())
+    asyncio.run(run(database_gate=database_gate))
     return tries, sleeps, result
 
 
 def test_the_node_retries_a_transient_failure_and_returns_the_next_success(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     tries, sleeps, result = _drive(
-        monkeypatch, [ModelConnectionError("a"), ModelConnectionError("b"), "ok"]
+        monkeypatch,
+        [ModelConnectionError("a"), ModelConnectionError("b"), "ok"],
+        database_gate=database_gate,
     )
 
     assert result == {"ok": "ok"}
@@ -454,8 +457,12 @@ def test_the_node_retries_a_transient_failure_and_returns_the_next_success(
     assert len(sleeps) == 2 and sleeps[1] > sleeps[0]  # the second wait doubles
 
 
-def test_the_node_does_not_retry_a_fatal_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    tries, sleeps, result = _drive(monkeypatch, [FatalProviderError("balance"), "never"])
+def test_the_node_does_not_retry_a_fatal_failure(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+) -> None:
+    tries, sleeps, result = _drive(
+        monkeypatch, [FatalProviderError("balance"), "never"], database_gate=database_gate
+    )
 
     assert isinstance(result["error"], FatalProviderError)
     assert len(tries) == 1 and sleeps == []
@@ -474,9 +481,11 @@ def test_the_node_does_not_retry_a_fatal_failure(monkeypatch: pytest.MonkeyPatch
     ],
 )
 def test_the_node_does_not_repeat_unknown_or_protocol_failures(
-    monkeypatch: pytest.MonkeyPatch, error: Exception
+    monkeypatch: pytest.MonkeyPatch, error: Exception, database_gate: ProcessDbGate
 ) -> None:
-    tries, sleeps, result = _drive(monkeypatch, [error, "must not execute"])
+    tries, sleeps, result = _drive(
+        monkeypatch, [error, "must not execute"], database_gate=database_gate
+    )
     assert result["error"] is error
     assert len(tries) == 1 and sleeps == []
 
@@ -496,10 +505,14 @@ def test_non_retryable_protocol_failure_does_not_poison_the_next_user_turn(
         )
 
 
-def test_the_node_gives_up_at_the_models_attempt_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_node_gives_up_at_the_models_attempt_cap(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+) -> None:
     monkeypatch.setattr(_retry, "_NEVER_RETRIED", ())
     monkeypatch.setattr("base.lm.registry.resolve_setting", _fixed_cap(3))
-    tries, sleeps, result = _drive(monkeypatch, [ModelConnectionError(str(i)) for i in range(5)])
+    tries, sleeps, result = _drive(
+        monkeypatch, [ModelConnectionError(str(i)) for i in range(5)], database_gate=database_gate
+    )
 
     assert str(result["error"]) == "2"  # the third failed try ends the node
     assert len(tries) == 3 and len(sleeps) == 2
@@ -507,7 +520,10 @@ def test_the_node_gives_up_at_the_models_attempt_cap(monkeypatch: pytest.MonkeyP
 
 @pytest.mark.parametrize("exc", [KeyboardInterrupt(), SystemExit()])
 def test_the_node_never_retries_an_interrupt_or_an_exit(
-    monkeypatch: pytest.MonkeyPatch, exc: BaseException, ledger: LlmLedger
+    monkeypatch: pytest.MonkeyPatch,
+    exc: BaseException,
+    ledger: LlmLedger,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Not `Exception`s: they leave the loop at once, as they left the former policy's
     `retry_on`."""
@@ -523,14 +539,21 @@ def test_the_node_never_retries_an_interrupt_or_an_exit(
     with pytest.raises(type(exc)):
         asyncio.run(
             node.llm_node(
-                cast(Any, object()), _runtime(), {"configurable": {"thread_id": "1"}}, ledger=ledger
+                cast(Any, object()),
+                _runtime(database_gate=database_gate),
+                {"configurable": {"thread_id": "1"}},
+                ledger=ledger,
             )
         )
     assert len(tries) == 1
 
 
 def _failing_node_run(
-    monkeypatch: pytest.MonkeyPatch, thread: str, model: str, ledger: LlmLedger
+    monkeypatch: pytest.MonkeyPatch,
+    thread: str,
+    model: str,
+    ledger: LlmLedger,
+    database_gate: ProcessDbGate,
 ) -> tuple[int, list[float]]:
     """Run `llm_node` for one agent over an always-failing try; returns the number of tries and
     the sleeps."""
@@ -554,7 +577,7 @@ def _failing_node_run(
             {"llm_model": model},
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -566,14 +589,18 @@ def _failing_node_run(
 
 
 def test_two_agents_in_one_process_get_their_own_schedules(
-    monkeypatch: pytest.MonkeyPatch, ledger: LlmLedger
+    monkeypatch: pytest.MonkeyPatch, ledger: LlmLedger, database_gate: ProcessDbGate
 ) -> None:
     """The point of retrying in the node: the one loop serves each agent's model and id — the
     try cap follows the model and the first wait follows the agent's phase."""
     monkeypatch.setattr("base.lm.registry.resolve_setting", _caps({"model-a": 2, "model-b": 4}))
     initial = settings.lm.llm_retry_initial_interval_seconds
-    tries_a, sleeps_a = _failing_node_run(monkeypatch, "1100", "model-a", ledger)
-    tries_b, sleeps_b = _failing_node_run(monkeypatch, "1200", "model-b", ledger)
+    tries_a, sleeps_a = _failing_node_run(
+        monkeypatch, "1100", "model-a", ledger, database_gate=database_gate
+    )
+    tries_b, sleeps_b = _failing_node_run(
+        monkeypatch, "1200", "model-b", ledger, database_gate=database_gate
+    )
     assert (tries_a, tries_b) == (2, 4)
     for first, agent_id in ((sleeps_a[0], 1100), (sleeps_b[0], 1200)):
         start = initial + retry_phase_jitter(agent_id)

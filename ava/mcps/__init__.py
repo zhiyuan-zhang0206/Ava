@@ -39,6 +39,7 @@ from ava.mcp_config import (
     assert_requirements,
     is_transport_error,
     load_mcp_config,
+    resolve_command,
     server_cwd,
     server_url,
 )
@@ -222,6 +223,7 @@ async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
         cmd = spec.get("command")
         if not isinstance(cmd, str) or not cmd:
             raise MCPError(f"server {server!r} 'command' field missing or not str")
+        cmd = resolve_command(cmd)
         args_list = spec.get("args") or []
         env_dict = spec.get("env") or {}
 

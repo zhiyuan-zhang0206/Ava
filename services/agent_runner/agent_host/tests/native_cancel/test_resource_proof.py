@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from base.agents.incarnation.hosted_force import original_host_force
 from base.agents.incarnation.resource_admission import admit_resources_async
 from base.agents.incarnation.resources import ResourceEvidenceError, ResourceProcess
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -24,9 +25,11 @@ async def test_collector_never_certifies_mismatched_frozen_stop_evidence(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     fault: str,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     pool: ConnectionPool
-    original, target = await managed_work(db_conn, aops_pool)
+    original, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         _status, _pid, _pages, force, _shell_cutoff = await asyncio.to_thread(
             _force_terminate_transaction, target.agent_id, pool, source="user"

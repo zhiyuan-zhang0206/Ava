@@ -99,7 +99,7 @@ _THREAD_CLASSES = frozenset({"threading.Thread"})
 # their own rule: a platform constant is a fact about the machine the code runs on,
 # to be injected as a `Platform` rather than recomputed per module.
 _HOST_READS = frozenset({"sys.platform", "os.name"})
-_HOST_READ_CALL_PREFIXES = ("platform.", "os.uname")
+_HOST_READ_CALL_PREFIXES = ("platform.", "os.uname", "sys.getwindowsversion")
 _READ_CALLS = frozenset(
     {
         "os.getenv", "os.getcwd", "os.path.expanduser", "os.getpid", "pathlib.Path.home",

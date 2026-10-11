@@ -38,7 +38,7 @@ _MMAP_ARGS = "-c shared_memory_type=mmap -c dynamic_shared_memory_type=mmap"
 
 
 def test_pg_shm_args_linux_branch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Linux — the incident platform: the pin is unconditional there."""
+    """Linux/WSL — the incident platform: the pin is unconditional there."""
     monkeypatch.setattr(pg_tools, "is_macos", lambda: False)
     assert pg_tools.pg_shm_args() == _MMAP_ARGS
 
@@ -57,7 +57,7 @@ def test_pg_shm_args_macos_incompatibility_keeps_status_quo(
 ) -> None:
     """The task's named fallback: a future macOS PG build that rejects either
     option flips `_PG_SHM_MMAP_OK_ON_MACOS` to False — macOS then keeps its
-    status quo (no explicit settings) while Linux keeps the pin."""
+    status quo (no explicit settings) while Linux/WSL keeps the pin."""
     monkeypatch.setattr(pg_tools, "is_macos", lambda: True)
     monkeypatch.setattr(pg_tools, "_PG_SHM_MMAP_OK_ON_MACOS", False)
     assert pg_tools.pg_shm_args() == ""

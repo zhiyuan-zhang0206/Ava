@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, cast
@@ -128,6 +129,8 @@ def read() -> PauseOwnerSnapshot:
 
 
 def _fsync_parent(path: Path) -> None:
+    if os.name == "nt":
+        return
     fsync_parent(path)
 
 

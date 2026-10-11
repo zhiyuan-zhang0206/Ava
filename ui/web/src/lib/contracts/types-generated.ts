@@ -1114,9 +1114,7 @@ export interface paths {
          *       - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /
          *         `exec` / `exec_failed`.
          *       - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any
-         *         case accepted; the stored/returned values are LOWERCASE since the W9
-         *         events-table switch — `agent_events`' uppercase `INFO`/`WARNING`/
-         *         `ERROR` no longer appears on the wire). This is an *exact* match,
+         *         case accepted; the stored/returned values are LOWERCASE). This is an *exact* match,
          *         unlike `/api/cluster/admin/events` where `level`
          *         is a minimum threshold — a per-agent history query reads more
          *         predictably as "give me exactly this level".
@@ -2649,28 +2647,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/schedules/draft": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Draft Schedule
-         * @description Hand a natural-language request to an ava-schedule-writer agent. Spawns the
-         *     agent (which loads ava-guide.schedules, clarifies, writes the script,
-         *     and POSTs it back) and returns its id so the UI can open the conversation.
-         */
-        post: operations["draft_schedule_api_schedules_draft_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/keyed/v1/schedules/draft": {
         parameters: {
             query?: never;
@@ -2682,7 +2658,10 @@ export interface paths {
         put?: never;
         /**
          * Guarded Draft Schedule
-         * @description Replay one raw draft intent and its original birth without legacy fallback.
+         * @description Hand a natural-language request to an ava-schedule-writer agent. Spawns the
+         *     agent (which loads ava-guide.schedules, clarifies, writes the script,
+         *     and POSTs it back) and returns its id so the UI can open the conversation.
+         *     Replays one raw draft intent and its original birth.
          */
         post: operations["guarded_draft_schedule_api_keyed_v1_schedules_draft_post"];
         delete?: never;
@@ -2744,27 +2723,6 @@ export interface paths {
         patch: operations["update_preset_api_presets__preset_id__patch"];
         trace?: never;
     };
-    "/api/guide/draft": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Draft Guide
-         * @description Spawn an ava-guide agent for a natural-language ops request and return its
-         *     id so the UI can open the conversation.
-         */
-        post: operations["draft_guide_api_guide_draft_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/keyed/v1/guide/draft": {
         parameters: {
             query?: never;
@@ -2776,7 +2734,9 @@ export interface paths {
         put?: never;
         /**
          * Guarded Draft Guide
-         * @description Replay one raw draft intent and its original birth without legacy fallback.
+         * @description Spawn an ava-guide agent for a natural-language ops request and return its
+         *     id so the UI can open the conversation. Replays one raw draft intent and its
+         *     original birth.
          */
         post: operations["guarded_draft_guide_api_keyed_v1_guide_draft_post"];
         delete?: never;
@@ -2864,27 +2824,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/packages/draft": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Draft Package
-         * @description Spawn an ava-package-installer agent for a natural-language install request
-         *     and return its id so the UI can open the conversation. 422 on an unknown kind.
-         */
-        post: operations["draft_package_api_packages_draft_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/keyed/v1/packages/draft": {
         parameters: {
             query?: never;
@@ -2896,7 +2835,9 @@ export interface paths {
         put?: never;
         /**
          * Guarded Draft Package
-         * @description Replay one raw draft intent and its original birth without legacy fallback.
+         * @description Spawn an ava-package-installer agent for a natural-language install request
+         *     and return its id so the UI can open the conversation. Replays one raw draft
+         *     intent and its original birth; 422 on an unknown kind.
          */
         post: operations["guarded_draft_package_api_keyed_v1_packages_draft_post"];
         delete?: never;
@@ -3319,8 +3260,6 @@ export interface paths {
          *     - warning/error event totals and class counts: the SELECTED window's warning, error and
          *       critical `telemetry_events` rows grouped by class; a class is dismissed when an active
          *       `event_dismissals` row cancels it (`gateway.cluster.alert_classes`)
-         *     - `total_events`: archived event row count — frozen historical constant
-         *       (task #1281 parity run; PG events dropped; not a live gauge)
          *
          *     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
          *     hours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is
@@ -4224,10 +4163,7 @@ export interface components {
          *     / runner / etc.) and an int for agent process lines. `payload` keeps the
          *     full structured record (msg, kwargs from logger.bind / kwargs from the
          *     call, plus traceback fields when an exception was attached).
-         *     `level` is LOWERCASE (`debug`/`info`/`warning`/`error`/`critical`): the
-         *     W9 switch from the legacy `agent_events` table (loguru's uppercase `INFO`/`WARNING`/
-         *     `ERROR`) flipped the wire values — consumers matching uppercase must
-         *     adapt.
+         *     `level` is LOWERCASE (`debug`/`info`/`warning`/`error`/`critical`).
          */
         AgentEventRow: {
             /** Id */
@@ -4382,9 +4318,11 @@ export interface components {
          *     notices pass shell:N / watcher:N; there is no default to prevent callers
          *     from forgetting and having inbounds silently tagged as "user", muddying
          *     envelope labels. The valid set is in `base/agents/messages/envelope.py:validate_source`
-         *     (system / agent:N / user / ui:page:<name> / watcher:N / shell:N /
-         *     schedule:N); an illegal source is intercepted by 422 at the HTTP layer —
-         *     otherwise it would land in inbound_messages and the agent claim node
+         *     (system / agent:N / external_agent:<subject>[:<instance>] / user / ui:page:<name> /
+         *     watcher:N / shell:N / schedule:N). `user` delivers as the user; an
+         *     `external_agent:` declaration delivers as a message from that external
+         *     agent (self-asserted, never authenticated). An illegal source is intercepted by
+         *     422 at the HTTP layer — otherwise it would land in inbound_messages and the agent claim node
          *     would hit ValueError and kill the process.
          */
         AgentMessageIn: {
@@ -5801,15 +5739,13 @@ export interface components {
          * EventRow
          * @description One row of the unified event stream.
          *
-         *     Every signal shares this shape (event-system design doc §1): audit
-         *     (legacy `event_log`), telemetry and log (formerly `agent_events`) all land
-         *     in it, written through the unified emitter (`base/telemetry/emitter.py`).
+         *     Every signal shares this shape (event-system design doc §1): audit,
+         *     telemetry and log all land in it, written through the unified emitter
+         *     (`base/telemetry/emitter.py`).
          *     `trace_id` is the correlation key — one turn = one trace id, every event
          *     inside it carries the same value. `agent_id` is None for service-level
          *     events (gateway / daemons); `machine` is the host dimension. `level` is
-         *     LOWERCASE (`debug`/`info`/`warning`/`error`/`critical`) — the retired
-         *     `agent_events` mirror stored loguru's uppercase; the W9 read-path switch
-         *     flipped API consumers to lowercase.
+         *     LOWERCASE (`debug`/`info`/`warning`/`error`/`critical`).
          */
         EventRow: {
             /** Id */
@@ -8681,8 +8617,7 @@ export interface components {
          *     ADDING skills to `skills_to_inject_into_system_prompt` /
          *     `skills_to_expand_at_start` (supersets); anything else is rejected with
          *     `fork_config_change_not_allowed`. A fork WITHOUT config inherits the
-         *     source's resolved overlay + preset verbatim (the pre-2026-09-10 behavior
-         *     dropped the source's overlay).
+         *     source's resolved overlay + preset verbatim.
          *
          *     `spawner` default "user" — frontend spawn button does not need to
          *     pass it; external callers (claude-code / SDK paths `agent:N` etc.)
@@ -8798,8 +8733,6 @@ export interface components {
          *       cancels the class — exact, or a wildcard row with an empty `process`.
          *       The sidebar card shows `alert_classes_active`; the classes themselves
          *       are `GET /api/stats/alert-classes`, which reads the same rows.
-         *     - `total_events`: archived event row count (frozen — the PG events copy
-         *       stopped growing at the LGTM cutover; not a live gauge)
          *
          *     `avg_turn_seconds` None = zero turns in the window (new DB / no
          *     activity); frontend renders "—".
@@ -8829,8 +8762,6 @@ export interface components {
             alert_classes_active: number;
             /** Alert Classes Dismissed */
             alert_classes_dismissed: number;
-            /** Total Events */
-            total_events: number;
             /** Plugin Stats */
             plugin_stats: components["schemas"]["PluginStat"][];
             /** As Of */
@@ -12730,39 +12661,6 @@ export interface operations {
             };
         };
     };
-    draft_schedule_api_schedules_draft_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ScheduleDraftRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScheduleDraftResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     guarded_draft_schedule_api_keyed_v1_schedules_draft_post: {
         parameters: {
             query?: never;
@@ -12951,39 +12849,6 @@ export interface operations {
             };
         };
     };
-    draft_guide_api_guide_draft_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GuideDraftRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GuideDraftResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     guarded_draft_guide_api_keyed_v1_guide_draft_post: {
         parameters: {
             query?: never;
@@ -13126,39 +12991,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SkillView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    draft_package_api_packages_draft_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PackageDraftRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PackageDraftResponse"];
                 };
             };
             /** @description Validation Error */

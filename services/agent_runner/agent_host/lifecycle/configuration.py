@@ -10,9 +10,10 @@ from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
 from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.agents.impersonation.notes import HandoffNotes
 from base.clock import Clock, clock_config_from_boot
-from base.cluster.machine import MachineIdentity, roles_from_flags
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
-from base.log import init_gateway_process
+from base.log.process import init_gateway_process
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
 
@@ -72,16 +73,7 @@ def understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
 
 def host_machine(config: ConfigBoot) -> MachineIdentity:
     """Keep machine validation lazy on the same process configuration owner."""
-    return MachineIdentity(
-        name=lambda: config.view.general.machine_name,
-        role=lambda: roles_from_flags(
-            serve_gateway=config.view.general.machine_serve_gateway,
-            serve_agent_runner=config.view.general.machine_serve_agent_runner,
-            serve_observability_station=config.view.general.machine_serve_observability_station,
-        ),
-        host=lambda: config.view.general.machine_host,
-        description=lambda: config.view.general.machine_description,
-    )
+    return machine_from_boot(config)
 
 
 def load_installation(

@@ -10,10 +10,12 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.ownership.tests.test_lifecycle_intent import _command
-from agent.tests.claim.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.context import AvaContext
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -25,6 +27,7 @@ from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure 
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize(
@@ -38,13 +41,13 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
     failure_site: str,
     command_kind: str,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     async with hosted_scope() as resources:
-        agent = _agent(db_conn)
-        incarnation = await _admit(
-            aops_pool,
-            agent,
-        )
+        agent = agent_row(db_conn)
+        incarnation = await _admit(aops_pool, agent, database_gate=database_gate)
         replies: list[str] = []
         graph, saver, config, _history = await _prepare_graph(aops_pool, agent, 100, replies)
         command = (
@@ -58,17 +61,19 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
             checkpointer=saver,
             graph=graph,
             bus=EventBus.from_settings(),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
+            machine=machine_identity,
         )
         ctx = AvaContext(
             ops_pool=aops_pool,
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
+            machine=machine_identity,
         )
         # A real closed PostgreSQL connection supplies the I/O failure. Injection
         # selects only the boundary; checkpoint, graph and lifecycle transactions run.

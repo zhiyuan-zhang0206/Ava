@@ -1,7 +1,7 @@
 ---
 type: doc
 title: CLI
-description: '`ava init` records a home''s identity once; `ava start` owns native provisioning and root-owned readiness; argparse dispatches lifecycle operations to cli/commands/.'
+description: 'Settings-free syntax and home admission dispatch lifecycle and operator commands.'
 tags:
 - gateway
 - tool
@@ -17,6 +17,7 @@ aliases. Parsing preserves caller-owned children. Agents/notices
 and impersonation builders live in `cli.commands.agents`, extensions in
 `cli.commands.extensions.parsers`, others in `cli/parsers/`. Adapters lazy-import
 `cmd_*` at dispatch; `pyproject.toml` installs `.venv/bin/ava` via `uv sync`.
+Operator inputs are described in [[cli/database/docs/database.ava.okf.md]].
 
 ## Top-Level Commands
 
@@ -30,6 +31,7 @@ and impersonation builders live in `cli.commands.agents`, extensions in
 | `ava status` | status (including the maintenance hold, pg/redis and the end-to-end private-network Redis bridge view); `ava status --json` prints only the hold as one JSON object, settings-lite |
 | `ava converge` | replays idempotent host wiring (symlink/PATH/dirs/plugin images and the macOS Redis bridge), usually via `ava start`; it never touches the memory pool |
 | `ava firewall status` / `ava firewall sync` | macOS Application Firewall allowlist manifest: `status` renders each manifest purpose, glob, resolved path, and Allow/Block/Missing state; `sync` applies it (repair + prune stale rules). Unprivileged mutation was empirically verified on the macmini running macOS 15.3.1, then falls back to non-interactive `sudo -n` and finally reports the exact manual commands on platforms that still require elevation |
+| `ava boot` | manual uncapped retry of `ava start` while boot dependencies become available |
 
 ### `ava cluster` Subcommands
 
@@ -77,7 +79,7 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 
 ## Design Principles
 
-- **Path-only cluster identity**: identity **is** the home path — no name. Registry home-keyed (legacy name-keyed records read compatibly); verbs address via `--path`. A checkout's `ava` acts on its home's cluster (`cli/commands/_repo.py`).
+- **Path-only cluster identity**: identity **is** the home path — no name. Registry home-keyed; verbs address via `--path`. A checkout's `ava` acts on its home's cluster (`cli/commands/_repo.py`).
 - **Two lifecycle entries**: `ava init` owns identity, `ava start` owns startup and restart; package acquisition does not create cluster identity or launch services.
 - **Ops-layer only**: not exposed to agents (they use the `ava.*` SDK).
 - **Settings-independent**: `ava init` and `ava start`'s admission are specially routed in `main()` before settings-gated imports — no `base.config` (stdlib + `base.host.env.dotenv_boot`). `ava config` uses only registry metadata and direct local files until a full Settings consumer needs the singleton, so a broken `.env` remains repairable. `ava pty` is settings-lite and data-plane-independent.
@@ -86,9 +88,7 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 
 ## Entry Points
 
-- `cli/main.py:main()` — dispatch; `cli.parsers` — `build_parser` for construction, `parse_args` for syntax, `command_options` for documentation.
-- `cli/init_intent.py:run_init()` — the first-start inputs; `cli/start_intent.py:run_start()` — start admission and the full home lifecycle lock; `cli/start_identity.py` — durable initialization journal and the start gate (`require_initialized`); `cli/unit_join.py` — a runner's gateway join.
-- `cli/commands/cluster/home.py` — `destroy` (confirmed at a terminal), exact cleanup before marking the home detached; `start.py` / `status.py` / `data_plane/cluster_instance.py` — runtime operations.
+See [[entry.ava.okf.md|fresh executable and embedded entry points]].
 
 ## Notes
 

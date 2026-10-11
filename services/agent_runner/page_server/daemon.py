@@ -23,6 +23,7 @@ import signal
 import sys
 import time
 import urllib.request
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,23 +32,28 @@ import psutil
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import machine_name, reachable_host
-from base.config import settings
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
-from base.log import init_gateway_process
+from base.log.process import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
-from base.sessions.backend import SessionBackend, get_shell_backend
+from base.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
 from base.sessions.page_session import page_session_name
 from base.sessions.pty import client as pty_client
 from base.sessions.record import SessionRecord
+from base.telemetry import build_pipeline
 from services.agent_runner.page_server.config import PageServerConfig
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
@@ -245,10 +251,22 @@ def _create_page_session(
 
 
 def _launch_in_session(backend: SessionBackend, handle: _ServerHandle, row: _PageRow) -> None:
-    """Relaunch a crashed server without replacing its shell session."""
+    """Relaunch a crashed server without replacing its POSIX shell session."""
     command = _server_command(row)
-    backend.send(handle.session_name, command)
-    backend.send_keys(handle.session_name, "Enter")
+    try:
+        backend.send(handle.session_name, command)
+        backend.send_keys(handle.session_name, "Enter")
+    except NotImplementedError as exc:
+        # Windows has no interactive PTY transport. Its native shell backend
+        # recreates the named session, retaining the durable session identity.
+        backend.kill_session(handle.session_name)
+        if not backend.new_session(
+            handle.session_name,
+            command,
+            Path(row.serve_dir),
+            env={**os.environ, "PAGE_SERVER_TOKEN": handle.token},
+        ):
+            raise RuntimeError(f"failed to recreate page session {handle.session_name!r}") from exc
 
 
 def _server_is_healthy(host: str, port: int, token: str) -> bool:
@@ -298,23 +316,40 @@ def _page_server_occupants() -> dict[int, tuple[int, str | None]]:
     return found
 
 
-def _live_session_records() -> dict[str, SessionRecord]:
-    """One listing of the live pty sessions' records.
+def _live_session_records(backend: SessionBackend) -> dict[str, SessionRecord] | None:
+    """One listing of the live pty sessions' records, or None when the backend
+    is not the PTY backend (the Windows native backend keeps no pty records).
 
     A reconcile pass that asked ``has_session`` once per managed row would
     serialize a round trip per row inside the 2 s poll (the 2026-08-28 incident,
     when each ask cost a Python startup and serve()'s 15 s wait timed out about
     half the time); one listing answers every row.
     """
+    if not isinstance(backend, PtySessionBackend):
+        return None
     return pty_client.live_sessions()
 
 
-def _page_session_shell_pids(
-    wanted: dict[tuple[int, str], _PageRow], live: dict[str, SessionRecord]
-) -> dict[int, tuple[int, str]]:
-    """Map live page-shell PIDs to their page-row keys.
+def _session_is_live(
+    backend: SessionBackend, live_names: set[str] | None, session_name: str
+) -> bool:
+    """Whether a page shell is alive: membership in the pass's one listing when
+    one exists, else the backend's per-name check (the Windows native backend,
+    whose has_session is in-process)."""
+    if live_names is not None:
+        return session_name in live_names
+    return backend.has_session(session_name)
 
-    ``live`` is the pass's pty record scan."""
+
+def _page_session_shell_pids(
+    wanted: dict[tuple[int, str], _PageRow], live: dict[str, SessionRecord] | None
+) -> dict[int, tuple[int, str]]:
+    """Map live page-shell PIDs to their page-row keys on POSIX.
+
+    ``live`` is the pass's pty record scan (None on Windows, where the native
+    backend keeps no pty records)."""
+    if live is None:
+        return {}
     session_keys = {
         row.session_name: key for key, row in wanted.items() if row.session_name is not None
     }
@@ -380,11 +415,11 @@ def _reclaim_occupants(
 
 
 def _close_persisted_sessions(
-    backend: SessionBackend, session_names: list[str], live_names: set[str]
+    backend: SessionBackend, session_names: list[str], live_names: set[str] | None
 ) -> None:
     """Finish closed-page teardown after a daemon restart lost its cache."""
     for page_session in session_names:
-        if page_session in live_names:
+        if _session_is_live(backend, live_names, page_session):
             _log.info("[page-server] closing persisted page session %s", page_session)
             backend.kill_session(page_session)
 
@@ -395,7 +430,7 @@ def _drop_stale_handles(
     managed: dict[tuple[int, str], _ServerHandle],
     backoff: dict[tuple[int, str], float],
     degraded: dict[tuple[int, str], _DegradedServeDir],
-    live_names: set[str],
+    live_names: set[str] | None,
 ) -> None:
     """Remove managed entries whose rows or sessions no longer match."""
     for key in list(managed):
@@ -404,16 +439,14 @@ def _drop_stale_handles(
         if row is None:
             _log.info("[page-server] closing %s (row gone)", key)
             _kill_page_session(backend, handle)
-            live_names.discard(handle.session_name)
             del managed[key]
         elif row.port != handle.port or row.serve_dir != handle.serve_dir:
             _log.info("[page-server] replacing %s (port/dir changed)", key)
             _kill_page_session(backend, handle)
-            live_names.discard(handle.session_name)
             del managed[key]
             backoff.pop(key, None)
             degraded.pop(key, None)
-        elif handle.session_name not in live_names:
+        elif not _session_is_live(backend, live_names, handle.session_name):
             _log.warning("[page-server] page session died for %s", key)
             del managed[key]
 
@@ -449,7 +482,7 @@ def _ensure_handle(
     backoff: dict[tuple[int, str], float],
     degraded: dict[tuple[int, str], _DegradedServeDir],
     now: float,
-    live_names: set[str],
+    live_names: set[str] | None,
     bus: EventBus,
 ) -> tuple[_ServerHandle | None, bool]:
     """Return a managed handle and whether this pass created its shell."""
@@ -459,7 +492,7 @@ def _ensure_handle(
         return None, False
     if now < backoff.get(key, 0.0):
         return None, False
-    if row.session_name is not None and row.session_name in live_names:
+    if row.session_name is not None and _session_is_live(backend, live_names, row.session_name):
         handle = _ServerHandle(
             row.agent_id,
             row.name,
@@ -574,8 +607,8 @@ def _reconcile_once(
     rows = _open_rows(pool, host)
     wanted = {(row.agent_id, row.name): row for row in rows}
     _discard_gone_degraded(degraded, wanted)
-    live = _live_session_records()
-    live_names = set(live)
+    live = _live_session_records(backend)
+    live_names = set(live) if live is not None else None
     now = time.monotonic()
     # Fast path: new/unadopted rows get their session now, before the slow
     # full-pass work. _ensure_handle's per-row snapshot re-check still guards
@@ -587,8 +620,8 @@ def _reconcile_once(
             )
     # Re-scan: sessions created above must be visible to the liveness checks
     # below, or a stale scan would reap them as dead in this same pass.
-    live = _live_session_records()
-    live_names = set(live)
+    live = _live_session_records(backend)
+    live_names = set(live) if live is not None else None
     occupants = _page_server_occupants()
     shell_pids = _page_session_shell_pids(wanted, live)
     _reclaim_occupants(rows, occupants, shell_pids)
@@ -612,24 +645,30 @@ def _reconcile_once(
             # session — drop it so the re-ensure below cannot re-adopt
             # the just-killed shell, then recreate in this same pass
             # (task #2670).
-            live_names.discard(handle.session_name)
+            if live_names is not None:
+                live_names.discard(handle.session_name)
             _ensure_handle(
                 pool, backend, row, key, managed, backoff, degraded, now, live_names, bus
             )
 
 
 async def _reconcile_loop(
-    pool: ConnectionPool, liveness: LoopProgress, config: PageServerConfig, bus: EventBus
+    pool: ConnectionPool,
+    liveness: LoopProgress,
+    config: PageServerConfig,
+    bus: EventBus,
+    *,
+    local_machine: MachineIdentity,
 ) -> None:
     """Run page-shell reconciliation at the configured poll interval."""
-    host = reachable_host()
+    host = local_machine.host()
     managed: dict[tuple[int, str], _ServerHandle] = {}
     backoff: dict[tuple[int, str], float] = {}
     degraded: dict[tuple[int, str], _DegradedServeDir] = {}
     _log.info(
         "[page-server] daemon started, pid=%s, machine=%s, host=%s",
         os.getpid(),
-        machine_name(),
+        local_machine.name(),
         host,
     )
     while True:
@@ -651,7 +690,9 @@ async def _reconcile_loop(
             _log.exception("[page-server] poll iteration failed")
 
 
-async def run() -> None:
+async def run(
+    *, database: Callable[[], Database], image: LoadedCommit, local_machine: MachineIdentity
+) -> None:
     """Start the daemon and keep its health endpoint alive while it reconciles."""
     if _is_running():
         _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
@@ -660,8 +701,10 @@ async def run() -> None:
     liveness = LivenessGroup()
     reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
     dead_pages_progress = liveness.register("dead_show_pages", _DEAD_PAGES_LIVENESS_TIMEOUT_S)
-    health = await start_health_server("page_server", _endpoint().health_port, liveness=liveness)
-    db = Database.from_settings()
+    health = await start_health_server(
+        "page_server", _endpoint().health_port, liveness=liveness, image=image
+    )
+    db = database()
     pool = db.pool()
     config, bus = page_server_config(), EventBus.from_settings()
     try:
@@ -669,10 +712,12 @@ async def run() -> None:
         # a stalled loop cannot be masked by a busy sibling: a loop that raises cancels
         # its sibling and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(_reconcile_loop(pool, reconcile_progress, config, bus))
+            loops.create_task(
+                _reconcile_loop(pool, reconcile_progress, config, bus, local_machine=local_machine)
+            )
             loops.create_task(
                 dead_pages.dead_pages_loop(
-                    pool, db, reachable_host(), dead_pages_progress, config, bus
+                    pool, db, local_machine.host(), dead_pages_progress, config, bus
                 )
             )
     finally:
@@ -685,8 +730,25 @@ def main() -> None:
     """Initialize the daemon after verifying the database schema version."""
     from base.deploy.schema.migrations import assert_schema_current
 
+    image = LoadedCommit.capture()
+    machine_config = ConfigBoot()
+    machine_config.boot()
+    machine = machine_from_boot(machine_config)
+    process_home = ava_home().resolve()
     assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="page_server")
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="page_server", exempt=False)
+
+    def database() -> Database:
+        return Database.from_settings(gate=gate, local_host=machine.host)
+
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    init_gateway_process(
+        name="page_server",
+        producer=lambda: pipeline,
+        machine_reader=machine.name,
+        image=image,
+    )
     install_graceful_shutdown("page_server")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
@@ -697,7 +759,7 @@ def main() -> None:
     # hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(run(database=database, image=image, local_machine=machine))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[page-server] interrupted, shutting down")
@@ -716,4 +778,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
     main()

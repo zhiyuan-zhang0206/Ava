@@ -181,7 +181,7 @@ def _declare_host_mirror_python(python_mirror: PythonMirror, tmp_path: Path) -> 
     config.write_text(f'[[index]]\nurl = "{python_mirror.index}"\ndefault = true\n')
     for key in ("UV_DEFAULT_INDEX", "UV_NO_CONFIG"):
         python_mirror.env.pop(key)
-    base = Path(sys.base_prefix) / "bin"
+    base = Path(sys.base_prefix) if sys.platform == "win32" else Path(sys.base_prefix) / "bin"
     python_mirror.env.update(
         XDG_CONFIG_HOME=str(config.parents[1]),
         XDG_CONFIG_DIRS=str(tmp_path / "xdg-system"),
@@ -191,7 +191,8 @@ def _declare_host_mirror_python(python_mirror: PythonMirror, tmp_path: Path) -> 
 
 
 def _venv_python(python_mirror: PythonMirror) -> Path:
-    return python_mirror.repo / ".venv" / "bin" / "python"
+    bin_python = "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+    return python_mirror.repo / ".venv" / bin_python
 
 
 def _reported(python: Path) -> str:
@@ -227,7 +228,7 @@ def test_mirror_recreates_an_environment_whose_interpreter_misses_the_pin(
     marker.write_text("old environment")
     # Its lib/pythonX.Y directory and pyvenv.cfg still name the pin; only the
     # interpreter's own report reveals the drift.
-    [site] = venv.glob("lib/python*/site-packages")
+    [site] = [*venv.glob("lib/python*/site-packages"), *venv.glob("Lib/site-packages")]
     (site / "sitecustomize.py").write_text(
         "import platform\nplatform.python_version = lambda: '3.11.0'\n"
     )
@@ -308,11 +309,12 @@ def test_stale_lock_preserves_runtime_when_python_version_has_changed(
 ) -> None:
     import re
     import subprocess
+    import sys
 
     assert python_mirror.install("--no-dev").returncode == 0
     before = python_mirror.inspect()
     venv = python_mirror.repo / ".venv"
-    interpreter = venv / "bin" / "python"
+    interpreter = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     config = venv / "pyvenv.cfg"
     # Reproduce a managed interpreter alias advancing while this existing venv
     # still records its old patch version. Actual uv detects the mismatch.
@@ -486,7 +488,9 @@ def test_fresh_bootstrap_finds_checkout_code_with_safe_path(python_mirror: Pytho
     from cli.tests.bootstrap._python_install_fixture import ROOT
 
     python_mirror.env["PYTHONSAFEPATH"] = "1"
-    base_python = Path(sys.base_prefix) / "bin" / "python3"
+    base_python = Path(sys.base_prefix) / (
+        "python.exe" if sys.platform == "win32" else "bin/python3"
+    )
     result = subprocess.run(  # noqa: S603 — managed Python and the trusted checkout entry point
         [
             "uv",

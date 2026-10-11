@@ -9,6 +9,7 @@ from cli.tests._commands_helpers import _fake_session_backends as _fake_session_
 from cli.tests._commands_helpers import _FakeResponse
 from cli.tests._commands_helpers import _gateway_role_pinned as _gateway_role_pinned
 from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 
 
 def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(

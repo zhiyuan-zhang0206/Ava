@@ -34,7 +34,7 @@ def test_helper_non_macos_skipped(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     monkeypatch.setattr("base.native_process.os_platform.is_macos", lambda: False)
 
     def unexpected(target: Path, *, helper_port: int, force: bool, timeout_s: float) -> None:
-        pytest.fail("the permissions helper must not be stopped on a non-macOS host")
+        pytest.fail("a user-wide Windows helper must not be stopped by one home")
 
     monkeypatch.setattr(
         "services.desktop.permissions_helper.launchd_job.unregister_helper", unexpected

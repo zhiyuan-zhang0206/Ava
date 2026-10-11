@@ -221,7 +221,7 @@ async def _connect_server(
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    from ava.mcp_config import server_cwd
+    from ava.mcp_config import resolve_command, server_cwd
 
     from ._browser import connect_browser_direct
 
@@ -250,7 +250,7 @@ async def _connect_server(
             f"Server {server!r}: unknown shared value {shared!r} "
             f'(expected true, "browser", or "computer_use")'
         )
-    cmd = spec["command"]
+    cmd = resolve_command(spec["command"])
     args_list = spec.get("args") or []
     env_dict = spec.get("env") or {}
 
@@ -681,10 +681,9 @@ def _unlink_own_socket(socket_path: str, self_ino: int) -> None:
 async def run_daemon(socket_path: str, *, timeout_seconds: Callable[[], float]) -> None:
     """Start the shared MCP daemon, listening on one Unix socket.
 
-    A single per-machine process (ops roster session "mcp-daemon") replaces
-    the previous one-daemon-per-agent design: 15 agents used to pay 15 daemon
-    processes (~12MB each). Sessions are isolated per client connection, so the
-    shared process is not a shared state.
+    A single per-machine process (ops roster session "mcp-daemon") serves every
+    agent. Sessions are isolated per client connection, so the shared process is
+    not a shared state.
     """
     # Reap this unit's stale daemons + drop a stale socket file, then bind.
     # The live-socket guard already ran in main(); anything still at

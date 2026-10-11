@@ -68,8 +68,10 @@ class LocalHostEvidence:
 def _same_user(process: psutil.Process, pid: int, shape: str, unreadable: list[str]) -> bool:
     """False for a process that cannot be this unit's (foreign user, gone, or owner unreadable)."""
     try:
-        if process.uids().real != os.getuid():
-            # A foreign-user process cannot be this unit's daemon or exec child.
+        if os.name == "posix" and process.uids().real != os.getuid():
+            # A foreign-user process cannot be this unit's daemon or exec
+            # child. Windows has no comparable uid (placeholder ids); the
+            # environment read decides ownership there.
             return False
     except psutil.AccessDenied:
         unreadable.append(f"pid {pid}: owner unreadable for a {shape} shape")

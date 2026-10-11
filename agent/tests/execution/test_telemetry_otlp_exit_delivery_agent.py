@@ -58,6 +58,7 @@ def otlp_receiver() -> Any:
 
 _EXTERNAL_CLI_CHILD = """
 from pathlib import Path
+import os
 import ava
 from ava import external
 from agent.extensions.registry import build_registry
@@ -78,7 +79,7 @@ LEASE = {{
 }}
 
 external.control.require_active = lambda _db, _lease_id, _caller: dict(LEASE)
-external.machine_name = lambda: "external-cli-probe"
+os.environ["AVA_MACHINE_NAME"] = "external-cli-probe"
 external.process_metadata = lambda: {{"pid": 1}}
 def load_snapshot(_agent_id, **_kwargs):
     state = build_agent_state(build_registry())()

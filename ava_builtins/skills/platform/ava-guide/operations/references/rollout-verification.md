@@ -11,11 +11,12 @@ code version. After every rollout, verify:
 
 1. **Service process start times ≈ deploy completion time** on every host:
    `ps -eo pid,lstart,command | grep <home>/source` — a process started before
-   the rollout window is running stale code (real cases: the mcp
-   daemon, a watchdog and a browser daemon were all found this way).
+   the rollout window is running stale code (three real cases: the mcp
+   daemon, the wsl watchdog, and the win browser daemon were all found this
+   way).
 2. **mcp-daemon**: exactly ONE `ava.mcps._daemon` per unit
-   (`pgrep -fc "python -m ava\.mcps\._daemon"`; co-located
-   units → one per unit).
+   (`pgrep -fc "python -m ava\.mcps\._daemon"`; wsl co-located
+   units → 2 total).
    Ghosts accumulate when a respawn storm relaunches while the old detached
    process survives; a ghost's exit can steal the live socket.
    Healthcheck probe: `.venv/bin/python -m services.supervision.healthchecks.mcp_daemon`

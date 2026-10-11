@@ -427,6 +427,7 @@ async def post_notice_resolve(
             agent_id,
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind=InboundKind.CHAT,
+            local_machine=request.app.state.machine.name(),
         )
     else:
         status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)

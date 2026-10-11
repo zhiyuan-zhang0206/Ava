@@ -22,7 +22,6 @@ from base.agents.incarnation.lifecycle_acceptance import (
     UNOWNED_TERMINATION_RECORDED,
 )
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
-from base.cluster.machine import machine_name
 from base.config import field_alias, get_field, settings
 from base.db import Database, fetch_one, publish_inbound_wake
 from base.events.live.announce import publish_agent_updated_sync
@@ -93,8 +92,7 @@ def _transition_terminated_to_unclaimed_idling(
                 "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
                 "termination_source = NULL, lease_expires_at = NULL, "
                 "last_turn_fatal_at = NULL, "
-                "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
-                "runtime_protocol_version = 0 "
+                "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL "
                 "WHERE id = %s AND status = %s AND {} "
                 "AND pid IS NULL AND lifecycle_command_id IS NULL "
                 "AND NOT {} "
@@ -122,8 +120,7 @@ def _transition_terminated_to_unclaimed_idling(
                 "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
                 "termination_source = NULL, lease_expires_at = NULL, "
                 "last_turn_fatal_at = NULL, "
-                "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
-                "runtime_protocol_version = 0 "
+                "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL "
                 "WHERE id = %s AND status = %s AND {} "
                 "AND pid IS NULL AND lifecycle_command_id IS NULL RETURNING status_changed_at"
             ).format(sql.SQL(_RESURRECTION_TARGET)),
@@ -193,6 +190,7 @@ def _prepare_resurrect_attempt(
     trigger_inbound_id: int | None,
     trigger_inbound_kind: WakeTriggerKind | None,
     billing_recovery: bool = False,
+    local_machine: str,
 ) -> telemetry.Event:
     """Commit resurrection and its optional prompt before waking the host.
 
@@ -204,10 +202,8 @@ def _prepare_resurrect_attempt(
     """
     from base.agents.incarnation.exec_owner_recovery import recover_local_resources
     from base.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_resurrect
-    from base.agents.messages.envelope import reject_unnegotiated_caller
 
-    reject_unnegotiated_caller(resurrected_by)
-    recover_local_resources(db, agent_id, machine_name())
+    recover_local_resources(db, agent_id, local_machine)
     with db.write_transaction() as conn, conn.cursor() as cur:
         # Task before agent: producers hold the task while inserting an inbound
         # whose foreign key can lock agents_meta. Keep the same lock order.
@@ -346,6 +342,7 @@ def resurrect_agent(
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
     billing_recovery: bool = False,
+    local_machine: str,
 ) -> int:
     """Resume a terminated hosted incarnation and enqueue lifecycle plus optional chat.
 
@@ -379,6 +376,7 @@ def resurrect_agent(
         trigger_inbound_id=trigger_inbound_id,
         trigger_inbound_kind=trigger_inbound_kind,
         billing_recovery=billing_recovery,
+        local_machine=local_machine,
     )
     telemetry.emit_prepared(prepared_event)
     logger.info(

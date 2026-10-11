@@ -37,6 +37,7 @@ from agent.graph.llm_errors import (
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -267,6 +268,7 @@ def test_gemini_safety_unexpected() -> None:
 async def test_llm_node_validator_wired(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Integration smoke: real _llm_node_impl path runs through, stream yields a max_tokens
     truncated chunk → should raise LLMStreamTruncatedError, locking in that
@@ -310,7 +312,7 @@ async def test_llm_node_validator_wired(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,

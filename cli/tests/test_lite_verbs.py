@@ -4,7 +4,8 @@ The lite opt-out exists so a runner's recovery verbs still construct Settings
 with the gateway down. `restart` must NOT be one of them: its preflight
 registers this machine in the central DB and its start leg needs the cluster
 config regardless, so a lite restart on a pure runner could only ever dial the
-never-dialed placeholder DB URL and die with PlaceholderDbUrlError — while a fetching restart works whenever
+never-dialed placeholder DB URL and die with PlaceholderDbUrlError (observed on
+the fleet Windows box, 2026-08-19) — while a fetching restart works whenever
 restart can work at all.
 
 The dispatch is exercised for real (`cli.main.main`), with only the parser

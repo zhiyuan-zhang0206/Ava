@@ -20,7 +20,7 @@ from base.host.net.url_secret import url_host, url_with_host, url_with_query_par
 
 
 def self_machine_host() -> str:
-    """This host's reachable address, mirroring `base.cluster.machine.reachable_host`
+    """This host's reachable address, mirroring `MachineIdentity.host`
     (env `AVA_MACHINE_HOST` > `localhost`).
     Duplicated at this leaf because base.cluster.machine imports settings — a config
     sub-model cannot import it back."""

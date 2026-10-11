@@ -34,12 +34,15 @@ from agent.ownership.hosted import (
     settle_hosted_runtime,
 )
 from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from ops.agents import wake
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _agent(conn: psycopg.Connection[Any], machine: str = "host-test") -> int:
@@ -58,6 +61,7 @@ async def _recrashed_row(
     aops_pool: AsyncConnectionPool[Any],
     *,
     machine: str = "host-test",
+    database_gate: ProcessDbGate,
 ) -> tuple[int, RuntimeIncarnation]:
     """The row at a re-crash's settle point: idling, marked, owned by the incarnation.
 
@@ -67,7 +71,12 @@ async def _recrashed_row(
     """
     agent_id, owner = _agent(db_conn, machine=machine), uuid4()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, machine, owner, expected_from="idling", db=Database.from_settings()
+        aops_pool,
+        agent_id,
+        machine,
+        owner,
+        expected_from="idling",
+        db=Database.from_settings(gate=database_gate),
     )
     assert incarnation is not None
     db_conn.execute(
@@ -113,12 +122,13 @@ async def test_the_reap_records_its_audit_fact_in_the_reaping_transaction(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
     async def _publish(_bus: object, _agent_id: int) -> None:
         return None
 
     monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
-    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
+    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool, database_gate=database_gate)
 
     await reap_recrashed_corpse(
         aops_pool,
@@ -189,9 +199,10 @@ async def test_prompt_reap_terminates_the_incarnations_marked_idling_row(
     reap_spies: tuple[list[dict[str, object]], list[int]],
     loguru_records: list[dict[str, Any]],
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
     events, published = reap_spies
-    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
+    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool, database_gate=database_gate)
     published.clear()
 
     reaped = await reap_recrashed_corpse(
@@ -238,9 +249,10 @@ async def test_prompt_reap_refuses_rows_that_are_not_its_marked_idling_own(
     aops_pool: AsyncConnectionPool[Any],
     reap_spies: tuple[list[dict[str, object]], list[int]],
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
     events, published = reap_spies
-    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
+    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool, database_gate=database_gate)
     published.clear()
 
     # A running row (a live turn or claim park) is never touched.
@@ -301,6 +313,7 @@ async def test_prompt_reap_and_admission_resolve_to_one_winner(
     reap_spies: tuple[list[dict[str, object]], list[int]],
     database: Database,
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The reap and the next wake's admission are CASes over one row.
 
@@ -309,7 +322,9 @@ async def test_prompt_reap_and_admission_resolve_to_one_winner(
     and the loser must refuse, never both and never a torn mix.
     """
     for _ in range(4):
-        agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
+        agent_id, incarnation = await _recrashed_row(
+            db_conn, aops_pool, database_gate=database_gate
+        )
         reaped, admitted = await asyncio.gather(
             reap_recrashed_corpse(
                 aops_pool,
@@ -338,7 +353,7 @@ async def test_prompt_reap_and_admission_resolve_to_one_winner(
             assert status == ("running",)
 
     # Serialized both ways: whichever transition runs second refuses.
-    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
+    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool, database_gate=database_gate)
     reaped = await reap_recrashed_corpse(
         aops_pool,
         incarnation,
@@ -353,7 +368,7 @@ async def test_prompt_reap_and_admission_resolve_to_one_winner(
         is None
     )
 
-    agent_id2, incarnation2 = await _recrashed_row(db_conn, aops_pool)
+    agent_id2, incarnation2 = await _recrashed_row(db_conn, aops_pool, database_gate=database_gate)
     assert (
         await admit_hosted_runtime(
             aops_pool,
@@ -383,6 +398,9 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
     database: Database,
+    database_gate: ProcessDbGate,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The reaped corpse's next transition is the resurrect — run it against a
     second reap attempt and assert one winner per state and no torn row.
@@ -400,7 +418,9 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
 
     monkeypatch.setattr(wake, "publish_inbound_wake", _wake)
 
-    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
+    agent_id, incarnation = await _recrashed_row(
+        db_conn, aops_pool, database_gate=database_gate, machine=machine_identity.name()
+    )
     reaped = await reap_recrashed_corpse(
         aops_pool,
         incarnation,
@@ -417,7 +437,12 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
             wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
         ),
         asyncio.to_thread(
-            wake.resurrect_agent, database, event_bus, agent_id, resurrected_by="user"
+            wake.resurrect_agent,
+            database,
+            event_bus,
+            agent_id,
+            resurrected_by="user",
+            local_machine=machine_identity.name(),
         ),
     )
 
@@ -481,9 +506,10 @@ async def test_recovery_wake_switch_off_commits_nothing(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(settings.daemon, "hosted_crash_recovery_wake_enabled", False)
-    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
+    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool, database_gate=database_gate)
 
     reaped = await reap_recrashed_corpse(
         aops_pool,
@@ -502,6 +528,7 @@ async def test_corpse_stamp_failure_keeps_its_traceback(
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A failed corpse stamp is best-effort — but its log keeps the cause (task #4979)."""
 
@@ -512,7 +539,12 @@ async def test_corpse_stamp_failure_keeps_its_traceback(
 
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=Database.from_settings()
+        aops_pool,
+        agent_id,
+        "host-test",
+        owner,
+        expected_from="idling",
+        db=Database.from_settings(gate=database_gate),
     )
     assert incarnation is not None
 

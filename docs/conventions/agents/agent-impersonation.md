@@ -76,7 +76,6 @@ get reused. Names may repeat; the pair `(agent_id, session_id)` identifies work.
 ## Read context and act
 
 ```bash
-ava agents context 405
 ava agents timeline 405 --limit 100 --before 23.0
 ava impersonate exec 0 --agent 405 --file operation.py
 ```

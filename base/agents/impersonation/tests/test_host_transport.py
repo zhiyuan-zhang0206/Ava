@@ -26,8 +26,9 @@ from websockets.sync.server import Server, ServerConnection, unix_serve
 
 from base.agents.impersonation import host_transport as codex_app_server
 from base.agents.impersonation.terminal_notices import deliver_pending_notice
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.db import Database, create_agent
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
 
@@ -266,18 +267,21 @@ def test_ended_lease_reaches_actual_codex_host_without_a_relay(
     short_socket: Path,
     database: Database,
     db_conn: psycopg.Connection,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
+    local_machine = machine_identity.name()
     from uuid import uuid4
 
     aid, lease_id = create_agent(db_conn), uuid4()
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'terminated',%s)",
-        (aid, machine_name()),
+        (aid, local_machine),
     )
     db_conn.execute(
         "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,expires_at,relay_provider,relay_thread_id,relay_codex_remote) "
         "VALUES(%s,%s,'external_agent:test',%s,'active',300,clock_timestamp()+interval '5 minutes','codex',%s,%s)",
-        (lease_id, aid, machine_name(), str(THREAD_ID), _endpoint(short_socket)),
+        (lease_id, aid, local_machine, str(THREAD_ID), _endpoint(short_socket)),
     )
     db_conn.execute(
         "UPDATE agent_impersonations SET status='expired',ended_at=clock_timestamp(),rejection_reason='confirmed executor death' WHERE id=%s",
@@ -287,7 +291,7 @@ def test_ended_lease_reaches_actual_codex_host_without_a_relay(
     server = FakeAppServer()
     server.start(short_socket)
     try:
-        assert deliver_pending_notice(database, machine_name())
+        assert deliver_pending_notice(database, local_machine)
     finally:
         server.stop()
     payload = server.received[-1]["params"]

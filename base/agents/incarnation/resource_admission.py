@@ -23,7 +23,7 @@ from base.agents.incarnation.resources import (
 )
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
-_LOCK = "SELECT incarnation_resources,runtime_generation,runtime_owner,runtime_kind,pid,started_at,runtime_protocol_version FROM agents_meta WHERE id=%s FOR UPDATE"
+_LOCK = "SELECT incarnation_resources,runtime_generation,runtime_owner,runtime_kind,pid,started_at FROM agents_meta WHERE id=%s FOR UPDATE"
 # The one predecessor rule: a settled lifecycle receipt for (agent, generation,
 # owner): an applied restart, including one superseded by an unowned force,
 # or an applied and observed terminate. Aliases: i = inbound_messages, m = agents_meta.
@@ -102,8 +102,6 @@ def _next(
     transfers: list[ResourceTransferProof] | None = None,
 ) -> IncarnationResources | None:
     if row[0] is None:
-        if row[6] != 0:
-            raise ResourceEvidenceError("unknown resource set cannot admit an enabled protocol")
         return None
     state = decode_resources(row[0])
     if isinstance(state, ResourceBirth):
@@ -134,27 +132,6 @@ def _next(
     return IncarnationResources(
         generation=target.generation, owner=target.owner, host_process=host, requests={}
     )
-
-
-def admit_resources(
-    conn: psycopg.Connection, target: RuntimeIncarnation, host: ResourceProcess
-) -> None:
-    row = conn.execute(_LOCK, (target.agent_id,)).fetchone()
-    if row is None:
-        raise ResourceEvidenceError("resource admission target does not exist")
-    predecessor = False
-    if row[0] is not None:
-        state = decode_resources(row[0])
-        if isinstance(state, IncarnationResources):
-            predecessor = (
-                conn.execute(
-                    _PREDECESSOR, (target.agent_id, state.generation, state.owner)
-                ).fetchone()
-                is not None
-            )
-    value = _next(row, target, host, predecessor=predecessor)
-    if value is not None:
-        conn.execute(_STORE, (Jsonb(value.model_dump(mode="json")), target.agent_id))
 
 
 async def admit_resources_async(

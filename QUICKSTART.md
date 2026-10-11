@@ -12,12 +12,18 @@ the entire cluster.
 
 | You need | Details |
 |----------|---------|
-| macOS or Linux | This guide sets up a whole cluster, which requires hosting Postgres + Redis. |
+| macOS or Linux | This guide sets up a whole cluster, which requires hosting Postgres + Redis. Windows runs the agent-runner half natively and joins a cluster instead — see below. |
 | Model API Key | Anthropic (`ANTHROPIC_API_KEY`), DeepSeek (`DEEPSEEK_API_KEY`), or OpenAI (`OPENAI_API_KEY`) |
 | Git | For cloning the repo |
 | A terminal | All commands in this guide run in a terminal |
 | Homebrew (macOS) | The first `ava start` provisions Postgres/Redis via Homebrew — install it first: `https://brew.sh` |
 | Non-root user (Linux) | The first `ava start` births a per-cluster Postgres via `initdb`, which **refuses to run as root**. Fresh VPS images land you as root — create a user with passwordless sudo first, then run the install as that user: `adduser ava && echo 'ava ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/ava && su - ava` |
+
+
+> **Windows users**: Windows runs the `agent-runner` capability natively — no
+> WSL2, no Docker — and enrolls against a gateway on macOS or Linux. It
+> cannot host the cluster itself. Follow the
+> [Windows setup guide](docs/conventions/operations/windows-setup.md) instead of this one.
 
 ---
 
@@ -204,6 +210,13 @@ switching every checkout and starting again:
 
 See [the runbook](docs/conventions/runbook.md#updating-a-networked-cluster-in-source-mode)
 for the two halves. Never `git pull` + `ava start` by hand on a production checkout.
+
+### Windows hardware
+
+Native Windows Ava services are retired. Install Ava inside a WSL2 Linux
+distribution and follow the [Windows host guidance](docs/conventions/operations/windows-setup.md).
+For unattended gateway boot, use the separate WSL distribution anchor described
+there; `ava start` inside Linux uses the Linux service path.
 
 ---
 

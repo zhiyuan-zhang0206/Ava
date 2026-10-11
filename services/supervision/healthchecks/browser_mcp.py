@@ -35,10 +35,18 @@ def _probe() -> bool:
 def _is_alive() -> bool:
     """True when the daemon answers a ping; ANY probe failure means "not alive".
 
-    A healthcheck's contract with the watchdog is a bool, not an exception: an
-    unforeseen probe failure degrades to "dead" — a decision the caller can act
-    on — instead of to no answer at all. Unexpected types still log a traceback,
-    so nothing is silently swallowed.
+    A healthcheck's contract with the watchdog is a bool, not an exception. The
+    narrow `(OSError, json.JSONDecodeError)` this used to catch let
+    `socket.AF_UNIX`'s AttributeError through on Windows, and the watchdog logged
+    a multi-KB "healthcheck browser-mcp raised" traceback every 60s while never
+    deciding alive-or-dead — no restart was ever attempted, and the round's
+    remaining checks ran only because the watchdog isolates each one.
+
+    The service is now gated out where AF_UNIX is absent (`ops.spec._gate_reason`),
+    so that specific failure no longer reaches here. This is the second line of
+    defence: an unforeseen probe failure degrades to "dead" — a decision the
+    caller can act on — instead of to no answer at all. Unexpected types still
+    log a traceback, so nothing is silently swallowed.
     """
     try:
         return _probe()

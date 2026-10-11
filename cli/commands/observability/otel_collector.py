@@ -34,8 +34,8 @@ from pathlib import Path
 from string import Template
 from urllib.parse import unquote, urlsplit
 
-from base.cluster.machine import MachineRoles
-from base.db import Database
+from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.release import collector_artifact
 from base.host.atomic_io import write_text_atomic
 from base.telemetry.observability import collector_allowed_for_home
@@ -250,7 +250,7 @@ def gateway_otel_ingress_endpoint() -> str:
     return endpoint.rstrip("/")
 
 
-def station_otel_ingress_endpoint() -> str:
+def station_otel_ingress_endpoint(*, database_factory: DatabaseFactory) -> str:
     """The selected station's ingress, independent of this unit's listen port."""
     from base.config import settings
     from base.telemetry.station_endpoint import validated_observability_base
@@ -263,7 +263,7 @@ def station_otel_ingress_endpoint() -> str:
         )
     from base.telemetry.station_endpoint import resolve_station_target
 
-    return resolve_station_target(Database.from_settings(), base).url
+    return resolve_station_target(database_factory(), base).url
 
 
 def telemetry_bearer() -> str | None:
@@ -291,7 +291,9 @@ def _cluster_bearer() -> str:
     return f"Bearer {token}"
 
 
-def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
+def _remote_receiver_fragments(
+    roles: MachineRoles | None, *, machine: MachineIdentity
+) -> dict[str, str]:
     """Template fragments for the authenticated remote OTLP ingress.
 
     Served by any unit that remote peers dial OTLP into: a gateway (pure
@@ -318,11 +320,10 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     if roles is None or not (roles & {"gateway", "observability-station"}):
         return no_remote
 
-    from base.cluster.machine import reachable_host
     from base.host.net.predicates import is_loopback_host
 
     token = telemetry_bearer()
-    host = reachable_host()
+    host = machine.host()
     if _unspecified_address(host):
         # 0.0.0.0 / :: is never a reachable host (the loopback classifier
         # treats 0.0.0.0 as loopback, so check the wildcard form first): a
@@ -367,7 +368,7 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     }
 
 
-def _otlp_exporters(roles: MachineRoles | None) -> str:
+def _otlp_exporters(roles: MachineRoles | None, *, database_factory: DatabaseFactory) -> str:
     """Role-specific fan-out with stable component/queue identities.
 
     Three shapes (docs/conventions/data/reachability-and-credentials.md):
@@ -390,10 +391,10 @@ def _otlp_exporters(roles: MachineRoles | None) -> str:
     obs = settings.observability
     if obs.observability_url:
         return RELAY_EXPORTERS.format(
-            endpoint=_yaml_quote(station_otel_ingress_endpoint()),
+            endpoint=_yaml_quote(station_otel_ingress_endpoint(database_factory=database_factory)),
             authorization=_yaml_quote(_cluster_bearer()),
         )
-    loki_base, prom_base = _lgtm_fanout_bases()
+    loki_base, prom_base = _lgtm_fanout_bases(database_factory=database_factory)
     return BACKEND_EXPORTERS.format(
         tempo_endpoint=_yaml_quote(obs.telemetry_tempo_endpoint.rstrip("/")),
         loki_base=_yaml_quote(loki_base),
@@ -401,19 +402,27 @@ def _otlp_exporters(roles: MachineRoles | None) -> str:
     )
 
 
-def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> str:
+def generate_config(
+    repo: Path,
+    ava_home: Path,
+    roles: MachineRoles | None,
+    *,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentity,
+) -> str:
     """Render the sidecar config from the repo template + this unit's settings."""
     from base.cluster import home_label
-    from base.cluster.machine import machine_name
     from base.config import settings
 
     obs = settings.observability
-    loki_base, prom_base = _lgtm_fanout_bases(remote=roles != frozenset({"agent-runner"}))
+    loki_base, prom_base = _lgtm_fanout_bases(
+        remote=roles != frozenset({"agent-runner"}), database_factory=database_factory
+    )
     data_plane_block, data_plane_pipeline = _data_plane_receivers(roles, ava_home)
     substitutions = {
         "AVA_HOME": str(ava_home),
         "CLUSTER_LABEL": home_label(ava_home),
-        "MACHINE_NAME": _ottl_quote(machine_name()),
+        "MACHINE_NAME": _ottl_quote(machine.name()),
         # Kept as named generation inputs for small downstream/custom templates;
         # the shipped template consumes the role-specific OTLP_EXPORTERS block.
         "TEMPO_ENDPOINT": obs.telemetry_tempo_endpoint.rstrip("/"),
@@ -424,13 +433,15 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
         "OTLP_RECEIVER_ENDPOINT": _host_port("127.0.0.1", _otlp_ingress_port()),
         "DATA_PLANE_RECEIVERS": data_plane_block,
         "DATA_PLANE_PIPELINE_RECEIVERS": data_plane_pipeline,
-        "OTLP_EXPORTERS": _otlp_exporters(roles),
+        "OTLP_EXPORTERS": _otlp_exporters(roles, database_factory=database_factory),
     }
-    substitutions.update(_remote_receiver_fragments(roles))
+    substitutions.update(_remote_receiver_fragments(roles, machine=machine))
     return Template(_config_template(repo)).substitute(substitutions)
 
 
-def _lgtm_fanout_bases(*, remote: bool = True) -> tuple[str, str]:
+def _lgtm_fanout_bases(
+    *, remote: bool = True, database_factory: DatabaseFactory
+) -> tuple[str, str]:
     """The gateway collector's LGTM fan-out base URLs (loki, prometheus).
 
     Two-state on AVA_OBSERVABILITY_URL (task #1791, A3): empty (default) keeps
@@ -448,7 +459,7 @@ def _lgtm_fanout_bases(*, remote: bool = True) -> tuple[str, str]:
         # Remote observatory: every signal enters the station through ONE
         # bearer-authenticated OTLP ingress (WP4) — the direct
         # /otlp fan-out to the station's loopback-bound backends is gone.
-        endpoint = station_otel_ingress_endpoint()
+        endpoint = station_otel_ingress_endpoint(database_factory=database_factory)
         return endpoint, endpoint
     return (
         obs.telemetry_loki_url.rstrip("/") + "/otlp",
@@ -485,7 +496,14 @@ def _write_config(path: Path, rendered: str) -> None:
         print(f"  ! otel-collector: {warning}", file=sys.stderr)
 
 
-def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None) -> None:
+def ensure_otel_collector(
+    repo: Path,
+    ava_home: Path,
+    roles: MachineRoles | None,
+    *,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentity,
+) -> None:
     """Idempotent install: pinned binary present + config regenerated.
 
     Binary download is skipped when the version marker matches. Config is
@@ -520,7 +538,10 @@ def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None
         print(
             f"  · otel-collector: otelcol-contrib {collector_artifact.OTELCOL_CONTRIB_VERSION} present"
         )
-    _write_config(dest_dir / "config.yaml", generate_config(repo, ava_home, roles))
+    _write_config(
+        dest_dir / "config.yaml",
+        generate_config(repo, ava_home, roles, database_factory=database_factory, machine=machine),
+    )
 
 
 def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
@@ -533,7 +554,9 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
     if (
         ctx.roles is not None
         and "gateway" in ctx.roles
-        and not collector_allowed_for_home(ctx.ava_home)
+        and not collector_allowed_for_home(
+            ctx.ava_home, machine=ctx.machine, unit_home=ctx.ava_home
+        )
     ):
         print(
             "  ! otel-collector: collector skipped — this gateway home is not "
@@ -551,4 +574,10 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
                 file=sys.stderr,
             )
         return
-    ensure_otel_collector(ctx.repo, ctx.ava_home, ctx.roles)
+    ensure_otel_collector(
+        ctx.repo,
+        ctx.ava_home,
+        ctx.roles,
+        database_factory=ctx.database_factory,
+        machine=ctx.machine,
+    )

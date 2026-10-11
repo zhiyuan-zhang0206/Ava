@@ -34,7 +34,9 @@ and this host's reachable address, never all interfaces. macOS Redis retains its
 loopback-only workaround and host-level `com.ava.redis-bridge` relay (task #1469).
 A no-secret cluster binds loopback only; no caller environment widens that posture.
 
-POSIX only (macOS brew / Linux postgres + redis-server).
+POSIX only (macOS brew / Linux postgres + redis-server). Windows has no native
+postgres/redis-server on PATH — a Windows per-cluster data plane is a follow-up;
+`ensure_cluster_storage` fails fast there rather than mis-starting.
 """
 
 from __future__ import annotations
@@ -47,10 +49,12 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from base.cluster import ensure_cluster_redis_acl, machine, ownership, port_preflight
+from base.agents.context.clients import DatabaseFactory
+from base.cluster import ensure_cluster_redis_acl, ownership, port_preflight
 from base.cluster import postgres as owned_postgres
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
 from base.cluster.dataplane import pooler
@@ -62,15 +66,17 @@ from base.cluster.dataplane.pg_tools import (
     pg_tool,
     pg_tz_args,
 )
+from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, settings
-from base.db import Database
 from base.db.pg_admin import pg_admin_url as _base_pg_admin_url
 from base.db.pg_admin import pg_socket_dir
 from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
+from base.host.system.backend import get_backend
 from base.native_process.child_env import daemon_process_env, inherited_process_env
 from base.native_process.os_platform import is_macos
 from base.paths import ava_home
+from base.telemetry import EventPipeline
 from cli.commands.data_plane.walg import warn_archive_inactive
 from services.backup.walg.archive import archive_pg_args
 
@@ -155,12 +161,12 @@ def _addr_assigned(addr: str) -> bool:
         return False
 
 
-def _wait_for_reachable_bind() -> bool:
+def _wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
     """Block (bounded) until this host's non-loopback bind address is assigned to a
     local interface. Returns True immediately on a loopback-only (single-box) host —
     loopback is always present. Returns False on timeout so the caller fails fast
     with a clear message instead of pg_ctl dying on an un-bindable address."""
-    host = machine.reachable_host()
+    host = machine.host()
     if host in port_preflight.LOOPBACK_ALIASES:
         return True
     deadline = time.monotonic() + _BIND_WAIT_TIMEOUT_S
@@ -172,7 +178,7 @@ def _wait_for_reachable_bind() -> bool:
         time.sleep(_BIND_WAIT_INTERVAL_S)
 
 
-def _pg_hba_body(cluster_secret: str) -> str:
+def _pg_hba_body(cluster_secret: str, *, machine: MachineIdentity) -> str:
     """Always-authenticated pg_hba, whatever the bearer.
 
     The OS user (the initdb bootstrap superuser) reaches Postgres only through
@@ -202,7 +208,7 @@ def _pg_hba_body(cluster_secret: str) -> str:
         "host all all ::1/128 scram-sha-256",
     ]
     if cluster_secret:
-        host = machine.reachable_host()
+        host = machine.host()
         if host not in port_preflight.LOOPBACK_ALIASES:
             lines.append(f"host all all {host}/32 scram-sha-256")
         for cidr in (c.strip() for c in settings.data_plane.trusted_cidrs.split(",") if c.strip()):
@@ -333,6 +339,7 @@ def _start_pg(
     cluster_secret: str,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    machine: MachineIdentity,
 ) -> int:
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
@@ -346,7 +353,7 @@ def _start_pg(
     owner = ownership.require_postgres(_pg_data_dir(), pg_port, required=False)
     data = _ensure_pg_data()
     (data / "pg_ident.conf").write_text(_pg_ident_body())
-    (data / "pg_hba.conf").write_text(_pg_hba_body(cluster_secret))
+    (data / "pg_hba.conf").write_text(_pg_hba_body(cluster_secret, machine=machine))
     dial_host = _pg_dial_host()
     # Same gate as the pgbouncer path (task #1303, PR #47 P2): a no-secret
     # cluster binds loopback alone (`port_preflight.bind_addrs`), so a stray ambient
@@ -354,18 +361,18 @@ def _start_pg(
     # happens. Wait only when this cluster actually binds the reachable address.
     if (
         owner is None
-        and port_preflight.bind_addrs(cluster_secret) != ["127.0.0.1"]
-        and not _wait_for_reachable_bind()
+        and port_preflight.bind_addrs(cluster_secret, machine=machine) != ["127.0.0.1"]
+        and not _wait_for_reachable_bind(machine=machine)
     ):
         print(
-            f"  ✗ reachable bind address {machine.reachable_host()!r} is not assigned to any "
+            f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
             f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — postgres cannot bind "
             f"it. On reboot this means the private network has not come "
             f"up yet; retry `ava start` once it is.",
             file=sys.stderr,
         )
         return 1
-    listen = ",".join(port_preflight.bind_addrs(cluster_secret))
+    listen = ",".join(port_preflight.bind_addrs(cluster_secret, machine=machine))
     owned_postgres.start(
         data,
         pg_port,
@@ -464,6 +471,8 @@ def start_redis(
     runtime_password: str,
     cluster_secret: str,
     identity: str,
+    *,
+    machine: MachineIdentity,
 ) -> int:
     if not (redis_admin_password and runtime_password):
         raise ValueError("Redis always authenticates: its admin and runtime passwords are required")
@@ -479,8 +488,10 @@ def start_redis(
             print(f"  ✓ redis already running ({dial_host}:{redis_port})")
         return result
     ownership.require_listener(None, redis_port, required=False)
-    bind_addrs = ["127.0.0.1"] if is_macos() else port_preflight.bind_addrs(cluster_secret)
-    if not is_macos() and cluster_secret and not _wait_for_reachable_bind():
+    bind_addrs = (
+        ["127.0.0.1"] if is_macos() else port_preflight.bind_addrs(cluster_secret, machine=machine)
+    )
+    if not is_macos() and cluster_secret and not _wait_for_reachable_bind(machine=machine):
         return 1
     data = ownership.redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
@@ -564,6 +575,7 @@ def ensure_cluster_storage(
     redis_password: str,
     redis_user: str,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    machine: MachineIdentity,
 ) -> int:
     """Ensure owned Postgres and Redis; schema, authority and pooler follow in
     start order (`cli.commands.data_plane.bringup`).
@@ -572,6 +584,23 @@ def ensure_cluster_storage(
         ValueError: a required credential is missing, before any native effect.
             Redis always needs its admin and runtime passwords. Postgres needs
             none: its administrator is the OS user over the owner-only socket."""
+    if not get_backend().supports_data_plane():
+        # Naming the supported topology, not the missing feature: this used to
+        # read as an unfinished TODO ("Follow-up: bundle or Docker-host ..."),
+        # which tells an operator nothing about what to do with the host in
+        # front of them. Windows is the only platform that lands here.
+        print(
+            "  ✗ this platform cannot host a per-cluster data plane (no native redis),\n"
+            "    so it cannot carry the `gateway` capability. Run the gateway on\n"
+            "    macOS/Linux — on Windows hardware, inside WSL2 — and join this host\n"
+            "    to it as an agent-runner:\n"
+            "      set AVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run:\n"
+            "      ava init --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> \\\n"
+            "                 --machine-host <this-host-private-ip> --db-capability <bundle>, then ava start\n"
+            "    What a gateway would additionally require: gateway/docs/windows-gateway.md",
+            file=sys.stderr,
+        )
+        return 1
     if not (redis_admin_password and redis_password):
         raise ValueError(
             "Redis always authenticates, but this home has no generated Redis credentials "
@@ -579,11 +608,20 @@ def ensure_cluster_storage(
             "always authenticated and no conversion exists; re-birth it as a new home."
         )
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
-    if (rc := _start_pg(pg_port, cluster_secret, retained_children=retained_children)) != 0:
+    if (
+        rc := _start_pg(
+            pg_port, cluster_secret, retained_children=retained_children, machine=machine
+        )
+    ) != 0:
         return rc
     if (
         rc := start_redis(
-            redis_port, redis_admin_password, redis_password, cluster_secret, redis_user
+            redis_port,
+            redis_admin_password,
+            redis_password,
+            cluster_secret,
+            redis_user,
+            machine=machine,
         )
     ) != 0:
         return rc
@@ -611,7 +649,7 @@ def _redis_reachable(redis_port: int, redis_host: str = "127.0.0.1") -> bool:
         client.close()
 
 
-def print_data_plane_status() -> None:
+def print_data_plane_status(*, database_factory: DatabaseFactory) -> None:
     """Print this cluster's own pg/redis reachability for `ava status`.
 
     Postgres is probed in two stages: `pg_isready` (the server accepts connections)
@@ -636,7 +674,7 @@ def print_data_plane_status() -> None:
         from .bringup import remote_pg_reachable, remote_redis_reachable
 
         print("  · data plane remote-managed — probing the URLs (no local instance)")
-        pg_ok, pg_line = remote_pg_reachable()
+        pg_ok, pg_line = remote_pg_reachable(database_factory=database_factory)
         print(f"  {'✓' if pg_ok else '✗'} {pg_line}")
         redis_ok, redis_line = remote_redis_reachable()
         print(f"  {'✓' if redis_ok else '✗'} {redis_line}")
@@ -653,9 +691,7 @@ def print_data_plane_status() -> None:
         print(f"  ✗ postgres ({pg_host}:{pg_port}) unreachable")
     else:
         try:
-            with (
-                Database.from_settings().connect() as conn
-            ):  # pooled front door (PgBouncer when enabled)
+            with database_factory().connect() as conn:  # pooled front door (PgBouncer when enabled)
                 conn.execute("select 1")
             print(f"  ✓ postgres ({pg_host}:{pg_port})")
         except Exception as exc:
@@ -693,6 +729,7 @@ def _print_pooler_status() -> None:
 def stop_cluster_instance(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    producer: Callable[[], EventPipeline],
 ) -> int:
     """Stop this cluster's own Postgres + Redis (data preserved on disk). The
     counterpart of ensure_cluster_storage for `ava stop` of a cluster running its
@@ -732,7 +769,7 @@ def stop_cluster_instance(
         retained_children=retained_children,
     )
     if escalation is not None:
-        report_postgres_stop_escalation(escalation)
+        report_postgres_stop_escalation(escalation, producer=producer)
     print("  ✓ postgres stopped")
     if port is not None:
         subprocess.run(

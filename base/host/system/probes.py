@@ -1,4 +1,4 @@
-"""Single source of truth for host platform probes: Chrome binary and display.
+"""Single source of truth for host platform probes: Chrome binary, display, AF_UNIX.
 
 The agent-runner has three pre-launch facts the rest of the system repeatedly
 needs to know about the local machine:
@@ -6,6 +6,7 @@ needs to know about the local machine:
 - Where is a launchable Chrome binary (explicit override, else platform
   default)?
 - Does this machine have a window server a headed browser can draw on?
+- Does it have AF_UNIX sockets (the browser-mcp daemon's transport)?
 - On macOS: does this process chain run inside the user's GUI login session
   (and which account owns the console)? The launchd management domain is
   inherited down the spawning chain and decides whether the login Keychain is
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -96,7 +98,7 @@ def display_available() -> bool:
     env-vars alone, so macOS is treated as always having a display.
 
     Linux: ``$DISPLAY`` (X11) or ``$WAYLAND_DISPLAY`` must be set and non-empty
-    (a headless server has neither).
+    (WSL without WSLg / headless servers have neither).
 
     Any other platform: False (fail-safe -- never assume a display on a host we
     cannot confirm has one).
@@ -171,7 +173,7 @@ def browser_incapability() -> str | None:
     both derive from this, so the capability logic lives in exactly one place.
     """
     if not display_available():
-        return "no display (headless server)"
+        return "no display (WSL without WSLg / headless server)"
     if resolve_chrome_binary() is None:
         return "no Chrome (install it or set AVA_CHROME_BINARY)"
     if shutil.which("npx") is None:
@@ -188,7 +190,7 @@ def browser_deps_incapability() -> str | None:
     override. Callers that have Settings use ``browser_incapability()``.
     """
     if not display_available():
-        return "no display (headless server)"
+        return "no display (WSL without WSLg / headless server)"
     if _platform_chrome_binary() is None:
         return "no Chrome (install it or set AVA_CHROME_BINARY)"
     if shutil.which("npx") is None:
@@ -204,6 +206,30 @@ def browser_capable() -> bool:
     Callers that want to show or log *why* call ``browser_incapability()``.
     """
     return browser_incapability() is None
+
+
+def unix_sockets_available() -> bool:
+    """Return True if this host has AF_UNIX stream sockets.
+
+    Probed by attribute presence because that is what callers need.
+    """
+    return hasattr(socket, "AF_UNIX")
+
+
+def browser_mcp_incapability() -> str | None:
+    """Return why this host cannot run the shared browser-mcp daemon, or None.
+
+    browser-mcp fronts the headed browser, so it needs every prong
+    ``browser_incapability()`` checks PLUS an AF_UNIX transport: the daemon
+    listens with ``asyncio.start_unix_server`` and each agent's wrapper dials it
+    with ``asyncio.open_unix_connection`` (``services/desktop/browser/mcp_daemon.py``,
+    ``services/desktop/browser/mcp_wrapper.py``). The AF_UNIX prong is checked first:
+    on a host that lacks it, no amount of Chrome or npx makes the service
+    runnable.
+    """
+    if not unix_sockets_available():
+        return "no AF_UNIX sockets (browser-mcp's transport is POSIX-only)"
+    return browser_incapability()
 
 
 def permissions_helper_incapability() -> str | None:

@@ -388,6 +388,7 @@ def test_resident_launch_scopes_the_credential_stub_to_its_generation(
     assert "--plugin-dir" in sent[0]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="resident wrapper requires POSIX")
 def test_relay_wrapper_marks_the_standby_stub_consumed(tmp_path: Path) -> None:
     stub = tmp_path / ".ava-relay.env"
     stub.write_text("SID=9\nAGENT=41\nAVA_IMPERSONATION_RELAY_TOKEN=token\n", encoding="utf-8")

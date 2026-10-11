@@ -15,7 +15,7 @@ import hashlib
 import json
 import os
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -197,16 +197,16 @@ def _emit_audit_event(event_type: str, payload: dict[str, object]) -> None:
     )
 
 
-def _machine_name() -> str:
+def _machine_name(reader: Callable[[], str]) -> str:
     """Return a machine label without letting damaged config block detection.
 
     No Settings/os.environ fallback: a broken Settings is exactly what this
     guard detects, and the unified event stream stamps its own machine field
     regardless — an empty label here only degrades the payload's copy."""
-    from base.cluster.machine import MachineNameMissing, machine_name
+    from base.cluster.machine import MachineNameMissing
 
     try:
-        return machine_name()
+        return reader()
     except MachineNameMissing:
         return ""
     except Exception:
@@ -391,10 +391,12 @@ def _unauthorized_record(
     return record
 
 
-def _emit_unauthorized_write(detection: dict[str, object]) -> None:
+def _emit_unauthorized_write(
+    detection: dict[str, object], *, machine_reader: Callable[[], str]
+) -> None:
     """Deliver a durable audit anomaly after its JSONL baseline has landed."""
     payload: dict[str, object] = {
-        "machine": _machine_name(),
+        "machine": _machine_name(machine_reader),
         "last_official_site": detection["last_official_site"],
         "keys": detection["keys"],
     }
@@ -411,7 +413,7 @@ def _emit_unauthorized_write(detection: dict[str, object]) -> None:
         )
 
 
-def check_env_integrity() -> dict[str, object] | None:
+def check_env_integrity(*, machine_reader: Callable[[], str]) -> dict[str, object] | None:
     """Return an anomaly record when an armed audit digest no longer matches.
 
     The guard is deliberately inert until an official write creates the audit
@@ -474,7 +476,7 @@ def check_env_integrity() -> dict[str, object] | None:
                         previous=record,
                     )
                     _append_record(audit_path, detection)
-        _emit_unauthorized_write(detection)
+        _emit_unauthorized_write(detection, machine_reader=machine_reader)
         return detection
     except Exception:
         logger.opt(exception=True).warning("could not inspect .env audit integrity")

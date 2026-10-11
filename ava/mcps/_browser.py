@@ -1,10 +1,7 @@
 """In-daemon client for the per-machine browser-mcp service.
 
-The chrome MCP server used to cost every agent a ~63MB `mcp_wrapper` stdio
-bridge subprocess on top of the shared browser-mcp daemon. This module is the
-process-less replacement: `_connect_browser_direct()` dials the service's
-line protocol from inside the MCP daemon and returns a session-shaped client.
-No child process is involved; each agent connection keeps its own socket. The
+`_connect_browser_direct()` dials the service's line protocol from inside the
+MCP daemon and returns a session-shaped client. No child process is involved; each agent connection keeps its own socket. The
 calling agent's id rides on every request (`client_agent_id`), so the
 service's page affinity is keyed per AGENT, not per connection — an exec
 subprocess child re-connecting mid-turn lands on the same tab the agent

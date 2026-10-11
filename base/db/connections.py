@@ -9,12 +9,7 @@ import psycopg
 from psycopg.rows import tuple_row
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from base.db.code_version_gate import (
-    ProcessDbGate,
-    application_name,
-    min_read_due,
-    observe_minimum,
-)
+from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig, db_config_from_settings
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.url_secret import url_with_port
@@ -149,7 +144,7 @@ PG_POOLED_RESTORE_WITH_MIN_SQL: LiteralString = (
 )
 
 
-def _restore_pooled_session(conn: psycopg.Connection, *, gate: ProcessDbGate | None = None) -> None:
+def _restore_pooled_session(conn: psycopg.Connection, *, gate: ProcessDbGate) -> None:
     """Scrub a pooled connection back to its baseline session state.
 
     PgBouncer transaction pooling hands any backend to any client transaction
@@ -179,8 +174,8 @@ def _restore_pooled_session(conn: psycopg.Connection, *, gate: ProcessDbGate | N
     same discard path `ConnectionPool.check_connection` feeds.
     """
     conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[0])
-    name = (application_name() if gate is None else gate.application_name(),)
-    read_due = min_read_due() if gate is None else gate.min_read_due()
+    name = (gate.application_name(),)
+    read_due = gate.min_read_due()
     if read_due:
         # tuple_row: a pool built with a dict row_factory must not change the shape read.
         with conn.cursor(row_factory=tuple_row) as cur:
@@ -188,17 +183,14 @@ def _restore_pooled_session(conn: psycopg.Connection, *, gate: ProcessDbGate | N
             row = cur.fetchone()
         if row is None:
             raise RuntimeError("the restore statement returned no row")
-        if gate is None:
-            observe_minimum(int(row[2]))
-        else:
-            gate.observe_minimum(int(row[2]))
+        gate.observe_minimum(int(row[2]))
     else:
         conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
     conn.commit()
 
 
 async def _restore_pooled_session_async(
-    conn: psycopg.AsyncConnection, *, gate: ProcessDbGate | None = None
+    conn: psycopg.AsyncConnection, *, gate: ProcessDbGate
 ) -> None:
     """Async twin of `_restore_pooled_session`: `async_pool()`'s per-borrow check.
 
@@ -207,18 +199,15 @@ async def _restore_pooled_session_async(
     a connection whose check raises), same name and code-version read.
     """
     await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[0])
-    name = (application_name() if gate is None else gate.application_name(),)
-    read_due = min_read_due() if gate is None else gate.min_read_due()
+    name = (gate.application_name(),)
+    read_due = gate.min_read_due()
     if read_due:
         async with conn.cursor(row_factory=tuple_row) as cur:
             await cur.execute(PG_POOLED_RESTORE_WITH_MIN_SQL, name)
             row = await cur.fetchone()
         if row is None:
             raise RuntimeError("the restore statement returned no row")
-        if gate is None:
-            observe_minimum(int(row[2]))
-        else:
-            gate.observe_minimum(int(row[2]))
+        gate.observe_minimum(int(row[2]))
     else:
         await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
     await conn.commit()
@@ -314,15 +303,13 @@ def direct_db_url(
     matches it byte-for-byte), and a home with no record (no gateway capability)
     keeps `AVA_DB_URL` as-is rather than guessing.
     """
-    from base.cluster.machine import reachable_host
-
     return _direct_url(
         config or db_config_from_settings(),
-        local_host=reachable_host if local_host is None else local_host,
+        local_host=local_host,
     )
 
 
-def _direct_url(cfg: DbConfig, *, local_host: Callable[[], str]) -> str:
+def _direct_url(cfg: DbConfig, *, local_host: Callable[[], str] | None) -> str:
     """`direct_db_url` for one resolved config."""
     from base.cluster import get_record
     from base.config.domains.storage.data_plane import gateway_url_host
@@ -340,9 +327,17 @@ def _direct_url(cfg: DbConfig, *, local_host: Callable[[], str]) -> str:
         return url
     if port is None:
         return url
+
+    def matches_local_host() -> bool:
+        if local_host is None:
+            raise RuntimeError(
+                "direct database host resolution requires an explicit local_host reader"
+            )
+        return host == local_host().lower()
+
     # Only a loopback or self-named host can be resolved against this home's
     # record — a remote host's record lives on that box, not here.
-    rec = get_record(ava_home()) if is_loopback_host(host) or host == local_host().lower() else None
+    rec = get_record(ava_home()) if is_loopback_host(host) or matches_local_host() else None
     if rec is not None:
         if port == rec.ports["pgbouncer"]:
             # URL names this cluster's pooler -> swap to its direct pg port.
@@ -355,7 +350,7 @@ def _direct_url(cfg: DbConfig, *, local_host: Callable[[], str]) -> str:
     # stand-in, or a split runner naming the gateway's pooler. A remote/SaaS plane (Task #1752)
     # is direct by definition — no local pooler exists — so it dials silently.
     if cfg.pgbouncer_enabled and (
-        is_loopback_host(host) or host == local_host().lower() or host == gateway_url_host()
+        is_loopback_host(host) or matches_local_host() or host == gateway_url_host()
     ):
         # Expected shape on a split agent-runner (its URL names the gateway's
         # pooler): every `ava start` logs one, so it is INFO, not a WARNING
@@ -379,7 +374,7 @@ def connect(
     direct: bool = False,
     unbounded: bool = False,
     config: DbConfig | None = None,
-    gate: ProcessDbGate | None = None,
+    gate: ProcessDbGate,
     local_host: Callable[[], str] | None = None,
 ) -> psycopg.Connection:
     """Open a new connection to the cluster Postgres.
@@ -446,13 +441,7 @@ def connect(
         **({"sslmode": sslmode} if sslmode else {}),
         # Through the pooler the connection names its process and code version,
         # so PgBouncer's SHOW CLIENTS shows who holds it.
-        **(
-            {}
-            if direct
-            else {
-                "application_name": application_name() if gate is None else gate.application_name()
-            }
-        ),
+        **({} if direct else {"application_name": gate.application_name()}),
         **_transport_kwargs(url, unbounded=unbounded),
     )
     if not direct and not unbounded:
@@ -463,10 +452,7 @@ def connect(
         # client's session-level SET must not reach this caller's writes
         # (2026-09-02 P0; direct dials already got the ceiling via options and
         # own their backend exclusively, so no scrub is needed there).
-        if gate is None:
-            _restore_pooled_session(conn)
-        else:
-            _restore_pooled_session(conn, gate=gate)
+        _restore_pooled_session(conn, gate=gate)
     return conn
 
 
@@ -527,7 +513,7 @@ def pool(
     autocommit: bool = False,
     row_factory: Any | None = None,
     config: DbConfig | None = None,
-    gate: ProcessDbGate | None = None,
+    gate: ProcessDbGate,
     local_host: Callable[[], str] | None = None,
 ) -> ConnectionPool:
     """Open a ConnectionPool on the cluster Postgres (opened eagerly).
@@ -581,22 +567,14 @@ def pool(
     connection_kwargs: dict[str, Any] = {
         "prepare_threshold": None,
         **({"sslmode": sslmode} if sslmode else {}),
-        **(
-            {}
-            if direct
-            else {
-                "application_name": application_name() if gate is None else gate.application_name()
-            }
-        ),
+        **({} if direct else {"application_name": gate.application_name()}),
         **_statement_kwargs(url),
     }
     if autocommit:
         connection_kwargs["autocommit"] = True
     if row_factory is not None:
         connection_kwargs["row_factory"] = row_factory
-    restore = (
-        _restore_pooled_session if gate is None else partial(_restore_pooled_session, gate=gate)
-    )
+    restore = partial(_restore_pooled_session, gate=gate)
     return ConnectionPool(
         url,
         min_size=min_size,
@@ -634,7 +612,7 @@ def async_pool(
     max_size: int,
     timeout: float,
     config: DbConfig | None = None,
-    gate: ProcessDbGate | None = None,
+    gate: ProcessDbGate,
     **pool_kwargs: Any,
 ) -> AsyncConnectionPool[psycopg.AsyncConnection]:
     """An unopened async pool on the cluster's access URL (the agent host's pools).
@@ -672,13 +650,9 @@ def async_pool(
             "autocommit": True,
             "prepare_threshold": None,
             **({"sslmode": sslmode} if sslmode else {}),
-            "application_name": application_name() if gate is None else gate.application_name(),
+            "application_name": gate.application_name(),
             **PG_KEEPALIVE_KWARGS,
         },
-        check=(
-            _restore_pooled_session_async
-            if gate is None
-            else partial(_restore_pooled_session_async, gate=gate)
-        ),
+        check=partial(_restore_pooled_session_async, gate=gate),
         **pool_kwargs,
     )

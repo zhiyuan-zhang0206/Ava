@@ -11,13 +11,14 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.plugin_providers import build_model_catalog
 from ops.agents import birth_transaction
 from ops.agents.spawn import create_agent_row
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _audit(
@@ -48,8 +49,9 @@ def test_a_spawn_is_recorded_with_its_machine(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
-    machine = machine_name()
+    machine = machine_identity.name()
 
     agent_id, _, _, _ = create_agent_row(
         database,
@@ -71,12 +73,13 @@ def test_a_fork_is_recorded_against_its_source_agent(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     parent, _, _, _ = create_agent_row(
         database,
         event_bus,
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         catalog=build_model_catalog(),
         authority=config_authority,
     )
@@ -88,7 +91,7 @@ def test_a_fork_is_recorded_against_its_source_agent(
         spawner="agent:4242",
         fork_from=parent,
         fork_checkpoint=checkpoint,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         catalog=build_model_catalog(),
         authority=config_authority,
     )
@@ -105,12 +108,13 @@ def test_an_agent_sourced_first_prompt_is_recorded_as_a_message(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id, _, inbound_id, _ = create_agent_row(
         database,
         event_bus,
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         prompt="hello",
         prompt_source="agent:4242",
         catalog=build_model_catalog(),
@@ -129,6 +133,7 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     before = db_conn.execute("SELECT count(*) FROM agents").fetchone()
     db_conn.commit()
@@ -143,7 +148,7 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
             database,
             event_bus,
             spawner="user",
-            machine=machine_name(),
+            machine=machine_identity.name(),
             catalog=build_model_catalog(),
             authority=config_authority,
         )

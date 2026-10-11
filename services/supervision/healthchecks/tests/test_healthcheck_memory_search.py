@@ -30,7 +30,9 @@ def owned_config_environment() -> Iterator[None]:
         with patch.dict(os.environ):
             yield
     finally:
-        time.tzset()
+        tzset = getattr(time, "tzset", None)
+        if tzset is not None:
+            tzset()
 
 
 @pytest.mark.usefixtures("owned_config_environment")

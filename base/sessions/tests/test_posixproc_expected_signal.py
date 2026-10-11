@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,8 @@ import pytest
 from base.native_process import pid_starttime_ticks
 from base.sessions import posixproc
 from base.sessions.record import SessionRecord
+
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX expected-record contract")
 
 
 def record_for(pid: int) -> SessionRecord:
@@ -90,9 +93,9 @@ def test_expected_identity_uses_stable_ticks_before_epoch_birth(
     birth_delta: float,
     should_signal: bool,
 ) -> None:
-    """A real private child; only the clock observation is simulated.
+    """A real private child; only the WSL clock observation is simulated.
 
-    A wall-clock step can change btime while /proc start ticks remain stable. Preserve the
+    WSL can change btime while /proc start ticks remain stable. Preserve the
     old recorded epoch to reproduce that discrepancy without changing the host
     clock. Unreadable or changed ticks keep refusing delivery; the legacy
     (create_time) guard is bounded by the platform-resolution tolerance, the

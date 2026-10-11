@@ -12,9 +12,10 @@ import pytest
 from base.agents.impersonation._store import token_hash
 from base.agents.impersonation.delivery import reserve_delivery
 from base.agents.impersonation.relay import relay_get, relay_inbox
-from base.cluster.machine import set_identity
+from base.cluster.machine import validate_machine_name
 from base.config import settings
 from base.db import Database, publish_inbound_wake
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
@@ -26,7 +27,9 @@ from tests.e2e.fakes.scenarios.force_expire import FIRST_REPLY, RESUMED_REPLY
 from tests.e2e.fixture_environment import E2EEnv
 
 
-def _seed_active_lease(agent_id: int, relay_token: str) -> tuple[UUID, int]:
+def _seed_active_lease(
+    agent_id: int, relay_token: str, database_gate: ProcessDbGate
+) -> tuple[UUID, int]:
     """Insert one already-active lease without publishing intermediate consent wakes."""
     lease_id = uuid4()
     with psycopg.connect(settings.data_plane.db_url) as conn:
@@ -48,7 +51,10 @@ def _seed_active_lease(agent_id: int, relay_token: str) -> tuple[UUID, int]:
         assert session_row is not None
         session_id = session_row[0]
     publish_inbound_wake(
-        Database.from_settings(), EventBus.from_settings(), agent_id, "impersonation"
+        Database.from_settings(gate=database_gate),
+        EventBus.from_settings(),
+        agent_id,
+        "impersonation",
     )
     bus = EventBus.from_settings()
     publish_impersonation_changed_sync(bus, agent_id)
@@ -56,28 +62,39 @@ def _seed_active_lease(agent_id: int, relay_token: str) -> tuple[UUID, int]:
     return lease_id, session_id
 
 
-def _exhaust_delivery_budget(env: E2EEnv, lease_id: UUID, relay_token: str) -> str:
+def _exhaust_delivery_budget(
+    env: E2EEnv,
+    lease_id: UUID,
+    relay_token: str,
+    database_gate: ProcessDbGate,
+    *,
+    local_machine: str,
+) -> str:
     """Drive real relay reservations; leave the unanswered UI request for native recovery."""
     request = "Please keep this unanswered request when the external session ends."
     env.page.fill('[data-testid="composer-input"]', request)
     env.page.click('[data-testid="composer-send"]')
-    db, bus = Database.from_settings(), EventBus.from_settings()
+    db, bus = Database.from_settings(gate=database_gate), EventBus.from_settings()
     handle = str(lease_id)
     pending: list[int] = []
 
     def captured() -> tuple[bool, object]:
-        messages = relay_inbox(db, handle, relay_token)
+        messages = relay_inbox(db, handle, relay_token, local_machine=local_machine)
         pending[:] = [message["id"] for message in messages if message["content"] == request]
         return len(pending) == 1, messages
 
     poll_until(captured, timeout=10.0, what="UI request reaches the relay inbox")
-    before = relay_get(db, bus, handle, relay_token)
-    assert reserve_delivery(db, bus, handle, relay_token, pending) == frozenset(pending)
+    before = relay_get(db, bus, handle, relay_token, local_machine=local_machine)
+    assert reserve_delivery(
+        db, bus, handle, relay_token, pending, local_machine=local_machine
+    ) == frozenset(pending)
     # A stale inbox snapshot must not spend a second attempt in the same window.
-    assert not reserve_delivery(db, bus, handle, relay_token, pending)
+    assert not reserve_delivery(db, bus, handle, relay_token, pending, local_machine=local_machine)
 
     def retry_due() -> tuple[bool, object]:
-        reserved = reserve_delivery(db, bus, handle, relay_token, pending)
+        reserved = reserve_delivery(
+            db, bus, handle, relay_token, pending, local_machine=local_machine
+        )
         return reserved == frozenset(pending), reserved
 
     poll_until(retry_due, timeout=10.0, what="second delivery becomes due")
@@ -85,7 +102,7 @@ def _exhaust_delivery_budget(env: E2EEnv, lease_id: UUID, relay_token: str) -> s
     def budget_exhausted() -> tuple[bool, object]:
         # The real expiry check detects the elapsed final ACK window, without
         # rewriting delivery timestamps or marking the input received.
-        session = relay_get(db, bus, handle, relay_token)
+        session = relay_get(db, bus, handle, relay_token, local_machine=local_machine)
         with psycopg.connect(settings.data_plane.db_url) as conn:
             state = conn.execute(
                 "SELECT l.relay_degraded_reason,m.delivery_attempts,m.acknowledged_at,i.status "
@@ -101,18 +118,23 @@ def _exhaust_delivery_budget(env: E2EEnv, lease_id: UUID, relay_token: str) -> s
         return bool(state[0] and "exhausted its delivery budget" in state[0]), state
 
     poll_until(budget_exhausted, timeout=10.0, what="final ACK window expires")
-    assert not reserve_delivery(db, bus, handle, relay_token, pending)
-    assert pending[0] in {message["id"] for message in relay_inbox(db, handle, relay_token)}
+    assert not reserve_delivery(db, bus, handle, relay_token, pending, local_machine=local_machine)
+    assert pending[0] in {
+        message["id"]
+        for message in relay_inbox(db, handle, relay_token, local_machine=local_machine)
+    }
     return request
 
 
 @pytest.mark.parametrize("exhaust_ack_budget", [False, True], ids=["ordinary", "ack-exhausted"])
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.force_expire:build")
 def test_sidebar_force_expires_takeover_and_agent_resumes(
-    e2e_env: E2EEnv, exhaust_ack_budget: bool
+    e2e_env: E2EEnv,
+    exhaust_ack_budget: bool,
+    database_gate: ProcessDbGate,
 ) -> None:
     # The test-process relay driver uses the same machine as the real e2e host.
-    set_identity(name=os.environ["AVA_MACHINE_NAME"])
+    local_machine = validate_machine_name(os.environ["AVA_MACHINE_NAME"])
     reset_record()
     page = e2e_env.page
     agent_id = e2e_env.agent_id
@@ -142,9 +164,13 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
     poll_until(first_turn_committed, timeout=30.0, interval=0.5, what="first turn committed")
 
     relay_token = str(uuid4())
-    lease_id, session_id = _seed_active_lease(agent_id, relay_token)
+    lease_id, session_id = _seed_active_lease(agent_id, relay_token, database_gate=database_gate)
     request = (
-        _exhaust_delivery_budget(e2e_env, lease_id, relay_token) if exhaust_ack_budget else None
+        _exhaust_delivery_budget(
+            e2e_env, lease_id, relay_token, database_gate=database_gate, local_machine=local_machine
+        )
+        if exhaust_ack_budget
+        else None
     )
 
     timeline = httpx.get(

@@ -24,11 +24,13 @@ from typing import NamedTuple
 # sites `from cli.commands._repo import session_name` keep working after the
 # composer moved to base.cluster.
 from base.cluster import session_name as session_name
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
+from base.host.system.backend import get_backend
 from base.sessions.env_forwarding import frontend_toolchain_env
+from cli.commands._setup import SetupValues
 
 # The service roster + capability filtering live in the `ops` module family — the
 # single desired-state source (`base < ops < {gateway, cli}`). Bound here under their
@@ -36,7 +38,7 @@ from base.sessions.env_forwarding import frontend_toolchain_env
 # intentional exports) so existing `from cli.commands._repo import ...` call sites
 # (start / status / stop / update / converge / __init__) keep working; `_repo` stays
 # the cli-facing façade, while the `ops` module family owns the definitions.
-from cli.commands._setup import SetupValues
+from cli.database.runtime import CommandRuntime
 from ops import spec as _spec
 from ops.roster import build_services as build_services
 from ops.roster.service_spec import ServiceSpec as ServiceSpec
@@ -46,15 +48,15 @@ _services_for_roles = _spec.services_for_capabilities
 _services_for_roles_annotated = _spec.services_for_capabilities_annotated
 
 
-def _roles_or_none() -> MachineRoles | None:
+def _roles_or_none(*, machine: MachineIdentity) -> MachineRoles | None:
     """Read the capability set; on missing or invalid value return None — the
     explicit "this host's role is not resolvable yet" state, distinct from a
     (never-valid) empty capability set. stop/status/converge should not be
     blocked by unfinished setup, so they treat None conservatively."""
-    from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
+    from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing
 
     try:
-        return machine_role()
+        return machine.role()
     except (MachineRoleMissing, MachineRoleInvalid):
         return None
 
@@ -137,10 +139,13 @@ def _ensure_frontend_deps(repo: Path) -> None:
     else:
         reason = "missing" if not node_modules.is_dir() else "package-lock.json changed"
         print(f"  · frontend deps {reason}, running npm ci (~30-60s)")
+    # On Windows `npm` is `npm.cmd`, which CreateProcess won't resolve from a bare
+    # "npm" argv — run it through the shell so the .cmd shim is found.
     subprocess.run(
         ["npm", "ci"],
         cwd=str(fe),
         check=True,
+        shell=get_backend().npm_shell_flag(),
         env=frontend_toolchain_env(),
     )
     stamp.write_text(want)
@@ -297,7 +302,9 @@ def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIG
         time.sleep(wait_s)
 
 
-def _register_machine_or_die(db: Database, resolved: SetupValues, roles: MachineRoles) -> int:
+def _register_machine_or_die(
+    db: Database, resolved: SetupValues, roles: MachineRoles, *, command: CommandRuntime
+) -> int:
     """UPSERT this host into the machines table with typed error handling.
 
     The dial URL comes from `base.cluster.machines.unit_dial_url(roles)` — the one
@@ -307,15 +314,32 @@ def _register_machine_or_die(db: Database, resolved: SetupValues, roles: Machine
     Failure modes get targeted hints + non-zero exit (a half-registered host
     silently breaks cross-machine orchestration; we'd rather fail loud on
     `ava start`). The ops daemon's equivalent call is deliberately non-fatal
-    instead — see `services/agent_runner/agent_ops/daemon.py:_register_boot`.
+    instead — see `services/agent_runner/agent_ops/boot.py:register_boot`.
     """
     import psycopg
 
     from base.cluster.machines import LoopbackDialUrlRefused, register_self, unit_dial_url
+    from base.daemon.endpoints import ServiceEndpoints
+    from base.paths import ava_home
 
-    url = unit_dial_url(roles)
+    url = unit_dial_url(
+        roles,
+        host=command.machine.host(),
+        ops_port=ServiceEndpoints.from_settings().of("ops").health_port,
+        gateway_port=command.config.view.gateway.gateway_port,
+        telemetry_otlp_port=command.config.view.observability.telemetry_otlp_port,
+        gateway=command.config.view.gateway.gateway_url,
+    )
     try:
-        register_self(db, url=url)
+        register_self(
+            db,
+            url=url,
+            name=command.machine.name(),
+            roles=roles,
+            description=command.machine.description(),
+            home=str(ava_home()),
+            gateway=command.config.view.gateway.gateway_url,
+        )
     except LoopbackDialUrlRefused as e:
         print(
             f"  ✗ {e}",
@@ -344,7 +368,7 @@ def _register_machine_or_die(db: Database, resolved: SetupValues, roles: Machine
     return 0
 
 
-def _preflight_probes(db: Database) -> int:
+def _preflight_probes(db: Database, *, command: CommandRuntime) -> int:
     """Run gateway and DB reachability checks BEFORE stopping services.
 
     Designed for `ava restart` and the fleet update (self-update leg): validate
@@ -363,7 +387,7 @@ def _preflight_probes(db: Database) -> int:
     from cli.commands._setup import _collect_setup_values, _missing_setup_message
 
     # Resolve setup from the home's persisted env/files (read-only, no writes).
-    resolved, missing = _collect_setup_values()
+    resolved, missing = _collect_setup_values(config=command.config)
     if missing:
         print(_missing_setup_message(missing), file=sys.stderr)
         return 1
@@ -372,7 +396,7 @@ def _preflight_probes(db: Database) -> int:
     roles: MachineRoles = frozenset(roles_raw.split(",")) if roles_raw else frozenset()
 
     print("\n→ preflight: register machine in central DB")
-    rc = _register_machine_or_die(db, resolved, roles)
+    rc = _register_machine_or_die(db, resolved, roles, command=command)
     if rc != 0:
         print("  ✗ preflight failed: cannot register machine — host still serving", file=sys.stderr)
         return rc

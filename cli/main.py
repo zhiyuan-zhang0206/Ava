@@ -1,6 +1,6 @@
 """`ava` CLI entry — argparse dispatch to the `cmd_*` implementations in `cli.commands`.
 
-Registered in `pyproject.toml [project.scripts] ava = "cli.main:main"`; after
+Registered in `pyproject.toml [project.scripts] ava = "cli.main:entry"`; after
 `uv sync`, `.venv/bin/ava` is callable. Ops layer only, decoupled from the
 `ava.*` SDK — agent should not see cron / infra plumbing.
 
@@ -21,13 +21,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from base.host.env.bootstrap import BootstrapFetchError
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
-from base.native_process import code_version
 from base.native_process.os_platform import (
     LockTimeoutError,
     ensure_line_buffered_stdio,
@@ -37,7 +37,7 @@ from base.native_process.os_platform import (
 # adapters lazy-import runtime commands when their bound handler is dispatched.
 from cli import parsers
 
-__all__ = ["main"]
+__all__ = ["entry", "main"]
 
 # The verbs that bring this unit up (every in-process `cmd_start`) open the
 # loguru sinks a service process has, under these names. Importing `base.log`
@@ -55,7 +55,7 @@ _CLI_LOG_NAMES: dict[tuple[str, ...], str] = {
 }
 
 
-def _init_cli_logging(args_in: list[str]) -> None:
+def _init_cli_logging(args_in: list[str], *, initialize: Callable[[str], None]) -> None:
     """Open this verb's sinks, once its Settings may be built.
 
     Building them builds Settings, so `ava start` calls this only after the home
@@ -65,9 +65,7 @@ def _init_cli_logging(args_in: list[str]) -> None:
     """
     name = _CLI_LOG_NAMES.get(tuple(args_in[:1])) or _CLI_LOG_NAMES.get(tuple(args_in[:2]))
     if name is not None:
-        from base.log import init_cli_process
-
-        init_cli_process(name=name)
+        initialize(name)
 
 
 # Settings-lite verbs — they must construct Settings while the gateway is down
@@ -81,7 +79,8 @@ _LITE_VERBS = frozenset(
         # `restart` is deliberately NOT here: its preflight registers this
         # machine in the central DB and its start leg needs the cluster config
         # regardless, so on a pure runner a lite restart could only ever hit
-        # the never-dialed placeholder DB URL (PlaceholderDbUrlError). With the gateway down, restart now fails at
+        # the never-dialed placeholder DB URL (PlaceholderDbUrlError, observed on
+        # the fleet Windows box). With the gateway down, restart now fails at
         # the fetch with the actionable BootstrapFetchError — `stop` stays lite
         # and remains the recovery verb.
         "status",
@@ -211,12 +210,6 @@ def main(
     # updater session) streams its own progress in real time instead of block-buffering
     # it to the end of the log, out of order against its children's unbuffered output.
     ensure_line_buffered_stdio()
-    # The operator CLI is exempt from the database code-version gate: `ava stop`
-    # writes to drain agents, so a host left behind by an update must still be able
-    # to run it. Service processes are launched with `python -m <module>`, never
-    # through here, so every one of them stays gated. Declared first, before any
-    # verb can dial the database.
-    code_version.exempt_from_db_gate()
     _normalize_process_profile()
     args_in = sys.argv[1:] if argv is None else argv
     # The checkout gate comes first, before `boot` and before anything loads a
@@ -227,13 +220,45 @@ def main(
     rc = require_own_checkout(args_in, Path(__file__).resolve().parents[1])
     if rc is not None:
         return rc
+    # `ava boot` is what the OS boot job runs on the platforms whose scheduler
+    # cannot retry a failed job for us (Linux cron `@reboot`, Windows ONLOGON):
+    # `ava start` re-run while the machine is still coming up. Dispatched here,
+    # before the settings-gated import, so it can retry a start that failed for
+    # ANY reason — a settings error included. See base/host/system/boot_policy.py.
+    if args_in and args_in[0] == "boot":
+        from cli.boot_retry import run_boot
+
+        return run_boot(args_in[1:])
+
     _opt_into_lite_config(args_in)
 
     children = [] if retained_children is None else retained_children
     args = parsers.parse_args(argv, retained_children=children)
+    if args_in[:1] == ["init"]:
+        return args.func(args)
+    if args_in[:1] == ["start"]:
+        from base.host.env.dotenv_boot import resolve_ava_home
+        from cli.start_identity import require_initialized
+
+        try:
+            require_initialized(resolve_ava_home().resolve())
+        except (ValueError, TypeError, RuntimeError, OSError) as exc:
+            print(f"ava start: {exc}", file=sys.stderr)
+            return 1
+    from base.paths import ava_home
+    from cli.database import operator_database_factory, operator_event_pipeline
+    from cli.database.runtime import CommandRuntime
+
+    command = CommandRuntime.create()
+    args.runtime = command
+    database_factory = operator_database_factory(local_host=command.machine.host)
+    args.database_factory = database_factory
+    args.database_for_url = database_factory.for_url
+    producer = operator_event_pipeline(database_factory, machine=command.machine, home=ava_home())
+    args.producer = producer
     try:
         if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission
-            _init_cli_logging(args_in)
+            _init_cli_logging(args_in, initialize=producer.initialize_logging)
         return args.func(args)
     except LockTimeoutError as exc:
         print(
@@ -245,7 +270,7 @@ def main(
         return _print_settings_load_failure(exc)
     except BootstrapFetchError as exc:
         # A pure agent-runner whose gateway is unreachable (or which was never
-        # enrolled) fails fast with an actionable message.
+        # enrolled) fails fast with an actionable message; `ava boot` retries.
         print(f"✗ ava: {exc}", file=sys.stderr)
         return 1
     finally:
@@ -257,7 +282,16 @@ def main(
         if telemetry is not None:
             with telemetry.failure_isolated("CLI telemetry drain"):
                 telemetry.sync(timeout=5.0, bounded=True)
+        producer.close_command(primary=sys.exception())
+
+
+def entry() -> int:
+    """Prepare a fresh executable process; embedded callers use main directly."""
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
+    return main()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(entry())

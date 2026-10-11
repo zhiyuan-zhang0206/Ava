@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -82,6 +83,7 @@ def test_guard_editable_install_leaves_healthy_records_byte_identical(
     assert emitted == []
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
 def test_editable_pth_write_window_allows_atomic_replacement_and_restores_modes(
     tmp_path: Path,
 ) -> None:
@@ -108,6 +110,7 @@ def test_editable_pth_write_window_allows_atomic_replacement_and_restores_modes(
     assert stat.S_IMODE(pth.stat().st_mode) == 0o444
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
 def test_editable_pth_write_window_opens_hardened_dist_info_directory(
     tmp_path: Path,
 ) -> None:
@@ -145,6 +148,7 @@ def test_editable_pth_write_window_opens_hardened_dist_info_directory(
     assert stat.S_IMODE(dist_info.stat().st_mode) == 0o555
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
 def test_protected_paths_survive_a_sync_that_deleted_the_records(tmp_path: Path) -> None:
     """A partial sync cannot hide its protected directories by deleting records."""
     source_root = tmp_path / "prod" / "source"
@@ -166,6 +170,7 @@ def test_write_window_skips_path_that_disappears_before_entry(tmp_path: Path) ->
         pass
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
 def test_repair_editable_install_opens_protected_site_packages_directory(
     tmp_path: Path,
 ) -> None:
@@ -183,6 +188,7 @@ def test_repair_editable_install_opens_protected_site_packages_directory(
     assert stat.S_IMODE(site_packages.stat().st_mode) == 0o555
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
 def test_repair_half_uninstall_opens_protected_site_packages_directory(
     tmp_path: Path,
 ) -> None:

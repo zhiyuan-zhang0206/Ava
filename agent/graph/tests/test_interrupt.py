@@ -23,7 +23,7 @@ from agent.graph.llm_errors import LlmLedger
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.clock import Clock
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
 # windows vs flake; the poll-interval tests are serial (flaky-marked) because
@@ -31,6 +31,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -39,6 +40,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugins.extensions import ExtensionRegistry
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _TIMEOUT_S = 5.0
 
@@ -136,7 +138,7 @@ class TestHasPendingInterrupt:
         assert await has_pending_interrupt(aops_pool, tid, incarnation=None, work=None) is True
 
     async def test_false_on_unmarked_maintenance_restart(
-        self, db_conn, aops_pool: AsyncConnectionPool
+        self, db_conn, aops_pool: AsyncConnectionPool, *, machine_identity: MachineIdentity
     ):
         # The drain waits for the turn boundary: a pending restart alone never
         # aborts in-flight work.
@@ -151,7 +153,7 @@ class TestHasPendingInterrupt:
         db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
             "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
             "VALUES(%s,'running',%s,'hosted')",
-            (tid, machine_name()),
+            (tid, machine_identity.name()),
         )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         assert await has_pending_interrupt(aops_pool, tid, incarnation=None, work=None) is False
@@ -458,6 +460,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     import json
     from unittest.mock import MagicMock
@@ -514,7 +517,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
@@ -574,6 +577,8 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from typing import Any, cast
     from unittest.mock import AsyncMock, MagicMock
@@ -637,7 +642,12 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     model, publisher = MagicMock(), MagicMock()
     model.bind_tools.return_value = model
     model.astream.return_value = ordinary_generation()
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     config: RunnableConfig = {"configurable": {"thread_id": str(tid)}}
     runtime = Runtime(
         context=AvaContext(
@@ -648,7 +658,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,

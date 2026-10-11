@@ -8,6 +8,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.deploy.schema.migrations import (
     _BASELINE_NAME,
@@ -31,6 +32,7 @@ from base.deploy.tests.migration_support import (
 from base.deploy.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_required_set_is_just_baseline_with_empty_migrations(
@@ -88,18 +90,26 @@ def test_check_raises_when_code_behind(db_conn: psycopg.Connection) -> None:
 
 
 def test_apply_pending_nothing_when_baselined(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Baselined DB, empty migrations/ -> nothing to apply."""
     _ = db_conn  # fixture reseeds the baseline
     _init_repo(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url) as fresh:
-        assert apply_pending_migrations(fresh) == []
+        assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
 
 
 def test_apply_pending_applies_post_baseline(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A synthetic post-baseline migration in migrations/ is applied and stamped by
     name; a second apply is idempotent."""
@@ -111,7 +121,7 @@ def test_apply_pending_applies_post_baseline(
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     try:
         with psycopg.connect(settings.data_plane.db_url) as fresh:
-            assert apply_pending_migrations(fresh) == [_SYN]
+            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == [_SYN]
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(_BASELINE_NAME,), (_SYN,)]
@@ -119,7 +129,9 @@ def test_apply_pending_applies_post_baseline(
             row = cur.fetchone()
             assert row is not None and row[0] is not None
         with psycopg.connect(settings.data_plane.db_url) as again:
-            assert apply_pending_migrations(again) == []  # idempotent
+            assert (
+                apply_pending_migrations(again, machine_name=machine_identity.name) == []
+            )  # idempotent
     finally:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
             c.execute("DROP TABLE IF EXISTS syn_t")
@@ -130,6 +142,8 @@ def test_untracked_migration_is_skipped_and_warned(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     loguru_records: list[dict[str, Any]],
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The regression itself: a rogue migration sitting untracked in migrations/
     must NOT be applied. The tracked migration applies normally; the untracked
@@ -143,7 +157,7 @@ def test_untracked_migration_is_skipped_and_warned(
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     try:
         with psycopg.connect(settings.data_plane.db_url) as fresh:
-            assert apply_pending_migrations(fresh) == [_SYN]
+            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == [_SYN]
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
             row = c.execute("SELECT to_regclass('syn_rogue_t')").fetchone()
             assert row is None or row[0] is None  # the rogue never ran
@@ -193,7 +207,10 @@ def test_non_git_dir_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
 
 def test_apply_multi_statement_migration_over_prepared_conn(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A MULTI-statement migration body applies over a `prepare_threshold=0`
     connection — the posture `base.db.connect()` uses (unconditionally, for
@@ -216,7 +233,7 @@ def test_apply_multi_statement_migration_over_prepared_conn(
         with conn.cursor() as cur:
             cur.execute("DROP TABLE IF EXISTS mstest_t")
         conn.commit()
-        applied = apply_pending_migrations(conn)
+        applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
         assert _SYN in applied
         with conn.cursor() as cur:
             cur.execute("SELECT id, note FROM mstest_t")

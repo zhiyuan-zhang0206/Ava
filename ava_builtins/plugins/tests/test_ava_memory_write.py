@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+import sys
+from collections.abc import Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module, util
 from pathlib import Path
@@ -15,14 +16,16 @@ import yaml
 import ava
 from agent.state import build_agent_state
 from ava.sdk_surface import install
+from base.cluster.machine import MachineIdentity
 from base.packages.plugins.extensions import ExtensionRegistry
 from tests.fixtures.pin_agent import pin_agent
 
 
 @pytest.fixture
-def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Any]:
+def memory_plugin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine_identity: MachineIdentity
+) -> Iterator[Any]:
     """Install the ava_memory SDK surface against isolated stores."""
-    import base.cluster.machine
     import base.paths
     from base.agents.sdk import call_policy
 
@@ -43,14 +46,11 @@ def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[A
     def isolated_pool() -> Path:
         return pool
 
-    def isolated_machine_name() -> str:
-        return "memory-host"
-
     monkeypatch.setattr(base.paths, "ava_home", isolated_home)
     monkeypatch.setattr(base.paths, "workspace_dir", isolated_workspace)
     monkeypatch.setattr(base.paths, "memory_dir", isolated_pool)
-    monkeypatch.setattr(base.cluster.machine, "machine_name", isolated_machine_name)
-    pin_agent(17)
+    machine_identity.set(name="memory-host")
+    pin_agent(17, machine=machine_identity)
     from ava_builtins.plugins.ava_memory import plugin
 
     install.install(ExtensionRegistry((("ava_memory", plugin.contribute()),)))
@@ -495,6 +495,93 @@ def test_personal_write_is_immune_to_ava_cwd_drift(memory_plugin: Any, tmp_path:
 
     assert entry == (workspace / "memory" / "cwd-proof.md").resolve()
     assert not (drifted_cwd / "memory" / "cwd-proof.md").exists()
+
+
+def test_plugin_loads_and_writes_without_fcntl(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine_identity: MachineIdentity
+) -> None:
+    """Windows smoke: plugin import + index update with no fcntl module.
+
+    CI has no Windows runner — the root cause of 6e96b1554, where an
+    unguarded top-level ``import fcntl`` crashed every Windows agent at
+    plugin load.
+    Simulate Windows's missing fcntl in-process by making ``import fcntl``
+    raise ImportError while the plugin loads and writes. Trade-off vs a real
+    Windows runner: only the fcntl absence is simulated, not msvcrt or other
+    platform quirks — but the ImportError mechanism is exactly what broke
+    Windows boot, and the write path is asserted to still work unguarded.
+    """
+    import builtins
+
+    sys.modules.pop("fcntl", None)  # collection may have imported it; the fake must intercept
+    real_import = builtins.__import__
+
+    def no_fcntl(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] | None = None,
+        level: int = 0,
+    ) -> Any:
+        if name == "fcntl":
+            raise ImportError("No module named 'fcntl'")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", no_fcntl)
+
+    import base.paths
+    from base.agents.sdk import call_policy
+
+    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
+        return call_policy.SamplingPolicy()
+
+    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
+
+    workspace = tmp_path / "workspace"
+    pool = tmp_path / "pool"
+
+    def isolated_home() -> Path:
+        return tmp_path
+
+    def isolated_workspace(_agent_id: int) -> Path:
+        return workspace
+
+    def isolated_pool() -> Path:
+        return pool
+
+    monkeypatch.setattr(base.paths, "ava_home", isolated_home)
+    monkeypatch.setattr(base.paths, "workspace_dir", isolated_workspace)
+    monkeypatch.setattr(base.paths, "memory_dir", isolated_pool)
+    machine_identity.set(name="memory-host")
+    pin_agent(17, machine=machine_identity)
+    # The guard is import-time: re-import the plugin face and its sdk while `import fcntl` raises.
+    for name in list(sys.modules):
+        if name.startswith("ava_builtins.plugins.ava_memory"):
+            del sys.modules[name]
+
+    try:
+        from ava_builtins.plugins.ava_memory import plugin as plugin
+        from ava_builtins.plugins.ava_memory import sdk as memory_sdk
+
+        install.install(ExtensionRegistry((("ava_memory", plugin.contribute()),)))
+        assert memory_sdk.fcntl is None  # the guard fired: fcntl unavailable
+
+        entry = ava.memory.write(
+            "no-fcntl",
+            "Body written without fcntl.\n",
+            title="No fcntl",
+            description="Windows smoke write",
+            tags=["type/reference"],
+        )
+        index = entry.parent / "MEMORY.md"
+        assert index.read_text(encoding="utf-8") == (
+            "- [No fcntl](no-fcntl.md) — Windows smoke write\n"
+        )
+    finally:
+        install.uninstall()
+        for name in list(sys.modules):
+            if name.startswith("ava_builtins.plugins.ava_memory"):
+                del sys.modules[name]
 
 
 def test_memory_namespace_importable_as_submodule(memory_plugin: Any) -> None:

@@ -10,6 +10,7 @@ marker left by an earlier boot cannot admit recovery during the next boot.
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -136,6 +137,8 @@ def born_identity() -> ServingState | None:
 
 
 def _fsync_parent(path: Path) -> None:
+    if os.name == "nt":
+        return
     fsync_parent(path)
 
 

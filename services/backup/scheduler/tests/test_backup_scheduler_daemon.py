@@ -20,6 +20,7 @@ import pytest
 
 from base.config import ConfigBoot, settings
 from base.daemon import health
+from base.daemon.tests.health_support import unknown_image
 from base.native_process.os_platform import LockTimeoutError
 from services.backup.scheduler import daemon
 
@@ -162,6 +163,7 @@ async def test_healthz_returns_503_for_an_overdue_backup(monkeypatch: pytest.Mon
         "pg_backup",
         port=port,
         components=lambda: daemon._backup_components(state),
+        image=unknown_image(),
     )
     try:
         status, body = await _http_get(port)

@@ -23,9 +23,9 @@ from base.db.transaction import write_transaction
 from base.host.net.http_dial import get as http_get
 
 
-def receive(pool: ConnectionPool, request: ReceiveRequest) -> CopyProof:
+def receive(pool: ConnectionPool, request: ReceiveRequest, *, local_machine: str) -> CopyProof:
     """Reserve native quota, pull immutable bytes, verify actual files, then acknowledge."""
-    unit = current_unit()
+    unit = current_unit(local_machine=local_machine)
     if request.target != unit:
         raise UploadDeliveryConflictError("copy targets a different native machine/home")
     manifest = request.manifest

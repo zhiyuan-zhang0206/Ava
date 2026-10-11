@@ -299,6 +299,7 @@ async def post_agents_resurrect_billing(
         pool=request.app.state.db_pool,
         db=request.app.state.db,
         bus=request.app.state.bus,
+        local_machine=request.app.state.machine.name(),
     )
 
 

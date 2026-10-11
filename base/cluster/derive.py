@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 from base import cluster
 from base.host.env.registry import REDIS_PASSWORD_ENV, health_port_env_aliases
 from base.host.net.url_secret import redacted_url, url_with_port, url_with_userinfo
+from base.native_process.os_platform import is_windows
 
 # The db / Postgres-role / redis-ACL identifier a newly-born cluster uses. Fixed:
 # every cluster owns its instance (exactly one tenant), so the identifier carries
@@ -161,6 +162,8 @@ def fe_build_env() -> str:
         return gateway_env
     # The normal build and watchdog rebuild must carry the same browser entry.
     # Keep this host setting separate from the runner/control-plane gateway URL.
+    if is_windows():
+        return f'{gateway_env}" && set "NEXT_PUBLIC_BROWSER_ORIGIN={origin}'
     return f"{gateway_env} NEXT_PUBLIC_BROWSER_ORIGIN={shlex.quote(origin)}"
 
 
@@ -172,11 +175,14 @@ def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
     session validator rejected it and a dead frontend could never self-heal);
     this is the one place the command shape is authored.
 
-    ``exec`` on the serve stage: the build is a transient prelude, so
+    ``exec`` on the serve stage (POSIX): the build is a transient prelude, so
     the shell must hand its pid to ``npm run start`` — otherwise it outlives it
     and swallows the graceful-stop SIGTERM (``base.sessions.env_forwarding.exec_into``
     rejects a compound command whose final stage does not exec, which is what
-    made the drifted respawn unlaunchable).
+    made the drifted respawn unlaunchable). On Windows cmd.exe has no ``exec``;
+    the ``&&`` chain runs through ``cmd /c`` and winproc kills the process tree,
+    so the Windows shape carries ``set "VAR=val"`` instead of a bash inline env
+    prefix (cmd cannot do ``VAR=val cmd``).
 
     Args:
         port: the cluster-allocated frontend port. Passed explicitly — Next.js
@@ -191,6 +197,10 @@ def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
     """
     frontend_dir = Path(frontend_dir).as_posix()
     build_env = fe_build_env()
+    if is_windows():
+        return (
+            f'cd {frontend_dir} && set "{build_env}" && npm run build && npm run start -- -p {port}'
+        )
     return f"cd {frontend_dir} && {build_env} npm run build && exec npm run start -- -p {port}"
 
 

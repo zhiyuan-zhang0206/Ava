@@ -77,7 +77,7 @@ def _autostart_plist_content() -> str:
     floor, so a start that keeps failing is retried once a minute rather than
     six times a minute. Together that is the retry policy in
     `base/host/system/boot_policy.py`, with launchd rather than a loop of ours doing the
-    retrying — which is why this job runs plain `ava start`.
+    retrying — which is why this job runs plain `ava start` and not `ava boot`.
 
     Start remains unsuccessful until readiness passes. Its idempotent root
     reconciliation preserves healthy units on subsequent boot attempts.

@@ -71,7 +71,11 @@ def ensure_pr_flow_job(ctx: ConvergeCtx) -> None:
     the absence. Idempotent."""
     from base.host.system.pr_flow_job import register_pr_flow_job
 
-    register_pr_flow_job(enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled)
+    register_pr_flow_job(
+        enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
+        machine=ctx.machine,
+        home=ctx.ava_home,
+    )
 
 
 def ensure_walg_job(ctx: ConvergeCtx) -> None:

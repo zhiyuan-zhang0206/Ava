@@ -19,9 +19,14 @@ from dotenv import dotenv_values
 
 from base import cluster
 from base.native_process.os_platform import file_lock
+from base.paths import ava_home
 from cli import init_intent, start_intent
 from cli import start_identity as identity
+from cli.database import OperatorDatabaseFactory, operator_event_pipeline
+from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap._init_identity import prepare_init_identity
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 @pytest.fixture(autouse=True)
@@ -190,8 +195,7 @@ def test_an_intent_carrying_the_retired_worktree_key_is_refused_by_name(
         identity.read_intent(inputs.home)
 
 
-# The one-line rollout step for a home born before that key was retired. It is
-# quoted verbatim in the pull request that retires it.
+# Historical identity-key retirement procedure.
 _STRIP_RETIRED_INTENT_KEY = (
     "python3 -c 'import json,os,sys;p=sys.argv[1];d=json.load(open(p));"
     'd.pop("worktree",None);t=p+".tmp";'
@@ -326,10 +330,12 @@ def _args(*extra: str):
     return build_parser().parse_args(["init", *extra])
 
 
-def _start_args(*extra: str):
+def _start_args(*extra: str, command_runtime: CommandRuntime):
     from cli.parsers import build_parser
 
-    return build_parser().parse_args(["start", *extra])
+    args = build_parser().parse_args(["start", *extra])
+    args.runtime = command_runtime
+    return args
 
 
 def _single_box(*extra: str):
@@ -685,9 +691,14 @@ def test_remote_input_cannot_redirect_libpq_identity(
 
 
 def test_public_start_holds_home_lock_through_runtime_start(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
-
+    producer = operator_event_pipeline(
+        operator_database, machine=command_runtime.machine, home=ava_home()
+    )
     from base.native_process.os_platform import LockTimeoutError
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
@@ -703,20 +714,28 @@ def test_public_start_holds_home_lock_through_runtime_start(
 
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     prepare_init_identity(_single_box())
-    assert start_intent.run_start(_start_args(), retained_children=[]) == 0
-
-
-def test_start_parser_rejects_retired_updater_telemetry() -> None:
-    with pytest.raises(SystemExit) as error:
-        _start_args("--updater-telemetry")
-    assert error.value.code == 2
+    assert (
+        start_intent.run_start(
+            _start_args(command_runtime=command_runtime),
+            retained_children=[],
+            database_factory=operator_database,
+            producer=producer,
+        )
+        == 0
+    )
 
 
 @pytest.mark.parametrize("result", [0, 1, 75])
 def test_public_start_publishes_boot_pid_only_after_complete_success(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, result: int
+    inputs: identity.IdentityInput,
+    monkeypatch: pytest.MonkeyPatch,
+    result: int,
+    operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
-
+    producer = operator_event_pipeline(
+        operator_database, machine=command_runtime.machine, home=ava_home()
+    )
     from cli.commands.lifecycle import root_driver
 
     calls: list[str] = []
@@ -730,14 +749,27 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     monkeypatch.setattr(root_driver, "complete_boot_start", lambda: calls.append("publish PID"))
     prepare_init_identity(_single_box())
-    assert start_intent.run_start(_start_args(), retained_children=[]) == result
+    assert (
+        start_intent.run_start(
+            _start_args(command_runtime=command_runtime),
+            retained_children=[],
+            database_factory=operator_database,
+            producer=producer,
+        )
+        == result
+    )
     assert calls == ["complete wrapped start"] + (["publish PID"] if result == 0 else [])
 
 
 def test_failed_boot_publication_clears_serving_and_refuses_success(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
-
+    producer = operator_event_pipeline(
+        operator_database, machine=command_runtime.machine, home=ava_home()
+    )
     from base.deploy.lifecycle import start_serving
     from cli.commands.lifecycle import root_driver
 
@@ -756,5 +788,13 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
 
     monkeypatch.setattr(root_driver, "complete_boot_start", fail)
     prepare_init_identity(_single_box())
-    assert start_intent.run_start(_start_args(), retained_children=[]) == 1
+    assert (
+        start_intent.run_start(
+            _start_args(command_runtime=command_runtime),
+            retained_children=[],
+            database_factory=operator_database,
+            producer=producer,
+        )
+        == 1
+    )
     assert calls == ["cleared"]

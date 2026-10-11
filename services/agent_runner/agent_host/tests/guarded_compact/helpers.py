@@ -24,12 +24,13 @@ from agent.state import AgentState, checkpoint_msgpack_allowlist
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import _AgentRuntime
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 
 class SummaryModel(FakeListChatModel):
@@ -60,6 +61,7 @@ async def make_host(
     *,
     seed_history: bool = True,
     catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> tuple[AgentHost, AsyncPostgresSaver, RunnableConfig]:
     async def model(state: AgentState, runtime: Runtime[AvaContext]) -> Command[Any]:
         work = runtime.context.native_work
@@ -98,9 +100,9 @@ async def make_host(
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=catalog,
     )
     monkeypatch.setattr(

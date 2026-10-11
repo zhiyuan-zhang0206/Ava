@@ -43,7 +43,7 @@ prod runtime and dev workspace are split at the filesystem level:
 
 | Path | Role | Notes |
 |---|---|---|
-| `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through `python -m cli.fleet_update` ([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode); `ava.self.update()` was removed 2026-08) |
+| `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through `python -m cli.fleet_update` ([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode)) |
 | `<development-checkout>/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (made by `scripts/setup-worktree.sh <task>`) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool; complete it with `scripts/setup-worktree.sh` inside it) | freely checkout any branch, decoupled from prod |
 
 ### Worktree uv iron rule (Tasks #1572, #5638)
@@ -100,7 +100,7 @@ nodes of the packages that own the code:
 | plugin enable config (`plugins_config.json`) | `base/packages/plugins/docs/enable_config.ava.okf.md` |
 | `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/docs/install_registry.ava.okf.md` |
 | `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages/docs/packages.ava.okf.md` |
-| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/docs/machine.ava.okf.md` |
+| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/machine/docs/machine.ava.okf.md` |
 | which services each capability contributes | `services/docs/services.ava.okf.md` |
 
 Three operational consequences worth stating here:
@@ -469,7 +469,7 @@ itself (its own public key in its own `authorized_keys`):
   reported with their online flag and commits and never fail `up` (see the last bullet for their old processes). Then
   the gateway smoke-tests each listed agent-runner with a real agent, reading its own
   address and bearer in place; then each host runs `ava packages refresh`
-  (skills follow their channel; `ava skill update` is retired) and its summary
+  (skills follow their channel) and its summary
   line (`summary: …`) is printed. A differing local copy is replaced and
   reported — an info line names the differing files. Last, two read-only drift checks
   run, each to the end before `up` fails with the details in the

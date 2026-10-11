@@ -9,24 +9,32 @@ from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
 from services.upkeep.events_maintenance import daemon
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
-from services.upkeep.events_maintenance.daemon import events_maintenance_db
-from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
+from services.upkeep.events_maintenance.tests.slices import (
+    events_maintenance_config,
+    events_maintenance_db,
+)
 
 _Loop = Callable[..., Coroutine[Any, Any, None]]
 
 
 def _rollup(
-    pool: Any, progress: LoopProgress, config: EventsMaintenanceConfig, *, tasks: asyncio.TaskGroup
+    pool: Any,
+    progress: LoopProgress,
+    config: EventsMaintenanceConfig,
+    *,
+    tasks: asyncio.TaskGroup,
+    local_machine: MachineIdentity,
 ) -> Any:
     return daemon._dispatch_loop(
         pool,
         progress,
         config,
-        events_maintenance_db(),
+        events_maintenance_db(local_machine=local_machine),
         tasks=tasks,
     )
 

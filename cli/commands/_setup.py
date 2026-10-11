@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import NotRequired, TypedDict, cast
 
-from base.config import get_field
+from base.config import ConfigBoot
 
 
 class SetupValues(TypedDict):
@@ -125,18 +125,18 @@ _SETUP_FIELDS: tuple[_SetupField, ...] = (
 )
 
 
-def _resolve_capability(cap: _Capability) -> bool:
+def _resolve_capability(cap: _Capability, config: ConfigBoot) -> bool:
     """The capability's settings bool; unset means the capability is off."""
-    env_val: bool | None = get_field(cap.settings_attr)
+    env_val: bool | None = config.get_field(cap.settings_attr)
     return bool(env_val)
 
 
-def _resolve_setup_field(field: _SetupField) -> str | None:
+def _resolve_setup_field(field: _SetupField, config: ConfigBoot) -> str | None:
     """The field's settings value, or None when it is empty.
 
     The field's validator gates the value; an invalid one raises immediately.
     """
-    value = get_field(field.name).strip()
+    value = config.get_field(field.name).strip()
     if not value:
         return None
     if field.validator:
@@ -144,7 +144,9 @@ def _resolve_setup_field(field: _SetupField) -> str | None:
     return value
 
 
-def _collect_setup_values() -> tuple[SetupValues, list[_SetupField | _Capability]]:
+def _collect_setup_values(
+    *, config: ConfigBoot
+) -> tuple[SetupValues, list[_SetupField | _Capability]]:
     """Resolve all fields. Returns (resolved dict, list of missing required items).
 
     Phase 1: resolve the serve-capabilities first — they gate which other
@@ -157,7 +159,7 @@ def _collect_setup_values() -> tuple[SetupValues, list[_SetupField | _Capability
     caller decides fallback (e.g. when memory_remote is missing, explicit
     `ava memory init` takes the local-init path).
     """
-    caps = {cap.capability for cap in _CAPABILITIES if _resolve_capability(cap)}
+    caps = {cap.capability for cap in _CAPABILITIES if _resolve_capability(cap, config)}
     if not caps:
         # No capability resolved: the only missing items are the serve flags;
         # every value field is unresolved, so the caller's `missing` check returns
@@ -172,7 +174,7 @@ def _collect_setup_values() -> tuple[SetupValues, list[_SetupField | _Capability
     for field in _SETUP_FIELDS:
         if not (caps & set(field.roles)):
             continue
-        value = _resolve_setup_field(field)
+        value = _resolve_setup_field(field, config)
         if value is None:
             if not field.optional:
                 missing.append(field)

@@ -495,7 +495,9 @@ def test_child_boot_timing_emits_ready_duration(
 
     monkeypatch.setattr(exec_child.time, "perf_counter", lambda: 100.25)
 
-    exec_child._emit_child_boot_timing(exec_child._import_runtime(100.0))
+    from base.agents.context.clients import ClientSet
+
+    exec_child._emit_child_boot_timing(exec_child._import_runtime(100.0), clients=ClientSet())
 
     [record] = [
         record for record in loguru_records if record["extra"].get("event") == "exec_child_boot"
@@ -503,6 +505,7 @@ def test_child_boot_timing_emits_ready_duration(
     assert record["extra"]["duration_ms"] == pytest.approx(250.0)  # pyright: ignore[reportUnknownMemberType]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 def test_child_watchdog_hard_exits_124(tmp_path: Path) -> None:
     """With no parent to signal it, the child's own watchdog os._exit(124)s
     past (timeout + grace + margin) — an orphaned exec child cannot run long."""

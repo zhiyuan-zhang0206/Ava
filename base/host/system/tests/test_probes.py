@@ -111,7 +111,7 @@ def test_display_linux_requires_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_display_false_on_unknown_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unknown (non-macOS/Linux) platform fails safe to no display."""
+    """An unknown (non-macOS/Linux/Windows) platform fails safe to no display."""
     monkeypatch.setattr(pp, "sys", _FakeSys("freebsd"))
     assert pp.display_available() is False
 
@@ -135,7 +135,7 @@ def test_incapability_none_when_all_present(monkeypatch: pytest.MonkeyPatch) -> 
 def test_incapability_no_display(monkeypatch: pytest.MonkeyPatch) -> None:
     _all_present(monkeypatch)
     monkeypatch.setattr(pp, "display_available", lambda: False)
-    assert pp.browser_incapability() == "no display (headless server)"
+    assert pp.browser_incapability() == "no display (WSL without WSLg / headless server)"
     assert pp.browser_capable() is False
 
 
@@ -159,7 +159,7 @@ def test_incapability_checks_display_first(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(pp, "display_available", lambda: False)
     monkeypatch.setattr(pp, "resolve_chrome_binary", lambda: None)
     monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    assert pp.browser_incapability() == "no display (headless server)"
+    assert pp.browser_incapability() == "no display (WSL without WSLg / headless server)"
 
 
 # ─── browser_deps_incapability ───────────────────────────────────────────
@@ -189,7 +189,7 @@ def test_browser_deps_incapability_returns_display_reason_first(
 ) -> None:
     _all_platform_browser_deps_present(monkeypatch)
     monkeypatch.setattr(pp, "display_available", lambda: False)
-    assert pp.browser_deps_incapability() == "no display (headless server)"
+    assert pp.browser_deps_incapability() == "no display (WSL without WSLg / headless server)"
 
 
 def test_browser_deps_incapability_returns_chrome_reason(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -202,6 +202,55 @@ def test_browser_deps_incapability_returns_npx_reason(monkeypatch: pytest.Monkey
     _all_platform_browser_deps_present(monkeypatch)
     monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     assert pp.browser_deps_incapability() == "no npx (install Node.js for chrome-devtools-mcp)"
+
+
+# ─── unix_sockets_available / browser_mcp_incapability ───────────────────
+
+
+def test_unix_sockets_available_reads_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The probe reads AF_UNIX availability directly from the socket module."""
+    assert pp.unix_sockets_available() is True
+    monkeypatch.delattr(pp.socket, "AF_UNIX", raising=False)
+    assert pp.unix_sockets_available() is False
+
+
+def test_browser_mcp_incapability_none_when_capable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On a POSIX host that can run the browser, browser-mcp can run too."""
+    _all_present(monkeypatch)
+    monkeypatch.setattr(pp, "unix_sockets_available", lambda: True)
+    assert pp.browser_mcp_incapability() is None
+
+
+def test_browser_mcp_incapability_without_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A host without AF_UNIX cannot run browser-mcp even with browser tools."""
+    _all_present(monkeypatch)
+    monkeypatch.setattr(pp, "unix_sockets_available", lambda: False)
+    assert pp.browser_incapability() is None
+    assert (
+        pp.browser_mcp_incapability()
+        == "no AF_UNIX sockets (browser-mcp's transport is POSIX-only)"
+    )
+
+
+def test_browser_mcp_incapability_checks_af_unix_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On a host missing everything, AF_UNIX is the reason shown: no display or
+    Chrome fix makes the transport exist, so the browser prongs would be a
+    misleading first answer."""
+    monkeypatch.setattr(pp, "unix_sockets_available", lambda: False)
+    monkeypatch.setattr(pp, "display_available", lambda: False)
+    assert (
+        pp.browser_mcp_incapability()
+        == "no AF_UNIX sockets (browser-mcp's transport is POSIX-only)"
+    )
+
+
+def test_browser_mcp_incapability_inherits_browser_prongs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With AF_UNIX present, browser-mcp's gate IS browser's gate — it is a
+    superset, not a separate list."""
+    _all_present(monkeypatch)
+    monkeypatch.setattr(pp, "unix_sockets_available", lambda: True)
+    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    assert pp.browser_mcp_incapability() == pp.browser_incapability()
 
 
 # ─── gui_session_domain / gui_login_user (task #3346) ────────────────────

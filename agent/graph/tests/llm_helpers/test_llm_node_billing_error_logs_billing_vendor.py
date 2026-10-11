@@ -29,6 +29,7 @@ from agent.graph.tests.test_llm_helpers import (
 )
 from agent.state import AgentState
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
@@ -41,6 +42,8 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     loguru_records,
     monkeypatch: pytest.MonkeyPatch,
     ledger: LlmLedger,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Provider 402 logs the billing flag, vendor, and model for alert routing."""
     from agent.graph.llm_errors import FatalProviderError
@@ -64,7 +67,10 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
             await llm_node(
                 state,
                 _make_runtime(
-                    resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()
+                    resources=hosted_resources,
+                    llm=fake_llm,
+                    event_publisher=MagicMock(),
+                    database_gate=database_gate,
                 ),
                 _CONFIG,
                 ledger=ledger,
@@ -84,7 +90,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
 
 
 async def test_llm_node_transient_provider_error_propagates_for_retry(
-    hosted_resources: HostedTurnResources, ledger: LlmLedger
+    hosted_resources: HostedTurnResources, ledger: LlmLedger, *, database_gate: ProcessDbGate
 ) -> None:
     """A TRANSIENT provider error (HTTP 500) is re-raised as-is — NOT wrapped in
     FatalProviderError — so the node's retry loop retries it. Fail-fast is
@@ -95,7 +101,12 @@ async def test_llm_node_transient_provider_error_propagates_for_retry(
     fake_llm.astream.return_value = _astream_raising(_FakeProviderStatusError(500))
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    runtime = _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock())
+    runtime = _make_runtime(
+        resources=hosted_resources,
+        llm=fake_llm,
+        event_publisher=MagicMock(),
+        database_gate=database_gate,
+    )
     with pytest.raises(_FakeProviderStatusError) as exc_info:
         await llm_attempt(state, runtime, _CONFIG, Attempt(1, time.time()), ledger=ledger)
     assert not isinstance(exc_info.value, FatalProviderError)
@@ -117,7 +128,7 @@ async def test_llm_node_transient_provider_error_propagates_for_retry(
 
 
 async def test_llm_node_configured_fatal_error_type_fails_fast(
-    hosted_resources: HostedTurnResources, ledger: LlmLedger
+    hosted_resources: HostedTurnResources, ledger: LlmLedger, *, database_gate: ProcessDbGate
 ) -> None:
     """A configured fatal error *type* (e.g. engine_overloaded_error) surfacing on
     a transient-nature status (429) still fails fast: retrying an overloaded engine
@@ -144,7 +155,10 @@ async def test_llm_node_configured_fatal_error_type_fails_fast(
             await llm_node(
                 state,
                 _make_runtime(
-                    resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()
+                    resources=hosted_resources,
+                    llm=fake_llm,
+                    event_publisher=MagicMock(),
+                    database_gate=database_gate,
                 ),
                 _CONFIG,
                 ledger=ledger,
@@ -156,7 +170,11 @@ async def test_llm_node_configured_fatal_error_type_fails_fast(
 
 
 async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(
-    hosted_resources: HostedTurnResources, loguru_records, ledger: LlmLedger
+    hosted_resources: HostedTurnResources,
+    loguru_records,
+    ledger: LlmLedger,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Silent-idle output consumes one token budget and reports its cost."""
     from base.config import settings
@@ -177,7 +195,12 @@ async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(
         state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
         result = await llm_node(
             state,
-            _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+            _make_runtime(
+                resources=hosted_resources,
+                llm=fake_llm,
+                event_publisher=MagicMock(),
+                database_gate=database_gate,
+            ),
             _CONFIG,
             ledger=ledger,
         )
@@ -200,7 +223,11 @@ async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(
 
 
 async def test_retried_llm_node_records_total_retry_duration(
-    hosted_resources: HostedTurnResources, loguru_records, ledger: LlmLedger
+    hosted_resources: HostedTurnResources,
+    loguru_records,
+    ledger: LlmLedger,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A success after retry exports the full sequence duration as telemetry."""
 
@@ -213,7 +240,12 @@ async def test_retried_llm_node_records_total_retry_duration(
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _text_turn()
-    runtime = _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock())
+    runtime = _make_runtime(
+        resources=hosted_resources,
+        llm=fake_llm,
+        event_publisher=MagicMock(),
+        database_gate=database_gate,
+    )
 
     await llm_attempt(
         AgentState(messages=[HumanMessage(content="hi")], halted=False),
@@ -233,7 +265,7 @@ async def test_retried_llm_node_records_total_retry_duration(
 
 
 async def test_silent_idle_streak_resets_after_normal_turn(
-    hosted_resources: HostedTurnResources, ledger: LlmLedger
+    hosted_resources: HostedTurnResources, ledger: LlmLedger, *, database_gate: ProcessDbGate
 ) -> None:
     """A real action clears the silent-idle output-token budget."""
 
@@ -256,7 +288,12 @@ async def test_silent_idle_streak_resets_after_normal_turn(
     fake_llm.astream.return_value = _reasoning_only()
     await llm_node(
         AgentState(messages=[HumanMessage(content="hi")], halted=False),
-        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _CONFIG,
         ledger=ledger,
     )
@@ -267,7 +304,12 @@ async def test_silent_idle_streak_resets_after_normal_turn(
     fake_llm.astream.return_value = _text_turn()
     result = await llm_node(
         AgentState(messages=[HumanMessage(content="hi")], halted=False),
-        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _CONFIG,
         ledger=ledger,
     )
@@ -279,7 +321,12 @@ async def test_silent_idle_streak_resets_after_normal_turn(
     fake_llm.astream.return_value = _reasoning_only()
     result = await llm_node(
         AgentState(messages=[HumanMessage(content="hi")], halted=False),
-        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _CONFIG,
         ledger=ledger,
     )
@@ -403,7 +450,11 @@ def test_is_fatal_provider_error_type_no_body() -> None:
 
 
 async def test_llm_usage_event_carries_latency_ms(
-    hosted_resources: HostedTurnResources, loguru_records, ledger: LlmLedger
+    hosted_resources: HostedTurnResources,
+    loguru_records,
+    ledger: LlmLedger,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The whole-call wall-clock lands on the llm_usage agent_event.
 
@@ -426,7 +477,12 @@ async def test_llm_usage_event_carries_latency_ms(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     await llm_node(
         state,
-        _make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _CONFIG,
         ledger=ledger,
     )

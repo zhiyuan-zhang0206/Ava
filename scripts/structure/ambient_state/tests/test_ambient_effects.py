@@ -90,9 +90,9 @@ def test_a_lazy_read_inside_a_function_or_lambda_is_not_import_time(
 @pytest.mark.parametrize(
     "line",
     [
-        "IS_MACOS = sys.platform == 'darwin'",
+        "IS_WINDOWS = sys.platform == 'win32'",
         "IS_LINUX = sys.platform.startswith('linux')",
-        "ON_POSIX = os.name == 'posix'",
+        "ON_NT = os.name == 'nt'",
         "SYSTEM = platform.system()",
     ],
 )

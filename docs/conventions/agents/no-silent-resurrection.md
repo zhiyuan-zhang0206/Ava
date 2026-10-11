@@ -55,11 +55,13 @@ Implementation: `scripts/ci/no_silent_resurrection.py` (stdlib + git only).
    distinctive dead line (an identifier of at least 20 characters with an
    underscore or camelCase). A hit is attributed to the commit covering the
    most of its dead lines (ties: the most recent). An incomplete expression or
-   declaration ending in an opening `(` remains strong for a three-line block,
-   but cannot qualify as a solo distinctive hit: the prefix alone omits the
-   arguments or body that define the deleted contract. Complete distinctive
-   single lines still fail. This distinguishes extending a current caller
-   from restoring its deleted arguments or implementation.
+   declaration ending in an opening `(`, or a function/class header without
+   its body, remains strong for a three-line block but cannot qualify as a solo
+   distinctive hit. Python string contents do not supply identifier proof;
+   neither does a qualified capitalized type reference without a constructor
+   call. Actual distinctive calls, assignments, inline bodies and restored
+   three-line blocks still fail. These fragments alone omit the operation or
+   implementation that defines the deleted contract.
 6. **Allowances** come from the PR's commit messages (merge-base..head): a
    `Resurrects: <reason>` line allows every hit, or only the hits it names by
    deleting sha (at least 7 hex characters, containing a digit) or path
@@ -73,9 +75,8 @@ this check does see: `uv.lock`, `ui/web/package-lock.json`,
 `ui/web/openapi.json`, `ui/web/src/lib/contracts/types-generated.ts`,
 `base/host/env/config_lite_table.json`, `base/events/registry.md`,
 `db/schema.sql`, `scripts/zombie_pyright_ignores.registry`, the generated
-`api.txt` files under `base/agents` and `base/events` (and their
-pre-2026-09-29 `shared/` layout), `scripts/structure/baseline/`, and
-`migrations/`.
+`api.txt` files under `base/agents` and `base/events`,
+`scripts/structure/baseline/`, and `migrations/`.
 
 Exit codes: 0 clean or fully allowed, 1 blocking hits, 2 usage or git failure.
 
@@ -131,12 +132,13 @@ the sweep is the tool for that. Recorded passes and residual classes:
 - Pass 2's largest flag is 3116eb0f "docs: restore the decision records
   that described since-removed mechanisms" (66 hits): a deliberate
   restoration - exactly the case the allowance line is for.
-- 2026-10-04, the check's own introduction: the skip table names the
-  pre-2026-09-29 `shared/` locations; those literals are text the shared ->
-  base move (9ae6105a6) had deleted. Under pass-1 thresholds the check
-  flagged its own PR and a sha-scoped `Resurrects:` line demonstrated the
-  allowance; the pass-2 thresholds drop the two-line match below the minimum
-  unit and the trailer was removed.
+- 2026-10-11, #5165: adding a required ConfigBoot reader removed an obsolete
+  unused-argument comment from a retained function header. Other matches were
+  a Mock's string target and a standard exception type assertion, deleted from
+  unrelated old tests. Solo proof now uses lexical identifiers, distinguishes
+  declarations from bodies, and distinguishes type references from calls;
+  the three-line threshold and textual block candidates are unchanged. The
+  separate docstring-shape match now uses the stdlib `ast.get_docstring` owner.
 
 ## Local runs
 

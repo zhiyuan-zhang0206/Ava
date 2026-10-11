@@ -427,27 +427,24 @@ def test_ast_rules_retain_the_eight_package_scope(
         assert f"{scope}/example.py:1:" in output
         assert "`if TYPE_CHECKING:` is banned" in output
         assert f"{scope}/example.py:3:" in output
-        assert "machine_role() may only be called" in output
+        assert "machine_role() is retired" in output
     else:
         assert output == ""
 
 
-def test_ast_allowlists_and_stale_role_entry_are_preserved(
+def test_retired_role_reader_has_no_former_file_allowance(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # Exercise actual policy entries instead of replacing the owner's policy.
+    # The existing TYPE_CHECKING policy is independent of machine retirement.
     path = _source(
         tmp_path, "if typing.TYPE_CHECKING:\n    import example\n", "agent/graph/__init__.py"
     )
     role = _source(tmp_path, "def ask():\n    machine_role()\n", "cli/commands/lifecycle/start.py")
+    assert lcs.main([], repo_root=tmp_path) == 1
+    assert "cli/commands/lifecycle/start.py:2: machine_role() is retired" in capsys.readouterr().out
+    role.write_text("def ask(machine):\n    return machine.role()\n", encoding="utf-8")
     assert lcs.main([], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
-    role.write_text("value = 1\n", encoding="utf-8")
-    assert lcs.main([], repo_root=tmp_path) == 1
-    assert (
-        "cli/commands/lifecycle/start.py:1: stale machine_role() allowlist entry"
-        in capsys.readouterr().out
-    )
     path.write_text("value = 1\n", encoding="utf-8")
 
 

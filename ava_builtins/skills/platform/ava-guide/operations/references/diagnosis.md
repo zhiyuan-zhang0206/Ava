@@ -45,8 +45,9 @@ from real incidents; the concrete sizes and dates are illustrative.
   reachable address is up (whatever the operator's VPN overlay client
   reports); machines table `last_seen_at`.
 - Causes: two units on one host sharing a default health port (the 8100s are
-  a shared segment — pin per-unit ports in `.env`); an orphaned Chrome holding
-  CDP 9222; stale pidfile pointing at the wrong process.
+  a shared segment — pin per-unit ports in `.env`); a Windows system service
+  (iphlpsvc) grabbing 8106; an orphaned Chrome holding CDP 9222; stale
+  pidfile pointing at the wrong process.
 - Response: pin a per-unit port (`AVA_*_HEALTH_PORT`) on the colliding unit;
   for system-service grabs pick a free port; kill the orphan; fix the pidfile
   accounting after stop/start (a missing pidfile leaves services unkillable
@@ -59,8 +60,7 @@ from real incidents; the concrete sizes and dates are illustrative.
 - Checks: `ava status` (session vs probe columns), session records
   (`run/sessions/*.json`), the session-backend in use
   (`get_backend()` vs `get_shell_backend()`).
-- Causes: after the session-backend migration, **service** sessions live in
-  `PosixProcSessionBackend` while **PTY** sessions (agent shells, watchers,
+- Causes: **service** sessions live in `PosixProcSessionBackend` while **PTY** sessions (agent shells, watchers,
   schedules) live in `get_shell_backend()`. Code
   that probes sessions on the wrong backend sees an empty set and relaunches
   into live sessions — the schedule-manager regression: launch
@@ -80,10 +80,9 @@ from real incidents; the concrete sizes and dates are illustrative.
 - Checks: `schedules` table status; gateway log launch failures; runner
   process alive?; the schedule session's pane output.
 - Causes: the manager asked the wrong session backend — schedule sessions
-  run on `get_shell_backend()` (the pty-sessions service) since the migration
-  (step 2: the launch command rides the service's initial-command mechanism,
-  so a PTY login shell can run a schedule runner); before that they were raw
-  orchestration sessions. A backend mismatch (manager on one backend, session
+  run on `get_shell_backend()` (the pty-sessions service; the launch command
+  rides the service's initial-command mechanism, so a PTY login shell can run
+  a schedule runner). A backend mismatch (manager on one backend, session
   on the other) makes reconcile relaunch every tick and collide with the live
   session (`duplicate session` -> breaker trip). Also:
   a stale session from before a rollout that the new gateway cannot adopt; a

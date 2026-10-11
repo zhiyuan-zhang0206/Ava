@@ -34,6 +34,7 @@ import pytest
 
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS
+from base.db.code_version_gate import ProcessDbGate
 
 # The control test waits this long and asserts a bare connect is STILL pending;
 # the fail-fast tests assert they finished inside it. Comfortably above
@@ -147,14 +148,18 @@ def test_assert_schema_current_fails_fast(silent_peer_url: str) -> None:
     _assert_fails_fast(lambda: assert_schema_current(silent_peer_url))
 
 
-def test_ava_db_connect_fails_fast(silent_peer_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ava_db_connect_fails_fast(
+    silent_peer_url: str, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+) -> None:
     """`ava.DB` is dialled from inside the agent's exec sandbox — an unbounded
     connect freezes the agent's tool call, not just a daemon's boot."""
     from base.agents.context.clients import ClientSet
     from base.db import Database
 
     monkeypatch.setattr(settings.data_plane, "db_url", silent_peer_url)
-    _assert_fails_fast(ClientSet(database=Database.from_settings)._connect_sql)  # pyright: ignore[reportUnknownArgumentType]
+    _assert_fails_fast(
+        ClientSet(database=lambda: Database.from_settings(gate=database_gate))._connect_sql
+    )  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _record_connect_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -200,7 +205,9 @@ def test_shell_session_index_passes_the_resilience_kwargs(
     assert seen.items() >= {**PG_KEEPALIVE_KWARGS, "prepare_threshold": None}.items()
 
 
-def test_ava_db_connect_never_prepares(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ava_db_connect_never_prepares(
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+) -> None:
     """`ava.DB` lives for the whole process and dials the pooled front door —
     a server-side prepared statement made on one pgbouncer backend does not
     exist on the next (2026-09-21 watcher wedge on `_pg3_0`), so the dial must
@@ -211,7 +218,7 @@ def test_ava_db_connect_never_prepares(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:x@127.0.0.1:1/ava")
     seen = _record_connect_kwargs(monkeypatch)
     with pytest.raises(psycopg.OperationalError):
-        ClientSet(database=Database.from_settings)._connect_sql()
+        ClientSet(database=lambda: Database.from_settings(gate=database_gate))._connect_sql()
     assert seen["prepare_threshold"] is None
 
 

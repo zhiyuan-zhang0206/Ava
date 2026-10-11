@@ -11,15 +11,19 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
-from base.db import Database
+from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.sessions.pty.paths import SERVICE_UNIT
+from base.telemetry import EventPipeline
 from cli.commands._repo import _repo_root, session_name
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import force_close_terminals
+from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
 
 # The browser service runs a headed Chrome on a persistent login profile. A
@@ -35,6 +39,7 @@ def _stop_data_plane(
     skip_infra: bool,
     runner_only: bool,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    producer: Callable[[], EventPipeline],
 ) -> None:
     """Stop this cluster's own Postgres+Redis (data preserved on disk).
 
@@ -50,7 +55,7 @@ def _stop_data_plane(
     else:
         from cli.commands.data_plane.cluster_instance import stop_cluster_instance
 
-        stop_cluster_instance(retained_children=retained_children)
+        stop_cluster_instance(retained_children=retained_children, producer=producer)
 
 
 def _reap_cluster_chrome() -> None:
@@ -86,6 +91,7 @@ def _compute_stop_scope(
     preserve_sessions: frozenset[str],
     keep_browser: bool,
     keep_infra: bool,
+    machine: MachineIdentity,
 ) -> tuple[list[str], bool, bool]:
     """What this stop actually tears down: (service_sessions, runner_only, skip_infra).
 
@@ -102,7 +108,7 @@ def _compute_stop_scope(
     if keep_browser:
         preserve_sessions = preserve_sessions | {_BROWSER_SESSION}
 
-    roles = _repo_commands._roles_or_none()
+    roles = _repo_commands._roles_or_none(machine=machine)
     runner_only = roles is not None and "agent-runner" in roles and "gateway" not in roles
     service_sessions = _root_driver_commands._root_tree_plan(preserve_sessions)
     return service_sessions, runner_only, keep_infra or runner_only
@@ -157,6 +163,8 @@ def _force_stop(
     keep_browser: bool = True,
     announce: bool = False,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    producer: Callable[[], EventPipeline],
+    machine: MachineIdentity,
 ) -> int:
     """Explicit force-only resource stop; normal commands use _temporary_stop.
 
@@ -167,7 +175,10 @@ def _force_stop(
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 
     _service_sessions, runner_only, skip_infra = _compute_stop_scope(
-        preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
+        preserve_sessions=preserve_sessions,
+        keep_browser=keep_browser,
+        keep_infra=keep_infra,
+        machine=machine,
     )
     root_preserve = preserve_sessions | (
         frozenset({_BROWSER_SESSION}) if keep_browser else frozenset[str]()
@@ -192,7 +203,7 @@ def _force_stop(
     start_serving.clear_serving()
 
     if announce:
-        _announce_stopping()
+        _announce_stopping(machine=machine)
 
     # Explicit force interrupts the host process. Agent metadata/checkpoints
     # remain untouched; the next host uses its existing owner recovery. This
@@ -220,7 +231,10 @@ def _force_stop(
 
     # 2) stop the data plane (data persists on disk).
     _stop_data_plane(
-        skip_infra=skip_infra, runner_only=runner_only, retained_children=retained_children
+        skip_infra=skip_infra,
+        runner_only=runner_only,
+        retained_children=retained_children,
+        producer=producer,
     )
 
     return 0
@@ -239,6 +253,9 @@ def _do_stop(
     force: bool = False,
     timeout: float = 300,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
+    machine: MachineIdentity,
 ) -> int:
     """Shared stop kernel; only explicit force escalates a service stop."""
     if force:
@@ -250,6 +267,8 @@ def _do_stop(
             keep_browser=keep_browser,
             announce=announce,
             retained_children=retained_children,
+            producer=producer,
+            machine=machine,
         )
     from cli.commands.lifecycle._temporary_stop import stop
 
@@ -262,6 +281,9 @@ def _do_stop(
         teardown_extras=teardown_extras,
         timeout=timeout,
         retained_children=retained_children,
+        database_factory=database_factory,
+        producer=producer,
+        machine=machine,
     )
 
 
@@ -274,6 +296,9 @@ def cmd_stop(
     force: bool = False,
     timeout: float = 300,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
+    machine: MachineIdentity,
 ) -> int:
     """Stop this unit, including terminals and infrastructure; retain its data."""
     return _do_stop(
@@ -287,10 +312,13 @@ def cmd_stop(
         force=force,
         timeout=timeout,
         retained_children=retained_children,
+        database_factory=database_factory,
+        producer=producer,
+        machine=machine,
     )
 
 
-def _announce_stopping() -> None:
+def _announce_stopping(*, machine: MachineIdentity) -> None:
     """Best-effort POST `/api/cluster/stopping` before local teardown.
 
     Stamps the stopping unit's `stopped_at` and recomputes the composed
@@ -299,12 +327,12 @@ def _announce_stopping() -> None:
     caps). Best-effort by design: if the gateway is unreachable we are stopping
     anyway, so we log and proceed rather than block the teardown.
     """
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers, machine_name
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
     from base.host.net.http_dial import post as dial_post
     from base.paths import ava_home
 
     try:
-        name = machine_name()
+        name = machine.name()
         home = str(ava_home())
         url = f"{gateway_api_base()}/api/cluster/stopping"
         resp = dial_post(
@@ -316,7 +344,9 @@ def _announce_stopping() -> None:
         print(f"[ava stop] could not announce shutdown (proceeding anyway): {e}")
 
 
-def _release_self_heal_pause() -> None:
+def _release_self_heal_pause(
+    *, database_factory: DatabaseFactory, machine: MachineIdentity
+) -> None:
     """After a declined restart, clear a paused posture that nothing else will.
 
     A restart that declines never reaches `ava start`/`ava restart`'s unpause,
@@ -345,7 +375,7 @@ def _release_self_heal_pause() -> None:
 
     # The pause lives in the posture row (R1, PR5): only `paused` is this heal's business.
     try:
-        state = read(Database.from_settings())
+        state = read(database_factory(), machine.name())
     except Exception as exc:
         print(
             f"  · leaving this host paused (could not read host_deploy_state: {exc})",
@@ -356,7 +386,7 @@ def _release_self_heal_pause() -> None:
         return  # nothing paused this host; an operator's `ava restart` changes nothing
     from ops.cluster.pause import unpause_local_cluster
 
-    unpause_local_cluster(Database.from_settings(), EventBus.from_settings())
+    unpause_local_cluster(database_factory(), EventBus.from_settings(), local_machine=machine)
     print("  · unpaused this host (nothing else owns the pause; nothing was stopped)")
 
 
@@ -380,6 +410,9 @@ def _cmd_restart_body(
     *,
     mode: str = "smooth",
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
+    command: CommandRuntime,
 ) -> int:
     """Stop then start without a stdin confirmation prompt.
 
@@ -411,7 +444,9 @@ def _cmd_restart_body(
             "it from a shell no ava session hosts (e.g. a plain ssh/login shell).",
             file=sys.stderr,
         )
-        _release_self_heal_pause()  # same decline contract as the preflight refusal below
+        _release_self_heal_pause(
+            database_factory=database_factory, machine=command.machine
+        )  # same decline contract as the preflight refusal below
         return RESTART_DECLINED_EXIT_CODE
 
     # Same refusal as `cmd_update`'s in-process legs: the stop below kills every
@@ -427,7 +462,9 @@ def _cmd_restart_body(
             "(e.g. a plain ssh/login shell) — host still serving",
             file=sys.stderr,
         )
-        _release_self_heal_pause()  # same decline contract as the preflight refusal below
+        _release_self_heal_pause(
+            database_factory=database_factory, machine=command.machine
+        )  # same decline contract as the preflight refusal below
         return RESTART_DECLINED_EXIT_CODE
 
     repo = runtime.code_root
@@ -456,10 +493,10 @@ def _cmd_restart_body(
     # On failure the host keeps serving — abort without stopping.
     print("\n→ preflight probes (validate-before-kill)")
     with status_journal.phase("preflight"):
-        rc = _repo._preflight_probes(Database.from_settings())
+        rc = _repo._preflight_probes(database_factory(), command=command)
     if rc != 0:
         print("  ✗ refusing restart: preflight probes failed — host still serving", file=sys.stderr)
-        _release_self_heal_pause()
+        _release_self_heal_pause(database_factory=database_factory, machine=command.machine)
         if owns_journal:
             status_journal.finish(RESTART_DECLINED_EXIT_CODE, error="preflight probes failed")
         return RESTART_DECLINED_EXIT_CODE
@@ -476,7 +513,7 @@ def _cmd_restart_body(
     print("\n→ start readiness preflight (validate-before-kill, local state)")
     with status_journal.phase("preflight"):
         rc = _start_readiness_preflight.preflight_start_readiness(
-            repo, check_launcher=False, runtime=runtime
+            repo, check_launcher=False, runtime=runtime, machine=command.machine
         )
     if rc != 0:
         print(
@@ -484,7 +521,7 @@ def _cmd_restart_body(
             "nothing was stopped. Fix the findings above, then retry.",
             file=sys.stderr,
         )
-        _release_self_heal_pause()
+        _release_self_heal_pause(database_factory=database_factory, machine=command.machine)
         if owns_journal:
             status_journal.finish(
                 RESTART_DECLINED_EXIT_CODE, error="start-readiness preflight failed"
@@ -508,13 +545,16 @@ def _cmd_restart_body(
             teardown_extras=False,
             force=mode == "force",
             retained_children=retained_children,
+            database_factory=database_factory,
+            producer=producer,
+            machine=command.machine,
         )
     if rc != 0:
         # The quiesce paused this host; a failed stop means no `ava start` is
         # coming to restore it. Release the pause unless a stop hold owns it
         # (same contract as the refusal paths above). The stop leg's own
         # journal phases (drain / services / ...) remain readable.
-        _release_self_heal_pause()
+        _release_self_heal_pause(database_factory=database_factory, machine=command.machine)
         if owns_journal:
             status_journal.finish(rc, error="stop leg failed")
         return rc
@@ -522,7 +562,14 @@ def _cmd_restart_body(
     # startup; neither is recaptured from a later caller or moving selector.
     with status_journal.phase("start"):
         rc = start._cmd_start_body(
-            None, persist_services=False, runtime=runtime, retained_children=retained_children
+            None,
+            database_factory,
+            command.machine,
+            persist_services=False,
+            runtime=runtime,
+            retained_children=retained_children,
+            producer=producer,
+            command=command,
         )
     if owns_journal:
         status_journal.finish(rc, error=None if rc == 0 else f"start leg failed with rc={rc}")
@@ -533,6 +580,15 @@ def cmd_restart(
     *,
     mode: str = "smooth",
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
+    command: CommandRuntime,
 ) -> int:
     """Stop then start without a confirmation prompt."""
-    return _cmd_restart_body(mode=mode, retained_children=retained_children)
+    return _cmd_restart_body(
+        mode=mode,
+        retained_children=retained_children,
+        database_factory=database_factory,
+        producer=producer,
+        command=command,
+    )

@@ -7,7 +7,6 @@ backends are recorded, while local drain uses the private test database.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -15,24 +14,46 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.root_control import client as root_client
 from gateway.app import app
 from gateway.events import telemetry_rows
 from gateway.http.auth.cors import cors_allowed_origins
 from ops import agent_pause, cluster_status
 from ops.cluster import pause as cluster_pause
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
-def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+def fake_admin_events(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[str, Any]]]:
+    """Patch telemetry_rows.query_events for the admin-events route; record the
+    kwargs and return canned rows."""
+
+    calls: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+
+    def _query(_conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+        calls.append(kwargs)
+        return rows, False
+
+    monkeypatch.setattr(telemetry_rows, "query_events", _query)
+    return {"calls": calls, "rows": rows}
+
+
+@pytest.fixture
+def fake_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine_identity: MachineIdentity
+) -> Path:
     """A tmp file standing in for the paused posture row, controllable by the tests.
 
     R1 (Task #1021) moved `is_paused` to the host_deploy_state posture row; the
@@ -48,12 +69,20 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     async def _paused(_request: object) -> bool:
         return flag.exists()
 
-    def _snapshot_paused(_db: object, _state: object = None) -> bool:
+    def _snapshot_paused(
+        _db: object, _state: object = None, *, local_machine: MachineIdentity
+    ) -> bool:
+        assert local_machine is machine_identity
         return flag.exists()
 
     monkeypatch.setattr("gateway.app._cluster_is_paused", _paused)
-    monkeypatch.setattr("gateway.cluster.router.cluster_is_paused", lambda _db: flag.exists())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", lambda _db: flag.exists())  # pyright: ignore[reportUnknownArgumentType]
+
+    def paused(_db: Database, *, local_machine: MachineIdentity) -> bool:
+        assert local_machine is machine_identity
+        return flag.exists()
+
+    monkeypatch.setattr("gateway.cluster.router.cluster_is_paused", paused)
+    monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", paused)
     monkeypatch.setattr("ops.cluster.pause.is_paused", _snapshot_paused)
     return flag
 
@@ -250,29 +279,39 @@ class TestPauseAgents:
         monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
     def test_completed_drain_keeps_sdk_requests_and_services_available(
-        self, pause_backend: _FakeSessionBackend, database: Database, event_bus: EventBus
+        self,
+        pause_backend: _FakeSessionBackend,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Phase A may finish while a peer still needs this gateway's SDK API."""
         pause_backend.alive_answer = True
 
-        agent_pause.pause_agents(database, event_bus)
+        agent_pause.pause_agents(database, event_bus, local_machine=machine_identity)
 
         current = admission.snapshot()
         assert current is not None and current.maintenance is not None
         assert current.maintenance.phase == MaintenancePhase.DRAINED
         with TestClient(app) as client:
             assert client.get("/api/agents").status_code == 200
-        assert not cluster_pause.is_paused(database)
+        assert not cluster_pause.is_paused(database, local_machine=machine_identity)
         assert pause_backend.killed == []
         assert pause_backend.has_session("ava-test-agent-host")
 
     def test_idempotent_when_session_missing(
-        self, pause_backend: _FakeSessionBackend, database: Database, event_bus: EventBus
+        self,
+        pause_backend: _FakeSessionBackend,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Repeated Phase A reuses the same drain without starting services."""
-        agent_pause.pause_agents(database, event_bus)
+        agent_pause.pause_agents(database, event_bus, local_machine=machine_identity)
         first = pause_owner.read()
-        agent_pause.pause_agents(database, event_bus)
+        agent_pause.pause_agents(database, event_bus, local_machine=machine_identity)
         assert pause_owner.read() == first
         assert first.maintenance is not None and first.maintenance.phase == MaintenancePhase.DRAINED
         assert pause_backend.killed == pause_backend.spawned == []
@@ -285,26 +324,36 @@ class TestUnpauseLocalCluster:
         monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
     def test_unpause_restores_posture_and_releases_admission(
-        self, pause_backend: _FakeSessionBackend, database: Database, event_bus: EventBus
+        self,
+        pause_backend: _FakeSessionBackend,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         from base.deploy.state.host_deploy_state import set_posture
 
-        agent_pause.pause_agents(database, event_bus)
-        set_posture(database, "paused")
-        assert cluster_pause.is_paused(database)
+        agent_pause.pause_agents(database, event_bus, local_machine=machine_identity)
+        set_posture(database, "paused", machine=machine_identity.name())
+        assert cluster_pause.is_paused(database, local_machine=machine_identity)
 
-        cluster_pause.unpause_local_cluster(database, event_bus)
+        cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
 
-        assert not cluster_pause.is_paused(database)
+        assert not cluster_pause.is_paused(database, local_machine=machine_identity)
         assert not admission.held()
         assert pause_backend.spawned == pause_backend.killed == []
 
     def test_missing_pause_and_repeated_resume_do_not_start_services(
-        self, pause_backend: _FakeSessionBackend, database: Database, event_bus: EventBus
+        self,
+        pause_backend: _FakeSessionBackend,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
-        cluster_pause.unpause_local_cluster(database, event_bus)
-        cluster_pause.unpause_local_cluster(database, event_bus)
-        assert not cluster_pause.is_paused(database)
+        cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
+        cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
+        assert not cluster_pause.is_paused(database, local_machine=machine_identity)
         assert pause_backend.spawned == pause_backend.killed == []
 
 
@@ -341,23 +390,33 @@ class TestStatusSnapshot:
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         from base.deploy.lifecycle import start_serving
         from base.deploy.state import host_deploy_state
 
         monkeypatch.setattr(start_serving, "run_dir", lambda: fake_flag.parent)
         set_machine_identity(role="agent-runner", name="runner-a")
-        host_deploy_state.set_posture(database, "idle")
+        host_deploy_state.set_posture(database, "idle", machine=machine_identity.name())
         start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
         # unpaused
-        snap = cluster_status.status_snapshot(database)
+        snap = cluster_status.status_snapshot(
+            database,
+            image=LoadedCommit(source_root=Path(__file__).parent, sha=None),
+            local_machine=machine_identity,
+        )
         assert snap.machine_name == "runner-a"
         assert snap.serve_gateway is False
         assert snap.serve_agent_runner is True
         assert snap.paused is False
         # paused
         fake_flag.write_text("")
-        snap2 = cluster_status.status_snapshot(database)
+        snap2 = cluster_status.status_snapshot(
+            database,
+            image=LoadedCommit(source_root=Path(__file__).parent, sha=None),
+            local_machine=machine_identity,
+        )
         assert snap2.paused is True
 
     def test_snapshot_includes_head_sha(
@@ -365,32 +424,60 @@ class TestStatusSnapshot:
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """status_snapshot threads the prod-source HEAD so the roster can compare
         it against the cluster pin."""
         set_machine_identity(role="agent-runner", name="runner-a")
         monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "abc1234")
-        assert cluster_status.status_snapshot(database).head_sha == "abc1234"
+        assert (
+            cluster_status.status_snapshot(
+                database,
+                image=LoadedCommit(source_root=Path(__file__).parent, sha=None),
+                local_machine=machine_identity,
+            ).head_sha
+            == "abc1234"
+        )
 
+    @pytest.mark.parametrize("sha", ["def5678", None])
     def test_snapshot_includes_running_sha(
         self,
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
+        sha: str | None,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """status_snapshot threads the commit the answering process froze at its
         own boot — distinct from head_sha (the checkout the pin verdict compares)
         so the roster can expose a node running stale code even when its checkout
         reads on-pin."""
         set_machine_identity(role="agent-runner", name="runner-a")
-        monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: "def5678")
-        assert cluster_status.status_snapshot(database).running_sha == "def5678"
+
+        def unexpected_process_read(_root: Path) -> str | None:
+            raise AssertionError("snapshot must use its supplied image")
+
+        monkeypatch.setattr(
+            "base.native_process.loaded_commit.capture_commit", unexpected_process_read
+        )
+        assert (
+            cluster_status.status_snapshot(
+                database,
+                image=LoadedCommit(source_root=Path(__file__).parent, sha=sha),
+                local_machine=machine_identity,
+            ).running_sha
+            == sha
+        )
 
     def test_snapshot_ignores_the_start_bookmark(
         self,
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A start that restarted nothing must not be able to make this node look
         current.
@@ -404,11 +491,14 @@ class TestStatusSnapshot:
         answers from the process, so the stale commit survives the bookmark's
         advance and the divergence every drift renderer keys on is there."""
         set_machine_identity(role="agent-runner", name="runner-a")
-        monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: "0ld0ld0aaaa")
         monkeypatch.setattr("base.deploy.git.running_sha.get", lambda: "n3wn3w0bbbb")
         monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "n3wn3w0bbbb")
 
-        snap = cluster_status.status_snapshot(database)
+        snap = cluster_status.status_snapshot(
+            database,
+            image=LoadedCommit(source_root=Path(__file__).parent, sha="0ld0ld0aaaa"),
+            local_machine=machine_identity,
+        )
 
         assert snap.running_sha == "0ld0ld0aaaa"
         assert snap.head_sha == "n3wn3w0bbbb"
@@ -422,6 +512,8 @@ class TestStatusSnapshot:
         monkeypatch: pytest.MonkeyPatch,
         online: bool | None,
         database: Database,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         del fake_flag
         set_machine_identity(role="agent-runner", name="test-host")
@@ -432,7 +524,14 @@ class TestStatusSnapshot:
             return object() if online else None
 
         monkeypatch.setattr(root_client, "root_process", inspect_root)
-        assert cluster_status.status_snapshot(database).supervisor_online is online
+        assert (
+            cluster_status.status_snapshot(
+                database,
+                image=LoadedCommit(source_root=Path(__file__).parent, sha=None),
+                local_machine=machine_identity,
+            ).supervisor_online
+            is online
+        )
 
 
 # ─── cluster endpoints via TestClient ─────────────────────────────────────────
@@ -469,180 +568,6 @@ class TestClusterEndpoints:
 
 
 # ─── admin events query ──────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def fake_admin_events(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[str, Any]]]:
-    """Patch telemetry_rows.query_events for the admin-events route; record the
-    kwargs and return canned rows."""
-
-    calls: list[dict[str, Any]] = []
-    rows: list[dict[str, Any]] = []
-
-    def _query(_conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
-        calls.append(kwargs)
-        return rows, False
-
-    monkeypatch.setattr(telemetry_rows, "query_events", _query)
-    return {"calls": calls, "rows": rows}
-
-
-def _row(
-    *, msg: str = "hi", level: str = "info", event: str = "log", agent_id: int | None = None
-) -> dict[str, Any]:
-    return {
-        "id": 1,
-        "line_sha256": "a" * 64,
-        "ts": datetime(2026, 8, 12, tzinfo=UTC),
-        "agent_id": agent_id,
-        "machine": "machine-1",
-        "process": "gateway",
-        "category": "telemetry",
-        "event_name": event,
-        "level": level,
-        "source": "test",
-        "target_agent_id": None,
-        "attributes": {"msg": msg},
-    }
-
-
-class TestAdminEvents:
-    """`GET /api/cluster/admin/events` slices the unified event stream
-    (`telemetry_events`) for ops debugging without SSH."""
-
-    def test_returns_newest_first(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
-        fake_admin_events["rows"].extend([_row(msg="oldest"), _row(msg="newest", agent_id=1)])
-        with TestClient(app) as client:
-            r = client.get("/api/cluster/admin/events?limit=10")
-        assert r.status_code == 200
-        items = r.json()["items"]
-        assert [i["payload"]["msg"] for i in items] == ["oldest", "newest"]
-        # Wire shape includes the canonical-line identity shared by all event APIs.
-        assert set(items[0]) == {"id", "line_sha256", "ts", "agent_id", "level", "event", "payload"}
-
-    def test_telemetry_and_log_categories_only(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:  # type: ignore[no-untyped-def]
-        """Old PG contract: category IN (telemetry, log) — audit rows (spawn /
-        send_message / ...) stay out of the ops log slice. The route passes the
-        category set to the reader."""
-        with TestClient(app) as client:
-            client.get("/api/cluster/admin/events")
-        assert fake_admin_events["calls"][0]["categories"] == ["telemetry", "log"]
-
-    def test_filter_agent_id(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
-            client.get("/api/cluster/admin/events?agent_id=3")
-        kw = fake_admin_events["calls"][0]
-        assert kw["agent_id"] == 3
-        assert kw["service_only"] is False
-
-    def test_filter_service_only(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
-            client.get("/api/cluster/admin/events?service_only=true")
-        kw = fake_admin_events["calls"][0]
-        assert kw["service_only"] is True
-        assert kw["agent_id"] is None
-
-    def test_rejects_agent_id_with_service_only(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
-            r = client.get("/api/cluster/admin/events?agent_id=1&service_only=true")
-        assert r.status_code == 400
-        assert fake_admin_events["calls"] == []
-
-    def test_filter_level_threshold(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:  # type: ignore[no-untyped-def]
-        # level is a MINIMUM threshold (warning -> warning|error|critical)
-        with TestClient(app) as client:
-            client.get("/api/cluster/admin/events?level=WARNING")
-        kw = fake_admin_events["calls"][0]
-        assert kw["level_min"] == "warning"
-        assert "level" not in kw
-
-    def test_rejects_invalid_level(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
-            r = client.get("/api/cluster/admin/events?level=NOPE")
-        assert r.status_code == 400
-        assert fake_admin_events["calls"] == []
-
-    def test_filter_since_relative(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:  # type: ignore[no-untyped-def]
-        before = datetime.now(UTC)
-        with TestClient(app) as client:
-            client.get("/api/cluster/admin/events?since=1m")
-        after = datetime.now(UTC)
-        from_ = fake_admin_events["calls"][0]["from_"]
-        assert from_ is not None
-        # cutoff = now - 60s, on the Python clock
-        assert before - timedelta(seconds=70) <= from_ <= after - timedelta(seconds=50)
-
-    def test_filter_since_absolute(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
-            client.get("/api/cluster/admin/events?since=2026-08-01T00:00:00Z")
-        assert fake_admin_events["calls"][0]["from_"] == datetime(2026, 8, 1, tzinfo=UTC)
-
-    def test_rejects_invalid_since(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
-            r = client.get("/api/cluster/admin/events?since=garbage")
-        assert r.status_code == 400
-        assert fake_admin_events["calls"] == []
-
-    def test_filter_event_multi(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
-            client.get("/api/cluster/admin/events?event=spawn,terminate")
-        assert fake_admin_events["calls"][0]["event_names"] == ["spawn", "terminate"]
-
-    def test_filter_grep(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
-            client.get("/api/cluster/admin/events?grep=hello")
-        assert fake_admin_events["calls"][0]["grep"] == "hello"
-
-    def test_limit_defaults_to_200(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
-            client.get("/api/cluster/admin/events")
-        assert fake_admin_events["calls"][0]["limit"] == 200
-
-    def test_limit_defaults_come_from_display_config(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
-    ) -> None:  # type: ignore[no-untyped-def]
-        """The implicit page is ``settings.display.cluster_events_default_limit``
-        (``AVA_CLUSTER_EVENTS_DEFAULT_LIMIT``); the literal 200 is only that
-        field's default, not a hard-coded page size."""
-        from base.config import settings
-
-        monkeypatch.setattr(settings.display, "cluster_events_default_limit", 7)
-        with TestClient(app) as client:
-            client.get("/api/cluster/admin/events")
-        assert fake_admin_events["calls"][0]["limit"] == 7
-
-    def test_limit_caps_at_1000(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
-            r = client.get("/api/cluster/admin/events?limit=1001")
-        assert r.status_code == 400
-        assert fake_admin_events["calls"] == []
-
-    def test_no_since_uses_default_window(
-        self, fake_admin_events: dict[str, list[dict[str, Any]]]
-    ) -> None:  # type: ignore[no-untyped-def]
-        # no since -> the route's 24h lower bound applies
-        before = datetime.now(UTC)
-        with TestClient(app) as client:
-            client.get("/api/cluster/admin/events")
-        from_ = fake_admin_events["calls"][0]["from_"]
-        assert from_ is not None
-        assert before - timedelta(hours=24, seconds=5) <= from_ <= before - timedelta(hours=23)
 
 
 # ─── admin: DELETE /api/cluster/machines/{name} ──────────────────────────────
@@ -684,12 +609,20 @@ def _seed_agent_on_machine(
     status: str = "idling",
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     """One live agent row homed on `machine` (test spawn helper + machine
     stamp; the row-creation path moved gateway-side, Task #1236 follow-up)."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET machine = %s, status = %s WHERE id = %s",

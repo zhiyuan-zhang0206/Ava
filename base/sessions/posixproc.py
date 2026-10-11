@@ -44,6 +44,7 @@ import psutil
 
 from base.log import logger
 from base.native_process import pid_starttime_ticks
+from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.native_process.ownership import stable_create_time
 from base.paths import logs_dir, run_dir
 from base.sessions.record import SessionRecord
@@ -197,6 +198,7 @@ def new_session(
         env=env,
         stdin=subprocess.DEVNULL,
         capture_output=True,
+        creationflags=CREATE_NO_WINDOW,
         text=True,
         timeout=_SPAWN_HELPER_TIMEOUT_S,
         check=False,
@@ -260,7 +262,7 @@ def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool
             if _read_record(name) != expected:
                 return False
             if expected.starttime is not None:
-                # A btime step can move the epoch birth of this same process. The
+                # WSL btime can move the epoch birth of this same process. The
                 # recorded /proc ticks are authoritative, including this final
                 # check; unavailable or changed ticks must still refuse delivery.
                 if expected.identifies(proc.pid) is not True:

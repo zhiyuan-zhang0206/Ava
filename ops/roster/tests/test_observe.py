@@ -6,21 +6,28 @@ from collections.abc import Callable
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
 from ops.roster import observe
 from ops.roster.service_spec import ServiceSpec
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
-def test_probe_set_gateway_classifies_signal_types() -> None:
-    views = {v.session: v for v in observe.probe_set(frozenset({"gateway"}))}
+def test_probe_set_gateway_classifies_signal_types(*, machine_identity: MachineIdentity) -> None:
+    views = {
+        v.session: v for v in observe.probe_set(frozenset({"gateway"}), machine=machine_identity)
+    }
     for name in ("gateway", "frontend", "memory-search"):
         assert views[name].kind == "identity"
     assert "gateway-watchdog" not in views
     assert views["gateway"].healthcheck_module == "services.supervision.healthchecks.gateway"
 
 
-def test_probe_set_agent_runner_membership() -> None:
-    views = {v.session: v for v in observe.probe_set(frozenset({"agent-runner"}))}
+def test_probe_set_agent_runner_membership(*, machine_identity: MachineIdentity) -> None:
+    views = {
+        v.session: v
+        for v in observe.probe_set(frozenset({"agent-runner"}), machine=machine_identity)
+    }
     assert set(views) == {
         "ops",
         "page-server",
@@ -75,21 +82,25 @@ def _unreachable(_target: object) -> bool:
     return False
 
 
-def test_observe_gated_service_reports_na_without_probing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_observe_gated_service_reports_na_without_probing(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     def unexpected() -> DaemonProbe:
         raise AssertionError("a gated service must not be probed")
 
     _one_service(monkeypatch, _spec(identity_probe=unexpected), "disabled by configuration")
-    (status,) = observe.observe_services(frozenset({"gateway"}))
+    (status,) = observe.observe_services(frozenset({"gateway"}), machine=machine_identity)
     assert status.alive is None
     assert status.kind == "gated"
     assert status.gate_reason == "disabled by configuration"
 
 
-def test_observe_runs_probe_for_active_http_service(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_observe_runs_probe_for_active_http_service(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     _one_service(monkeypatch, _spec(curl_url="http://inert.invalid"))
     monkeypatch.setattr(observe, "_curl_ok", _reachable)
-    (status,) = observe.observe_services(frozenset({"gateway"}))
+    (status,) = observe.observe_services(frozenset({"gateway"}), machine=machine_identity)
     assert status.alive is True
     assert status.kind == "http"
 
@@ -102,34 +113,38 @@ def test_observe_runs_probe_for_active_http_service(monkeypatch: pytest.MonkeyPa
     ],
 )
 def test_observe_preserves_failed_identity_and_detail(
-    monkeypatch: pytest.MonkeyPatch, probe: DaemonProbe
+    monkeypatch: pytest.MonkeyPatch, probe: DaemonProbe, *, machine_identity: MachineIdentity
 ) -> None:
     _one_service(monkeypatch, _spec(identity_probe=lambda: probe, curl_url="http://inert.invalid"))
     monkeypatch.setattr(observe, "_curl_ok", _reachable)
-    (status,) = observe.observe_services(frozenset({"gateway"}))
+    (status,) = observe.observe_services(frozenset({"gateway"}), machine=machine_identity)
     assert status.kind == "identity"
     assert status.alive is False
     assert status.detail == probe.detail
 
 
-def test_observe_leaves_detail_empty_on_a_healthy_service(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_observe_leaves_detail_empty_on_a_healthy_service(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     _one_service(
         monkeypatch, _spec(identity_probe=lambda: DaemonProbe.up("captured process owns listener"))
     )
-    (status,) = observe.observe_services(frozenset({"gateway"}))
+    (status,) = observe.observe_services(frozenset({"gateway"}), machine=machine_identity)
     assert status.alive is True
     assert status.detail == ""
 
 
 def test_reported_kind_agrees_with_the_probe_actually_run() -> None:
-    from ops.spec import build_services
+    from ops.roster import build_services
 
     for spec in build_services():
         kind, _target = observe._probe_kind_target(spec)
         assert (kind == "identity") == (spec.identity_probe is not None)
 
 
-def test_liveness_only_failures_name_the_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_liveness_only_failures_name_the_endpoint(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     monkeypatch.setattr(observe, "_curl_ok", _unreachable)
     monkeypatch.setattr(observe, "_tcp_ok", _unreachable)
     for spec, expected in (
@@ -137,6 +152,6 @@ def test_liveness_only_failures_name_the_endpoint(monkeypatch: pytest.MonkeyPatc
         (_spec(tcp_port=12345), "nothing accepting on port 12345"),
     ):
         _one_service(monkeypatch, spec)
-        (status,) = observe.observe_services(frozenset({"gateway"}))
+        (status,) = observe.observe_services(frozenset({"gateway"}), machine=machine_identity)
         assert status.alive is False
         assert status.detail == expected

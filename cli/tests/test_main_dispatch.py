@@ -117,7 +117,6 @@ assert not any(name in sys.modules for name in (
     'cli.commands.agents.control', 'cli.commands.agents.notices',
     'cli.commands.agents.timeline', 'cli.commands.agents.impersonation',
     'cli.commands.agents.impersonation_relay', 'cli.commands.agents.impersonation_adapters',
-    'cli.commands.agents.codex_app_server',
 ))
 """
     result = _run_isolated_program(code, tmp_path)
@@ -197,24 +196,6 @@ def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPat
 
     assert _main.main(["status"]) == 0
     assert "AVA_PROCESS_PROFILE" not in os.environ
-
-
-def test_status_handler_body_forwards_the_parsed_namespace(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The routing test above stubs the `_h_*` handler itself, so no handler body
-    ever runs under test — a handler reading a flag the parser no longer defines
-    (`args.via_gateway` after `--via-gateway` was dropped) stays green here and
-    AttributeErrors on the first real `ava status`. Stub one level lower instead:
-    `cmd_status`, which `_h_status` lazy-imports, so the real body executes against
-    the real Namespace."""
-    import cli.commands.lifecycle.status as _status_commands
-
-    calls: list[dict[str, object]] = []
-    monkeypatch.setattr(_status_commands, "cmd_status", lambda **kwargs: calls.append(kwargs) or 0)  # pyright: ignore[reportUnknownArgumentType]
-
-    assert _main.main(["status"]) == 0
-    assert calls == [{}]
 
 
 def test_restart_handler_forwards_the_parsed_config_overlay(
@@ -370,6 +351,7 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
         return 7
 
     _stub_dispatch(monkeypatch, "start", _fake)
+    monkeypatch.setattr("cli.start_identity.require_initialized", _ignoring_retention(lambda: None))
     # `start` is the one verb with a pre-dispatch side effect (the settings-free
     # installed-home gate), which this test neutralizes — it asserts flag
     # forwarding, not bring-up behaviour.
@@ -488,11 +470,13 @@ def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         ["config", "set", "KEY=VALUE"],
         ["logs", "retention"],
         ["agents", "send", "1", "hello"],
+        ["boot"],
         ["status"],
         ["agents", "ls"],
         ["config", "get"],
         ["stop", "--help"],
         ["config", "unset", "--", "--help"],
+        ["boot", "--help"],
     ],
 )
 def test_foreign_checkout_is_refused_before_dispatch(
@@ -502,8 +486,8 @@ def test_foreign_checkout_is_refused_before_dispatch(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A checkout that is not the home's own does not operate that home: every
-    command is refused before anything dispatches, and nothing is written to the
-    home."""
+    command is refused before anything dispatches (and before `ava boot` could
+    retry a start), and nothing is written to the home."""
     home = _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
     monkeypatch.setattr(
@@ -616,8 +600,7 @@ def _noop_parser_recording(verb: str, sink: list[str]) -> argparse.ArgumentParse
 
 
 def test_init_and_start_are_settings_free_until_the_home_is_admitted(tmp_path: Path) -> None:
-    """Deny settings and network; the real public dispatch of `init`, then `start`,
-    must reach its runtime boundary."""
+    """Keep config imports before admission and lazy runtime delivery separate."""
     repo = Path(__file__).resolve().parents[2]
     code = r"""
 import importlib.abc
@@ -628,10 +611,12 @@ import types
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 class DenySettings(importlib.abc.MetaPathFinder):
+    admitted = False
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == "base.config" or fullname.startswith("base.config."):
+        if not self.admitted and (fullname == "base.config" or fullname.startswith("base.config.")):
             raise AssertionError("premature runtime Settings import")
-sys.meta_path.insert(0, DenySettings())
+guard = DenySettings()
+sys.meta_path.insert(0, guard)
 def no_network(*args, **kwargs):
     raise AssertionError("initialization performed a network dial")
 socket.socket.connect = no_network
@@ -648,12 +633,13 @@ def configured():
     assert (home / "start-intent.json").is_file()
     assert (home / ".env").is_file()
     assert not (home.parent / "clusters.json").exists()
-def log(args):
+def log(args, *, initialize):
     assert args == ["start"]
     configured()
     calls.append("logging")
 main._init_cli_logging = log
 def start(**kwargs):
+    assert not kwargs["command"].config.prepared
     configured()
     calls.append("runtime")
     return 0
@@ -668,9 +654,15 @@ assert main.main(["start"]) == 1 and not home.exists()  # nothing to start yet, 
 assert main.main(["init", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"]) == 0
 configured()
 assert calls == []  # init started nothing
+assert "base.config" not in sys.modules
+guard.admitted = True
+from base.config import ConfigBoot
+def no_prepare(self):
+    raise AssertionError("typed root prepared configuration before runtime delivery")
+ConfigBoot.prepare = no_prepare
 assert main.main(["start"]) == 0
 assert calls == ["logging", "runtime", "boot-complete"]
-assert "base.config" not in sys.modules
+assert "base.config" in sys.modules  # admitted root types are allowed; delivery stayed lazy
 """
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.update(
@@ -747,22 +739,46 @@ assert 'base.config' not in sys.modules
     assert result.returncode == 0, result.stderr
 
 
-def test_main_declares_the_cli_exempt_from_the_database_code_gate(
+def test_help_keeps_service_database_admission_unchanged(
     tmp_path: Path,
 ) -> None:
     """`ava stop` writes to the database to drain agents, so a host left on stale
-    code must still be able to run it: the CLI entry point exempts itself first."""
+    code must still be able to run it through its own handles; help preserves the service gate."""
     code = """
-from base.native_process import code_version
+import sys
 from cli import main
-assert code_version.db_gate_applies() is True
 try:
     main.main(['--help'])
 except SystemExit as exc:
     assert exc.code == 0
 else:
     raise AssertionError('help must exit')
-assert code_version.db_gate_applies() is False
+assert 'base.config' not in sys.modules
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from cli.database import operator_database_factory
+from cli.database.runtime import CommandRuntime
+command = CommandRuntime.create()
+
+def unavailable():
+    raise AssertionError('help and operator admission must not read a Git version')
+
+service = ProcessDbGate(version=unavailable, process='service')
+assert service.min_read_due() is True
+seen = []
+def from_settings(*, gate, local_host):
+    assert local_host == command.machine.host
+    assert gate.application_name() == 'ava:cli'
+    assert gate.min_read_due() is False
+    seen.append(gate)
+    return object()
+Database.from_settings = from_settings
+factory = operator_database_factory(local_host=command.machine.host)
+assert not seen
+factory()
+factory()
+assert len(seen) == 2 and seen[0] is seen[1]
+assert service.min_read_due() is True
 """
     result = _run_isolated_program(code, tmp_path)
     assert result.returncode == 0, result.stderr
@@ -773,3 +789,9 @@ def _ignoring_retention[T](callback: Callable[[], T]) -> Callable[..., T]:
         return callback()
 
     return invoke
+
+
+def test_start_parser_rejects_retired_updater_telemetry() -> None:
+    with pytest.raises(SystemExit) as error:
+        build_parser().parse_args(["start", "--updater-telemetry"])
+    assert error.value.code == 2

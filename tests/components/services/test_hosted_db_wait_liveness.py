@@ -16,10 +16,11 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from base.agents.observation import db_wait
 from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.turn_progress import TurnProgress
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
@@ -31,7 +32,10 @@ from services.agent_runner.agent_host.dispatcher import (
     TurnScheduler,
 )
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
+from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import (
+    _graph,
+    admit_recovery,
+)
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.wake.delivery_watchdog import turn_liveness
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog_turn_liveness import FakeRedis
@@ -54,6 +58,7 @@ def _mark_agent_stale_with_pending_cause(
     held: bool,
     event_bus: EventBus,
     database: Database,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Make the agent look 100s stale, held by maintenance or by an old pending message."""
     if held:
@@ -61,7 +66,7 @@ def _mark_agent_stale_with_pending_cause(
         pause_owner.begin_maintenance("waiting", acquired)
         cohort.prepare(
             db_conn,
-            machine=machine_name(),
+            machine=machine_identity.name(),
             host_owner=incarnation.owner,
             holder="waiting",
             acquired_at=acquired,
@@ -170,9 +175,16 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    incarnation = await admit_recovery(
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
 
@@ -185,14 +197,20 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,
-        machine=machine_name(),
+        machine=machine_identity,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     host._owner = incarnation.owner
     _mark_agent_stale_with_pending_cause(
-        db_conn, agent, incarnation, held=held, event_bus=event_bus, database=database
+        db_conn,
+        agent,
+        incarnation,
+        held=held,
+        event_bus=event_bus,
+        database=database,
+        machine_identity=machine_identity,
     )
     recovered, cancelled = asyncio.Event(), asyncio.Event()
     waits = DatabaseWaits()
@@ -255,9 +273,16 @@ async def test_gateway_exemption_requires_current_db_identity_and_finite_fresh_p
     proof_kind: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    incarnation = await admit_recovery(
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     db_conn.execute(
@@ -292,7 +317,7 @@ async def test_gateway_exemption_requires_current_db_identity_and_finite_fresh_p
         proof.update(observed_at=now - 88, expires_at=now + 12)
     redis = FakeRedis(
         {
-            f"host_turn_progress:{machine_name()}": json.dumps(
+            f"host_turn_progress:{machine_identity.name()}": json.dumps(
                 {str(agent): {"age_s": 100.0, "last_marks": [1.0], "db_wait": proof}}
             )
         }
@@ -310,9 +335,16 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    incarnation = await admit_recovery(
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     clock = TurnProgress()
@@ -329,10 +361,10 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
         with waits.wait(incarnation) as waiting:
             waiting.renew()
             await daemon._publish_turn_progress_heartbeat(
-                EventBus.from_settings(), machine_name(), {agent}, waits, clock
+                EventBus.from_settings(), machine_identity.name(), {agent}, waits, clock
             )
             await daemon._publish_turn_progress_heartbeat(
-                EventBus.from_settings(), machine_name(), {agent}, waits, clock
+                EventBus.from_settings(), machine_identity.name(), {agent}, waits, clock
             )
             assert writes[0][str(agent)]["db_wait"] == writes[1][str(agent)]["db_wait"]
             assert writes[0][str(agent)]["age_s"] >= 100
@@ -340,7 +372,7 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
             waiting.deadline = time.monotonic() - 1
             assert waits.snapshot(agent) is None
             await daemon._publish_turn_progress_heartbeat(
-                EventBus.from_settings(), machine_name(), {agent}, waits, clock
+                EventBus.from_settings(), machine_identity.name(), {agent}, waits, clock
             )
             assert "db_wait" not in writes[-1][str(agent)]
         assert waits.snapshot(agent) is None
@@ -353,9 +385,16 @@ async def test_success_handoff_clears_on_actual_node_progress(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+    incarnation = await admit_recovery(
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     clock = TurnProgress()
@@ -373,12 +412,12 @@ async def test_success_handoff_clears_on_actual_node_progress(
             waiting.renew()
             waiting.complete()
         await daemon._publish_turn_progress_heartbeat(
-            EventBus.from_settings(), machine_name(), {agent}, waits, clock
+            EventBus.from_settings(), machine_identity.name(), {agent}, waits, clock
         )
         assert "db_wait" in writes[-1][str(agent)]
         clock.mark(agent)
         await daemon._publish_turn_progress_heartbeat(
-            EventBus.from_settings(), machine_name(), {agent}, waits, clock
+            EventBus.from_settings(), machine_identity.name(), {agent}, waits, clock
         )
         assert "db_wait" not in writes[-1][str(agent)]
         assert waits.snapshot(agent) is None

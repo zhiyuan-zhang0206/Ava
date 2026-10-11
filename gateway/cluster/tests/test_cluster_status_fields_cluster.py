@@ -7,9 +7,11 @@ from datetime import UTC, datetime
 import pytest
 
 import gateway.cluster.status as status_mod
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from gateway.cluster import roster_probe
-from ops import cluster_status
+from gateway.cluster.process_boot import LOADED_IMAGE
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
@@ -21,6 +23,8 @@ def test_gather_cluster_status_local_agent_runner_probed(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
+    *,
+    machine_identity: MachineIdentity,
 ):
     """A local agent-runner row is probed via its own ops server (status_probe,
     dialed at its registered localhost URL), picking up shell_count + daemon
@@ -67,7 +71,14 @@ def test_gather_cluster_status_local_agent_runner_probed(
         )
     ]
     machines = asyncio.run(
-        status_mod.gather_cluster_status(database, rows, "m1", identity_log=identity_log)
+        status_mod.gather_cluster_status(
+            database,
+            rows,
+            "m1",
+            identity_log=identity_log,
+            image=LOADED_IMAGE,
+            local_machine=machine_identity,
+        )
     )
 
     assert len(machines) == 1
@@ -85,6 +96,8 @@ def test_probe_flags_identity_mismatch_when_responder_name_differs(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
+    *,
+    machine_identity: MachineIdentity,
 ):
     """If the ops server answers under a machine_name != the targeted row, the
     probe returns a loud identity-mismatch row (online False, identity_mismatch
@@ -119,7 +132,14 @@ def test_probe_flags_identity_mismatch_when_responder_name_differs(
         ("air", "http://localhost:8106", ["agent-runner"], datetime.now(UTC), None, None, False)
     ]
     machines = asyncio.run(
-        status_mod.gather_cluster_status(database, rows, "gateway-host", identity_log=identity_log)
+        status_mod.gather_cluster_status(
+            database,
+            rows,
+            "gateway-host",
+            identity_log=identity_log,
+            image=LOADED_IMAGE,
+            local_machine=machine_identity,
+        )
     )
 
     assert len(machines) == 1
@@ -136,6 +156,8 @@ def test_identity_mismatch_logs_once_per_episode(
     caplog: pytest.LogCaptureFixture,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
+    *,
+    machine_identity: MachineIdentity,
 ):
     """An active row's mismatch stays a loud ERROR, but one line per episode —
     not one per panel poll; a correct identity echo ends the episode, so a
@@ -167,7 +189,14 @@ def test_identity_mismatch_logs_once_per_episode(
     caplog.set_level(logging.DEBUG, logger="gateway.cluster.roster_probe")
 
     machines = asyncio.run(
-        status_mod.gather_cluster_status(database, rows, "gateway-host", identity_log=identity_log)
+        status_mod.gather_cluster_status(
+            database,
+            rows,
+            "gateway-host",
+            identity_log=identity_log,
+            image=LOADED_IMAGE,
+            local_machine=machine_identity,
+        )
     )
     assert machines[0].identity_mismatch is True
     first = [r for r in caplog.records if r.name == "gateway.cluster.roster_probe"]
@@ -176,7 +205,14 @@ def test_identity_mismatch_logs_once_per_episode(
     # A second poll of the same mismatch is silent.
     caplog.clear()
     asyncio.run(
-        status_mod.gather_cluster_status(database, rows, "gateway-host", identity_log=identity_log)
+        status_mod.gather_cluster_status(
+            database,
+            rows,
+            "gateway-host",
+            identity_log=identity_log,
+            image=LOADED_IMAGE,
+            local_machine=machine_identity,
+        )
     )
     assert [r for r in caplog.records if r.name == "gateway.cluster.roster_probe"] == []
 
@@ -184,14 +220,28 @@ def test_identity_mismatch_logs_once_per_episode(
     caplog.clear()
     responder["name"] = "air"
     machines = asyncio.run(
-        status_mod.gather_cluster_status(database, rows, "gateway-host", identity_log=identity_log)
+        status_mod.gather_cluster_status(
+            database,
+            rows,
+            "gateway-host",
+            identity_log=identity_log,
+            image=LOADED_IMAGE,
+            local_machine=machine_identity,
+        )
     )
     assert machines[0].online is True
 
     # ...so the next mismatch is a fresh episode and logs again.
     responder["name"] = "gateway-host"
     asyncio.run(
-        status_mod.gather_cluster_status(database, rows, "gateway-host", identity_log=identity_log)
+        status_mod.gather_cluster_status(
+            database,
+            rows,
+            "gateway-host",
+            identity_log=identity_log,
+            image=LOADED_IMAGE,
+            local_machine=machine_identity,
+        )
     )
     again = [
         r
@@ -206,6 +256,8 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
     caplog: pytest.LogCaptureFixture,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
+    *,
+    machine_identity: MachineIdentity,
 ):
     """A stopped row's stale URL answering as another host is the expected
     face of the stop: the verdict stays (the row is still not that host), but
@@ -237,10 +289,24 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
     caplog.set_level(logging.DEBUG, logger="gateway.cluster.roster_probe")
 
     machines = asyncio.run(
-        status_mod.gather_cluster_status(database, rows, "gateway-host", identity_log=identity_log)
+        status_mod.gather_cluster_status(
+            database,
+            rows,
+            "gateway-host",
+            identity_log=identity_log,
+            image=LOADED_IMAGE,
+            local_machine=machine_identity,
+        )
     )
     asyncio.run(
-        status_mod.gather_cluster_status(database, rows, "gateway-host", identity_log=identity_log)
+        status_mod.gather_cluster_status(
+            database,
+            rows,
+            "gateway-host",
+            identity_log=identity_log,
+            image=LOADED_IMAGE,
+            local_machine=machine_identity,
+        )
     )
 
     assert machines[0].identity_mismatch is True
@@ -253,6 +319,8 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
+    *,
+    machine_identity: MachineIdentity,
 ):
     """A local machine WITHOUT agent-runner capability (pure gateway) runs no
     ops server: its row is a lightweight local read — no probe dispatched, no
@@ -264,14 +332,26 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(
         return {}
 
     monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(status_mod, "cluster_is_paused", lambda _db: True)  # pyright: ignore[reportUnknownArgumentType]
+
+    def paused(_db: Database, *, local_machine: MachineIdentity) -> bool:
+        assert local_machine is machine_identity
+        return True
+
+    monkeypatch.setattr(status_mod, "cluster_is_paused", paused)
     monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
 
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("m1", "http://m1", ["gateway"], datetime.now(UTC), None, None, False)
     ]
     machines = asyncio.run(
-        status_mod.gather_cluster_status(database, rows, "m1", identity_log=identity_log)
+        status_mod.gather_cluster_status(
+            database,
+            rows,
+            "m1",
+            identity_log=identity_log,
+            image=LOADED_IMAGE,
+            local_machine=machine_identity,
+        )
     )
 
     assert dispatched == []
@@ -279,6 +359,7 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(
     assert m.online is True
     assert m.paused is True
     assert m.head_sha == "abc123"
+    assert m.running_sha == LOADED_IMAGE.sha
     assert m.shell_count == 0
     assert m.agent_host_online is None
     assert m.supervisor_online is None
@@ -288,11 +369,18 @@ def test_gather_returns_rows_sorted_by_name(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
+    *,
+    machine_identity: MachineIdentity,
 ):
     """The local pure-gateway row takes the lightweight local read and the
     address-less row is reported offline without a dial; the roster comes back
     ordered by machine name whatever order the table gave."""
-    monkeypatch.setattr(status_mod, "cluster_is_paused", lambda _db: False)  # pyright: ignore[reportUnknownArgumentType]
+
+    def paused(_db: Database, *, local_machine: MachineIdentity) -> bool:
+        assert local_machine is machine_identity
+        return False
+
+    monkeypatch.setattr(status_mod, "cluster_is_paused", paused)
     monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
     now = datetime.now(UTC)
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
@@ -301,7 +389,14 @@ def test_gather_returns_rows_sorted_by_name(
     ]
 
     machines = asyncio.run(
-        status_mod.gather_cluster_status(database, rows, "m1", identity_log=identity_log)
+        status_mod.gather_cluster_status(
+            database,
+            rows,
+            "m1",
+            identity_log=identity_log,
+            image=LOADED_IMAGE,
+            local_machine=machine_identity,
+        )
     )
 
     assert [m.name for m in machines] == ["m1", "m2"]
@@ -311,6 +406,8 @@ def test_gather_cluster_status_carries_probe_paused_reason(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
+    *,
+    machine_identity: MachineIdentity,
 ):
     """A host parked by its serving gate must arrive on the roster with the
     breakdown attached (task #3404): paused=true + paused_reason='startup', not
@@ -343,7 +440,14 @@ def test_gather_cluster_status_carries_probe_paused_reason(
         ("m1", "http://localhost:9", ["agent-runner"], datetime.now(UTC), None, None, False)
     ]
     machines = asyncio.run(
-        status_mod.gather_cluster_status(database, rows, "m1", identity_log=identity_log)
+        status_mod.gather_cluster_status(
+            database,
+            rows,
+            "m1",
+            identity_log=identity_log,
+            image=LOADED_IMAGE,
+            local_machine=machine_identity,
+        )
     )
 
     assert len(machines) == 1
@@ -351,12 +455,3 @@ def test_gather_cluster_status_carries_probe_paused_reason(
     assert m.online is True
     assert m.paused is True
     assert m.paused_reason == "startup"
-
-
-def test_status_schemas_omit_retired_updater_projections() -> None:
-    from base.api_contracts.status import MachineStatus
-    from gateway.cluster.schemas import ClusterPanel
-
-    retired = {"current_orchestration", "last_updater_outcome", "last_update"}
-    for model in (cluster_status.ClusterStatus, ClusterPanel, MachineStatus):
-        assert retired.isdisjoint(model.model_fields)

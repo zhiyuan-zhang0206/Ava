@@ -21,16 +21,20 @@ manually with `scripts/ci/pull_requests/accounting.py --since ... --until ... --
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from collections.abc import Callable
+from functools import partial
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from schedules.catchup import cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
-from base.log import init_gateway_process
+from base.daemon.schedules.inputs import ScheduleInputs
+from schedules.entry import fresh_schedule_entry, schedule_entry
+from base.log.process import init_gateway_process
 
 
 CRON = "0 5 * * *"
@@ -117,13 +121,22 @@ def summarize(
     }
 
 
-def _fire(slot_end: datetime, _payload: None) -> None:
+def _fire(
+    slot_end: datetime,
+    _payload: None,
+    *,
+    producer: Callable[[], Any],
+    image: LoadedCommit,
+    machine_reader: Callable[[], str],
+) -> None:
     try:
         accounting = _load_accounting()
         since, until, day = window_bounds(slot_end)
         entries = accounting.collect(accounting.DEFAULT_REPO, since, until)
         appended = accounting.append_ledger(accounting.DEFAULT_LEDGER, entries)
-        init_gateway_process(name=_PROCESS_NAME)
+        init_gateway_process(
+            name=_PROCESS_NAME, producer=producer, machine_reader=machine_reader, image=image
+        )
         from base import telemetry
 
         telemetry.emit(
@@ -147,9 +160,12 @@ def _fire(slot_end: datetime, _payload: None) -> None:
         _report_failure(f"{type(exc).__name__}: {exc}")
 
 
-def _main_loop() -> None:
-    db = Database.from_settings()
-    run_daily_loop(db, CRON, cluster_timezone(), _fire)
+def _main_loop(*, inputs: ScheduleInputs) -> None:
+    db = inputs.database()
+    fire = partial(
+        _fire, producer=inputs.producer, image=inputs.image, machine_reader=inputs.machine.name
+    )
+    run_daily_loop(db, CRON, cluster_timezone(), fire)
 
 
 if __name__ == "__main__":
@@ -158,4 +174,10 @@ if __name__ == "__main__":
         {"IDLING", "RUNNING", "TERMINATED"},
         schedule_name="c9-daily-report",
     )
-    _main_loop()
+    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    if entry_inputs is None:
+        from base.log import prepare_process_logging
+
+        prepare_process_logging()
+    with fresh_schedule_entry() if entry_inputs is None else schedule_entry(entry_inputs) as inputs:
+        _main_loop(inputs=inputs)

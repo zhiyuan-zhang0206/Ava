@@ -5,8 +5,10 @@ from __future__ import annotations
 import importlib.util
 import sys
 from datetime import UTC, datetime
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -35,7 +37,8 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
     module = _load()
     calls: list[list[str]] = []
 
-    def run_exporter(args: list[str]) -> int:
+    def run_exporter(args: list[str], *, producer: Callable[[], Any]) -> int:
+        assert producer == module.ava.context.clients.event_pipeline
         calls.append(args)
         return 0
 
@@ -63,7 +66,8 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
 def test_fire_reports_failed_collector(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load()
 
-    def failed_exporter(args: list[str]) -> int:
+    def failed_exporter(args: list[str], *, producer: Callable[[], Any]) -> int:
+        assert producer == module.ava.context.clients.event_pipeline
         return 1
 
     monkeypatch.setattr(

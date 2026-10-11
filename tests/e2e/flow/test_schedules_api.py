@@ -163,12 +163,16 @@ def test_rest_runs_and_logs_read_persisted_history_and_transcript(
         assert client.get("/api/schedules/999999999/runs").status_code == 404
 
 
+@pytest.mark.usefixtures("authenticated_gateway")
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.schedules:build")
 def test_draft_launches_a_writer_with_the_request_in_model_input(spawned_agent: int) -> None:
     reset_record()
     request_text = "e2e draft consolidate memory each night"
     response = httpx.post(
-        f"{GATEWAY_URL}/api/schedules/draft", json={"nl": request_text}, timeout=90.0
+        f"{GATEWAY_URL}/api/keyed/v1/schedules/draft",
+        json={"nl": request_text},
+        headers={"Idempotency-Key": "e2e-draft", "Idempotency-Scope": "principal-v1"},
+        timeout=90.0,
     )
     response.raise_for_status()
     writer_id = int(response.json()["agent_id"])

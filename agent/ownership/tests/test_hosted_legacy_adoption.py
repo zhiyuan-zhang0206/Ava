@@ -34,6 +34,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.incarnation.host_process_evidence import LocalHostEvidence, local_host_evidence
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import ava_home, exec_run_dir
 
@@ -69,10 +70,20 @@ def _seed(
 
 
 async def _admit(
-    pool: AsyncConnectionPool, agent_id: int, owner: UUID, *, expected_from: str = "idling"
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    owner: UUID,
+    *,
+    expected_from: str = "idling",
+    database_gate: ProcessDbGate,
 ) -> RuntimeIncarnation | None:
     return await admit_hosted_runtime(
-        pool, agent_id, "host-test", owner, expected_from=expected_from, db=Database.from_settings()
+        pool,
+        agent_id,
+        "host-test",
+        owner,
+        expected_from=expected_from,
+        db=Database.from_settings(gate=database_gate),
     )
 
 
@@ -152,8 +163,7 @@ def _audit_attributes(
 
 
 async def test_legacy_null_row_admits_over_dead_local_host_without_full_ttl(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     """The #2156 shape admits at renewal silence, not at lease expiry.
 
@@ -163,7 +173,7 @@ async def test_legacy_null_row_admits_over_dead_local_host_without_full_ttl(
     predecessor.
     """
     agent_id, prior = _seed(db_conn, lease_s=300.0)
-    successor = await _admit(aops_pool, agent_id, uuid4())
+    successor = await _admit(aops_pool, agent_id, uuid4(), database_gate=database_gate)
     assert successor is not None
     stored_owner, resources, status, lease_fresh = _row(db_conn, agent_id)
     assert stored_owner == successor.owner
@@ -187,6 +197,7 @@ async def test_an_admission_whose_audit_fact_cannot_be_recorded_does_not_admit(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     async def refuse(_conn: object, _event: object) -> None:
         raise RuntimeError("audit write failed")
@@ -195,14 +206,13 @@ async def test_an_admission_whose_audit_fact_cannot_be_recorded_does_not_admit(
     agent_id, prior = _seed(db_conn, lease_s=300.0)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
-        await _admit(aops_pool, agent_id, uuid4())
+        await _admit(aops_pool, agent_id, uuid4(), database_gate=database_gate)
 
     assert _row(db_conn, agent_id) == (prior, None, "idling", True)
 
 
 async def test_legacy_null_row_still_waits_while_the_lease_looks_beaten(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     """A lease renewed 10s ago is not silence: the fence is not shortcut.
 
@@ -210,14 +220,13 @@ async def test_legacy_null_row_still_waits_while_the_lease_looks_beaten(
     fresh-lease shape refuses exactly as before.
     """
     agent_id, prior = _seed(db_conn, lease_s=590.0)  # 10s of silence
-    assert await _admit(aops_pool, agent_id, uuid4()) is None
+    assert await _admit(aops_pool, agent_id, uuid4(), database_gate=database_gate) is None
     assert _row(db_conn, agent_id) == (prior, None, "idling", True)
     assert _audit_attributes(db_conn, agent_id, "hosted_legacy_adoption") == []
 
 
 async def test_legacy_null_row_refuses_while_same_home_host_daemon_lives(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     """A live same-home host daemon outranks the silence probe."""
     agent_id, prior = _seed(db_conn)
@@ -229,15 +238,18 @@ async def test_legacy_null_row_refuses_while_same_home_host_daemon_lives(
             lambda: daemon_pid in _evidence(agent_id).live_hosts,
             what="the daemon look-alike to appear in the evidence",
         )
-        assert await _admit(aops_pool, agent_id, successor_owner) is None
+        assert (
+            await _admit(aops_pool, agent_id, successor_owner, database_gate=database_gate) is None
+        )
     assert _row(db_conn, agent_id) == (prior, None, "idling", True)
     _wait_until(lambda: _evidence(agent_id).clean, what="the daemon look-alike to exit")
-    assert await _admit(aops_pool, agent_id, successor_owner) is not None
+    assert (
+        await _admit(aops_pool, agent_id, successor_owner, database_gate=database_gate) is not None
+    )
 
 
 async def test_legacy_null_row_refuses_while_an_exec_child_of_the_agent_lives(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     """A live exec child of this agent is an unresolved resource: wait."""
     agent_id, prior = _seed(db_conn)
@@ -255,16 +267,21 @@ async def test_legacy_null_row_refuses_while_an_exec_child_of_the_agent_lives(
             lambda: child_pid in _evidence(agent_id).live_exec_children,
             what="the exec-child look-alike to appear in the evidence",
         )
-        assert await _admit(aops_pool, agent_id, successor_owner) is None
+        assert (
+            await _admit(aops_pool, agent_id, successor_owner, database_gate=database_gate) is None
+        )
     assert _row(db_conn, agent_id) == (prior, None, "idling", True)
     _wait_until(lambda: _evidence(agent_id).clean, what="the exec child to exit")
-    assert await _admit(aops_pool, agent_id, successor_owner) is not None
+    assert (
+        await _admit(aops_pool, agent_id, successor_owner, database_gate=database_gate) is not None
+    )
 
 
 async def test_legacy_null_row_ignores_a_foreign_home_host_daemon(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     tmp_path: Path,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A co-located unit's daemon is not evidence about this home."""
     agent_id, _prior = _seed(db_conn)
@@ -273,12 +290,11 @@ async def test_legacy_null_row_ignores_a_foreign_home_host_daemon(
         {"AVA_HOME": str(tmp_path / "other-home")},
     ) as daemon_pid:
         assert daemon_pid not in _evidence(agent_id).live_hosts
-        assert await _admit(aops_pool, agent_id, uuid4()) is not None
+        assert await _admit(aops_pool, agent_id, uuid4(), database_gate=database_gate) is not None
 
 
 async def test_legacy_null_row_refuses_an_unattributable_exec_child(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     """A child-shaped process without readable identity is never guessed away."""
     agent_id, prior = _seed(db_conn)
@@ -288,38 +304,37 @@ async def test_legacy_null_row_refuses_an_unattributable_exec_child(
             lambda: any(f"pid {child_pid}" in reason for reason in _evidence(agent_id).unreadable),
             what="the unattributable child to appear in the evidence",
         )
-        assert await _admit(aops_pool, agent_id, successor_owner) is None
+        assert (
+            await _admit(aops_pool, agent_id, successor_owner, database_gate=database_gate) is None
+        )
     assert _row(db_conn, agent_id) == (prior, None, "idling", True)
 
 
 async def test_legacy_null_row_refuses_a_remote_machine(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     """Another machine's rows are not this host's to replace, evidence or not."""
     agent_id, prior = _seed(db_conn, machine="other-machine")
-    assert await _admit(aops_pool, agent_id, uuid4()) is None
+    assert await _admit(aops_pool, agent_id, uuid4(), database_gate=database_gate) is None
     assert _row(db_conn, agent_id) == (prior, None, "idling", True)
 
 
 async def test_legacy_null_row_refuses_a_crash_marked_row(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     """Crash corpses keep their reaper/resurrect recovery, not this path."""
     agent_id, prior = _seed(db_conn, marked=True)
-    assert await _admit(aops_pool, agent_id, uuid4()) is None
+    assert await _admit(aops_pool, agent_id, uuid4(), database_gate=database_gate) is None
     assert _row(db_conn, agent_id) == (prior, None, "idling", True)
 
 
 async def test_two_successors_admit_only_one_legacy_owner(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     """Concurrent successors of a dead legacy host cannot both take the row."""
     agent_id, _prior = _seed(db_conn)
     results = await asyncio.gather(
-        *(_admit(aops_pool, agent_id, uuid4()) for _ in range(2)),
+        *(_admit(aops_pool, agent_id, uuid4(), database_gate=database_gate) for _ in range(2)),
         return_exceptions=True,
     )
     admitted = [value for value in results if isinstance(value, RuntimeIncarnation)]
@@ -333,6 +348,7 @@ async def test_stale_proposal_cannot_adopt_a_row_that_moved_on(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Evidence gathered for one row state is void once that state moved.
 
@@ -357,6 +373,6 @@ async def test_stale_proposal_cannot_adopt_a_row_that_moved_on(
         return proposal
 
     monkeypatch.setattr("agent.ownership.hosted._legacy_dead_host_adoption", _stale)
-    assert await _admit(aops_pool, agent_id, uuid4()) is None
+    assert await _admit(aops_pool, agent_id, uuid4(), database_gate=database_gate) is None
     stored_owner, _resources, status, _fresh = _row(db_conn, agent_id)
     assert stored_owner == prior and status == "idling"

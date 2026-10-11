@@ -570,6 +570,7 @@ finally:
 """
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="real POSIX PTY sessions")
 @pytest.mark.usefixtures("pty_service")
 @pytest.mark.asyncio
 async def test_kill_terminates_only_the_owners_real_shell_sessions(

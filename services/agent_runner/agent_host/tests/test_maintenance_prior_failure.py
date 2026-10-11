@@ -17,9 +17,10 @@ from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -32,6 +33,7 @@ from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.components.agent.test_maintenance import WHEN, _agent
 from tests.components.agent.test_maintenance import isolate as isolate
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def _failed_turn(
@@ -39,6 +41,9 @@ async def _failed_turn(
     agent: int,
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> tuple[host_module.AgentHost, AsyncPostgresSaver, RunnableConfig, AIMessage, list[str]]:
     calls: list[str] = []
     tail = AIMessage(id="saved-before-error", content="Preserve this completed work")
@@ -71,9 +76,9 @@ async def _failed_turn(
         pool=pool,
         checkpointer=saver,
         graph=graph,
-        machine=machine_name(),
+        machine=local_machine,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
@@ -82,7 +87,7 @@ async def _failed_turn(
         ops_pool=pool,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
         clock_factory=configured_policy().clock_factory,
@@ -127,10 +132,18 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn)
+    agent = _agent(db_conn, machine_name=machine_identity.name())
     host, _saver, config, tail, calls = await _failed_turn(
-        aops_pool, agent, monkeypatch, model_catalog=model_catalog
+        aops_pool,
+        agent,
+        monkeypatch,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+        local_machine=machine_identity,
     )
     chat = insert_inbound_message(
         db_conn, agent, "Leave queued work untouched", "user", bus=event_bus, database=database
@@ -143,7 +156,7 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
     pause_owner.begin_maintenance("after-crash", WHEN)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=host._owner,
         holder="after-crash",
         acquired_at=WHEN,
@@ -202,15 +215,23 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn)
+    agent = _agent(db_conn, machine_name=machine_identity.name())
     host, _saver, config, tail, calls = await _failed_turn(
-        aops_pool, agent, monkeypatch, model_catalog=model_catalog
+        aops_pool,
+        agent,
+        monkeypatch,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+        local_machine=machine_identity,
     )
     pause_owner.begin_maintenance("failed-flush", WHEN)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=host._owner,
         holder="failed-flush",
         acquired_at=WHEN,

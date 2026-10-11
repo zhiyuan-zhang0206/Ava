@@ -169,7 +169,10 @@ def test_builtin_mcps_folder_surfaces_chrome(
     # on every agent; it resolves because built-ins are spawned with cwd=repo root.
     assert merged["chrome"]["command"] == ".venv/bin/python"
     assert "services.desktop.browser.mcp_wrapper" in merged["chrome"]["args"]
-    assert merged["chrome"]["requires"] == {"display": True}
+    # unix_socket alongside display: the wrapper reaches the browser-mcp daemon
+    # over an AF_UNIX socket, so a Windows agent must not be offered this entry —
+    # it is gated on the same fact that keeps the daemon out of that host's roster.
+    assert merged["chrome"]["requires"] == {"display": True, "unix_socket": True}
 
 
 def test_builtin_command_is_not_uv(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -329,6 +332,34 @@ def test_assert_requirements_unknown_key_fails_fast() -> None:
         cfg_mod.assert_requirements({"requires": {"gpu": True}})
 
 
+def test_assert_requirements_unix_socket_ok_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cfg_mod, "unix_sockets_available", lambda: True)
+    cfg_mod.assert_requirements({"requires": {"unix_socket": True}})  # no raise
+
+
+def test_assert_requirements_unix_socket_raises_without_af_unix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Windows agent connecting to `chrome` gets a capability error naming the
+    real cause, instead of the wrapper's opaque AttributeError from
+    `asyncio.open_unix_connection`."""
+    monkeypatch.setattr(cfg_mod, "unix_sockets_available", lambda: False)
+    with pytest.raises(cfg_mod.MCPError, match="requires AF_UNIX sockets"):
+        cfg_mod.assert_requirements({"requires": {"unix_socket": True}})
+
+
+def test_assert_requirements_gates_chrome_on_a_windows_shaped_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shipped chrome spec, on a host with a display but no AF_UNIX — i.e.
+    Windows, where `display_available()` deliberately returns True. The display
+    prong alone would have let it through."""
+    monkeypatch.setattr(cfg_mod, "display_available", lambda: True)
+    monkeypatch.setattr(cfg_mod, "unix_sockets_available", lambda: False)
+    with pytest.raises(cfg_mod.MCPError, match="requires AF_UNIX sockets"):
+        cfg_mod.assert_requirements({"requires": {"display": True, "unix_socket": True}})
+
+
 # ─── server_capability ───────────────────────────────────────────────────
 
 
@@ -346,7 +377,8 @@ def test_assert_requirements_unknown_key_fails_fast() -> None:
         {"gpu": True},
         {"display": "false"},
         {"display": 1},
-        {"unix_socket": True},
+        {"unix_socket": None},
+        {"display": True, "unix_socket": "false"},
     ],
 )
 @pytest.mark.parametrize("reader", [cfg_mod.assert_requirements, cfg_mod.server_capability])
@@ -359,6 +391,7 @@ def test_invalid_requirements_fail_before_host_probe(
         pytest.fail("invalid declarations must fail before probing host capabilities")
 
     monkeypatch.setattr(cfg_mod, "display_available", unexpected_probe)
+    monkeypatch.setattr(cfg_mod, "unix_sockets_available", unexpected_probe)
     with pytest.raises(cfg_mod.MCPError):
         reader({"requires": requires})
 
@@ -369,7 +402,7 @@ def test_invalid_requirements_fail_before_host_probe(
         {},
         {"requires": None},
         {"requires": {}},
-        {"requires": {"display": False}},
+        {"requires": {"display": False, "unix_socket": False}},
     ],
 )
 def test_optional_or_false_requirements_need_no_host_probe(
@@ -379,13 +412,56 @@ def test_optional_or_false_requirements_need_no_host_probe(
         pytest.fail("optional or false requirements must not probe host capabilities")
 
     monkeypatch.setattr(cfg_mod, "display_available", unexpected_probe)
+    monkeypatch.setattr(cfg_mod, "unix_sockets_available", unexpected_probe)
     cfg_mod.assert_requirements(spec)
     assert cfg_mod.server_capability(spec) == (True, None)
 
 
-def test_server_capability_ok_when_host_has_a_display(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_server_capability_ok_when_host_has_both(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cfg_mod, "display_available", lambda: True)
-    assert cfg_mod.server_capability({"requires": {"display": True}}) == (True, None)
+    monkeypatch.setattr(cfg_mod, "unix_sockets_available", lambda: True)
+    assert cfg_mod.server_capability({"requires": {"display": True, "unix_socket": True}}) == (
+        True,
+        None,
+    )
+
+
+def test_server_capability_reports_missing_unix_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The UI gate reports the same fact the connect-time check raises on, so a
+    Windows host shows chrome as unavailable rather than offering it."""
+    monkeypatch.setattr(cfg_mod, "display_available", lambda: True)
+    monkeypatch.setattr(cfg_mod, "unix_sockets_available", lambda: False)
+    ok, reason = cfg_mod.server_capability({"requires": {"display": True, "unix_socket": True}})
+    assert ok is False
+    assert reason is not None
+    assert "AF_UNIX" in reason
+
+
+# ─── resolve_command ─────────────────────────────────────────────────────
+
+
+def test_resolve_command_passthrough_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cfg_mod, "is_windows", lambda: False)
+    assert cfg_mod.resolve_command(".venv/bin/python") == ".venv/bin/python"
+
+
+def test_resolve_command_maps_venv_python_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`.mcp.json` is committed once and read on every platform, so the reader
+    maps the repo's POSIX interpreter convention onto the local venv layout —
+    the same substitution `base.sessions.backend` does for session commands."""
+    monkeypatch.setattr(cfg_mod, "is_windows", lambda: True)
+    assert cfg_mod.resolve_command(".venv/bin/python") == ".venv\\Scripts\\python.exe"
+
+
+def test_resolve_command_leaves_third_party_commands_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plugin / machine entry carries its own argv — reinterpreting it would be
+    guessing at someone else's command line."""
+    monkeypatch.setattr(cfg_mod, "is_windows", lambda: True)
+    assert cfg_mod.resolve_command("npx") == "npx"
+    assert cfg_mod.resolve_command("/usr/local/bin/python3") == "/usr/local/bin/python3"
+    assert cfg_mod.resolve_command(".venv/bin/python3.12") == ".venv/bin/python3.12"
 
 
 # ─── server_url ──────────────────────────────────────────────────────────
@@ -469,4 +545,4 @@ def test_builtin_mcps_folder_surfaces_computer_use(
     assert merged["computer_use"]["shared"] == "computer_use"
     assert merged["computer_use"]["command"] == ".venv/bin/python"
     assert "services.desktop.computer.mcp_wrapper" in merged["computer_use"]["args"]
-    assert merged["computer_use"]["requires"] == {"display": True}
+    assert merged["computer_use"]["requires"] == {"display": True, "unix_socket": True}

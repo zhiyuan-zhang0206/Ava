@@ -72,7 +72,7 @@ def pinned(home: Path) -> str | None:
     if not path.exists():
         return None
     problem = private_file_problem(path)
-    if problem is None and path.lstat().st_mode & 0o077:
+    if problem is None and os.name != "nt" and path.lstat().st_mode & 0o077:
         problem = "is not owner-only"
     if problem is not None:
         raise PassphrasePinError(f"{path}: {problem}")

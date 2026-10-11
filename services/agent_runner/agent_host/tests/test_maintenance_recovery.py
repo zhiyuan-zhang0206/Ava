@@ -27,8 +27,9 @@ from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
@@ -38,10 +39,11 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from tests.factories.maintenance import WHEN, maintenance_agent, start_cluster_through_ready_gate
 from tests.factories.maintenance import isolate as isolate
 from tests.factories.maintenance import maintenance_agent as _agent
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_successor_cannot_sign_original_host_final_cleanup(
@@ -50,22 +52,25 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn)
+    agent = _agent(db_conn, machine_name=machine_identity.name())
     old = AgentHost(
         policy=configured_policy(),
         pool=aops_pool,
         checkpointer=MagicMock(),
         graph=MagicMock(),
-        machine=machine_name(),
+        machine=configured_machine(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     incarnation = await admit_hosted_runtime(
         aops_pool,
         agent,
-        machine_name(),
+        machine_identity.name(),
         old._owner,
         expected_from="idling",
         db=database,
@@ -74,7 +79,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
     pause_owner.begin_maintenance("owner", WHEN)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=old._owner,
         holder="owner",
         acquired_at=WHEN,
@@ -92,9 +97,9 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         pool=aops_pool,
         checkpointer=MagicMock(),
         graph=MagicMock(),
-        machine=machine_name(),
+        machine=configured_machine(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     await successor.run_turn(agent)
@@ -114,11 +119,13 @@ async def test_journal_write_failure_before_or_after_commit_keeps_same_restart(
     monkeypatch: pytest.MonkeyPatch,
     failure_write: int,
     database: Database,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent, owner = _agent(db_conn), uuid4()
+    agent, owner = _agent(db_conn, machine_name=machine_identity.name()), uuid4()
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent, machine_name(), owner, expected_from="idling", db=database
+            aops_pool, agent, machine_identity.name(), owner, expected_from="idling", db=database
         )
         is not None
     )
@@ -137,7 +144,7 @@ async def test_journal_write_failure_before_or_after_commit_keeps_same_restart(
     with pytest.raises(OSError, match="journal failure"):
         cohort.prepare(
             db_conn,
-            machine=machine_name(),
+            machine=machine_identity.name(),
             host_owner=owner,
             holder="retry",
             acquired_at=WHEN,
@@ -149,7 +156,7 @@ async def test_journal_write_failure_before_or_after_commit_keeps_same_restart(
     assert len(committed) == (1 if failure_write == 2 else 0)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=owner,
         holder="retry",
         acquired_at=WHEN,
@@ -165,15 +172,15 @@ async def test_journal_write_failure_before_or_after_commit_keeps_same_restart(
 
 
 def test_unowned_idle_intent_is_preserved_without_restart_or_termination(
-    db_conn: psycopg.Connection[Any],
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
 ) -> None:
-    agent = _agent(db_conn)
+    agent = _agent(db_conn, machine_name=machine_identity.name())
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     db_conn.commit()
     pause_owner.begin_maintenance("parked", WHEN)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=uuid4(),
         holder="parked",
         acquired_at=WHEN,
@@ -194,6 +201,9 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from unittest.mock import AsyncMock
 
@@ -206,7 +216,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
     from agent.graph.claim.node import claim_node
     from base.agents.context import AvaContext
 
-    agent = _agent(db_conn)
+    agent = _agent(db_conn, machine_name=machine_identity.name())
     saver = AsyncPostgresSaver(aops_pool)
     await saver.setup()
     builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
@@ -224,21 +234,26 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,
-        machine=machine_name(),
+        machine=configured_machine(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent, machine_name(), original._owner, expected_from="idling", db=database
+            aops_pool,
+            agent,
+            machine_identity.name(),
+            original._owner,
+            expected_from="idling",
+            db=database,
         )
         is not None
     )
     pause_owner.begin_maintenance("idle", WHEN)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=original._owner,
         holder="idle",
         acquired_at=WHEN,
@@ -254,9 +269,9 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         pool=aops_pool,
         checkpointer=AsyncPostgresSaver(aops_pool),
         graph=builder.compile(checkpointer=AsyncPostgresSaver(aops_pool)),
-        machine=machine_name(),
+        machine=configured_machine(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     ctx = AvaContext(
@@ -264,7 +279,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         event_publisher=MagicMock(),
         llm=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
         clock_factory=configured_policy().clock_factory,
@@ -307,22 +322,25 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn)
+    agent = _agent(db_conn, machine_name=machine_identity.name())
     host = AgentHost(
         policy=configured_policy(),
         pool=aops_pool,
         checkpointer=MagicMock(),
         graph=MagicMock(),
-        machine=machine_name(),
+        machine=configured_machine(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     incarnation = await admit_hosted_runtime(
         aops_pool,
         agent,
-        machine_name(),
+        machine_identity.name(),
         host._owner,
         expected_from="idling",
         db=database,
@@ -340,7 +358,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
     with pytest.raises(OSError):
         cohort.prepare(
             db_conn,
-            machine=machine_name(),
+            machine=machine_identity.name(),
             host_owner=host._owner,
             holder="commit-gap",
             acquired_at=WHEN,
@@ -356,7 +374,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
     monkeypatch.setattr(pause_owner, "change_maintenance", original)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=host._owner,
         holder="commit-gap",
         acquired_at=WHEN,
@@ -447,15 +465,17 @@ def _host_driving_invoke_until_done(
     graph: Any,
     ctx: AvaContext,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> AgentHost:
     host = AgentHost(
         policy=configured_policy(),
         pool=pool,
         checkpointer=saver,
         graph=graph,
-        machine=machine_name(),
+        machine=configured_machine(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
@@ -498,8 +518,11 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = maintenance_agent(db_conn)
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     entered, finish = asyncio.Event(), asyncio.Event()
     calls: list[str] = []
     effect = tmp_path / "effect.txt"
@@ -519,7 +542,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         event_publisher=MagicMock(),
         llm=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         clients=process_clients(),
         identity=AgentIdentity(agent_id=agent, owns_loop=True),
@@ -530,7 +553,13 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         "services.agent_runner.agent_host.runtime.validate_model_config", MagicMock()
     )
     host = _host_driving_invoke_until_done(
-        monkeypatch, aops_pool, saver, graph, ctx, model_catalog=model_catalog
+        monkeypatch,
+        aops_pool,
+        saver,
+        graph,
+        ctx,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     work = asyncio.create_task(host.run_turn(agent))
     try:
@@ -538,7 +567,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         pause_owner.begin_maintenance("move", WHEN)
         hold = cohort.prepare(
             db_conn,
-            machine=machine_name(),
+            machine=machine_identity.name(),
             host_owner=host._owner,
             holder="move",
             acquired_at=WHEN,
@@ -558,7 +587,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         # Drop the old host's in-memory graph/cache: recovery consumes the
         # durable restart pointer and real cold checkpoint after explicit release.
         assert current.maintenance is not None
-        start_cluster_through_ready_gate(monkeypatch)
+        start_cluster_through_ready_gate(monkeypatch, machine=machine_identity)
         successor = _host_driving_invoke_until_done(
             monkeypatch,
             aops_pool,
@@ -566,6 +595,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
             builder.compile(checkpointer=AsyncPostgresSaver(aops_pool)),
             ctx,
             model_catalog=model_catalog,
+            database_gate=database_gate,
         )
         wakes = await successor.pending_inbound_wakes(stale_after_s=300)
         assert agent in [wake.agent_id for wake in wakes]

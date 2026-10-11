@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.native_process.os_platform import is_windows
 from tests.factories.secret_argv import (
     SECRET_VALUES,
     assert_service_tree_clean,
@@ -19,6 +20,10 @@ from tests.factories.secret_argv import (
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 from tests.path_scoped.pty_shells import wait_for
+
+pytestmark = pytest.mark.skipif(
+    is_windows(), reason="POSIX launch paths only (Windows hands env to CreateProcess)"
+)
 
 
 def test_schedule_launch(

@@ -136,7 +136,7 @@ class Cluster:
         if command.endswith("status --json'"):
             emit(hold)
             return 0
-        if "machine_name()" in command:
+        if "machine_from_boot(ConfigBoot()).name()" in command:
             emit(self.names[alias])
             return 0
         if " - roster" in command:
@@ -647,12 +647,18 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(
     if not Path(shell).exists():
         pytest.skip(f"{shell} is not installed")
     source = tmp_path / ".ava" / "source"
-    (source / "base" / "cluster").mkdir(parents=True)
-    for package in (source / "base", source / "base" / "cluster"):
+    (source / "base" / "cluster" / "machine").mkdir(parents=True)
+    for package in (
+        source / "base",
+        source / "base" / "cluster",
+        source / "base" / "cluster" / "machine",
+    ):
         (package / "__init__.py").write_text("")
-    (source / "base" / "cluster" / "machine.py").write_text(
-        'def machine_name() -> str:\n    return "mac-mini"\n'
+    (source / "base" / "cluster" / "machine" / "boot.py").write_text(
+        'class Identity:\n    def name(self) -> str:\n        return "mac-mini"\n'
+        "def machine_from_boot(config) -> Identity:\n    return Identity()\n"
     )
+    (source / "base" / "config.py").write_text("class ConfigBoot: pass\n")
     python = source / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True)
     python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')

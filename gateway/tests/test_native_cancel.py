@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.runtime import TurnOutcome
@@ -39,8 +40,10 @@ async def test_original_acceptance_replay_precedes_current_owner_and_work(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    _inc, target = await managed_work(db_conn, aops_pool)
+    _inc, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     headers = _headers(monkeypatch)
     url = f"/api/keyed/v1/agents/{target.agent_id}"
     observed = client.get(f"{url}/native-work", headers=headers)
@@ -78,8 +81,10 @@ async def test_raw_protocol_is_required_and_lossless(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     protocol: object,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    _inc, target = await managed_work(db_conn, aops_pool)
+    _inc, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     headers = _headers(monkeypatch)
     body = target.model_dump(mode="json")
     if protocol is None:
@@ -102,8 +107,10 @@ async def test_guarded_cancel_rejects_unscoped_or_unkeyed_request(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     missing: str,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    _inc, target = await managed_work(db_conn, aops_pool)
+    _inc, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     headers = _headers(monkeypatch)
     del headers[missing]
     response = client.post(
@@ -122,8 +129,10 @@ async def test_preparing_and_managed_null_do_not_advertise_capability(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    _inc, target = await managed_work(db_conn, aops_pool, active=False)
+    _inc, target = await managed_work(db_conn, aops_pool, active=False, database_gate=database_gate)
     headers = _headers(monkeypatch)
     url = f"/api/keyed/v1/agents/{target.agent_id}"
     assert client.get(f"{url}/native-work", headers=headers).status_code == 409
@@ -147,8 +156,10 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    incarnation, initial = await managed_work(db_conn, aops_pool)
+    incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     _insert(db_conn, initial.agent_id)
 
     original_error = RuntimeError("isolated unexpected graph failure")
@@ -157,7 +168,7 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
         raise original_error
 
     _graph, saver, host, context = await _blocked_host(
-        aops_pool, unexpected, model_catalog=model_catalog
+        aops_pool, unexpected, model_catalog=model_catalog, database_gate=database_gate
     )
     async with hosted_scope(expected_error=RuntimeError) as resources:
         context = replace(context, original_incarnation=incarnation, hosted_resources=resources)
