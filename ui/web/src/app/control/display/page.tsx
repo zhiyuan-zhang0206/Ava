@@ -21,6 +21,7 @@ import {
   EyeOff,
   History,
   Languages,
+  MessageSquareText,
   MoveHorizontal,
   Palette,
   Rows3,
@@ -265,6 +266,16 @@ export default function DisplaySettingsPage() {
           description="Show a red dot + count badge in the sidebar for agents awaiting reply; off by default — check the Fleet page when you want to know"
           value={settings["notification.awaiting_reply"] as boolean}
           onChange={(v) => setSetting("notification.awaiting_reply", v)}
+        />
+      </SettingsSection>
+
+      <SettingsSection id="display-composer" title={t("composer")}>
+        <ToggleRow
+          icon={MessageSquareText}
+          label={t("replySuggestions")}
+          description={t("replySuggestionsDesc")}
+          value={settings["behavior.replySuggestions"] === true}
+          onChange={(v) => setSetting("behavior.replySuggestions", v)}
         />
       </SettingsSection>
 

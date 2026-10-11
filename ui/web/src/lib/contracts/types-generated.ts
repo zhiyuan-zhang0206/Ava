@@ -1382,6 +1382,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/reply-suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Reply Suggestion
+         * @description Draft the reply the user is likely to send to the agent's last message.
+         *
+         *     200 with `suggestion` null and a `reason` for every way there is nothing to show: the
+         *     agent is mid-turn, its last message is not waiting for the user, or the gate or draft
+         *     model failed (logged as a warning). 404 for an unknown agent; 503 when the conversation
+         *     cannot be read. The work stops when the client disconnects.
+         */
+        post: operations["post_reply_suggestion_api_agents__agent_id__reply_suggestion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system": {
         parameters: {
             query?: never;
@@ -7407,6 +7432,19 @@ export interface components {
             note: string;
         };
         /**
+         * ReplySuggestionResponse
+         * @description A drafted reply, or the reason there is none.
+         *
+         *     `suggestion` is set exactly when `reason` is None. Every non-error outcome is a 200: a
+         *     missing suggestion is an ordinary result, never a failure of the request.
+         */
+        ReplySuggestionResponse: {
+            /** Suggestion */
+            suggestion?: string | null;
+            /** Reason */
+            reason?: ("disabled" | "agent_not_idle" | "no_agent_text" | "not_awaiting_reply" | "gate_failed" | "generation_failed" | "invalid_generation" | "client_disconnected") | null;
+        };
+        /**
          * ResolveNoticeIn
          * @description POST /api/agents/{id}/notices/{notice_id}/resolve request body.
          *
@@ -10860,6 +10898,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetainedTimelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_reply_suggestion_api_agents__agent_id__reply_suggestion_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplySuggestionResponse"];
                 };
             };
             /** @description Validation Error */

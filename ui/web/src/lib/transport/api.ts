@@ -77,6 +77,7 @@ import type { NoticesFeed,
   TerminateAgentResponse,
   TimelineResponse,
   TokenUsageResponse,
+  ReplySuggestionResponse,
   ScheduleCreate,
   ScheduleDraftResponse,
   ScheduleLogsView,
@@ -282,6 +283,14 @@ export const api = {
 
   getTokenUsage: (agentId: number, signal?: AbortSignal): Promise<TokenUsageResponse> => {
     return f(`/api/agents/${agentId}/token-usage`, { signal }).then(ok<TokenUsageResponse>);
+  },
+
+  // A drafted reply to the agent's last message (or `suggestion: null` plus a
+  // `reason`). The gateway cancels its model calls when this request is aborted.
+  getReplySuggestion: (agentId: number, signal: AbortSignal): Promise<ReplySuggestionResponse> => {
+    return f(`/api/agents/${agentId}/reply-suggestion`, { ...POST, signal }).then(
+      ok<ReplySuggestionResponse>,
+    );
   },
 
   // One switch-refresh read of the selected agent's three conversation

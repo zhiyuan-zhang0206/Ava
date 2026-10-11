@@ -90,6 +90,111 @@ class LmSettings(EnvSettings):
         },
     )
 
+    reply_suggestion_enabled: bool = Field(
+        default=True,
+        alias="AVA_REPLY_SUGGESTION_ENABLED",
+        description=(
+            "Cluster switch for reply suggestions: after an agent's turn ends the web "
+            "console asks the gateway to draft a reply for the user, shown as grey text "
+            "in the empty composer. Each user also has a `behavior.replySuggestions` "
+            "preference. Off makes the endpoint answer with an empty suggestion without "
+            "calling any model."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
+    reply_suggestion_model: str = Field(
+        default="deepseek-flash",
+        alias="AVA_REPLY_SUGGESTION_MODEL",
+        description=(
+            "Chat model that drafts the suggested reply, run with reasoning off (a "
+            "reasoning pass makes a one-line draft take tens of seconds). Must be a "
+            "registered chat model; an unknown id fails the gateway at boot."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
+    reply_suggestion_gate_model: str = Field(
+        default="jev-1.13.0",
+        alias="AVA_REPLY_SUGGESTION_GATE_MODEL",
+        description=(
+            "Decision model that judges whether the agent's last message is waiting for "
+            "the user before any draft is generated. Must be a registered decision "
+            "model (not a chat model); an unknown id fails the gateway at boot."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
+    reply_suggestion_gate_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        alias="AVA_REPLY_SUGGESTION_GATE_THRESHOLD",
+        description=(
+            "Minimum probability (0-1) the gate model must give to 'the agent is waiting "
+            "for the user' for a reply to be drafted. Raise it to draft less often."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
+    reply_suggestion_max_input_tokens: int = Field(
+        default=1500,
+        gt=0,
+        alias="AVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS",
+        description=(
+            "Token budget of the conversation excerpt (the user's latest message and the "
+            "agent's last-turn text) given to the gate and the draft model. The excerpt "
+            "is cut from the end backwards, so the newest text survives."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_non_streaming_fallback_timeout_seconds: float = Field(
+        default=600.0,
+        alias="AVA_LLM_NON_STREAMING_FALLBACK_TIMEOUT_SECONDS",
+        description=(
+            "Total timeout (seconds) for the non-streaming fallback after a "
+            "corrupted stream. 600s leaves headroom for a slow thinking-model "
+            "single response."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     llm_invoke_timeout_seconds: float = Field(
         default=60.0,
         alias="AVA_LLM_INVOKE_TIMEOUT_SECONDS",
