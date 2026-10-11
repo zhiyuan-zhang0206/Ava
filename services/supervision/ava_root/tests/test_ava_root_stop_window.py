@@ -29,16 +29,18 @@ from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfi
 _DEFAULT_WINDOW_S = 0.2  # scaled stand-in for root's 10 s default
 
 
+_CHILD = Path(__file__).with_name("child_unit.py")
+
+
 def root(
     run_dir: Path,
-    code: str,
-    *,
+    *scenario: str,
     stop_timeout_s: float | None = None,
     default_window_s: float = _DEFAULT_WINDOW_S,
 ) -> Supervisor:
     unit = UnitManifest(
         "worker",
-        (sys.executable, "-u", "-c", code),
+        (sys.executable, "-u", str(_CHILD), *scenario),
         RestartPolicy.ALWAYS,
         "root",
         stop_timeout_s=stop_timeout_s,
@@ -62,16 +64,9 @@ async def wait_file(path: Path) -> None:
     raise AssertionError(f"child did not write {path}")
 
 
-def closes_slowly_after_term(ready: Path, close_s: float) -> str:
+def closes_slowly_after_term(ready: Path, close_s: float) -> tuple[str, ...]:
     """A unit that handles TERM by closing for `close_s` before it exits, like a bounded drain."""
-    return (
-        "import pathlib,signal,sys,time\n"
-        "def close(*_):\n"
-        f"    time.sleep({close_s}); sys.exit(0)\n"
-        "signal.signal(signal.SIGTERM, close)\n"
-        f"pathlib.Path({str(ready)!r}).touch()\n"
-        "time.sleep(60)\n"
-    )
+    return ("closes_slowly", str(ready), str(close_s))
 
 
 async def test_unit_closing_past_the_default_window_stops_inside_its_declared_window(
@@ -83,7 +78,7 @@ async def test_unit_closing_past_the_default_window_stops_inside_its_declared_wi
     the unit closes for 0.8 s; its manifest declares a 3 s window.
     """
     ready = tmp_path / "ready"
-    owner = root(tmp_path, closes_slowly_after_term(ready, 0.8), stop_timeout_s=3.0)
+    owner = root(tmp_path, *closes_slowly_after_term(ready, 0.8), stop_timeout_s=3.0)
     await owner.start()
     await wait_file(ready)
     result = await owner.down("worker")
@@ -98,7 +93,7 @@ async def test_unit_declaring_no_window_keeps_the_default_and_the_refusal_names_
 ) -> None:
     """Without a declaration the default window applies; a real overrun is still refused."""
     ready = tmp_path / "ready"
-    owner = root(tmp_path, closes_slowly_after_term(ready, 0.8))
+    owner = root(tmp_path, *closes_slowly_after_term(ready, 0.8))
     await owner.start()
     await wait_file(ready)
     try:
@@ -118,11 +113,7 @@ async def test_unit_declaring_no_window_keeps_the_default_and_the_refusal_names_
 async def test_force_escalates_after_the_units_declared_window(tmp_path: Path) -> None:
     """Explicit force still kills, but only once the unit's own window has passed."""
     ready = tmp_path / "ready"
-    ignores_term = (
-        "import signal,pathlib,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
-        f"pathlib.Path({str(ready)!r}).touch(); time.sleep(60)"
-    )
-    owner = root(tmp_path, ignores_term, stop_timeout_s=0.8)
+    owner = root(tmp_path, "ignore_term", str(ready), stop_timeout_s=0.8)
     await owner.start()
     await wait_file(ready)
     pid = cast("list[dict[str, Any]]", (await owner.status())["units"])[0]["pid"]
@@ -144,7 +135,7 @@ async def test_down_over_the_control_socket_succeeds_for_a_unit_closing_past_ten
     ready = short_tmp / "ready"
     unit = UnitManifest(
         "worker",
-        (sys.executable, "-u", "-c", closes_slowly_after_term(ready, 12.5)),
+        (sys.executable, "-u", str(_CHILD), *closes_slowly_after_term(ready, 12.5)),
         RestartPolicy.ALWAYS,
         "root",
         stop_timeout_s=20.0,

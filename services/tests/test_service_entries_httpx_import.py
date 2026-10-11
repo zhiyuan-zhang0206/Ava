@@ -16,31 +16,23 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# name -> (modules the entry imports, AVA_PROCESS_PROFILE the roster sets)
-ENTRIES: dict[str, tuple[tuple[str, ...], str]] = {
-    "heartbeat": (("services.wake.heartbeat.daemon",), "gateway"),
-    "memory-indexer": (("services.derived.memory_indexer.daemon",), "gateway"),
-    "memory-search": (("services.derived.memory_search.daemon",), "gateway"),
-    "gateway": (("gateway.cluster.server", "gateway.app"), "gateway"),
-    "ops": (("services.agent_runner.agent_ops.daemon",), "runner"),
-    "browser-mcp": (("services.desktop.browser.mcp_daemon",), "runner"),
-    "agent-host": (("services.agent_runner.agent_host.daemon",), "agent"),
+# name -> AVA_PROCESS_PROFILE the roster sets; `child_httpx_probe.py` owns the modules each
+# entry imports.
+ENTRIES: dict[str, str] = {
+    "heartbeat": "gateway",
+    "memory-indexer": "gateway",
+    "memory-search": "gateway",
+    "gateway": "gateway",
+    "ops": "runner",
+    "browser-mcp": "runner",
+    "agent-host": "agent",
 }
-
-_PROBE = """
-import json
-import sys
-
-sys.path.insert(0, {repo!r})
-for module in {modules!r}:
-    __import__(module)
-print(json.dumps({{"httpx_loaded": "httpx" in sys.modules}}))
-"""
+_PROBE = Path(__file__).with_name("child_httpx_probe.py")
 
 
 @pytest.mark.parametrize("entry", list(ENTRIES))
 def test_service_entry_imports_httpx_in_a_fresh_process(entry: str, tmp_path: Path) -> None:
-    modules, profile = ENTRIES[entry]
+    profile = ENTRIES[entry]
     home = tmp_path / "home"
     home.mkdir()
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
@@ -50,7 +42,7 @@ def test_service_entry_imports_httpx_in_a_fresh_process(entry: str, tmp_path: Pa
         AVA_PROCESS_PROFILE=profile,
     )
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-X", "utf8", "-c", _PROBE.format(repo=str(_REPO_ROOT), modules=modules)],
+        [sys.executable, "-X", "utf8", str(_PROBE), entry],
         cwd=_REPO_ROOT,
         env=env,
         capture_output=True,

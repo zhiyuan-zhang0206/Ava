@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import types
 import urllib.error
 import urllib.request
@@ -294,7 +295,7 @@ def test_probe_timeout_serves_down_and_emits_timeout_event(
     the distinction the audit needed (a slow gateway needs different surgery
     than a dead one)."""
     monkeypatch.setattr(gate_daemon, "_PROBE_TIMEOUT_S", 0.2)
-    _FakeGateway.auth_hook = lambda: __import__("time").sleep(1.0)
+    _FakeGateway.auth_hook = lambda: time.sleep(1.0)
 
     status, body = _get(servers["gate"] + "/")
 

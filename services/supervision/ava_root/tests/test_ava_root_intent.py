@@ -31,7 +31,8 @@ from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, 
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.ava_root.unit_records import _UnitRuntime
 
-_SLEEP_FOREVER = "import time; time.sleep(60)"
+_CHILD = Path(__file__).with_name("child_unit.py")
+_SLEEP_FOREVER = ("sleep",)
 
 
 class _Recorder:
@@ -60,14 +61,13 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
 
 
 def _unit(
-    code: str,
-    *,
+    *scenario: str,
     unit_id: str = "svc",
     inputs: tuple[InputSeal, ...] = (),
 ) -> UnitManifest:
     return UnitManifest(
         unit_id,
-        (sys.executable, "-u", "-c", code),
+        (sys.executable, "-u", str(_CHILD), *scenario),
         RestartPolicy.ALWAYS,
         "root",
         inputs=inputs,
@@ -202,7 +202,7 @@ async def test_boot_holds_an_explicit_stored_stop(
     intent_store.write(
         tmp_path, "svc", IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None)
     )
-    owner = _supervisor(tmp_path, [_unit(_SLEEP_FOREVER)])
+    owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER)])
     await owner.start()
     try:
         entry = await _entry(owner)
@@ -223,7 +223,7 @@ async def test_boot_holds_a_stored_selection_stop(tmp_path: Path) -> None:
     intent_store.write(
         tmp_path, "svc", IntentRecord(UnitIntent.STOPPED, IntentSource.SELECTION, None)
     )
-    owner = _supervisor(tmp_path, [_unit(_SLEEP_FOREVER)])
+    owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER)])
     await owner.start()
     try:
         entry = await _entry(owner)
@@ -238,13 +238,13 @@ async def test_boot_holds_a_stored_selection_stop(tmp_path: Path) -> None:
 
 
 async def test_boot_supersedes_a_stored_root_stop(tmp_path: Path) -> None:
-    first = _supervisor(tmp_path, [_unit(_SLEEP_FOREVER)])
+    first = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER)])
     await first.start()
     await first.shutdown()  # writes stopped/self for the unit
     stored = intent_store.read(tmp_path, "svc")
     assert stored is not None and stored.source is IntentSource.SELF
 
-    second = _supervisor(tmp_path, [_unit(_SLEEP_FOREVER)])
+    second = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER)])
     await second.start()
     try:
         entry = await _entry(second)
@@ -263,7 +263,7 @@ async def test_restart_up_half_failure_records_explicit_state(
     tmp_path: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     input_path, seal = _sealed_input(tmp_path)
-    owner = _up_failure_supervisor(tmp_path, [_unit(_SLEEP_FOREVER, inputs=(seal,))], monkeypatch)
+    owner = _up_failure_supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))], monkeypatch)
     await owner.start()
     try:
         input_path.write_text("v2")  # the seal no longer matches: the up half must fail
@@ -290,7 +290,7 @@ async def test_restart_up_half_failure_retry_replaces_and_clears(
     # The up-half episode must not depend on a live child's TERM deadline.
     # The old fixture entered this boundary before it could test the seal.
     input_path, seal = _sealed_input(tmp_path)
-    owner = _up_failure_supervisor(tmp_path, [_unit(_SLEEP_FOREVER, inputs=(seal,))], monkeypatch)
+    owner = _up_failure_supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))], monkeypatch)
     live_stop = Mock(wraps=owner._signal_owned)
     monkeypatch.setattr(owner, "_signal_owned", live_stop)
     await owner.start()
@@ -326,18 +326,7 @@ async def test_restart_up_half_failure_retry_replaces_and_clears(
 async def test_restart_down_refusal_records_stage_down_and_retry_settles(tmp_path: Path) -> None:
     ready = tmp_path / "ready"
     release = tmp_path / "release"
-    template = (
-        "import pathlib, signal, sys, time\n"
-        "if pathlib.Path(RELEASE).exists():\n"
-        "    time.sleep(60)\n"
-        "else:\n"
-        "    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-        "    pathlib.Path(READY).touch()\n"
-        "    while not pathlib.Path(RELEASE).exists(): time.sleep(0.05)\n"
-        "    sys.exit(0)\n"
-    )
-    code = template.replace("RELEASE", repr(str(release))).replace("READY", repr(str(ready)))
-    owner = _supervisor(tmp_path, [_unit(code)])
+    owner = _supervisor(tmp_path, [_unit("restart_down", str(ready), str(release))])
     await owner.start()
     try:
         await _wait_file(ready)  # the child now ignores TERM for real
@@ -365,7 +354,7 @@ async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
     tmp_path: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     input_path, seal = _sealed_input(tmp_path)
-    unit = _unit(_SLEEP_FOREVER, inputs=(seal,))
+    unit = _unit(*_SLEEP_FOREVER, inputs=(seal,))
     first = _up_failure_supervisor(tmp_path, [unit], monkeypatch)
     await first.start()
     input_path.write_text("v2")
