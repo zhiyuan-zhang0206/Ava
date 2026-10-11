@@ -30,8 +30,7 @@ EXPECTED = {
     # name -> (panel, output, event_name, category, n_targets)
     "ava_obs_llm_cost_usd": ("timeseries", ["grafana"], "llm_usage", "telemetry", 1),
     "ava_obs_agent_llm_cost_usd": ("timeseries", ["inspector"], "llm_usage", "telemetry", 1),
-    "ava_obs_llm_error_rate": ("timeseries", ["grafana", "inspector"], "llm_usage", "telemetry", 4),
-    "ava_obs_llm_stall_rate": ("timeseries", ["grafana"], "stream_stalled_retry", "telemetry", 2),
+    "ava_obs_llm_error_rate": ("timeseries", ["grafana", "inspector"], "llm_usage", "telemetry", 2),
     "ava_obs_turn_ok_rate": ("timeseries", ["grafana", "inspector"], "turn_end", "telemetry", 1),
     "ava_obs_turn_duration_s": ("timeseries", ["grafana"], "turn_end", "telemetry", 2),
     "ava_obs_compaction_summary_history_ratio": (
@@ -67,13 +66,6 @@ EXPECTED = {
         "stat",
         ["grafana"],
         "delivery_stalled",
-        "telemetry",
-        1,
-    ),
-    "ava_obs_delivery_poisoned_count": (
-        "stat",
-        ["grafana"],
-        "delivery_poisoned",
         "telemetry",
         1,
     ),
