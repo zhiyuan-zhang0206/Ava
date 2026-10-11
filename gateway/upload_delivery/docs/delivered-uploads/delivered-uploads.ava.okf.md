@@ -8,8 +8,9 @@ tags: [gateway, uploads]
 # Delivered upload acceptance and recovery
 
 `POST /api/keyed/v1/agents/{id}/uploads` requires a verified credential, explicit
-`principal-v1` and caller `Idempotency-Key`. It always promises one user chat
-**after** confirmed copy. Browser file delivery uses this route with one key per
+`principal-v1` and caller `Idempotency-Key`. It promises at most one user chat, only
+**after** confirmed copy, and only within a bounded number of copy attempts: a batch
+that cannot be copied is held and the person uploads again. Browser file delivery uses this route with one key per
 submission; silent native-image attachments use the separate keyed
 `POST /api/agents/{id}/uploads`, which never notifies the agent.
 SDK/MCP callers are not activated. Agent IDs must be
@@ -40,7 +41,8 @@ app-state replacement cannot leave the original recovery TaskGroup unstopped.
 `gateway.upload_delivery.worker.UploadRecovery` belongs to Gateway lifespan,
 including pure Gateway topology without Ops. Four intents run in a scoped
 TaskGroup; due selection and final acceptance borrow short transactions, with no
-DB connection held across RPC/HTTP. Backoff is scheduling, never a lease or proof
+DB connection held across RPC/HTTP. A batch gets `source.MAX_COPY_ATTEMPTS` (3) copy
+attempts spaced by a short linear backoff. Backoff is scheduling, never a lease or proof
 another writer died. Multiple Gateway processes can repeat the same batch.
 Source placement is checked before copy and again under locks before inbound.
 
@@ -77,15 +79,16 @@ outcome. No mutable-target FK or TTL deletes this evidence.
 
 Authenticated `.../uploads/{batch}` projects receiving/pending/accepted/HOLD,
 frozen source/target, attempts, next retry, safe failure reason and retained IID.
-Accepted means chat acceptance, not execution. Pending receiver outages back off;
-unsupported protocol, native conflict/quota, missing source or changed/deleted
-placement HOLD visibly. There is no operator cancel/unseal/retarget endpoint in
+Accepted means chat acceptance, not execution. A receiver outage is retried until the
+third failed copy, which HOLDs the batch; unsupported protocol, native conflict/quota,
+missing source or changed/deleted placement HOLD at once. Every HOLD is visible in the
+status and emits the `upload_delivery_held` anomaly event; nothing retries a HOLD. There is no operator cancel/unseal/retarget endpoint in
 this contribution. Restoration or cancellation requires a separate reviewed policy.
 
-Wake/resurrection follows the existing exact pending-inbound policy. A bounded
-rotating scan revisits original still-pending rows; one failure does not starve
-later batches and no mark-woken receipt can swallow a lost wake. Deleted/done IID
-is never requeued. Gateway business pause/quiesce stops fresh work. Lifespan stops
+The worker wakes the target once, right after `source.complete` commits (the same
+publish-wake and resurrect-if-terminated path as ordinary chat delivery). A failed
+wake is logged and not repeated: the accepted chat stays a pending inbound that the
+agent's next ordinary wake delivers. Deleted/done IID is never requeued. Gateway business pause/quiesce stops fresh work. Lifespan stops
 rounds and drains actual shielded native futures before closing the pool; cancelling
 an HTTP wait does not pretend its filesystem/DB thread ended. Ops retains its
 existing maintenance admission and native-worker drainage.

@@ -14,11 +14,12 @@ agent's conversation up to the chunk's end plus a trailing instruction on the
 plain path (SystemMessage in-band, `execute_code` bound, the model built with
 the agent's own effort), so the provider serves the prefix from cache.
 
-No staleness judgment: a claimed chunk is always described. A chunk whose
+No staleness judgment: a claimed chunk is always described, once. A chunk whose
 checkpoint has not caught up (the writer persists every Nth super-step) goes
-back to the queue and is retried after a spacing; indices that drifted fail the
-job loudly; a grouping reply still refused after the corrections is a
-generation failure (retried, then failed). Each poll samples the queue's depth, with this
+back to the queue and is claimed again after a spacing, up to a bound; every other
+failure ends the job as `failed` with the `understanding_chunk_failed` event and no
+retry: drifted indices, a generation error (a grouping reply still refused after the
+corrections included), a database error, a stopping host or a claimer that died. Each poll samples the queue's depth, with this
 runner's in-flight jobs, as the `understanding_backlog` event. A job that ends
 `done` is followed, in the same task, by the upper-level grouping checks of its agent
 (`group_consumer.py`). A manual build's upper-level rebuild (`rebuild.py`) is claimed by the same
@@ -53,7 +54,6 @@ from base.agents.history.checkpoint import (
 from base.agents.history.hierarchy.chunk_generate import ChunkResult, generate_chunk
 from base.agents.history.hierarchy.chunks import (
     GIVE_UP_AFTER_SECONDS,
-    MAX_ATTEMPTS,
     ChunkCall,
     ChunkDriftError,
     ChunkEmptyError,
@@ -99,20 +99,14 @@ from base.log import logger
 
 POLL_SECONDS = 2.0
 
-# Generation failures (a provider error after its own retries, a model that
-# will not answer in text) are retried a few times, not the full checkpoint-lag
-# budget: the same request failing repeatedly is not about to start working.
-GENERATION_MAX_ATTEMPTS = 3
-
 # A database error that a retry can outlive (a restart, a dropped connection, a pool wait).
 _TRANSIENT = (psycopg.OperationalError, psycopg.InterfaceError, PoolTimeout)
 
 
 @dataclass(frozen=True)
 class Outcome:
-    """How one claimed job ended: done / failed / skipped, or back to the queue: `retry` after a
-    generation failure (an attempt spent), `wait` when nothing about the job itself went wrong
-    (the checkpoint has not caught up, the database blinked: no attempt spent)."""
+    """How one claimed job ended: done / failed / skipped, or `wait` (back to the queue) when
+    nothing about the job itself went wrong: the checkpoint has not caught up."""
 
     status: str
     error: str | None = None
@@ -227,9 +221,7 @@ def _report_gaps(job: ChunkJob, located: LocatedChunk, left_over: list[tuple[int
 
 
 def _gave_up(job: ChunkJob) -> Outcome | None:
-    """`failed` for a job claimed too often or waiting too long, else None."""
-    if job.attempts > MAX_ATTEMPTS:
-        return Outcome("failed", f"gave up after {job.attempts - 1} attempts")
+    """`failed` for a job that has waited too long for its checkpoint, else None."""
     if job.age_seconds > GIVE_UP_AFTER_SECONDS:
         hours = job.age_seconds / 3600
         return Outcome("failed", f"gave up: still not describable after {hours:.0f} h")
@@ -279,7 +271,7 @@ async def _run_job(
             _load_segments, db, job.agent_id, job.boundary_checkpoint_id
         )
     except CheckpointReadError as exc:
-        return Outcome("wait", f"checkpoint read failed: {exc}")
+        return Outcome("failed", f"checkpoint read failed: {exc}")
     except ValueError:
         return Outcome("failed", f"boundary checkpoint {job.boundary_checkpoint_id} is gone")
     try:
@@ -324,9 +316,7 @@ async def _run_job(
             inputs=inputs,
         )
     except GenerateError as exc:
-        if job.attempts >= GENERATION_MAX_ATTEMPTS:
-            return Outcome("failed", str(exc))
-        return Outcome("retry", str(exc))
+        return Outcome("failed", str(exc))
     finally:
         await write_chunk_calls(pool, job, calls)
     await write_group_nodes(pool, job, _plan_nodes(result, located), model=model)
@@ -336,14 +326,8 @@ async def _run_job(
 
 async def _settle(pool: AsyncConnectionPool, job: ChunkJob, outcome: Outcome) -> None:
     """Record a job's outcome on its row, with the event for the ones that end without a node."""
-    if outcome.status in ("retry", "wait"):
-        await release_job(
-            pool,
-            job.id,
-            error=outcome.error or "",
-            count_attempt=outcome.status == "retry",
-            waiting=outcome.status == "wait",
-        )
+    if outcome.status == "wait":
+        await release_job(pool, job.id, error=outcome.error or "")
         return
     await finish_job(pool, job.id, status=outcome.status, error=outcome.error)
     if outcome.status == "failed":
@@ -445,17 +429,13 @@ class _Consumer:
             self.in_flight -= 1
             raise
 
-    async def _put_back(self, job: ChunkJob) -> None:
-        """Release a job this consumer holds, without spending an attempt; never raises."""
+    async def _fail_stopped(self, job: ChunkJob) -> None:
+        """Fail a job this consumer holds because its host is stopping; never raises."""
         try:
-            await asyncio.shield(
-                release_job(
-                    self.pool, job.id, error="host stopping", count_attempt=False, waiting=None
-                )
-            )
+            await asyncio.shield(_settle(self.pool, job, Outcome("failed", "host stopping")))
         except Exception:
             logger.opt(exception=True).warning(
-                "understanding chunk {job} could not be put back; its lease will lapse",
+                "understanding chunk {job} could not be failed; its lease will lapse and fail it",
                 job=job.id,
             )
 
@@ -468,19 +448,10 @@ class _Consumer:
                     self.pool, self.db, job, self.tools, self.models, executor, inputs=self.inputs
                 )
             except asyncio.CancelledError:
-                # The host is stopping (a rollout): hand the job back at once instead of making
-                # the next host wait out the lease. A crash still relies on the lease.
-                await self._put_back(job)
+                # The host is stopping (a rollout): a chunk is attempted once, so the job ends
+                # here rather than holding its agent's queue until the lease lapses.
+                await self._fail_stopped(job)
                 raise
-            except _TRANSIENT as exc:
-                # The database blinked (a restart during a roll): the job is not at fault.
-                logger.warning(
-                    "understanding chunk {job} (agent {agent}) hit a database error, waiting: {exc!r}",
-                    job=job.id,
-                    agent=job.agent_id,
-                    exc=exc,
-                )
-                outcome = Outcome("wait", f"{type(exc).__name__}: {exc}")
             except Exception as exc:
                 logger.opt(exception=True).warning(
                     "understanding chunk {job} (agent {agent}) crashed",
@@ -505,7 +476,7 @@ class _Consumer:
                     inputs=self.inputs,
                 )
         except Exception:
-            # A settle that failed leaves the row `running`; its lease lapses and it is retaken.
+            # A settle that failed leaves the row `running`; its lease lapses and fails it.
             logger.opt(exception=True).warning(
                 "understanding chunk {job} (agent {agent}) could not be settled",
                 job=job.id,

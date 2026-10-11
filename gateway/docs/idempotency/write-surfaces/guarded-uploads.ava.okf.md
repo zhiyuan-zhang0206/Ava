@@ -16,8 +16,9 @@ Browser file delivery submits one batch/key to the new route and validates its
 202 source receipt. There is no client Outbox or automatic resend;
 silent native-image uploads use the silent route above and SDK/MCP consumers are not activated.
 Old consumers cannot effect the new path/kind. 202 reports historical source acceptance, not remote readiness or
-agent execution. Retained status distinguishes pending retries from inspectable
-HOLD; there is no time-based reservation expiration or operator cancel endpoint.
+agent execution. Copy is attempted at most three times; retained status distinguishes
+pending retries from inspectable HOLD, and a HOLD is not retried. There is no
+time-based reservation expiration or operator cancel endpoint.
 
 Current owner: [delivered uploads](../../../upload_delivery/docs/delivered-uploads/delivered-uploads.ava.okf.md).
 Silent native-image saves: [upload batches](../../../routers/docs/upload-batches.ava.okf.md).

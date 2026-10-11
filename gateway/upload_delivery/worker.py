@@ -1,4 +1,8 @@
-"""Bounded source recovery rounds, drained before the Gateway closes its pool."""
+"""Upload delivery rounds: copy each accepted batch, accept one chat, wake once.
+
+A batch gets at most `source.MAX_COPY_ATTEMPTS` copy attempts; the round then holds it
+and emits `upload_delivery_held`. Rounds drain before the Gateway closes its pool.
+"""
 
 import asyncio
 import logging
@@ -10,6 +14,7 @@ from typing import Any
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
+from base import telemetry
 from base.agents import AgentNotFound
 from base.agents.messages.inbound import InboundKind
 from base.agents.upload_delivery import source, storage
@@ -30,13 +35,26 @@ from ops.lifecycle import resurrect_if_terminated
 _log = logging.getLogger(__name__)
 
 
+def _cluster_failure(exc: ClusterOpFailed) -> tuple[str, bool]:
+    """The safe reason of a failed receiver call and whether it can never succeed."""
+    if str(exc.result.get("error", "")).startswith("unknown kind:"):
+        return "unsupported-receiver", True
+    reason = exc.result.get("reason")
+    if reason in {
+        "upload-copy-conflict-v1",
+        "upload-copy-quota-v1",
+        "upload-source-unavailable-v1",
+    }:
+        return str(reason), True
+    return "receiver-unavailable", False
+
+
 class UploadRecovery:
     """A source domain round and its actual native futures; never time-based leases."""
 
     def __init__(self, pool: ConnectionPool, db: Database, bus: EventBus) -> None:
         self.pool, self.db, self.bus = pool, db, bus
         self.stopped = asyncio.Event()
-        self.wake_after = ""
         self.calls: set[asyncio.Future[Any]] = set()
         self.task: asyncio.Task[None] | None = None
 
@@ -94,33 +112,29 @@ class UploadRecovery:
         async with asyncio.TaskGroup() as group:
             for request in requests:
                 group.create_task(self.copy(request))
-        pending = await self.native(source.pending_wakes, self.pool, self.wake_after)
-        for batch_id, agent_id, inbound_id in pending:
-            if (
-                self.stopped.is_set()
-                or await self.native(business_paused)
-                or await self.native(quiesced)
-            ):
-                break
-            self.wake_after = batch_id
-            try:
-                await self.native(
-                    publish_inbound_wake, self.db, self.bus, agent_id, str(inbound_id)
-                )
-                await resurrect_if_terminated(
-                    self.db,
-                    self.bus,
-                    agent_id,
-                    trigger_inbound_id=inbound_id,
-                    trigger_inbound_kind=InboundKind.CHAT,
-                )
-            except Exception:
-                _log.warning(
-                    "upload inbound wake failed for agent=%s iid=%s; retained row will retry",
-                    agent_id,
-                    inbound_id,
-                    exc_info=True,
-                )
+
+    async def wake(self, agent_id: int, inbound_id: int) -> None:
+        """Wake the target once after acceptance; a failure is logged and not retried.
+
+        The accepted chat is already a pending inbound, so the agent's next ordinary wake
+        (a message or heartbeat) delivers it.
+        """
+        try:
+            await self.native(publish_inbound_wake, self.db, self.bus, agent_id, str(inbound_id))
+            await resurrect_if_terminated(
+                self.db,
+                self.bus,
+                agent_id,
+                trigger_inbound_id=inbound_id,
+                trigger_inbound_kind=InboundKind.CHAT,
+            )
+        except Exception:
+            _log.warning(
+                "upload inbound wake failed for agent=%s iid=%s; not retried",
+                agent_id,
+                inbound_id,
+                exc_info=True,
+            )
 
     async def copy(self, request: ReceiveRequest) -> None:
         if self.stopped.is_set() or await self.native(business_paused):
@@ -137,24 +151,10 @@ class UploadRecovery:
                 or await self.native(quiesced)
             ):
                 return
-            await self.native(source.complete, self.pool, request, proof)
+            inbound_id = await self.native(source.complete, self.pool, request, proof)
         except ClusterOpFailed as exc:
-            unsupported = str(exc.result.get("error", "")).startswith("unknown kind:")
-            reason = exc.result.get("reason")
-            permanent = reason in {
-                "upload-copy-conflict-v1",
-                "upload-copy-quota-v1",
-                "upload-source-unavailable-v1",
-            }
-            await self.failure(
-                request,
-                "unsupported-receiver"
-                if unsupported
-                else str(reason)
-                if permanent
-                else "receiver-unavailable",
-                hold=unsupported or permanent,
-            )
+            reason, hold = _cluster_failure(exc)
+            await self.failure(request, reason, hold=hold)
         except (
             UploadDeliveryConflictError,
             AgentNotFound,
@@ -168,6 +168,8 @@ class UploadRecovery:
             )
         except Exception as exc:
             await self.failure(request, type(exc).__name__, hold=False)
+        else:
+            await self.wake(request.manifest.agent_id, inbound_id)
 
     async def copy_proof(self, request: ReceiveRequest) -> CopyProof:
         if request.source == request.target:
@@ -190,6 +192,16 @@ class UploadRecovery:
         return CopyProof.model_validate(result)
 
     async def failure(self, request: ReceiveRequest, reason: str, *, hold: bool) -> None:
-        await self.native(
+        state = await self.native(
             lambda: source.record_failure(self.pool, request.manifest.batch_id, reason, hold=hold)
         )
+        if state == "hold":
+            telemetry.emit(
+                "telemetry",
+                "upload_delivery_held",
+                attributes={
+                    "agent_id": request.manifest.agent_id,
+                    "batch_id": request.manifest.batch_id,
+                    "reason": reason,
+                },
+            )

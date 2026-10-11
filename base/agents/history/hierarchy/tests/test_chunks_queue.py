@@ -70,7 +70,7 @@ async def test_claim_takes_oldest_first_and_never_the_same_row_twice(
     assert all(job.attempts == 1 for job in claimed if job is not None)
 
 
-async def test_released_job_waits_out_the_spacing_and_a_lapsed_lease_is_taken_over(
+async def test_released_job_waits_out_the_spacing_and_a_lapsed_lease_fails_the_job(
     aops_pool: AsyncConnectionPool,
 ) -> None:
     await enqueue_chunk(aops_pool, 1, compact_version=0, chunk=Chunk(0, 10), end_msg_id="m10")
@@ -85,16 +85,18 @@ async def test_released_job_waits_out_the_spacing_and_a_lapsed_lease_is_taken_ov
         job.id,
     )
     again = await claim_job(aops_pool)
-    assert again is not None and again.id == job.id and again.attempts == 2
-    # A running claim past the lease (its claimer died) is taken over too.
+    assert again is not None and again.id == job.id and again.attempts == 1  # a wait is no attempt
+    # A running claim past the lease (its claimer died) is failed, never taken over.
     await _rows(
         aops_pool,
         "UPDATE understanding_chunk_jobs SET claimed_at = now() - interval '1 hour'"
         " WHERE id = %s RETURNING id",
         job.id,
     )
-    taken_over = await claim_job(aops_pool)
-    assert taken_over is not None and taken_over.attempts == 3
+    assert await claim_job(aops_pool) is None
+    assert await _rows(
+        aops_pool, "SELECT status, error FROM understanding_chunk_jobs WHERE id = %s", job.id
+    ) == [("failed", "claimer lost: lease expired")]
 
 
 async def test_backlog_counts_pending_and_running_and_ages_the_oldest_pending(

@@ -32,6 +32,9 @@ from base.agents.upload_delivery.paths import (
 from base.cluster.authority.unit import UnitIdentity
 from base.db.transaction import write_transaction
 
+# Copy attempts a batch gets before it is held for a person to re-upload.
+MAX_COPY_ATTEMPTS = 3
+
 
 def target_unit(conn: Connection[Any], agent_id: int) -> UnitIdentity:
     if (
@@ -243,14 +246,21 @@ def validate_pending(pool: ConnectionPool, request: ReceiveRequest) -> bool:
         return True
 
 
-def record_failure(pool: ConnectionPool, batch_id: str, reason: str, *, hold: bool) -> None:
+def record_failure(pool: ConnectionPool, batch_id: str, reason: str, *, hold: bool) -> str | None:
+    """Record one failed copy attempt; the batch's state afterwards, None when not pending.
+
+    A permanent failure (`hold`) or the `MAX_COPY_ATTEMPTS`th attempt holds the batch, which
+    nothing retries or unseals; otherwise it stays pending behind a linear backoff.
+    """
     with write_transaction(pool) as conn:
-        conn.execute(
-            "UPDATE upload_delivery_batches SET state=%s, reason=%s, attempts=attempts+1, "
-            "next_attempt_at=now()+interval '30 seconds' * least(attempts+1, 20) "
-            "WHERE batch_id=%s AND state='pending'",
-            ("hold" if hold else "pending", reason, batch_id),
-        )
+        row = conn.execute(
+            "UPDATE upload_delivery_batches SET reason=%s, attempts=attempts+1, "
+            "state=CASE WHEN %s OR attempts+1 >= %s THEN 'hold' ELSE 'pending' END, "
+            "next_attempt_at=now()+interval '30 seconds' * (attempts+1) "
+            "WHERE batch_id=%s AND state='pending' RETURNING state",
+            (reason, hold, MAX_COPY_ATTEMPTS, batch_id),
+        ).fetchone()
+    return None if row is None else row[0]
 
 
 def _proof_paths(proof: CopyProof, manifest: Manifest) -> list[str]:
@@ -325,16 +335,3 @@ def complete(pool: ConnectionPool, request: ReceiveRequest, proof: CopyProof) ->
             ),
         )
         return receipt.inbound_id
-
-
-def pending_wakes(
-    pool: ConnectionPool, after: str = "", limit: int = 32
-) -> list[tuple[str, int, int]]:
-    with pool.connection() as conn:
-        return conn.execute(
-            "SELECT d.batch_id, d.agent_id, d.inbound_id FROM upload_delivery_batches d "
-            "JOIN inbound_messages i ON i.id=d.inbound_id WHERE d.state='accepted' "
-            "AND i.agent_id=d.agent_id AND i.status='pending' AND d.source_unit=%s "
-            "ORDER BY (d.batch_id<=%s), d.batch_id LIMIT %s",
-            (Jsonb(current_unit().model_dump()), after, limit),
-        ).fetchall()
