@@ -179,22 +179,6 @@ class LmSettings(EnvSettings):
         },
     )
 
-    llm_non_streaming_fallback_timeout_seconds: float = Field(
-        default=600.0,
-        alias="AVA_LLM_NON_STREAMING_FALLBACK_TIMEOUT_SECONDS",
-        description=(
-            "Total timeout (seconds) for the non-streaming fallback after a "
-            "corrupted stream. 600s leaves headroom for a slow thinking-model "
-            "single response."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     llm_invoke_timeout_seconds: float = Field(
         default=60.0,
         alias="AVA_LLM_INVOKE_TIMEOUT_SECONDS",
