@@ -4,6 +4,13 @@ The dump runs in this supervised process so its one-hour subprocess deadline
 cannot delay a watchdog round. Its health component reports the age of the
 last successful backup; the watchdog therefore only probes and restarts this
 daemon when its schedule has stopped making progress.
+
+A failed dump is attempted once per cluster day: the daemon reports it through
+the `backup_dump_failed` event and its health detail, then waits for the next
+backup hour. A degraded health component would make the watchdog restart the
+daemon, and a restarted daemon dumps again at once, so a failure is deliberately
+not reported as a degraded status; only a missing success for
+`BACKUP_STALE_AFTER_S` is.
 """
 
 from __future__ import annotations
@@ -49,9 +56,9 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 
 _log = logging.getLogger("services.backup.scheduler.daemon")
 
-BACKUP_RETRY_INTERVAL_S = 1800
 BACKUP_STALE_AFTER_S = 26 * 3600
 _SLEEP_CHUNK_S = 60
+_FAILURE_DETAIL_CHARS = 500
 
 
 def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
@@ -120,9 +127,9 @@ def _backup_components(state: _BackupState) -> list[dict[str, object]]:
         progress = f"running {time.time() - started_at:.0f}s"
         detail = None
     elif state.last_error is not None:
-        status = DEGRADED
+        status = OK
         progress = "idle"
-        detail = state.detail
+        detail = f"last dump failed: {state.detail}; next attempt at the next backup hour"
     elif state.last_success is not None:
         age_s = time.time() - state.last_success
         status = OK if age_s <= BACKUP_STALE_AFTER_S else DEGRADED
@@ -198,7 +205,7 @@ async def _run_due_local_dump_restore(now: datetime, *, config: ConfigBoot) -> N
 
 
 async def _backup_loop(state: _BackupState, *, config: ConfigBoot) -> None:
-    """Run due dumps and retry a failed dump sooner than the next schedule."""
+    """Run due dumps; a failed dump is reported and not attempted again before the next backup hour."""
     _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
     # quiesce-exempt: pg_dump dials the direct URL read-only, not the pool; a held pause must not stop backups
     while True:
@@ -219,9 +226,13 @@ async def _backup_loop(state: _BackupState, *, config: ConfigBoot) -> None:
             await _run_due_local_dump_restore(now, config=config)
         except Exception as exc:
             state.record_error(str(exc))
-            _log.exception("[pg-backup] dump failed; retrying in %ss", BACKUP_RETRY_INTERVAL_S)
-            await _sleep(BACKUP_RETRY_INTERVAL_S)
-            continue
+            telemetry.emit(
+                "telemetry",
+                "backup_dump_failed",
+                level="error",
+                attributes={"detail": str(exc)[:_FAILURE_DETAIL_CHARS]},
+            )
+            _log.exception("[pg-backup] dump failed; next attempt at the next backup hour")
         finally:
             state.running = False
         await _sleep_until_next_backup_hour(datetime.now(UTC), config=config)

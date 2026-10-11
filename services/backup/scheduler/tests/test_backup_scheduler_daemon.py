@@ -11,6 +11,7 @@ import os
 import socket
 import subprocess
 import sys
+import time
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
@@ -19,7 +20,7 @@ from unittest.mock import patch
 import pytest
 
 from base.config import ConfigBoot, settings
-from base.daemon import health
+from base.daemon import health, health_schema
 from base.daemon.tests.health_support import unknown_image
 from base.native_process.os_platform import LockTimeoutError
 from services.backup.scheduler import daemon
@@ -277,28 +278,64 @@ def test_due_backup_sleeps_from_completion_time(monkeypatch: pytest.MonkeyPatch)
     assert sleeps == [24 * 3600 - 53 * 60 - 52]
 
 
-def test_failed_backup_retries_before_tomorrow(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     state = daemon._BackupState(started_at=0.0)
-    sleeps: list[float] = []
+    ran: list[str] = []
+    waits: list[str] = []
+    emitted: list[tuple[str, str, dict[str, object]]] = []
 
     monkeypatch.setattr(daemon, "is_due", _always_due)
 
-    async def fail(_kind: str, *, now: datetime, config: ConfigBoot) -> None:
+    async def fail(kind: str, *, now: datetime, config: ConfigBoot) -> None:
+        ran.append(kind)
         raise RuntimeError("temporary failure")
 
-    async def stop_after_retry(seconds: float) -> None:
-        sleeps.append(seconds)
+    async def stop_at_next_backup_hour(_now: datetime, *, config: ConfigBoot) -> None:
+        waits.append("next_backup_hour")
         raise asyncio.CancelledError
 
+    async def no_short_retry_sleep(seconds: float) -> None:
+        pytest.fail(f"a failed dump must not schedule a shorter retry ({seconds}s)")
+
+    def record_emit(category: str, event_name: str, **kwargs: object) -> None:
+        emitted.append((category, event_name, kwargs))
+
     monkeypatch.setattr(daemon, "run_job", fail)
-    monkeypatch.setattr(daemon, "_sleep", stop_after_retry)
+    monkeypatch.setattr(daemon, "_sleep", no_short_retry_sleep)
+    monkeypatch.setattr(daemon, "_sleep_until_next_backup_hour", stop_at_next_backup_hour)
+    monkeypatch.setattr(daemon.telemetry, "emit", record_emit)
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(daemon._backup_loop(state, config=ConfigBoot()))
 
-    assert sleeps == [daemon.BACKUP_RETRY_INTERVAL_S]
+    assert ran == ["dump"]
+    assert waits == ["next_backup_hour"]
     assert state.running is False
     assert state.last_error == "temporary failure"
+    assert emitted == [
+        (
+            "telemetry",
+            "backup_dump_failed",
+            {"level": "error", "attributes": {"detail": "temporary failure"}},
+        )
+    ]
+
+
+def test_failed_dump_does_not_make_healthz_ask_the_supervisor_for_a_restart() -> None:
+    """A degraded component is a 503, which root answers with a restart, and a restarted
+    daemon dumps again at once. The failure is reported in the detail and the event."""
+    state = daemon._BackupState(started_at=time.monotonic())
+    state.record_error("disk full")
+
+    components = daemon._backup_components(state)
+
+    assert components[0]["status"] == "ok"
+    assert components[0]["last_error"] == "disk full"
+    assert "last dump failed: disk full" in str(components[0]["detail"])
+    status, _body = health_schema.render({"name": "pg_backup"}, components)
+    assert status == 200
 
 
 @pytest.mark.asyncio

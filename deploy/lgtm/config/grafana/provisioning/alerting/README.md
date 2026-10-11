@@ -85,6 +85,7 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-events-low-water` | `ava-ops` | event stream below low-water mark | count in 5m < 150 (Loki) | 10m | warning |
 | `ava-ops-telemetry-queue-loss` | `ava-ops` | telemetry queue lost events | a machine+process+queue's last drop < 300s old (Prometheus) | 0s | error |
 | `ava-ops-recovery-drill-failed` | `ava-ops` | scheduled recovery drill failed | `recovery_drill_failed` (level=error) by drill in 1h > 0 (Loki) | 0m | error |
+| `ava-ops-backup-dump-failed` | `ava-ops` | scheduled logical dump failed | `backup_dump_failed` (level=error) in 24h > 0 (Loki) | 0m | error |
 | `ava-ops-llm-rate-limit` | `ava-ops-slow` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
 | `ava-ops-llm-stall-pair` | `ava-ops` | LLM stream stall pair | `stream_stall_pair_terminated` in 15m > 0 (Loki) | 0m | warning |
 | `ava-ops-llm-stall-burst` | `ava-ops` | LLM provider stall burst | `stream_stalled_retry` per vendor in 15m > 4 (Loki) | 0m | warning |

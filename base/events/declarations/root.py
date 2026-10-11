@@ -110,6 +110,17 @@ class RecoveryDrillFailed(TypedDict):
     detail: str
 
 
+class BackupDumpFailed(TypedDict):
+    """`backup_dump_failed` payload — the scheduled daily logical dump.
+
+    ``detail`` is the bounded failure diagnostic retained in the event stream; it
+    is not a Prometheus measurement or alert grouping key. The scheduler attempts
+    a dump once per cluster day, so each event is one day without a new dump.
+    """
+
+    detail: str
+
+
 class HealthProbeFailing(TypedDict):
     """`health_probe_failing` payload — cli/commands/cluster/health.py.
 
@@ -274,6 +285,13 @@ EVENTS: dict[str, EventSpec] = {
             "cli/commands/lifecycle/service_stop.py:report_postgres_stop_escalation "
             'telemetry.emit("telemetry", ...)'
         ),
+    ),
+    "backup_dump_failed": telemetry_event(
+        "backup_dump_failed",
+        "the scheduled daily logical dump failed; it is not attempted again before the next backup hour",
+        payload=BackupDumpFailed,
+        tier="anomaly",
+        site="services/backup/scheduler/daemon.py:_backup_loop (positional emit)",
     ),
     "recovery_drill_failed": telemetry_event(
         "recovery_drill_failed",

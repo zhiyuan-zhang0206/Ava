@@ -293,6 +293,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `root_diagnostic` | root diagnostic sampled non-alive (every sample while it persists, WARNING) or recovered (once, INFO); observation only, no recovery authority | anomaly | diagnostic, verdict, detail, consecutive_failures | — | events | — |
 | `root_health_tick` | root completed one service health and diagnostic observation round | noise | home_id, last_tick_timestamp_seconds | — | events | — |
 | `postgres_stop_escalated` | a Postgres fast shutdown did not finish within its budget and was ended by an immediate shutdown plus a SIGKILL of the leftover descendants (usually a hung archive command) | anomaly | — | — | events | — |
+| `backup_dump_failed` | the scheduled daily logical dump failed; it is not attempted again before the next backup hour | anomaly | detail | — | events | — |
 | `recovery_drill_failed` | scheduled logical restore drill failed | anomaly | drill, detail | — | events | — |
 | `health_probe_failing` | the cluster health probe found a failing check; repeated on every unhealthy run | anomaly | check, failure_class, message | — | events | — |
 | `health_probe_ran` | the cluster health probe completed a run, healthy or not (its own heartbeat) | observation | unhealthy_checks | — | events | — |

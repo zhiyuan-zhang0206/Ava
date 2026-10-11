@@ -29,7 +29,9 @@ The other alerts say the archive and the backup run are healthy or not; they are
 a recovery proof.
 
 A failed drill emits the typed `recovery_drill_failed` telemetry event with the
-drill name. Grafana alerts immediately on that event's one-hour window. Every
+drill name. Grafana alerts immediately on that event's one-hour window. A failed
+daily logical dump emits `backup_dump_failed` and is not attempted again before
+the next backup hour; its Grafana rule keeps firing for 24 hours. Every
 scheduled backup worker uses private staging and bounded stop, without durable
 custody or blocked-kind retirement. Failures remain failures in scheduler
 health/logs and never advance backup/drill success markers. If cleanup fails,
