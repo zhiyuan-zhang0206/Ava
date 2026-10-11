@@ -9,10 +9,9 @@ detected before exec crashes, and legitimate runtime artifacts are allowlisted.
 ``ava cluster health-probe`` check 8 is the one caller: read-only detection on
 the OS-cron cadence. It alerts on tamper and never writes. The check reports
 changed tracked files and untracked files outside ``SOURCE_TREE_WHITELIST``.
-A moved HEAD alone is not tamper: no current lifecycle records an installed
-commit for a source checkout (the retired updater's ``installed_sha`` bookmark
-has no writer), and an operator legitimately moves the checkout before an
-``ava restart``. Running-versus-checkout drift is shown, not alerted, by the
+A moved HEAD alone is not tamper: no lifecycle records an installed
+commit for a source checkout, and an operator legitimately moves the checkout
+before an ``ava restart``. Running-versus-checkout drift is shown, not alerted, by the
 roster ``code`` column.
 """
 

@@ -114,7 +114,7 @@ $REMOTE_OTLP_RECEIVER
           static_configs:
             - targets: [localhost:$SELF_METRICS_PORT]
 
-  # ── Session-log tailing (2026-08-23 cutover; replaces promtail) ──────────
+  # ── Session-log tailing ───────────────────────────────────────────────────
   # Agent shell transcripts and service stdout use separate, disjoint
   # receivers. Agent main logs are banner-only here and are deliberately
   # absent: their identical prefixes collide under filelog's content
@@ -180,7 +180,7 @@ processors:
     logs:
       log_record:
         - 'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != "$CLUSTER_LABEL"'
-  # Session-log labeling (filelog receivers; replaces promtail's per-file
+  # Session-log labeling (filelog receivers; per-file
   # service label): service.name <- the file's session name (strip .out.log),
   # guarded so event logs (no log.file.name) pass through untouched.
   transform/filelog_service:

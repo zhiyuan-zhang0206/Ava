@@ -21,8 +21,8 @@
 #   14318 Tempo OTLP/HTTP intake (container)
 #   9090  Prometheus API and OTLP receiver (native backend)
 #
-# Resource posture: native limits are GOMEMLIMIT=2GiB (Loki), 1GiB
-# (Prometheus), and 256MiB (Promtail). Tempo has a 1-core/768MiB container
+# Resource posture: native limits are GOMEMLIMIT=2GiB (Loki) and 1GiB
+# (Prometheus). Tempo has a 1-core/768MiB container
 # capsule; Grafana has a 2-core/2GiB capsule. Native backend ports are pinned
 # to loopback in their templates; Grafana keeps the wider bind for remote,
 # anonymous-but-read-only viewing.
@@ -89,4 +89,3 @@ volumes:
   loki-data:
   prom-data:
   grafana-data:
-  promtail-positions:

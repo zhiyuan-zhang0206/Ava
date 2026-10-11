@@ -40,14 +40,9 @@ class LmSettings(EnvSettings):
     )
 
     labeler_model: str = Field(
-        # The flash tier is the only DeepSeek tier left after the V4 Pro
-        # withdrawal (user order 2026-09-10; the surviving tier is served as
-        # `deepseek-flash` — the V4 ids are retired, 2026-09-20 user report).
-        # The pro-over-flash pick here was a measurement against the pre-V4.1
-        # Flash backend (issue #178: flash *executed* machine-authored briefs
-        # instead of summarizing them, 15 of 56 attempts) — re-measure if
-        # label quality regresses. Staying inside DeepSeek keeps the
-        # gateway's required-key surface unchanged.
+        # The flash tier is the only DeepSeek tier, served as `deepseek-flash`.
+        # Staying inside DeepSeek keeps the gateway's required-key surface
+        # unchanged; re-measure label quality if it regresses.
         default="deepseek-flash",
         alias="AVA_LABELER_MODEL",
         description=(

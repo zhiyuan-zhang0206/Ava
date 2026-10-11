@@ -287,11 +287,8 @@ def bootstrap_from_gateway() -> None:
     temp dir and atomically swapped into place, so a failed attempt leaves no
     residue to poison a later retry.
 
-    2026-08-27 company-mini incident: before this, a fresh runner with no
-    remote silently got a stub local pool and its agents saw no shared memory.
-    Note: a pool that was already initialized as a stub (pre-fix) is not
-    self-healed — `init()` no-ops on an existing checkout; recover such a
-    machine by removing `$AVA_HOME/memory` and running `ava memory init`.
+    A fresh runner with no remote must never get a stub local pool: its agents
+    would see no shared memory. `init()` no-ops on an existing checkout.
 
     Raises:
         MemoryPoolBootstrapFailed: gateway URL missing/unreachable, non-200,
