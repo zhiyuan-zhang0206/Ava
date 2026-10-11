@@ -740,6 +740,28 @@ def test_encrypted_artifact_decrypts_to_original_dump(
     assert custom_dump.read_bytes() == original_dump
 
 
+def test_decrypt_failure_reports_exit_and_removes_private_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = tmp_path / ".backup-key-test"
+    key.write_text("private key")
+    key.chmod(0o600)
+
+    def key_file(_directory: Path) -> Path:
+        return key
+
+    def failed_decrypt(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess([], 7)
+
+    monkeypatch.setattr(backup, "_key_file", key_file)
+    monkeypatch.setattr(backup.subprocess, "run", failed_decrypt)
+    output = tmp_path / "backup.dump"
+    with pytest.raises(RuntimeError, match=r"^backup decrypt exited 7$"):
+        backup.decrypt_artifact(tmp_path / "artifact.dump.enc", output)
+    assert not key.exists()
+    assert output.stat().st_mode & 0o777 == 0o600
+
+
 def test_run_backup_forwards_requested_timeout(
     bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
