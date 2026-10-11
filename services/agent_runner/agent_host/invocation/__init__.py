@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -14,7 +15,7 @@ from agent.ownership.hosted_completion import (
     pending_hosted_lifecycle_id,
 )
 from agent.state import BaseAgentState
-from agent.turn.runloop import PendingTurnFailure, settle_turn_failure
+from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
 from base.agents.impersonation.notes import HandoffNotes
@@ -76,7 +77,14 @@ async def finish_pending_failure(
                 resources=ctx.hosted_resources,
             )
         await attach_trace_checkpoint_ref(graph, ctx, agent_id)
-    return TurnOutcome(exited=False, crashed=True, aborted=True)
+    return TurnOutcome(
+        exited=False,
+        crashed=True,
+        aborted=True,
+        failure_report=(
+            partial(publish_turn_failure, pending, ctx.require_bus()) if pending.errors else None
+        ),
+    )
 
 
 async def returned_lifecycle_request(
