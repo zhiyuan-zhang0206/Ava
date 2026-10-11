@@ -602,7 +602,7 @@ def test_fresh_build_signs_with_the_stable_certificate(
         "--entitlements",
         str(lifecycle._ENTITLEMENTS),
         "--identifier",
-        lifecycle._BUNDLE_ID,
+        lifecycle.HELPER_BUNDLE_ID,
         "--requirements",
         f"=designated => {_test_dr()}",
         str(app),

@@ -47,9 +47,8 @@ _REQUIRED_STRINGS = (
 )
 
 # Bucket prefixes the physical chain must never live under: the logical-dump
-# namespace, the scratch area (lifecycle-expired) and the retired physical chain.
+# namespace and the scratch area (lifecycle-expired).
 _FORBIDDEN_FIRST_SEGMENTS = (REMOTE_ROOT, "ava-pitr-scratch")
-_FORBIDDEN_FIRST_SEGMENT_PREFIXES = ("ava-wsl-cutover-",)
 
 
 class WalgConfigError(RuntimeError):
@@ -99,7 +98,7 @@ def _prefix_problem(prefix: str) -> str | None:
     if not segments:
         return "WALG_OSS_PREFIX must name a path inside the bucket, not the bucket root"
     first = segments[0]
-    if first in _FORBIDDEN_FIRST_SEGMENTS or first.startswith(_FORBIDDEN_FIRST_SEGMENT_PREFIXES):
+    if first in _FORBIDDEN_FIRST_SEGMENTS:
         return f"WALG_OSS_PREFIX must not live under {first}/"
     return None
 

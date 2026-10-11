@@ -114,7 +114,7 @@ async def test_a_wake_cancelled_before_its_row_read_latches_only_live_continuati
 ) -> None:
     """FC-10 F20: a stop's SIGTERM cancels every task (`cancel_and_drain`).
 
-    Caught before `_read_stored_config` could say "not ours", a wake for
+    Caught before `read_stored_config` could say "not ours", a wake for
     another machine's agent latched a blocking receipt on the stopping unit's
     hold, and so could one for a member already drained. A member still
     draining keeps its receipt.

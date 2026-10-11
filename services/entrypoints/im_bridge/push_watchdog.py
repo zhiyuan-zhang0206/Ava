@@ -11,8 +11,6 @@ own message, so:
   user (through the ops fan-out) to message the bot;
 - after a later send succeeds (a fresh user message brought a new token),
   hint "recovered" on the next inbound reply.
-
-The old "24h window" reminder assumed a fixed 24h expiry and was retired.
 """
 
 from __future__ import annotations

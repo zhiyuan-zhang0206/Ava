@@ -275,10 +275,9 @@ def _send_heartbeat_checkin(
         # (`base/telemetry/emitter.py`).
         #
         # ts time-source note: the emitter stamps datetime.now(UTC) at ENQUEUE
-        # time (process clock, one time source for the whole stream) — the old
-        # direct agent_events INSERT used DB now() (transaction time). The two
-        # can differ by the drain interval (≤0.5s) plus any queue backlog;
-        # historical rows keep their original DB-clock ts (W7 rewiring).
+        # time (process clock, one time source for the whole stream), so it can
+        # trail the inbound's transaction time by the drain interval (≤0.5s)
+        # plus any queue backlog.
         telemetry.emit(
             "telemetry",
             "heartbeat_nudged",

@@ -34,7 +34,6 @@ from services.entrypoints.im_bridge.timeline_acceptance import (
     apply_account_selection,
     hold_selection,
     register_adapter,
-    render_item,
     restore_selection,
     selection_account,
     sync_selection,
@@ -87,9 +86,6 @@ def _is_dialog_item(it: dict[str, Any]) -> bool:
 # Refresh Telegram's ~5-second typing indicator every 4s, for at most 5 minutes.
 _TYPING_INTERVAL_S = 4.0
 _TYPING_MAX_S = 300.0
-
-
-_render_item = render_item  # Compatibility for the existing renderer consumer.
 
 
 class IMBridgeCore(SpawnMenuMixin):

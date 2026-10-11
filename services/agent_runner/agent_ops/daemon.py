@@ -66,17 +66,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.log import init_gateway_process
 from base.packages.plugins.config_registration import InvalidConfigOverlay
-from ops import host_config as host_config
-from ops import inventory as inventory
 from ops import lifecycle
-from ops import uploads as uploads
-
-# The synchronous op arms and the op modules they call live in
-# `services.agent_runner.agent_ops.dispatch_sync` (split at the file-size ceiling, task
-# #4129 I4). The op modules below are re-exported through the daemon because
-# the routing tests patch them through this module's name
-# (`daemon.cluster`); the arms reference the same module objects.
-from ops.cluster import operations
 from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import (
     LaunchAgentRequest,
@@ -97,8 +87,6 @@ from services.agent_runner.agent_ops._boot import (
 )
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-
-cluster = operations
 
 _log = logging.getLogger("services.agent_runner.agent_ops.daemon")
 

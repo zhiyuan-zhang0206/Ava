@@ -296,12 +296,11 @@ async def test_reap_expired_shells_absent_reaping_is_silent(
     assert _system_inbounds(db_conn, aid) == []
 
 
-async def test_reap_expired_shells_missing_interrupted_field_notifies(
+async def test_reap_expired_shells_result_without_interrupted_is_deferred(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A pre-policy runner's shell_kill result has no `interrupted` field —
-    default to notifying (the old behavior) so a version-skewed fleet never
-    silently swallows an interruption notice."""
+    """A shell_kill result missing `interrupted` is malformed: the row stays
+    for the next round and nothing is notified."""
     aid = _running_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -315,7 +314,7 @@ async def test_reap_expired_shells_missing_interrupted_field_notifies(
     async def _dispatch(
         _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
-        return {"mode": "killed"}  # old runner: no interrupted field
+        return {"mode": "killed"}
 
     monkeypatch.setattr(
         shells.cluster_rpc,
@@ -324,9 +323,12 @@ async def test_reap_expired_shells_missing_interrupted_field_notifies(
     )
     reaped = await _reap(reaper_pool)
 
-    assert reaped == [(aid, 6)]
-    msgs = _system_inbounds(db_conn, aid)
-    assert len(msgs) == 1 and "interrupting a running task" in msgs[0]
+    assert reaped == []
+    assert _system_inbounds(db_conn, aid) == []
+    row = db_conn.execute(
+        "SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s AND session_id = 6", (aid,)
+    ).fetchone()
+    assert row is not None and row[0] == 1
 
 
 async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
