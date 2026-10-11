@@ -22,20 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-# argv: <function to call>. Prints the result.
-_DRIVER = r"""
-import sys
-
-from ava_builtins.plugins.ava_memory import pool_ops
-
-fn = sys.argv[1]
-if fn == "pool_dir":
-    print(str(pool_ops.pool_dir()))
-elif fn == "machine_name":
-    print(pool_ops.machine_name())
-else:
-    raise ValueError(f"unknown fn {fn!r}")
-"""
+_CHILD = Path(__file__).with_name("child_pool_ops.py")
 
 
 def _run(
@@ -48,7 +35,7 @@ def _run(
         env["HOME"] = str(home)
     env |= env_overrides
     return subprocess.run(  # noqa: S603 — fixed argv, repository-owned driver script
-        [sys.executable, "-c", _DRIVER, fn],
+        [sys.executable, str(_CHILD), fn],
         capture_output=True,
         text=True,
         env=env,
@@ -113,22 +100,6 @@ def test_machine_name_refuses_when_nothing_names_the_machine(tmp_path: Path) -> 
 
 # ── import side effects (path_imports refactor, pool_ops now a plugin submodule) ──
 
-_IMPORT_SIDE_EFFECT_DRIVER = r"""
-import sys
-
-before = set(sys.modules)
-from ava_builtins.plugins.ava_memory import pool_ops  # noqa: F401
-after = set(sys.modules)
-
-# Nothing beyond pool_ops itself and its own (stdlib) imports should load as a
-# side effect -- in particular, no sibling submodule that does plugin/hook
-# declaration (plugin.py, sdk.py, services.py, setup.py, ...).
-new_ava_builtins_modules = sorted(
-    m for m in (after - before) if m.startswith("ava_builtins.plugins.ava_memory")
-)
-print(",".join(new_ava_builtins_modules))
-"""
-
 
 def test_importing_pool_ops_as_a_plain_module_loads_no_sibling_submodule() -> None:
     """Importing `ava_builtins.plugins.ava_memory.pool_ops` as a plain module
@@ -140,7 +111,7 @@ def test_importing_pool_ops_as_a_plain_module_loads_no_sibling_submodule() -> No
     which this fresh-subprocess import locks in."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("AVA_")}
     res = subprocess.run(  # noqa: S603 — fixed argv, repository-owned driver script
-        [sys.executable, "-c", _IMPORT_SIDE_EFFECT_DRIVER],
+        [sys.executable, str(_CHILD), "import_side_effects"],
         capture_output=True,
         text=True,
         env=env,

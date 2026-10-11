@@ -7,13 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_PROBE = (
-    "import ava.shell.sessions as sessions\n"
-    "try:\n"
-    "    print('LIST=' + repr(sessions.list()))\n"
-    "except RuntimeError as exc:\n"
-    "    print('REFUSED=' + str(exc))\n"
-)
+_PROBE = Path(__file__).with_name("child_sessions_probe.py")
 
 
 def _run_probe(home: Path, *, agent_id: int | None) -> str:
@@ -21,8 +15,8 @@ def _run_probe(home: Path, *, agent_id: int | None) -> str:
     env.update(AVA_HOME=str(home), AVA_CONFIG_FETCH="skip")
     if agent_id is not None:
         env["AVA_AGENT_ID"] = str(agent_id)
-    result = subprocess.run(  # noqa: S603 — fixed interpreter and probe source
-        [sys.executable, "-c", _PROBE],
+    result = subprocess.run(  # noqa: S603 — fixed interpreter and probe script
+        [sys.executable, str(_PROBE)],
         env=env,
         capture_output=True,
         text=True,
