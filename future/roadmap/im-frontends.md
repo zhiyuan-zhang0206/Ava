@@ -27,8 +27,7 @@ logic).
 - After a switch, subscribe to all of that agent's new messages (SSE
   `timeline_snapshot` -> filter conversation kinds -> push), follow mode.
 - WeChat goes through the **iLink official Bot API** (Tencent opened it via
-  OpenClaw in 2026-03; a bot identity is enough for the IM Bridge scenario);
-  the OCR approach stays out of the open-source repo.
+  OpenClaw in 2026-03; a bot identity is enough for the IM Bridge scenario).
 
 ## v1 channels (landing 2026-08)
 
@@ -57,5 +56,3 @@ Same im_bridge core; a new channel = a new adapter:
 - Uploading files, the tasks command, group chat, media forwarding — all
   excluded from v1 (simplicity first).
 - No fallback (no switch = error).
-- The OCR-based WeChat approach is not open-sourced (Tencent policy risk;
-  stays in the private repo).

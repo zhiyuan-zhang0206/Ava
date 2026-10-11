@@ -138,19 +138,19 @@ def test_register_and_enable_fold_the_typed_name_onto_the_real_directory(
     since that is what the loader reads back."""
     from cli.commands.extensions.skill import cmd_skill_disable, cmd_skill_enable
 
-    _write(unit_home / "skills" / "wechat_ocr", "wechat_ocr", _BENIGN)
+    _write(unit_home / "skills" / "page_ocr", "page_ocr", _BENIGN)
 
-    assert cmd_skill_register("wechat-ocr") == 0
-    entry = reg.get("wechat-ocr")
+    assert cmd_skill_register("page-ocr") == 0
+    entry = reg.get("page-ocr")
     assert entry is not None
-    assert entry.name == "wechat_ocr"  # the directory's spelling, not the typed one
+    assert entry.name == "page_ocr"  # the directory's spelling, not the typed one
 
-    assert cmd_skill_disable("wechat-ocr") == 0
-    assert reg.get("wechat_ocr").enabled is False  # type: ignore[union-attr]
-    assert cmd_skill_enable("wechat_ocr") == 0
-    assert reg.get("wechat-ocr").enabled is True  # type: ignore[union-attr]
+    assert cmd_skill_disable("page-ocr") == 0
+    assert reg.get("page_ocr").enabled is False  # type: ignore[union-attr]
+    assert cmd_skill_enable("page_ocr") == 0
+    assert reg.get("page-ocr").enabled is True  # type: ignore[union-attr]
     # one row throughout — no dash/underscore duplicate
-    assert [p.name for p in reg.load().packages] == ["wechat_ocr"]
+    assert [p.name for p in reg.load().packages] == ["page_ocr"]
 
 
 def test_trust_is_a_separate_human_verb(unit_home: Path, tmp_path: Path) -> None:

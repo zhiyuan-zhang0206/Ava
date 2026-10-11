@@ -351,11 +351,11 @@ def test_legacy_underscore_dir_still_loads_and_displays_dash(fake_skills_dir: Pa
     """A hand-installed skill still spelled with underscores (the shape of an
     instance-local `~/.agents/skills/` package nobody renamed) keeps loading, keeps
     resolving under the Python path, and presents the canonical dash name."""
-    _write_skill(fake_skills_dir, "wechat_ocr", "name: wechat_ocr\ndescription: read wechat")
+    _write_skill(fake_skills_dir, "page_ocr", "name: page_ocr\ndescription: read page")
     (skill,) = skills_mod.names()
-    assert skills_mod.identifier(skill) == "wechat-ocr"
-    assert skills_mod.target(skill) == "wechat_ocr"
-    assert skills_mod.wechat_ocr.name == "wechat_ocr"  # raw frontmatter preserved
+    assert skills_mod.identifier(skill) == "page-ocr"
+    assert skills_mod.target(skill) == "page_ocr"
+    assert skills_mod.page_ocr.name == "page_ocr"  # raw frontmatter preserved
 
 
 def test_legacy_underscore_namespace_dir_still_loads(fake_skills_dir: Path) -> None:
@@ -495,11 +495,11 @@ def test_frontmatter_name_not_folding_to_dir_is_refused(
 ) -> None:
     """Design R2-B: the directory is the identity source, the frontmatter
     name is the display claim — they must fold to one key. A skill whose
-    frontmatter says `wechat` inside a `wechat-ocr/` directory used to load
+    frontmatter says `page` inside a `page-ocr/` directory used to load
     under a name that was not its own; the loader refuses it now (same
     family as SkillNameCollision)."""
-    _write_skill(fake_skills_dir, "wechat-ocr", "name: wechat\ndescription: read wechat")
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"wechat-ocr"})
+    _write_skill(fake_skills_dir, "page-ocr", "name: page\ndescription: read page")
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"page-ocr"})
     from base.packages.skills.names import SkillIdentityMismatch
 
     with pytest.raises(SkillIdentityMismatch):
