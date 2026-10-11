@@ -11,6 +11,7 @@ Package door — no imports, no re-exports; callers use `agent.graph.exec.node`
   - `protocol.py`    — request/result envelopes shared with the child entry (`agent/execution/child.py`)
   - `_subprocess.py` — parent side: spawn / poll / signal / collect one child
   - `_owned_run.py`  — the same run under an admitted durable resource set
+  - `_child_boundary.py` — child environment and result-envelope mapping both runs share
   - `_process.py`    — owned lifetime of one child process tree (reap, domain close, reader join)
   - `_stream.py`     — streaming stdout/stderr capture + incremental publish
   - `_result.py`     — exec outcome sum type + the child-crash placeholder

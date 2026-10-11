@@ -13,7 +13,8 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent import impersonation
-from agent.impersonation import flush_checkpoint, settle_checkpoint
+from agent.impersonation import settle_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.tests.impersonation.handoff_inputs import (
     assert_death_cause_note,

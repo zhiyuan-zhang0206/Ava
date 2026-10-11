@@ -21,7 +21,8 @@ from agent import impersonation
 from agent import state as states
 from agent.graph.claim.node import claim_node
 from agent.graph.exec.node import exec_node
-from agent.impersonation import flush_checkpoint, protect_native_hooks, settle_checkpoint
+from agent.impersonation import protect_native_hooks, settle_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from ava.sdk_surface.process_context import process_clients

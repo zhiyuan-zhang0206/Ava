@@ -27,10 +27,10 @@ from agent.graph.node_log import flush_node_exit_aggregate
 from agent.hooks.compact import CompactionFailedError
 from agent.impersonation import (
     active_lease,
-    flush_checkpoint,
     native_status,
     supervise_relay,
 )
+from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership import hosted
 from agent.ownership.corpse_reap import reap_crash_corpses
 from agent.ownership.hosted import (

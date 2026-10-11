@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.graph.exec import _subprocess
+from agent.graph.exec import _child_boundary
 from agent.graph.exec._result import ExecChildError, _ExecCrashed, _ExecDone
 from agent.graph.exec._subprocess import _run_in_subprocess
 from base.db import Database
@@ -110,23 +110,23 @@ def test_child_env_drops_foreign_virtual_env_but_preserves_its_own(
     monkeypatch.setattr(editable_install, "current_interpreter_source_root", lambda: source_root)
 
     monkeypatch.chdir(outside)
-    foreign_env = _subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
+    foreign_env = _child_boundary.build_child_env(None, tmp_path / "request", tmp_path / "result")
 
     monkeypatch.chdir(inside)
-    own_env = _subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
+    own_env = _child_boundary.build_child_env(None, tmp_path / "request", tmp_path / "result")
 
     monkeypatch.chdir(sibling_worktree)
-    sibling_env = _subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
+    sibling_env = _child_boundary.build_child_env(None, tmp_path / "request", tmp_path / "result")
 
     monkeypatch.chdir(claude_sibling_worktree)
-    claude_sibling_env = _subprocess._build_child_env(
+    claude_sibling_env = _child_boundary.build_child_env(
         None,
         tmp_path / "request",
         tmp_path / "result",
     )
 
     monkeypatch.setattr(editable_install, "current_interpreter_source_root", lambda: None)
-    no_root_env = _subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
+    no_root_env = _child_boundary.build_child_env(None, tmp_path / "request", tmp_path / "result")
 
     assert "VIRTUAL_ENV" not in foreign_env
     assert own_env["VIRTUAL_ENV"] == "/source/.venv"

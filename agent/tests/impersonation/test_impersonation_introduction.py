@@ -12,7 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from agent import impersonation, impersonation_handoff
+from agent import impersonation_handoff
 from agent.impersonation_handoff import ensure_start_marker, start_marker
 from agent.state import BaseAgentState
 from base.agents.impersonation.notes import HandoffNotes
@@ -89,7 +89,7 @@ async def test_crash_after_checkpoint_before_flush_does_not_repeat_explanation(
         if attempts == 1:
             raise RuntimeError("Interrupted flush")
 
-    monkeypatch.setattr(impersonation, "flush_checkpoint", interrupted_flush)
+    monkeypatch.setattr(impersonation_handoff, "flush_checkpoint", interrupted_flush)
     with pytest.raises(RuntimeError, match="Interrupted flush"):
         await ensure_start_marker(graph, _session(), notes=_notes())
     await ensure_start_marker(graph, _session(), notes=_notes())
