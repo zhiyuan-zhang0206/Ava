@@ -24,15 +24,15 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.turn_identity import HostedTurnResources
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from services.agent_runner.agent_host.tests.test_circuit_breaker import (
-    _ancestor_halt_notes,
-    _overflow_state,
-    _RecordingPublisher,
-    _recovery_halt_errors,
-    _reject_turn,
-    _spawn_child_under_idling_ancestor,
+from services.agent_runner.agent_host.tests.circuit_breaker.helpers import (
+    RecordingPublisher,
+    ancestor_halt_notes,
+    overflow_state,
+    recovery_halt_errors,
+    reject_turn,
+    spawn_child_under_idling_ancestor,
 )
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
@@ -53,7 +53,7 @@ async def test_llm_node_closes_circuit_on_success(
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _fast_complete()
-    state = _overflow_state(breaker_reason="context_overflow")
+    state = overflow_state(breaker_reason="context_overflow")
 
     cmd = await llm_node(
         state,
@@ -85,7 +85,7 @@ async def test_llm_node_cancel_does_not_close_circuit(
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _stream_then_hang()
-    state = _overflow_state(breaker_reason="billing")
+    state = overflow_state(breaker_reason="billing")
 
     async def _trigger() -> None:
         await asyncio.sleep(0.05)
@@ -121,16 +121,16 @@ async def test_first_permanent_rejection_trips_the_recovery_breaker(
     machine_identity: MachineIdentity,
 ) -> None:
     """One permanent rejection halts background recovery and reports the cause."""
-    ancestor_id, child_id = _spawn_child_under_idling_ancestor(
+    ancestor_id, child_id = spawn_child_under_idling_ancestor(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
         local_machine=machine_identity,
     )
-    publisher = _RecordingPublisher()
+    publisher = RecordingPublisher()
 
-    await _reject_turn(aops_pool, child_id, publisher=publisher, database_gate=database_gate)
+    await reject_turn(aops_pool, child_id, publisher=publisher, database_gate=database_gate)
     row = db_conn.execute(
         "SELECT permanent_reject_streak, wake_suppress_reason FROM agents_meta WHERE id = %s",
         (child_id,),
@@ -149,7 +149,7 @@ async def test_first_permanent_rejection_trips_the_recovery_breaker(
     assert reason == "permanent_provider_reject"
     assert window_s > 300 * 24 * 3600.0  # until-human, far past any timer
 
-    halt_notes = _ancestor_halt_notes(db_conn, ancestor_id)
+    halt_notes = ancestor_halt_notes(db_conn, ancestor_id)
     assert len(halt_notes) == 1
     assert "do not replay" not in halt_notes[0]  # metadata only, never the text
 
@@ -159,7 +159,7 @@ async def test_first_permanent_rejection_trips_the_recovery_breaker(
         if r["extra"].get("event") == "recovery_breaker_halt"  # pyright: ignore[reportUnknownMemberType]
     ]
     assert len(halt_logs) == 1
-    assert len(_recovery_halt_errors(publisher)) == 1
+    assert len(recovery_halt_errors(publisher)) == 1
 
 
 async def test_transient_rejection_does_not_count_or_trip(
@@ -185,10 +185,10 @@ async def test_transient_rejection_does_not_count_or_trip(
         "rate limited", error_class="transient", provider="deepseek", status=429
     )
     for _ in range(3):
-        await _reject_turn(
+        await reject_turn(
             aops_pool,
             child_id,
-            publisher=_RecordingPublisher(),
+            publisher=RecordingPublisher(),
             exc=exc,
             database_gate=database_gate,
         )

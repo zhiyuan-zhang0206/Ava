@@ -16,17 +16,17 @@ from services.agent_runner.agent_host.dispatcher import (
 )
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
 from services.agent_runner.agent_host.scheduling.pending_wakes import PendingInboundWake
-from services.agent_runner.agent_host.tests.test_turn_dispatcher import (
-    _FRESH,
-    _STALE,
-    _UNKNOWN,
-    _patch_redis,
-    _QueueingPubSub,
-    _Recorder,
-    _releasing_stuck_turn,
-    _scan_dispatcher,
-    _settle,
-    _StuckTurn,
+from services.agent_runner.agent_host.tests.turn_dispatcher.helpers import (
+    FRESH,
+    STALE,
+    UNKNOWN,
+    QueueingPubSub,
+    Recorder,
+    StuckTurn,
+    patch_redis,
+    releasing_stuck_turn,
+    scan_dispatcher,
+    settle,
 )
 from services.agent_runner.agent_host.tests.turn_dispatcher.scan_setup import ScanScheduler
 
@@ -36,7 +36,7 @@ class TestCancelAgent:
         """The hosted force-terminate primitive: one agent's turn task is
         cancelled at its next await point, the task unwinds and leaves the
         registry — other agents' turns are untouched."""
-        rec = _Recorder()
+        rec = Recorder()
         sched = TurnScheduler(rec)
         rec.gate(7)  # hold turn 7 open so the cancel lands on a RUNNING turn
         rec.gate(8)  # hold turn 8 open too — it must survive 7's cancel
@@ -46,19 +46,19 @@ class TestCancelAgent:
         await rec.arrival(8).wait()
 
         assert await asyncio.wait_for(sched.cancel_agent(7), 2) is True
-        await _settle()
+        await settle()
 
         assert 7 not in sched.active_agents, "the cancelled turn must unwind out of the registry"
         assert 8 in sched.active_agents, "another agent's turn must not be touched"
 
         # clean up agent 8
         rec.gate(8).set()
-        await _settle()
+        await settle()
 
     async def test_cancel_agent_without_a_task_returns_false(self) -> None:
         """False means "nothing to accelerate", never an error — the ops caller
         treats a host with no task for this agent as already done."""
-        sched = TurnScheduler(_Recorder())
+        sched = TurnScheduler(Recorder())
         assert await asyncio.wait_for(sched.cancel_agent(42), 2) is False
 
     async def test_cancel_agent_reports_a_stuck_turn(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,7 +73,7 @@ class TestCancelAgent:
             records.append(kw)
 
         monkeypatch.setattr(dispatcher.logger, "error", _capture)
-        async with _releasing_stuck_turn() as turn:
+        async with releasing_stuck_turn() as turn:
             sched = TurnScheduler(turn)
             sched.wake(5)
             await asyncio.wait_for(turn.entered.wait(), 2)
@@ -84,7 +84,7 @@ class TestCancelAgent:
             assert 5 in sched.active_agents, "a wedged turn still owns its registry slot"
             original_task = turn._task
             sched.wake(5)
-            await _settle()
+            await settle()
             assert turn._task is original_task, "another wake must not replace the live task"
         assert 5 not in sched.active_agents, "only actual unwind releases the slot"
 
@@ -96,12 +96,12 @@ class TestCancelBeforeTheFirstSlice:
     releases the slot and re-arms the wake the task never consumed."""
 
     async def test_the_unstarted_slot_is_released_and_the_wake_rearmed(self) -> None:
-        rec = _Recorder()
+        rec = Recorder()
         sched = TurnScheduler(rec)
 
         sched.wake(7)  # queued; not one slice has run
         assert await asyncio.wait_for(sched.cancel_agent(7), 2) is True
-        await _settle()
+        await settle()
 
         # Pre-fix the entry leaked: the agent stayed in `active_agents` (the
         # scan reads that as a straggler) and the recorded wake went nowhere.
@@ -109,7 +109,7 @@ class TestCancelBeforeTheFirstSlice:
         assert sched.active_agents == frozenset()
 
     async def test_force_cancel_before_the_first_slice_releases_the_slot(self) -> None:
-        rec = _Recorder()
+        rec = Recorder()
         sched = TurnScheduler(rec)
 
         async def _validate(_agent_id: int, _command_id: int) -> bool:
@@ -117,7 +117,7 @@ class TestCancelBeforeTheFirstSlice:
 
         sched.wake(7)
         assert await asyncio.wait_for(sched.cancel_exact_force(7, 1, _validate), 2) is True
-        await _settle()
+        await settle()
 
         assert rec.started == [7]
         assert sched.active_agents == frozenset()
@@ -125,12 +125,12 @@ class TestCancelBeforeTheFirstSlice:
     async def test_aclose_does_not_rearm_after_a_prestart_cancel(self) -> None:
         """Shutdown must stay quiet: the closed flag outranks any pending wake,
         so a pre-start cancel during `aclose` never starts a successor."""
-        rec = _Recorder()
+        rec = Recorder()
         sched = TurnScheduler(rec)
 
         sched.wake(7)
         await sched.aclose()
-        await _settle()
+        await settle()
 
         assert rec.started == [], "a closed scheduler must not start a successor"
         assert sched.active_agents == frozenset()
@@ -141,31 +141,31 @@ class TestCancelBeforeTheFirstSlice:
         """The scan's post-cancel check judges the captured task, not registry
         membership: pre-fix, the staging below exits the host with a false
         `did not unwind`."""
-        rec = _Recorder()
+        rec = Recorder()
         sched = TurnScheduler(rec)
 
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return [PendingInboundWake(agent_id=7, stale=True)]
 
-        disp = _scan_dispatcher(sched, _pending, _STALE)
+        disp = scan_dispatcher(sched, _pending, STALE)
 
         sched.wake(7)
         await asyncio.wait_for(sched.cancel_agent(7), 2)
-        await _settle()
+        await settle()
 
         await disp.scan_once()  # must not raise: no straggler exists
-        await _settle()
+        await settle()
 
         assert rec.started.count(7) >= 1, "the scan must re-drive the agent it saw stale"
 
 
 async def test_stuck_fixture_releases_after_failed_assertion() -> None:
     """A useful failure must not strand an unkillable task in pytest teardown."""
-    turn: _StuckTurn | None = None
+    turn: StuckTurn | None = None
     sched: TurnScheduler | None = None
     try:
         with pytest.raises(AssertionError, match="injected assertion failure"):
-            async with _releasing_stuck_turn() as turn:
+            async with releasing_stuck_turn() as turn:
                 sched = TurnScheduler(turn)
                 sched.wake(5)
                 await asyncio.wait_for(turn.entered.wait(), 2)
@@ -337,7 +337,7 @@ class TestPendingScan:
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return [PendingInboundWake(agent_id=23, stale=True)]
 
-        disp = _scan_dispatcher(scheduler, _pending, _STALE)
+        disp = scan_dispatcher(scheduler, _pending, STALE)
 
         await disp.scan_once()
 
@@ -357,7 +357,7 @@ class TestPendingScan:
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return [PendingInboundWake(agent_id=23, stale=True)]
 
-        disp = _scan_dispatcher(scheduler, _pending, _STALE)
+        disp = scan_dispatcher(scheduler, _pending, STALE)
 
         with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
             await disp.scan_once()
@@ -378,7 +378,7 @@ class TestStallRestartEscalation:
 
         sched = TurnScheduler(_RefusingTurn())
         sched.wake(23)
-        await _settle()
+        await settle()
         assert sched.restart_required is True
 
     async def test_a_clean_stall_abort_does_not_request_a_restart(self) -> None:
@@ -388,14 +388,14 @@ class TestStallRestartEscalation:
 
         sched = TurnScheduler(_CleanAbort())
         sched.wake(23)
-        await _settle()
+        await settle()
         assert sched.restart_required is False
 
     async def test_the_dispatcher_loop_exits_when_restart_is_required(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        pubsub = _QueueingPubSub()
-        _patch_redis(monkeypatch, pubsub)
+        pubsub = QueueingPubSub()
+        patch_redis(monkeypatch, pubsub)
         scheduler = ScanScheduler(restart_required=True)
 
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
@@ -429,7 +429,7 @@ class TestTurnLevelStaleScan:
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
-        disp = _scan_dispatcher(scheduler, _pending, _STALE)
+        disp = scan_dispatcher(scheduler, _pending, STALE)
 
         await disp.scan_once()
 
@@ -444,7 +444,7 @@ class TestTurnLevelStaleScan:
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
-        disp = _scan_dispatcher(scheduler, _pending, _FRESH)
+        disp = scan_dispatcher(scheduler, _pending, FRESH)
 
         await disp.scan_once()
 
@@ -462,7 +462,7 @@ class TestTurnLevelStaleScan:
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
-        disp = _scan_dispatcher(scheduler, _pending, _UNKNOWN)
+        disp = scan_dispatcher(scheduler, _pending, UNKNOWN)
 
         await disp.scan_once()
 
@@ -477,7 +477,7 @@ class TestTurnLevelStaleScan:
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
-        disp = _scan_dispatcher(scheduler, _pending, _STALE)
+        disp = scan_dispatcher(scheduler, _pending, STALE)
 
         with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
             await disp.scan_once()
@@ -519,7 +519,7 @@ class TestTurnLevelStaleScan:
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
-        disp = _scan_dispatcher(scheduler, _pending, _STALE)
+        disp = scan_dispatcher(scheduler, _pending, STALE)
 
         await disp.scan_once()  # must not raise
 
@@ -544,7 +544,7 @@ class TestAdmissionWaitExemption:
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return []
 
-        disp = _scan_dispatcher(scheduler, _pending, _STALE, turn_admission=admission)
+        disp = scan_dispatcher(scheduler, _pending, STALE, turn_admission=admission)
         await disp.scan_once()
 
         assert scheduler.cancelled == []
@@ -560,7 +560,7 @@ class TestAdmissionWaitExemption:
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             return [PendingInboundWake(agent_id=17, stale=True)]
 
-        disp = _scan_dispatcher(scheduler, _pending, _STALE, turn_admission=admission)
+        disp = scan_dispatcher(scheduler, _pending, STALE, turn_admission=admission)
         await disp.scan_once()
 
         assert scheduler.cancelled == []

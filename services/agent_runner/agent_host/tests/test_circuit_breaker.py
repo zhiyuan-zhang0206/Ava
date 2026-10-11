@@ -2,7 +2,7 @@
 
 import json
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import cast
 from unittest.mock import MagicMock
 
 import psycopg
@@ -31,56 +31,17 @@ from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
+from services.agent_runner.agent_host.tests.circuit_breaker.helpers import (
+    RecordingPublisher,
+    breaker_ctx,
+    overflow_state,
+)
 from services.agent_runner.agent_host.tests.circuit_breaker.provider_failures import (
     LONG_SUMMARY,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
-
-
-class _RecordingPublisher:
-    """Minimal typed event sink for fatal-error live-event assertions."""
-
-    def __init__(self) -> None:
-        self.payloads: list[str] = []
-
-    def emit(self, payload: str) -> None:
-        self.payloads.append(payload)
-
-
-def _overflow_state(breaker_reason: str | None = None) -> AgentState:
-    """An agent state sitting past the provider's context ceiling, with the
-    circuit breaker optionally open (the default closed)."""
-    circuit = CircuitState()
-    if breaker_reason is not None:
-        circuit = CircuitState(
-            open=True, reason=breaker_reason, opened_at="2026-08-29T00:00:00+00:00"
-        )
-    return AgentState(
-        messages=[
-            SystemMessage(content="<sys>"),
-            *(HumanMessage(content=f"history-{i}") for i in range(10)),
-        ],
-        halted=True,
-        circuit=circuit,
-    )
-
-
-def _breaker_ctx(*, database_gate: ProcessDbGate) -> AvaContext:
-    """An AvaContext for `_handle_fatal_llm_error` — no ops_pool, so the
-    best-effort event-log write is skipped (unit tests have no DB)."""
-    return AvaContext(
-        ops_pool=None,
-        llm=MagicMock(),
-        event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
-        catalog=build_model_catalog(),
-        clock_factory=configured_policy().clock_factory,
-    )
-
 
 # ── breaker open (runloop `_handle_fatal_llm_error`) ──
 
@@ -99,7 +60,7 @@ async def test_fatal_provider_error_opens_circuit_breaker(
         context_overflow=True,
     )
     update = await _handle_fatal_llm_error(
-        exc, _breaker_ctx(database_gate=database_gate), agent_id=42
+        exc, breaker_ctx(database_gate=database_gate), agent_id=42
     )
 
     assert update["halted"] is True
@@ -123,7 +84,7 @@ async def test_fatal_provider_error_billing_reason(*, database_gate: ProcessDbGa
         status=402,
     )
     update = await _handle_fatal_llm_error(
-        exc, _breaker_ctx(database_gate=database_gate), agent_id=42
+        exc, breaker_ctx(database_gate=database_gate), agent_id=42
     )
 
     circuit = update["circuit"]
@@ -140,7 +101,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details(
     Regression for #5759: an opaque error plus an ``idling`` status made a
     permanent provider rejection look like an ordinary runnable idle state.
     """
-    publisher = _RecordingPublisher()
+    publisher = RecordingPublisher()
     ctx = AvaContext(
         ops_pool=None,
         llm=MagicMock(),
@@ -342,7 +303,7 @@ async def test_fatal_llm_stream_error_does_not_open_breaker(
     it only halts the turn; the breaker stays untouched."""
     exc = FatalLLMStreamError("retry cap exhausted")
     update = await _handle_fatal_llm_error(
-        exc, _breaker_ctx(database_gate=database_gate), agent_id=42
+        exc, breaker_ctx(database_gate=database_gate), agent_id=42
     )
 
     assert update == {"halted": True}
@@ -366,7 +327,7 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker(
         return CircuitState(open=True, reason="billing", opened_at=opened_at)
 
     update = await _handle_fatal_llm_error(
-        exc, _breaker_ctx(database_gate=database_gate), agent_id=42, circuit_reader=_reader
+        exc, breaker_ctx(database_gate=database_gate), agent_id=42, circuit_reader=_reader
     )
 
     assert update == {"halted": True}, (
@@ -400,7 +361,7 @@ async def test_heartbeat_while_breaker_open_parks(
     )
     insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
-    state = _overflow_state(breaker_reason=reason)
+    state = overflow_state(breaker_reason=reason)
     fake_llm = _fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         state,
@@ -443,7 +404,7 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
 
     fake_llm = _fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
-        _overflow_state(breaker_reason="billing"),
+        overflow_state(breaker_reason="billing"),
         make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
         thread_config(tid),
     )
@@ -546,7 +507,7 @@ async def test_heartbeat_normal_when_breaker_closed(
     )
     insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
-    state = _overflow_state()  # breaker closed
+    state = overflow_state()  # breaker closed
     fake_llm = _fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         state,
@@ -565,93 +526,3 @@ async def test_heartbeat_normal_when_breaker_closed(
 
 
 # ── recovery circuit breaker (task #3617) ────────────────────────────────────
-
-
-def _permanent_rejection() -> FatalProviderError:
-    """A permanent 400 in the 6260 shape; the body is deliberately distinctive
-    so the tests can prove no rejected text reaches the ancestor report."""
-    return FatalProviderError(
-        "Content Exists Risk: do not replay this rejected history",
-        error_class="permanent",
-        provider="deepseek",
-        status=400,
-    )
-
-
-async def _reject_turn(
-    aops_pool: AsyncConnectionPool,
-    agent_id: int,
-    *,
-    publisher: _RecordingPublisher,
-    exc: FatalProviderError | None = None,
-    database_gate: ProcessDbGate,
-) -> None:
-    await _handle_fatal_llm_error(
-        exc if exc is not None else _permanent_rejection(),
-        AvaContext(
-            ops_pool=aops_pool,
-            llm=MagicMock(),
-            event_publisher=cast(AgentEventPublisher, publisher),
-            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
-            catalog=build_model_catalog(),
-            clock_factory=configured_policy().clock_factory,
-        ),
-        agent_id=agent_id,
-        occurred_at=datetime(2026, 9, 16, 6, 0, tzinfo=UTC),
-    )
-
-
-def _spawn_child_under_idling_ancestor(
-    db_conn: psycopg.Connection,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
-) -> tuple[int, int]:
-    """A live idling ancestor and its child; returns (ancestor_id, child_id)."""
-    ancestor_id = spawn_agent(
-        spawner="user",
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=local_machine,
-    )
-    child_id = spawn_agent(
-        spawner=f"agent:{ancestor_id}",
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=local_machine,
-    )
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET status = 'idling', "
-            "lease_expires_at = now() + interval '10 minutes' WHERE id = %s",
-            (ancestor_id,),
-        )
-    db_conn.commit()
-    return ancestor_id, child_id
-
-
-def _ancestor_halt_notes(db_conn: psycopg.Connection, ancestor_id: int) -> list[str]:
-    reports = [
-        r[0]
-        for r in db_conn.execute(
-            "SELECT content FROM inbound_messages WHERE agent_id = %s AND kind = 'system_note' "
-            "ORDER BY id",
-            (ancestor_id,),
-        ).fetchall()
-    ]
-    return [note for note in reports if "blocked after a permanent provider rejection" in note]
-
-
-def _recovery_halt_errors(publisher: _RecordingPublisher) -> list[dict[str, Any]]:
-    errors = [json.loads(payload) for payload in publisher.payloads]
-    return [
-        err
-        for err in errors
-        if err.get("blocked") and "Automatic recovery is halted" in err.get("content", "")
-    ]

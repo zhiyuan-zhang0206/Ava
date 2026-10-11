@@ -1,4 +1,4 @@
-"""Actual core, registered adapter, native selection and isolated provider transports."""
+"""Actual core, registered adapter, native selection and isolated provider transports for the native Weixin tests."""
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -16,10 +16,6 @@ from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
 from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
-from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.unit.sdk import sdk_environment as sdk_environment
-from tests.fixtures.unit.sdk import sdk_identity as sdk_identity
-from tests.fixtures.unit.sdk import sdk_metering as sdk_metering
 
 
 @dataclass

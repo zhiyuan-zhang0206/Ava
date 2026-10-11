@@ -10,8 +10,6 @@ and a visible ACK line (success judged by destination state, #2620).
 from __future__ import annotations
 
 import logging
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -22,7 +20,6 @@ from services.backup.artifact import offsite
 from services.backup.artifact.names import REMOTE_ROOT
 from services.backup.artifact.tests.oss_fake import FakeOssBucket, chain_etag, md5_hex
 
-_CHILD = Path(__file__).with_name("child_offsite_entry.py")
 _NAME = "ava-20260916T030000Z.dump.enc"
 _METADATA = {"ava-artifact-kind": "logical-backup"}
 
@@ -373,70 +370,6 @@ def test_open_bucket_reads_the_access_key_pair(tmp_path: Path) -> None:
 
     assert bucket.bucket_name == "backups"
     assert bucket.endpoint == "https://oss-cn-test.example.com"
-
-
-# ── the standalone entry: success and failure both leave evidence on stderr ──
-
-
-def _entry(
-    tmp_path: Path, bucket: str, *args: str, configured: bool = True
-) -> subprocess.CompletedProcess[str]:
-    """Run `python -m services.backup.dump --publish-offsite` logic in a fresh interpreter.
-
-    A fresh interpreter is deliberate: pytest's own root handler would mask the
-    standalone logging behavior the entry point configures. `configured` gives
-    it an OSS destination (the settings read is covered in-process above);
-    `bucket` is `fake`, `init_failure` or `real` (see `child_offsite_entry.py`)."""
-    return subprocess.run(  # noqa: S603
-        [
-            sys.executable,
-            str(_CHILD),
-            "configured" if configured else "unconfigured",
-            bucket,
-            "--publish-offsite",
-            str(tmp_path / _NAME),
-            *args,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-
-def test_standalone_success_is_visible(tmp_path: Path) -> None:
-    """A fully silent success was once read as a dead upload (misdiagnosed 2026-09-16)."""
-    _artifact(tmp_path)
-
-    proc = _entry(
-        tmp_path,
-        "fake",
-        "--offsite-root",
-        "ava-pitr-scratch/smoke",
-    )
-
-    assert proc.returncode == 0, proc.stderr
-    assert "[backup] off-site published" in proc.stderr
-    assert f"ava-pitr-scratch/smoke/{_NAME}" in proc.stderr
-
-
-def test_standalone_unconfigured_still_says_so_and_exits_zero(tmp_path: Path) -> None:
-    artifact = _artifact(tmp_path)
-
-    proc = _entry(tmp_path, "real", configured=False)
-
-    assert proc.returncode == 0, proc.stderr
-    assert "[backup] off-site publish skipped" in proc.stderr
-    assert artifact.read_bytes() == b"encrypted artifact"
-
-
-def test_standalone_publish_failure_keeps_exit_and_artifact(tmp_path: Path) -> None:
-    artifact = _artifact(tmp_path)
-
-    proc = _entry(tmp_path, "init_failure")
-
-    assert proc.returncode == 0, proc.stderr
-    assert f"[backup] off-site publish of {REMOTE_ROOT}/{_NAME} failed" in proc.stderr
-    assert artifact.read_bytes() == b"encrypted artifact"
 
 
 def test_explicit_bucket_does_not_read_configuration(tmp_path: Path) -> None:

@@ -13,11 +13,12 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.daemon.health import Liveness
 from services.derived.memory_indexer import daemon
-from services.derived.memory_indexer.tests.test_memory_indexer import _cancel_quietly, _FakeProvider
-from services.derived.memory_indexer.tests.test_memory_indexer import (
+from services.derived.memory_indexer.tests.fake_provider import FakeProvider
+from services.derived.memory_search.tests.test_memory_indexer import _cancel_quietly
+from services.derived.memory_search.tests.test_memory_indexer import (
     _watched_root as _watched_root,
 )
-from services.derived.memory_indexer.tests.test_memory_indexer import (
+from services.derived.memory_search.tests.test_memory_indexer import (
     store_backend as store_backend,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -44,7 +45,7 @@ async def test_reconcile_retry_inflight_pass_cancels_promptly(
     retry.record_incomplete()
     task = asyncio.create_task(
         daemon._drain_loop(
-            Mock(), queue.Queue(), Liveness(1.0), _FakeProvider(), retry, machine=machine_identity
+            Mock(), queue.Queue(), Liveness(1.0), FakeProvider(), retry, machine=machine_identity
         )
     )
     try:

@@ -6,7 +6,7 @@ import json
 import psycopg
 import pytest
 
-from services.entrypoints.im_bridge.ingress.tests.conftest import NativeWeixin, message
+from services.entrypoints.im_bridge.adapters.tests.weixin_native import NativeWeixin, message
 from services.entrypoints.im_bridge.ingress.types import IngressIdentityConflictError, IngressStatus
 
 

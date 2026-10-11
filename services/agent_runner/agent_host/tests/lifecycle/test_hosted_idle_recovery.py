@@ -24,8 +24,8 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.recovery.tests.helpers import admit as _admit
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
+from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import admit as _admit
 from tests.components.base.poll_until import poll_until_async
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 

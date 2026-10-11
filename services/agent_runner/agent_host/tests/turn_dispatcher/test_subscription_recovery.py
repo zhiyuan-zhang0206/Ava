@@ -13,9 +13,9 @@ from base.events.live.tests.fakes import patch_open_async_redis
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
 from services.agent_runner.agent_host.scheduling.pending_wakes import PendingInboundWake
-from services.agent_runner.agent_host.tests.test_turn_dispatcher import (
-    _patch_redis,
-    _QueueingPubSub,
+from services.agent_runner.agent_host.tests.turn_dispatcher.helpers import (
+    QueueingPubSub,
+    patch_redis,
 )
 from services.agent_runner.agent_host.tests.turn_dispatcher.scan_setup import ScanScheduler
 
@@ -25,8 +25,8 @@ class TestSubscriptionRecovery:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The durable backstop may be down while the Redis wake path remains healthy."""
-        pubsub = _QueueingPubSub()
-        clients = _patch_redis(monkeypatch, pubsub)
+        pubsub = QueueingPubSub()
+        clients = patch_redis(monkeypatch, pubsub)
         failures_seen = asyncio.Event()
         failure_events: list[dict[str, object]] = []
         scans = 0
@@ -69,8 +69,8 @@ class TestSubscriptionRecovery:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A DB outage must not create a gap in the subscription's wake delivery."""
-        pubsub = _QueueingPubSub()
-        clients = _patch_redis(monkeypatch, pubsub)
+        pubsub = QueueingPubSub()
+        clients = patch_redis(monkeypatch, pubsub)
         first_failure = asyncio.Event()
         scheduler = ScanScheduler()
 
@@ -104,8 +104,8 @@ class TestSubscriptionRecovery:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A recovered scan resets to its normal cadence without reconnecting Redis."""
-        pubsub = _QueueingPubSub()
-        clients = _patch_redis(monkeypatch, pubsub)
+        pubsub = QueueingPubSub()
+        clients = patch_redis(monkeypatch, pubsub)
         recovered_twice = asyncio.Event()
         scans = 0
         successful_scans = 0
@@ -147,8 +147,8 @@ class TestSubscriptionRecovery:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A stale turn that cannot unwind remains a host-level recovery condition."""
-        pubsub = _QueueingPubSub()
-        clients = _patch_redis(monkeypatch, pubsub)
+        pubsub = QueueingPubSub()
+        clients = patch_redis(monkeypatch, pubsub)
 
         async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
             raise dispatcher.HostRestartRequiredError("stale turn did not unwind")
