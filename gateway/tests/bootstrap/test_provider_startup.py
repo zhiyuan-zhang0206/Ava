@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 from fastapi import FastAPI
+
+from gateway import app as gateway_app
 
 
 @pytest.mark.asyncio
 async def test_gateway_startup_propagates_zero_provider_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    gateway_app = importlib.import_module("gateway.app")
     failure = RuntimeError("no provider plugins enabled")
 
     def _fail_provider_load() -> None:

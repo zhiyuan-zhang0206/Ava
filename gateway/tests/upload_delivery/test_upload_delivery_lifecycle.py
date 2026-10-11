@@ -48,19 +48,15 @@ def test_hard_death_native_temp_not_double_charged_or_cleaned(
     manifest = source.Manifest.model_validate(row[0])
     directory = source.agent_upload_dir(agent, create=False).resolve()
     final = storage.object_path(directory, manifest, manifest.objects[0])
-    script = """import os, sys
-from pathlib import Path
-from base.host import private_storage
-original = private_storage.os.link
-def crash(source, target):
-    if sys.argv[2] == 'after-link':
-        original(source, target)
-    os._exit(73)
-private_storage.os.link = crash
-private_storage.create_private_bytes(Path(sys.argv[1]), b'bytes')
-"""
     result = subprocess.run(  # noqa: S603 -- fixed interpreter/script and isolated fixture arguments
-        [sys.executable, "-c", script, str(final), stage], env=dict(os.environ), check=False
+        [
+            sys.executable,
+            str(Path(__file__).with_name("child_native_link_crash.py")),
+            str(final),
+            stage,
+        ],
+        env=dict(os.environ),
+        check=False,
     )
     assert result.returncode == 73
     temps = list(final.parent.glob(".*.tmp"))

@@ -1,7 +1,6 @@
 """Gateway cancellation drains a real inspector SQL call before pool closure."""
 
 import asyncio
-import importlib
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -10,12 +9,13 @@ import psycopg
 import pytest
 from fastapi import FastAPI
 
+from gateway import app as gateway_app
+
 
 async def test_lifespan_waits_for_cancelled_request_sql_before_pool_close(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     del db_conn
-    gateway_app = importlib.import_module("gateway.app")
     monkeypatch.setattr(gateway_app, "register_os_cron", lambda: None)
     app = FastAPI()
     ready = asyncio.Event()
@@ -77,7 +77,6 @@ async def test_native_sql_error_does_not_cancel_gateway_service(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     del db_conn
-    gateway_app = importlib.import_module("gateway.app")
     monkeypatch.setattr(gateway_app, "register_os_cron", lambda: None)
     app = FastAPI()
     ready, stop = asyncio.Event(), asyncio.Event()
