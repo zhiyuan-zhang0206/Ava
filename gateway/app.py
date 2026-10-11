@@ -181,7 +181,6 @@ def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
     app.state.status_cache = StatusCache()
     app.state.identity_mismatch_log = IdentityMismatchLog()
     app.state.inspect_query_cache = inspect_router.build_query_cache()
-    app.state.upload_locks = uploads_router.AgentUploadLocks()
     app.state.timeline_policy = timeline_policy(config)
     app.state.understanding_policy = understanding_policy(config, app.state.config_authority)
     app.state.reply_suggestions = reply_suggestion_service(

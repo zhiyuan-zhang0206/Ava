@@ -19,7 +19,6 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.agents import AgentNotFound
-from base.agents.upload_delivery.models import NAMESPACE
 from base.agents.upload_delivery.paths import upload_url
 from base.db import agent_exists
 from base.db.transaction import write_transaction
@@ -30,13 +29,8 @@ RESERVED_PREFIX = "ava-upload-"
 type UploadItem = tuple[str, bytes, str]
 
 
-def is_reserved_upload_name(name: str) -> bool:
-    """Protect both silent flat finals and the nested delivered namespace."""
-    return name.startswith(RESERVED_PREFIX) or name == NAMESPACE
-
-
 def lock_agent(conn: Connection[Any], agent_id: int) -> None:
-    """Use the same transaction-scoped quota gate for keyed and legacy writers."""
+    """Take the transaction-scoped quota gate shared with every other upload writer."""
     from base.agents.upload_delivery.storage import lock_agent as native_lock_agent
 
     native_lock_agent(conn, agent_id)
@@ -71,12 +65,12 @@ def check_quota(
         raise HTTPException(413, str(exc)) from exc
 
 
-def _fingerprint(batch: list[UploadItem], original_names: list[str], *, deliver: bool) -> str:
+def _fingerprint(batch: list[UploadItem], original_names: list[str]) -> str:
     manifest = [
         [name, len(contents), hashlib.sha256(contents).hexdigest(), content_type]
         for name, (_, contents, content_type) in zip(original_names, batch, strict=True)
     ]
-    canonical = json.dumps([deliver, manifest], ensure_ascii=True, separators=(",", ":"))
+    canonical = json.dumps(manifest, ensure_ascii=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
@@ -126,7 +120,6 @@ def _claim(
     names: list[str],
     fingerprint: str,
     *,
-    deliver: bool,
     max_bytes: int,
     max_files: int,
 ) -> tuple[Any, ...]:
@@ -137,8 +130,6 @@ def _claim(
             return row
         if not agent_exists(conn, agent_id):
             raise AgentNotFound(agent_id)
-        if deliver:
-            raise HTTPException(422, "keyed uploads currently require deliver=false")
         manifest = _manifest(batch, names)
         ensure_private_dir(directory)
         check_quota(
@@ -202,12 +193,11 @@ def save_keyed_batch(
     batch: list[UploadItem],
     names: list[str],
     *,
-    deliver: bool,
     max_bytes: int,
     max_files: int,
 ) -> UploadedBatch:
     """Claim first, then publish and commit an immutable receipt in a second transaction."""
-    fingerprint = _fingerprint(batch, names, deliver=deliver)
+    fingerprint = _fingerprint(batch, names)
     claimed = _claim(
         pool,
         key,
@@ -216,7 +206,6 @@ def save_keyed_batch(
         batch,
         names,
         fingerprint,
-        deliver=deliver,
         max_bytes=max_bytes,
         max_files=max_files,
     )

@@ -7,6 +7,7 @@ the tool output and framework notes the model is handed next, files on disk, inb
 from __future__ import annotations
 
 import shutil
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -136,13 +137,14 @@ def test_uploaded_file_is_announced_to_the_agent_and_readable(
     saved_dir = Path.home() / "Downloads" / f"AvaAgent-{agent}"
     try:
         resp = httpx.post(
-            f"{GATEWAY_URL}/api/agents/{agent}/uploads",
+            f"{GATEWAY_URL}/api/keyed/v1/agents/{agent}/uploads",
+            headers={"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"},
             files=[("files", (world.UPLOAD_NAME, world.UPLOAD_TEXT.encode(), "text/plain"))],
             timeout=30.0,
         )
-        resp.raise_for_status()
-        saved = saved_dir / world.UPLOAD_NAME
-        assert saved.read_text() == world.UPLOAD_TEXT
+        assert resp.status_code == 202, resp.text
+        accepted = resp.json()
+        saved = saved_dir / ".delivered-v1" / accepted["batch_id"] / accepted["files"][0]["name"]
 
         poll_until(
             lambda: (len(model_inputs(agent)) >= 2, len(model_inputs(agent))),
@@ -152,7 +154,10 @@ def test_uploaded_file_is_announced_to_the_agent_and_readable(
         )
         calls = model_inputs(agent)
         # The agent was told where the file is, and read it back from there.
-        assert str(saved) in _human_text(calls[0]), _human_text(calls[0])[-500:]
+        announced = _human_text(calls[0])
+        assert accepted["batch_id"] in announced, announced[-500:]
+        assert accepted["files"][0]["name"] in announced, announced[-500:]
+        assert saved.read_text() == world.UPLOAD_TEXT
         assert f"upload-content {world.UPLOAD_TEXT}" in _last_tool(calls[1])
     finally:
         shutil.rmtree(saved_dir, ignore_errors=True)

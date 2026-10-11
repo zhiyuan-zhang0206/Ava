@@ -48,7 +48,7 @@ owner.publish_files = publish
 with ConnectionPool(config["dsn"], min_size=1, max_size=1) as pool:
     owner.save_keyed_batch(pool, config.get("key", "crash"), 123, directory,
         [("a.png", b"aaa", "image/png"), ("b.png", b"bbb", "image/png")],
-        ["a.png", "b.png"], deliver=False, max_bytes=6, max_files=2)
+        ["a.png", "b.png"], max_bytes=6, max_files=2)
 os._exit(41)
 """
 
@@ -61,7 +61,6 @@ def _save(pool: ConnectionPool, directory: Path) -> UploadedBatch:
         directory,
         [("a.png", b"aaa", "image/png"), ("b.png", b"bbb", "image/png")],
         ["a.png", "b.png"],
-        deliver=False,
         max_bytes=6,
         max_files=2,
     )
