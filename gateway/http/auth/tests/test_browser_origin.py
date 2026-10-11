@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from base.cluster.derive import fe_build_env
 from base.config import settings
 from base.config.domains.gateway import GatewaySettings
-from gateway.http.auth.cors import cors_allowed_origins, session_cookie_secure
+from gateway.http.middleware.cors import cors_allowed_origins, session_cookie_secure
 
 
 @pytest.mark.parametrize(

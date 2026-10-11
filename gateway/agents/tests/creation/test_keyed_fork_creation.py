@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 
 from ava.gateway_client import transport
 from base.agents import GatewayUnavailable
-from gateway.agents import router as agent_router
+from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, PATH
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.agents.tests.creation.test_sdk_strong_creation import _response, _sdk
@@ -77,7 +77,7 @@ def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
         def unexpected(*args: object, **kwargs: object) -> None:
             raise AssertionError("fork replay must precede mutable source preflight")
 
-        monkeypatch.setattr(agent_router, "spawn_prechecks_blocking", unexpected)
+        monkeypatch.setattr(agent_creation, "spawn_prechecks_blocking", unexpected)
         assert _sdk(fork_from=parent_id, idempotency_key="fork-intent") == child_id
 
     assert http.post.call_count == lost_attempts + 1

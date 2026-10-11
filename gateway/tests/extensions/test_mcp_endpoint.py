@@ -325,14 +325,14 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from base.agents.observation.evidence import AvailabilityReason
-    from gateway.agents import router as route
+    from gateway.agents import creation
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
     async def _fail(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
-    monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
+    monkeypatch.setattr(creation, "forward_spawn_to_remote", _fail)
     with TestClient(app) as client:
         token = _create_token(client)
         response = _tool_call(
@@ -717,9 +717,9 @@ def test_concurrent_requests_keep_verified_clients_and_ignore_context_arguments(
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
 
-    from gateway.agents import router
+    from gateway.agents import creation
 
-    create = router.create_and_launch_agent
+    create = creation.create_and_launch_agent
     both_started = asyncio.Event()
     started = 0
 
@@ -731,7 +731,7 @@ def test_concurrent_requests_keep_verified_clients_and_ignore_context_arguments(
         await asyncio.wait_for(both_started.wait(), timeout=10)
         return await create(*args, **kwargs)
 
-    monkeypatch.setattr(router, "create_and_launch_agent", simultaneous_create)
+    monkeypatch.setattr(creation, "create_and_launch_agent", simultaneous_create)
     with TestClient(app) as client:
         credentials = [
             create_mcp_client(client, name, "write").json()

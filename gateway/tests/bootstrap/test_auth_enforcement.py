@@ -11,7 +11,7 @@ from base import config
 from base.cluster.auth import bearer_header
 from base.cluster.machine import MachineIdentity
 from gateway.app import app
-from gateway.http.auth.cors import cors_allowed_origins
+from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.http.middleware.error_handlers import cors_headers
 from gateway.tests.bootstrap.test_auth import (
     _SECRET,

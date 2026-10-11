@@ -12,7 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base.agents import AgentLaunchFailed, AvaAgentError
 from base.agents.messages.chat_delivery import ChatInboundCommittedError
-from gateway.http.auth.cors import cors_allowed_origins
+from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.http.middleware.error_envelope import error_response
 
 _log = logging.getLogger(__name__)

@@ -29,7 +29,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.root_control import client as root_client
 from gateway.app import app
 from gateway.events import telemetry_rows
-from gateway.http.auth.cors import cors_allowed_origins
+from gateway.http.middleware.cors import cors_allowed_origins
 from ops import agent_pause, cluster_status
 from ops.cluster import pause as cluster_pause
 from tests.fixtures.unit.gateway_auth import without_credentials

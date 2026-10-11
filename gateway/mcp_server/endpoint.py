@@ -59,7 +59,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported
-from gateway.agents import router as _agents_router
+from gateway.agents import creation as _agents_creation
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.lifecycle import terminate_agent_with_open_tasks
 from gateway.agents.schemas import AgentRow
@@ -420,9 +420,9 @@ def _register_spawn_tools(
         target = body.machine if body.machine is not None else local_machine.name()
         # Same path as the keyed REST spawn route: `create_and_launch_agent`
         # (preflight + row creation off the event loop, then the launch op).
-        # Referenced through the router module so tests patch the same seam.
+        # Referenced through the creation module so tests patch the same seam.
         try:
-            spawned = await _agents_router.create_and_launch_agent(
+            spawned = await _agents_creation.create_and_launch_agent(
                 body,
                 target,
                 pool,

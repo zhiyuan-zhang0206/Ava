@@ -29,8 +29,7 @@ from base.cluster import session_name
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home
-from gateway.agents.creation import guarded_draft_key
-from gateway.agents.router import create_and_launch_agent
+from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import receipts, session_control
 from ops.rpc_schemas import SpawnAgentRequest
