@@ -454,18 +454,8 @@ def test_render_is_deterministic_and_environment_independent(
     rendered = render_to_json(dashboard)
     assert rendered == render_to_json(render_dashboard(core_specs, plugin_specs))
 
-    script = (
-        "import hashlib, sys;"
-        f"sys.path.insert(0, {str(_REPO_ROOT)!r});"
-        "from base.telemetry.metrics.core import catalog;"
-        "from base.telemetry.metrics.grafana_dashboard import render_dashboard, render_to_json;"
-        "from base.telemetry.metrics.grafana_dashboard_supply import collect_plugin_specs;"
-        "plugins = collect_plugin_specs();"
-        "core = catalog.collect_core_metrics();"
-        "print(hashlib.sha256(render_to_json(render_dashboard(core, plugins.specs)).encode()).hexdigest())"
-    )
-    scrubbed = subprocess.run(  # noqa: S603 — our own interpreter + a literal script
-        [sys.executable, "-c", script],
+    scrubbed = subprocess.run(  # noqa: S603 — our own interpreter + a repository script
+        [sys.executable, str(Path(__file__).with_name("child_dashboard_hash.py"))],
         capture_output=True,
         text=True,
         cwd="/",

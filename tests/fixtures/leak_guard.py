@@ -57,8 +57,8 @@ prints the same list, xdist or not. Design and evidence: `tests/docs/test-leak-g
 
 from __future__ import annotations
 
+import _signal  # pyright: ignore[reportMissingImports]
 import contextlib
-import importlib
 import operator
 import os
 import re
@@ -95,7 +95,7 @@ _SIGNALS = tuple(
 )
 # `signal.getsignal` wraps this C function to turn 0 and 1 into enum members: three Python frames
 # per signal and per read. The raw answer (0, 1, a callable or None) compares just as well.
-_getsignal: Callable[[int], Any] = importlib.import_module("_signal").getsignal
+_getsignal: Callable[[int], Any] = _signal.getsignal
 _now = time.perf_counter_ns
 _IGNORED_ENV = os.environ.encodekey("PYTEST_CURRENT_TEST")  # pytest rewrites it on every phase
 # A directory below the rootdir that holds no production module: tests, an installed package.

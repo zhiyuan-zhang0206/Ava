@@ -191,25 +191,9 @@ def test_read_only_attachment_refuses_an_undelivered_login_before_dial(tmp_path:
     authority = tmp_path / "db-authority"
     authority.mkdir()
     (authority / "ledger.json").write_text("{}", encoding="utf-8")
-    script = """
-import os
-from unittest.mock import patch
-from ava import external
-from base.db import NoDatabaseAuthorityError
-
-before = dict(os.environ)
-with patch("psycopg.connect", side_effect=AssertionError("native dial must not run")):
-    try:
-        external.attach("lease")
-    except NoDatabaseAuthorityError as error:
-        assert "startup entry" in str(error)
-    else:
-        raise AssertionError("undelivered login must be refused")
-assert dict(os.environ) == before
-"""
     environment = {key: value for key, value in os.environ.items() if key != "AVA_AGENT_ID"}
     result = run_bounded(
-        [sys.executable, "-c", script],
+        [sys.executable, str(Path(__file__).with_name("child_undelivered_login.py"))],
         env={
             **environment,
             "AVA_HOME": str(tmp_path),

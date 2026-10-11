@@ -37,7 +37,6 @@ this file can fail where merges are gated.
 from __future__ import annotations
 
 import ast
-import importlib
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -141,7 +140,8 @@ def test_the_native_root_conftest_defers_to_the_repo_root_conftest(
     gateway `.env` that does not exist). Run against a private copy of the environment
     so a regression here reports itself without leaking into the tests that follow.
     """
-    native_root = importlib.import_module("tests.components.lifecycle.native_root.conftest")
+    from tests.components.lifecycle.native_root import conftest as native_root
+
     repo_conftest = Path(native_root.__file__ or "").parents[4] / "conftest.py"
     assert repo_conftest.is_file()
     assert pytestconfig.pluginmanager.get_plugin(str(repo_conftest)) is not None
@@ -182,7 +182,8 @@ def test_the_e2e_env_fixture_tears_down_when_pytest_leaves_its_package() -> None
     `tests/e2e/ tests/harness/test_home_isolation.py` in one serial worker. This test is the
     order-independent partner: it fails in every job that collects this file.
     """
-    conftest = importlib.import_module("tests.e2e.conftest")
+    from tests.e2e import conftest as conftest
+
     # `_fixture_function_marker` is where pytest records the declared scope; reading it
     # IS the assertion, so the private access is deliberate rather than a shortcut
     # around a public API (pytest exposes no public reader for it).
@@ -221,7 +222,8 @@ def test_the_e2e_fixture_restores_every_env_key_it_assigns() -> None:
     drifted once. Setup assignments only — the writes after the `yield` are the
     restore itself.
     """
-    lint = importlib.import_module("scripts.lint.fixture_scope")
+    from scripts.lint import fixture_scope as lint
+
     assigned, dynamic = lint.setup_env_keys(
         _E2E_CONFTEST.read_text(encoding="utf-8"), "_e2e_process_env"
     )

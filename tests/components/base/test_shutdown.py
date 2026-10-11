@@ -196,40 +196,13 @@ async def test_root_graceful_stop_runs_the_product_handlers_cleanup(
         await owner.shutdown()
 
 
-_PLUGIN_SERVICE = """
-import asyncio
-import sys
-from pathlib import Path
-sys.path.insert(0, {repo!r})
-from base.daemon.shutdown import install_graceful_shutdown
-from services.agent_runner.agent_host import daemon
-install_graceful_shutdown("private-plugin-restart-test")
-fingerprints = iter(["before", "after"])
-daemon._plugins_fingerprint = lambda: next(fingerprints)
-daemon._PLUGINS_POLL_INTERVAL_S = 0.01
-
-async def run():
-    try:
-        await daemon._watch_plugins_for_restart()
-    finally:
-        await asyncio.sleep(0.05)
-        Path({marker!r}).write_text("clean")
-
-try:
-    asyncio.run(run())
-except KeyboardInterrupt:
-    pass
-"""
-
-
 def test_plugin_restart_runs_the_product_handlers_cleanup(unit_home: Path) -> None:
     repo = Path(__file__).resolve().parents[3]
     marker = unit_home / "plugin-clean"
-    code = _PLUGIN_SERVICE.format(repo=str(repo), marker=str(marker))
     env = dict(os.environ)
     env.update(AVA_HOME=str(unit_home), AVA_CONFIG_FETCH="skip")
     result = subprocess.run(  # noqa: S603 — fixed test-owned Python script
-        [sys.executable, "-c", code],
+        [sys.executable, str(Path(__file__).with_name("plugin_restart_probe.py")), str(marker)],
         cwd=repo,
         env=env,
         capture_output=True,

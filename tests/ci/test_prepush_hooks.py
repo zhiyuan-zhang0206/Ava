@@ -3,7 +3,6 @@
 # ruff: noqa: S603 — subprocess commands use only test-owned paths and fixture literals.
 
 import fcntl
-import importlib
 import json
 import os
 import selectors
@@ -17,6 +16,8 @@ from typing import Literal
 
 import pytest
 import yaml
+
+from scripts.provision import prepush_freshness
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "scripts/hooks/prepush-guard.sh"
@@ -145,7 +146,7 @@ def test_artifact_freshness_hook_list_matches_config() -> None:
     # family it re-runs when a branch only deletes their inputs. A new files:-filtered artifact
     # hook added to .pre-commit-config.yaml without also joining this list would silently keep
     # the delete-only blind spot the hook exists to close.
-    listed = list(importlib.import_module("scripts.provision.prepush_freshness").HOOKS)
+    listed = list(prepush_freshness.HOOKS)
     expected = {
         "types-codegen-fresh",
         "constants-codegen-fresh",
