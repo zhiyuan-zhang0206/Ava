@@ -36,6 +36,7 @@ include:
 | `auto_compact_fraction` | Auto compact threshold (as fraction of window) | float |
 | `auto_compact_ceiling_tokens` | Absolute cap on auto compact threshold in tokens (0=no cap; actual threshold is the smaller of the two) | int |
 | `passive_memory_recall_enabled` | Enable passive memory recall | bool |
+| `skill_recall_enabled` | Offer the skills that fit a person's or a schedule's request in a system note | bool |
 | `agent_reply_reminder_cadence` | Peer-reply reminder cadence (`once_per_compaction` / `every_time`) | string |
 | `agent_communication_style` | Feedback style (`oriented` / `concise` / `silent` / `off`) | string |
 

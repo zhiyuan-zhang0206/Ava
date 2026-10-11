@@ -162,10 +162,12 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
         from base.packages.plugins.config_registration import validate_config_overlay
 
         installation = installed()
+        catalog = _settings.model_catalog()
         validate_config_overlay(
             config_overlay,
             None if installation is None else installation.configs,
-            models=_settings.model_catalog().models,
+            models=catalog.models,
+            decision_models=catalog.decision_models,
         )
         # Settle a withdrawn llm_model before it is stored (task #4306): the
         # rewrite is reported in this agent's own log — the spawner-visible

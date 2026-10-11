@@ -3,13 +3,13 @@
 Split out of the former flat Settings god object; each field keeps its exact
 env alias so the .env surface is unchanged. Aggregated by base/config.
 
-The AgentSettings schema is split by field domain into five sub-models
+The AgentSettings schema is split by field domain into six sub-models
 (AgentRuntimeSettings, AgentPromptSettings, AgentMemorySettings,
-AgentCompactionSettings, AgentEvalSettings) and composed here by pydantic
+AgentSkillRecallSettings, AgentCompactionSettings, AgentEvalSettings) and composed here by pydantic
 multiple inheritance, so the `settings.agent.*` aggregation surface is
 unchanged: every consumer sees the same flat field set on one instance.
 pydantic orders `model_fields` in reverse MRO, so the bases are declared in
-reverse display order (Eval -> Compaction -> Memory -> Prompt -> Runtime) to
+reverse display order (Eval -> Compaction -> SkillRecall -> Memory -> Prompt -> Runtime) to
 keep the config-panel field order as close to the historical one as possible.
 """
 
@@ -20,11 +20,13 @@ from base.config.domains.agent.eval import AgentEvalSettings
 from base.config.domains.agent.memory import AgentMemorySettings
 from base.config.domains.agent.prompt import AgentPromptSettings
 from base.config.domains.agent.runtime import AgentRuntimeSettings
+from base.config.domains.agent.skill_recall import AgentSkillRecallSettings
 
 
 class AgentSettings(
     AgentEvalSettings,
     AgentCompactionSettings,
+    AgentSkillRecallSettings,
     AgentMemorySettings,
     AgentPromptSettings,
     AgentRuntimeSettings,

@@ -631,6 +631,27 @@ def read(name: str) -> str:
     raise ValueError(f"no skill named {name!r} — `ava.help(ava.skills)` lists the loaded catalog")
 
 
+def _note_skill_read(skill_identifier: str) -> None:
+    """Hand the identifier of a skill whose body was just read to the exec turn's state update,
+    so the agent host knows which skills are already in this context window (skill recall
+    does not offer them again).
+
+    The same single point as the `skill_invoked` audit, so every way of reading a body is
+    covered. Plain strings only: this runs in the exec child, which must not import the
+    agent state classes or the model stack. Outside an exec turn there is no state update to
+    carry it and the read is not noted."""
+    import ava
+
+    if not ava.in_exec_turn():
+        return
+    update = ava.state_update
+    if not isinstance(update, dict):
+        return  # agent code replaced the slot; the exec child reports that at exit
+    reads: list[str] = update.setdefault("skill_reads", [])
+    if skill_identifier not in reads:
+        reads.append(skill_identifier)
+
+
 def _record_skill_invoked(skill: Skill) -> None:
     """Record that this agent opened this skill: one `skill_invoked` audit event
     at the `"loaded"` depth (the only depth the producer writes), written at the
@@ -652,6 +673,7 @@ def _record_skill_invoked(skill: Skill) -> None:
         agent = require_agent_id(context)
     except RuntimeError:
         return
+    _note_skill_read(identifier(skill))
 
     # Function-local: ava.sdk_surface.settings is the composition root and pulls the shell stack; only
     # recording needs it, and the gateway's import closure must not (test_gateway_consumer_guard).

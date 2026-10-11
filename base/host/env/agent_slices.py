@@ -69,6 +69,18 @@ class MemoryRecall:
 
 
 @dataclass(frozen=True)
+class SkillRecall:
+    """Skill recall: whether it runs, the decision model that scores the skill index, and how
+    its scores become an offer."""
+
+    skill_recall_enabled: bool
+    skill_recall_model: str
+    skill_recall_threshold: float
+    skill_recall_max: int
+    skill_recall_deadline_seconds: float
+
+
+@dataclass(frozen=True)
 class HistoryDump:
     """The per-turn history dump into the agent's workspace."""
 
@@ -168,6 +180,7 @@ class AgentSlices:
     brain: AgentBrain
     prompt: Prompt
     memory: MemoryRecall
+    skill_recall: SkillRecall
     history_dump: HistoryDump
     sdk_reminders: SdkReminders
     llm_policy: LlmCallPolicy
@@ -206,6 +219,7 @@ class AgentSlices:
             else AgentBrain(**_kwargs(AgentBrain, pins, default_reader)),
             prompt=Prompt(**_kwargs(Prompt, pins, default_reader)),
             memory=MemoryRecall(**_kwargs(MemoryRecall, pins, default_reader)),
+            skill_recall=SkillRecall(**_kwargs(SkillRecall, pins, default_reader)),
             history_dump=HistoryDump(**_kwargs(HistoryDump, pins, default_reader)),
             sdk_reminders=SdkReminders(**_kwargs(SdkReminders, pins, default_reader)),
             llm_policy=LlmCallPolicy(**_kwargs(LlmCallPolicy, pins, default_reader)),

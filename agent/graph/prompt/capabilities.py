@@ -163,29 +163,83 @@ def indexed_skills(prompt: Prompt) -> list[Any]:
     )
 
 
+def _index_description(skill: Any) -> str | None:
+    """The one-line description an index entry quotes for `skill`, or `None` when
+    it is withheld.
+
+    The description is untrusted frontmatter from whoever wrote the SKILL.md
+    (audit round-2 up-security-trust P0-2): a flagged description is not
+    quoted into the system prompt, so an 'ignore previous instructions'
+    imperative inside 300 chars cannot enter the index. (The runtime mount
+    gate already refuses critical-flagged skills entirely; this is the
+    in-depth check for patterns the skill-scan table does not carry.) Every
+    listing of a skill's description — the index, the drift note, the recall
+    candidates — goes through here, so they quote the same text."""
+    from ava.security import is_flagged
+
+    description = skill["description"]
+    return None if is_flagged(description) else _one_line(description)
+
+
+def index_entry(identifier: str, description: str) -> str:
+    """One skill line in the shape `# Capabilities` uses, so every note that names a
+    skill reads as more of the same listing."""
+    return f"- `ava.skills.{identifier}` — {description}"
+
+
 def _index_line(skill: Any) -> str:
     """One index entry. Display form — `ava.skills.<dash:colon>` (e.g.
     `ava.skills.web-ai:deep-research`), the same spelling the expanded-SDK
     section uses; the loadable form is that path with `-`/`:` -> `_`/`.`.
-
-    The description is untrusted frontmatter from whoever wrote the SKILL.md
-    (audit round-2 up-security-trust P0-2): a flagged description is not
-    quoted into the system prompt — the line renders as a security marker, so
-    an 'ignore previous instructions' imperative inside 300 chars cannot enter
-    the index. (The runtime mount gate already refuses critical-flagged
-    skills entirely; this is the in-depth check for patterns the skill-scan
-    table does not carry.)"""
+    A flagged description renders as a security marker (see `_index_description`)."""
     import ava
-    from ava.security import is_flagged
 
-    description = skill["description"]
-    if is_flagged(description):
-        identifier = ava.skills.identifier(skill)
+    identifier = ava.skills.identifier(skill)
+    description = _index_description(skill)
+    if description is None:
         return (
             f"- `ava.skills.{identifier}` — [security-flagged] description withheld "
             f"(load the body with `ava.help(ava.skills.{identifier})` and judge it yourself)"
         )
-    return f"- `ava.skills.{ava.skills.identifier(skill)}` — {_one_line(description)}"
+    return index_entry(identifier, description)
+
+
+class RecallCandidate(NamedTuple):
+    """One skill that recall may offer: its display `identifier`, the index line's
+    `description`, and `target`, the `ava.skills` access path that loads it."""
+
+    identifier: str
+    description: str
+    target: str
+
+
+def recall_candidates(prompt: Prompt) -> list[RecallCandidate]:
+    """The skills a recall pass may offer, in index order: every skill the
+    `# Capabilities` index covers (entry skills and sub-skills alike), described by
+    exactly the text its index line quotes.
+
+    Left out: a skill whose description the index withholds as security-flagged, and
+    one `skills_to_expand_at_start` already put its whole body in front of the agent.
+    Which of the rest the agent has already read or been offered this window is
+    per-window state, so the caller filters it."""
+    import ava
+
+    preloaded = {
+        ava.skills.identifier(s)
+        for s in resolve_prompt_skills(
+            prompt.skills_to_expand_at_start,
+            prompt.sdk_disable,
+            config_field="skills_to_expand_at_start",
+        )
+    }
+    candidates: list[RecallCandidate] = []
+    for skill in indexed_skills(prompt):
+        identifier = ava.skills.identifier(skill)
+        description = _index_description(skill)
+        if description is None or identifier in preloaded:
+            continue
+        candidates.append(RecallCandidate(identifier, description, ava.skills.target(skill)))
+    return candidates
 
 
 def _skill_index_lines(prompt: Prompt) -> list[str]:

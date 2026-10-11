@@ -136,6 +136,18 @@ class PassiveRecall(TypedDict, total=False):
     filter_ms: int
 
 
+class SkillRecallScored(TypedDict, total=False):
+    """`skill_recall` payload — agent/graph/recall/skill_recall.py.
+
+    The scoring pass outcome (the success path): how many skills were scored and which
+    identifiers were offered. The defer / deadline / decision-failure emissions carry
+    neither key.
+    """
+
+    candidates: int
+    offered: list[str]
+
+
 class HookTiming(TypedDict):
     """`hook_timing` payload — agent/hooks/_registry.py.
 
@@ -312,6 +324,13 @@ EVENTS: dict[str, EventSpec] = {
         "passive_recall",
         "passive memory recall",
         payload=PassiveRecall,
+        tier="noise",
+        persist=True,
+    ),
+    "skill_recall": telemetry_event(
+        "skill_recall",
+        "skill recall",
+        payload=SkillRecallScored,
         tier="noise",
         persist=True,
     ),
