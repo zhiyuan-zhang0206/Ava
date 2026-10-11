@@ -84,7 +84,6 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
-        cluster_secret="s3cr3t",  # noqa: S106 — test fixture
     )
     _assert_transaction_pooling_with_scram_clients(ini)
     _assert_database_entry_forwards_over_owner_only_socket(ini)
@@ -93,13 +92,21 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     _assert_quiet_connection_logs_and_userlist_only_console(ini)
 
 
-def test_render_ini_authenticates_without_secret_and_binds_loopback_only() -> None:
-    """The internal data plane always authenticates: an empty cluster secret
-    changes only the bind (loopback alone), never the SCRAM front door."""
-    ini = pgbouncer._render_ini(pg_port=5433, listen_port=6433, db_name="ava", cluster_secret="")
+def test_render_ini_authenticates_and_binds_loopback_on_a_single_box() -> None:
+    """The internal data plane always authenticates, and a box that declares no
+    reachable address (`AVA_MACHINE_HOST` unset) binds loopback alone."""
+    ini = pgbouncer._render_ini(pg_port=5433, listen_port=6433, db_name="ava")
     assert "auth_type = scram-sha-256" in ini.splitlines()
     assert "trust" not in ini
     assert "listen_addr = 127.0.0.1" in ini.splitlines()
+
+
+def test_render_ini_adds_only_the_declared_reachable_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
+    ini = pgbouncer._render_ini(pg_port=5433, listen_port=6433, db_name="ava")
+    assert "listen_addr = 127.0.0.1, 10.0.0.5" in ini.splitlines()
 
 
 def test_render_ini_binds_loopback_never_all_interfaces() -> None:
@@ -107,7 +114,6 @@ def test_render_ini_binds_loopback_never_all_interfaces() -> None:
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
-        cluster_secret="s3cr3t",  # noqa: S106 — test fixture
     )
     listen = next(ln for ln in ini.splitlines() if ln.startswith("listen_addr ="))
     assert "127.0.0.1" in listen

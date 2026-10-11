@@ -8,5 +8,7 @@
   "tooManyAttempts": "Too many failed attempts — try again in a few minutes",
   "connectionFailed": "Connection failed — is the gateway running?",
   "checkingSession": "Checking session…",
-  "enterPassword": "Enter the cluster password to continue"
+  "enterPassword": "Enter the cluster password to continue",
+  "ticketRejected": "This login link has expired or was already used — sign in with the cluster password",
+  "ticketUnreachable": "Could not reach the gateway to use the login link — sign in with the cluster password"
 }

@@ -32,6 +32,7 @@ from fastapi.testclient import TestClient
 from base import config
 from gateway.app import app
 from gateway.routers import grafana as grafana_router
+from tests.fixtures.unit.gateway_auth import without_credentials
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -223,7 +224,6 @@ def test_proxy_cookie_post_from_gateway_origin_passes(
     frontend port on the gateway host, so the gateway's own origin never
     matched and every same-origin data POST died with 403."""
     _enable(monkeypatch, grafana_server)
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
     monkeypatch.setattr(
@@ -254,11 +254,10 @@ def test_proxy_requires_auth(grafana_server: int, monkeypatch: pytest.MonkeyPatc
     """The proxy is auth-gated like every other API route: no credentials ->
     401; a valid bearer passes the middleware (404 here because the proxy is
     disabled, proving it reached the route)."""
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     monkeypatch.setattr(config.settings.gateway, "grafana_proxy_enabled", False)
     with TestClient(app) as client:
-        no_auth = client.get("/grafana/")
+        no_auth = without_credentials(client).get("/grafana/")
         assert no_auth.status_code == 401
 
         with_auth = client.get(

@@ -15,7 +15,7 @@ different principal per tool label. Validated browser sessions authenticate that
 same stable cluster administrator, but only while the credential that minted
 them is current ([[web-sessions.ava.okf.md]]); rotating a cookie does not
 change principal.
-No-auth mode has no verified principal. Caller/source JSON cannot bind one.
+The API always authenticates, so a verified principal exists on every request that passes the middleware. Caller/source JSON cannot bind one.
 
 Alongside that authorization principal, the middleware stores the narrower
 credential fact used for inbound audit rows: `cluster_bearer` (the human
@@ -29,7 +29,7 @@ cluster middleware. The fact is never copied from request JSON, and it grants
 authority in one place only: the MCP client admin routes mint tokens bound to
 no write generation, so `require_human_credential` admits only the human facts
 (`cluster_bearer`, `user_session`) there and answers 403 to a generation-bound
-one. An open API passes, having no credential to tell apart.
+one.
 
 Supplied keys must contain 1 to 128 characters in both legacy and scoped
 requests; invalid keys fail before durable writes. Missing keys retain each

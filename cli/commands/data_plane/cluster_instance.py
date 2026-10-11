@@ -13,13 +13,11 @@ Model (mirrors `base.cluster.dataplane.pg_tools.throwaway_postgres`, but persist
   superuser is the sole passwordless identity (`peer` on the 0700 owner-only
   socket — the administrator authority), and every other role is SCRAM over
   the socket and TCP. The schema owner is NOLOGIN; application processes log in
-  only as the home's write generation (`base.cluster.authority`). A no-secret
-  cluster differs only in binding loopback alone.
+  only as the home's write generation (`base.cluster.authority`).
 - Redis runs `redis-server` on the cluster's redis port and ALWAYS authenticates,
   whatever the bearer: `requirepass` = the gateway-only Redis admin password, and
   the cluster's ACL user has its own runtime password. Both are minted at first
-  start; a home without them is refused, never converted. A no-secret cluster
-  keeps the loopback-only bind. Data dir under `$AVA_HOME/redis`. The
+  start; a home without them is refused, never converted. Data dir under `$AVA_HOME/redis`. The
   Redis admin password reaches redis through a 0600 `redis.conf` and reaches `redis-cli`
   through `$REDISCLI_AUTH` — never argv, which `ps` shows to any local user
   (issue #974).
@@ -30,9 +28,10 @@ read each from its own `.env` URL (`db_identity()` / `redis_identity()`) and pas
 `DATA_PLANE_IDENTITY` for both; later starts preserve different existing names.
 
 Bind posture — authenticated Postgres, PgBouncer and Linux Redis bind loopback
-and this host's reachable address, never all interfaces. macOS Redis retains its
-loopback-only workaround and host-level `com.ava.redis-bridge` relay (task #1469).
-A no-secret cluster binds loopback only; no caller environment widens that posture.
+and this host's declared reachable address (`AVA_MACHINE_HOST`), never all
+interfaces; a host that declares none (`localhost`) binds loopback only. macOS Redis
+retains its loopback-only workaround and host-level `com.ava.redis-bridge` relay
+(task #1469).
 
 POSIX only (macOS brew / Linux postgres + redis-server).
 """
@@ -172,8 +171,8 @@ def _wait_for_reachable_bind() -> bool:
         time.sleep(_BIND_WAIT_INTERVAL_S)
 
 
-def _pg_hba_body(cluster_secret: str) -> str:
-    """Always-authenticated pg_hba, whatever the bearer.
+def _pg_hba_body() -> str:
+    """Always-authenticated pg_hba.
 
     The OS user (the initdb bootstrap superuser) reaches Postgres only through
     `peer` on the owner-only socket — the administrator authority provisioning,
@@ -184,16 +183,12 @@ def _pg_hba_body(cluster_secret: str) -> str:
     (the schema owner and the capability groups) never log in
     under any method.
 
-    The bearer decides only reach: a secret cluster adds its reachable address
-    and `trusted_cidrs` as SCRAM host lines, matching its bind posture
-    (`port_preflight.bind_addrs`); a no-secret cluster has loopback lines only.
-
-    `cluster_secret` is the CALLER-PASSED cluster secret, never read from
-    `settings`: install-time birth has no `.env` yet, so `settings` would see an
-    inherited sibling secret (a prod-sourced shell) and widen a no-secret
-    cluster's hba (Task #1113). `trusted_cidrs` stays a settings read: it is a
-    cluster-scope field the env-authority pass drops when undeclared, so it has
-    no ambient-leak vector."""
+    The declared reach adds SCRAM host lines, matching the bind posture
+    (`port_preflight.bind_addrs`): the reachable address when it is not a loopback
+    alias, and each `trusted_cidrs` range. A single box (reachable address
+    `localhost`, no CIDRs) has loopback lines only. Both are cluster-scope fields
+    the env-authority pass drops when undeclared, so neither has an ambient-leak
+    vector."""
     lines = [
         f"local all {getpass.getuser()} peer",
         f"local all {MONITOR_ROLE} peer map={MONITOR_MAP}",
@@ -201,12 +196,11 @@ def _pg_hba_body(cluster_secret: str) -> str:
         "host all all 127.0.0.1/32 scram-sha-256",
         "host all all ::1/128 scram-sha-256",
     ]
-    if cluster_secret:
-        host = machine.reachable_host()
-        if host not in port_preflight.LOOPBACK_ALIASES:
-            lines.append(f"host all all {host}/32 scram-sha-256")
-        for cidr in (c.strip() for c in settings.data_plane.trusted_cidrs.split(",") if c.strip()):
-            lines.append(f"host all all {cidr} scram-sha-256")
+    host = machine.reachable_host()
+    if host not in port_preflight.LOOPBACK_ALIASES:
+        lines.append(f"host all all {host}/32 scram-sha-256")
+    for cidr in (c.strip() for c in settings.data_plane.trusted_cidrs.split(",") if c.strip()):
+        lines.append(f"host all all {cidr} scram-sha-256")
     return "\n".join(lines) + "\n"
 
 
@@ -330,7 +324,6 @@ def _pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
 
 def _start_pg(
     pg_port: int,
-    cluster_secret: str,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
@@ -346,17 +339,11 @@ def _start_pg(
     owner = ownership.require_postgres(_pg_data_dir(), pg_port, required=False)
     data = _ensure_pg_data()
     (data / "pg_ident.conf").write_text(_pg_ident_body())
-    (data / "pg_hba.conf").write_text(_pg_hba_body(cluster_secret))
+    (data / "pg_hba.conf").write_text(_pg_hba_body())
     dial_host = _pg_dial_host()
-    # Same gate as the pgbouncer path (task #1303, PR #47 P2): a no-secret
-    # cluster binds loopback alone (`port_preflight.bind_addrs`), so a stray ambient
-    # AVA_MACHINE_HOST must not hold a warm start hostage for a bind that never
-    # happens. Wait only when this cluster actually binds the reachable address.
-    if (
-        owner is None
-        and port_preflight.bind_addrs(cluster_secret) != ["127.0.0.1"]
-        and not _wait_for_reachable_bind()
-    ):
+    # The wait applies only when this cluster binds a non-loopback reachable address
+    # (`port_preflight.bind_addrs`); a loopback host returns immediately.
+    if owner is None and not _wait_for_reachable_bind():
         print(
             f"  ✗ reachable bind address {machine.reachable_host()!r} is not assigned to any "
             f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — postgres cannot bind "
@@ -365,7 +352,7 @@ def _start_pg(
             file=sys.stderr,
         )
         return 1
-    listen = ",".join(port_preflight.bind_addrs(cluster_secret))
+    listen = ",".join(port_preflight.bind_addrs())
     owned_postgres.start(
         data,
         pg_port,
@@ -443,8 +430,7 @@ def _write_redis_conf(data: Path, redis_admin_password: str) -> Path:
     stays a flag: redis applies flags after the config file, so the per-cluster
     port/bind/dir still win (and a stale conf from an older start cannot pin them).
 
-    Every render carries `requirepass`: Redis always authenticates, including a
-    no-secret cluster (which differs only in its loopback-only bind).
+    Every render carries `requirepass`: Redis always authenticates.
 
     Raises:
         ValueError: `redis_admin_password` is empty."""
@@ -462,7 +448,6 @@ def start_redis(
     redis_port: int,
     redis_admin_password: str,
     runtime_password: str,
-    cluster_secret: str,
     identity: str,
 ) -> int:
     if not (redis_admin_password and runtime_password):
@@ -479,8 +464,8 @@ def start_redis(
             print(f"  ✓ redis already running ({dial_host}:{redis_port})")
         return result
     ownership.require_listener(None, redis_port, required=False)
-    bind_addrs = ["127.0.0.1"] if is_macos() else port_preflight.bind_addrs(cluster_secret)
-    if not is_macos() and cluster_secret and not _wait_for_reachable_bind():
+    bind_addrs = ["127.0.0.1"] if is_macos() else port_preflight.bind_addrs()
+    if not is_macos() and not _wait_for_reachable_bind():
         return 1
     data = ownership.redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
@@ -559,7 +544,6 @@ def ensure_cluster_storage(
     *,
     pg_port: int,
     redis_port: int,
-    cluster_secret: str,
     redis_admin_password: str,
     redis_password: str,
     redis_user: str,
@@ -579,13 +563,9 @@ def ensure_cluster_storage(
             "always authenticated and no conversion exists; re-birth it as a new home."
         )
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
-    if (rc := _start_pg(pg_port, cluster_secret, retained_children=retained_children)) != 0:
+    if (rc := _start_pg(pg_port, retained_children=retained_children)) != 0:
         return rc
-    if (
-        rc := start_redis(
-            redis_port, redis_admin_password, redis_password, cluster_secret, redis_user
-        )
-    ) != 0:
+    if (rc := start_redis(redis_port, redis_admin_password, redis_password, redis_user)) != 0:
         return rc
     return 0
 

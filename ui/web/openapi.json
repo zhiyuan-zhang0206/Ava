@@ -8,13 +8,67 @@
     "/api/auth/login": {
       "post": {
         "summary": "Login",
-        "description": "Authenticate with the cluster secret and receive a session cookie.\n\nRequest body: ``{\"password\": \"<cluster-secret>\"}``. An agent-runner's\nmanaged browser presents the active generation's runner API token instead.\nThe session is bound to the credential that minted it (`login_mint`): it\nstops authenticating when that generation is revoked or the human secret\nrotates, whatever its remaining lifetime.\n\nOn success, returns ``{\"ok\": true}`` and sets an HTTP-only session\ncookie whose lifetime is controlled by ``session_ttl_seconds``.\n\nOn failure, returns a typed 401 error envelope with detail ``\"invalid password\"``.\n\nA no-secret cluster (single-box no-auth posture) has no credential: login\nis a no-op 200 success, deliberately BEFORE the rate limiter — there is\nnothing to guess, and no-secret requests must never count into the\nlimiter's failure records.\n\nBrute-force guard: an IP that fails ``gateway.login_max_failures`` times in\na row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on\nthose config fields; enforcement in base/cluster/rate_limit.py).\nWhile locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —\n401 would read as \"wrong password\" and invite exactly the retry loop the\nlockout exists to stop. A successful login resets the IP's counter.",
+        "description": "Authenticate with the cluster secret and receive a session cookie.\n\nRequest body: ``{\"password\": \"<cluster-secret>\"}``. An agent-runner's\nmanaged browser presents the active generation's runner API token instead.\nThe session is bound to the credential that minted it (`login_mint`): it\nstops authenticating when that generation is revoked or the human secret\nrotates, whatever its remaining lifetime.\n\nOn success, returns ``{\"ok\": true}`` and sets an HTTP-only session\ncookie whose lifetime is controlled by ``session_ttl_seconds``.\n\nOn failure, returns a typed 401 error envelope with detail ``\"invalid password\"``.\n\nBrute-force guard: an IP that fails ``gateway.login_max_failures`` times in\na row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on\nthose config fields; enforcement in base/cluster/rate_limit.py).\nWhile locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —\n401 would read as \"wrong password\" and invite exactly the retry loop the\nlockout exists to stop. A successful login resets the IP's counter.",
         "operationId": "login_api_auth_login_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login-ticket": {
+      "post": {
+        "summary": "Issue Login Ticket",
+        "description": "Issue a one-time login ticket for a browser, from a human-secret caller.\n\nThe ticket is a `web_sessions` row valid for ``LOGIN_TICKET_TTL_SECONDS``\nand bound to the human secret's mint: redeeming it\n(``/api/auth/login-ticket/redeem``) opens exactly the session a password\nlogin with that secret would. Only the human secret (or a session it\nminted) may issue one; a write generation's machine token gets 403, so no\nmachine credential can mint a browser session.\n\nReturns ``{\"ticket\": \"<opaque>\", \"expires_in_seconds\": <int>}``.",
+        "operationId": "issue_login_ticket_api_auth_login_ticket_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login-ticket/redeem": {
+      "post": {
+        "summary": "Redeem Login Ticket",
+        "description": "Exchange a login ticket for a session cookie; the ticket is consumed.\n\nNeeds no credential: the ticket is the credential. Redemption revokes the\nticket row in one atomic statement, so a ticket opens at most one session,\nand only while it is unexpired and the credential that issued it is still\ncurrent. An unknown, malformed, replayed, expired or orphaned ticket all\nget the same 401, and every failure counts against the login limiter\n(429 while locked), so tickets cannot be guessed at.",
+        "operationId": "redeem_login_ticket_api_auth_login_ticket_redeem_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginTicketRedeemRequest"
               }
             }
           },
@@ -141,7 +195,7 @@
     "/api/bootstrap": {
       "get": {
         "summary": "Get Bootstrap",
-        "description": "Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an\nagent-runner to load into its environment.\n\n`AVA_DB_URL` is the credential-free endpoint; no database credential is\nserved. The admin credentials remain gateway-local (see\nbase.config.bootstrap_config_values).\n\nRaises:\n    HTTPException: 401 when the request carries neither the active write\n        generation's machine API token nor the cluster secret as its bearer\n        (a no-secret cluster serves without auth — there is no credential\n        to require); 400 when the gateway configuration has no database\n        endpoint.",
+        "description": "Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an\nagent-runner to load into its environment.\n\n`AVA_DB_URL` is the credential-free endpoint; no database credential is\nserved. The admin credentials remain gateway-local (see\nbase.config.bootstrap_config_values).\n\nRaises:\n    HTTPException: 401 when the request carries neither the active write\n        generation's machine API token nor the cluster secret as its bearer;\n        400 when the gateway configuration has no database\n        endpoint.",
         "operationId": "get_bootstrap_api_bootstrap_get",
         "parameters": [
           {
@@ -12967,6 +13021,18 @@
         "type": "object",
         "title": "LoginRequest",
         "description": "POST /api/auth/login body. `password` is the cluster secret (or, for the\nmanaged browser of an agent-runner, the active generation's runner API\ntoken); a missing or empty one falls through to the 401 below rather than a\n422. `username` is accepted for Chrome password-manager compatibility but\nnever validated."
+      },
+      "LoginTicketRedeemRequest": {
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "title": "Ticket",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "LoginTicketRedeemRequest",
+        "description": "POST /api/auth/login-ticket/redeem body; a missing or empty ticket falls\nthrough to the 401 rather than a 422, like a missing password."
       },
       "MachineDeleteResponse": {
         "properties": {

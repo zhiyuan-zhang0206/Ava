@@ -30,6 +30,7 @@ from gateway.app import app
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
 from tests.fixtures.configuration import snapshot_process_config
+from tests.fixtures.unit.gateway_auth import without_credentials
 
 
 @pytest.fixture(autouse=True)
@@ -113,12 +114,11 @@ def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
 @pytest.mark.usefixtures("held")
 def test_held_health_exemption_preserves_authentication(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", uuid4().hex)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     with TestClient(app) as client:
         # Health is already public; control-plane classification must not make
         # the authenticated status surface public too.
         assert client.get("/api/health").status_code == 200
-        assert client.get("/api/cluster/status").status_code == 401
+        assert without_credentials(client).get("/api/cluster/status").status_code == 401
     assert admission.held()
 
 
@@ -126,7 +126,6 @@ def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
     """The served home's ledger authenticates machine tokens; returns the human secret."""
     secret = uuid4().hex
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr("base.paths.ava_home", rt._ava_home)
     return secret
 
@@ -141,7 +140,7 @@ def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
     _authenticated(monkeypatch)
     runner = bearer_header(served_gateway_home.api.runner)
     with TestClient(app) as client:
-        assert client.get("/api/bootstrap").status_code == 401
+        assert without_credentials(client).get("/api/bootstrap").status_code == 401
         assert client.get("/api/bootstrap", headers=bearer_header("wrong")).status_code == 401
         served = client.get("/api/bootstrap", headers=runner)
         assert client.get("/api/agents", headers=runner).status_code == 503

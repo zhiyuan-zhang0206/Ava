@@ -32,6 +32,7 @@ from base.events.live.tests.fakes import record_publishes
 from base.telemetry.alerts.native import load_native_group, stamp_native_sent
 from gateway.alerts import router as alerts_router
 from gateway.app import app
+from tests.fixtures.unit.gateway_auth import without_credentials
 
 
 def native_sender(callback: Callable[[str], bool]) -> Callable[[int], bool]:
@@ -610,6 +611,7 @@ def test_ingest_requires_webhook_token(client: TestClient) -> None:
     """No/wrong token -> 401; correct token -> 200; the legacy header name
     no longer authenticates (removed with task #1173)."""
     payload = _webhook()
+    without_credentials(client)  # the cluster secret is itself a valid webhook credential
     assert client.post("/api/alerts", json=payload).status_code == 401
     assert (
         client.post(

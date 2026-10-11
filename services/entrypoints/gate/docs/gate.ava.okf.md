@@ -30,7 +30,10 @@ transition, a service, or the host. Gate keeps no update state: a release
 transition stops Gate with the rest of root, so no listener exists to describe
 it.
 The login and unavailable pages are dependency-free static assets loaded at
-boot. Next.js navigation request headers and response security headers cross
+boot. The login page also redeems the one-time `#ticket=` fragment of the link
+`ava start` prints (clearing it from the address bar first), and reloads into the
+app once the gateway sets the session cookie; a refused ticket leaves the
+password form usable. Next.js navigation request headers and response security headers cross
 the proxy. Normal root startup loads the candidate code and static assets.
 
 The loopback product tests exercise auth, the unavailable projection, proxy

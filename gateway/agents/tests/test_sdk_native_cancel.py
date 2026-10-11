@@ -26,7 +26,6 @@ async def test_sdk_replays_original_command_after_lost_response_and_owner_change
     _incarnation, target = await managed_work(db_conn, aops_pool)
     secret = "sdk-cancel-test-secret"  # noqa: S105 — isolated fixture credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     posts: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:

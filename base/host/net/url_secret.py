@@ -21,8 +21,8 @@ def url_with_userinfo(url: str, user: str, password: str) -> str:
 
     Both components are percent-encoded so a URL-reserved character cannot break
     the netloc. An empty `password` still writes the username (`user@host`) — the
-    username IS the data-plane identity (names-as-data), and a no-secret cluster
-    carries identity without a credential. `url_with_password` is the password-only
+    username IS the data-plane identity (names-as-data), and a credential-free
+    endpoint URL carries identity without a credential. `url_with_password` is the password-only
     rewrite and keeps its no-op-on-empty contract."""
     parts = urlsplit(url)
     host = parts.hostname or ""

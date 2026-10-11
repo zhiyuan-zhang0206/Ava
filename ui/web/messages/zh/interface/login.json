@@ -8,5 +8,7 @@
   "tooManyAttempts": "失败次数过多——请几分钟后再试",
   "connectionFailed": "连接失败——gateway 是否在运行？",
   "checkingSession": "检查会话中…",
-  "enterPassword": "输入集群密码以继续"
+  "enterPassword": "输入集群密码以继续",
+  "ticketRejected": "登录链接已过期或已被使用——请使用集群密码登录",
+  "ticketUnreachable": "无法连接 gateway 使用登录链接——请使用集群密码登录"
 }

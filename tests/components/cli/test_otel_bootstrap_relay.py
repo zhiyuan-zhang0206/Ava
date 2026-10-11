@@ -17,6 +17,7 @@ from base.config.service_read import ConfigAuthority
 from base.host.env import runtime_config
 from cli.commands.observability import otel_collector as collector
 from gateway.app import app
+from tests.fixtures.unit.gateway_auth import without_credentials
 
 
 @pytest.mark.parametrize(("gateway_port", "local_port"), [(4318, 4319), (54318, 4318)])
@@ -44,7 +45,7 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     gateway_app = importlib.import_module("gateway.app")
     monkeypatch.setattr(gateway_app, "ConfigBoot", lambda: owner)
     with TestClient(app) as client:
-        assert client.get("/api/bootstrap").status_code == 401
+        assert without_credentials(client).get("/api/bootstrap").status_code == 401
         response = client.get(
             "/api/bootstrap", headers={"Authorization": "Bearer relay-test-token"}
         )

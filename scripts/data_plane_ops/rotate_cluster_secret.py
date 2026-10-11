@@ -110,7 +110,7 @@ def _begin(home: Path) -> tuple[Rotation, str]:
     """Stage the next secret (a crash-left staged secret is adopted)."""
     current = _current_secret(home)
     if not current:
-        raise RotationRefusedError("this home serves an open API (no secret); nothing to rotate")
+        raise RotationRefusedError("this home has no AVA_CLUSTER_SECRET to rotate")
     staged = _staged(home)
     if staged is None or staged == current:
         staged = mint_secret()

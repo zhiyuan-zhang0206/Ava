@@ -204,7 +204,6 @@ def _auth401_state(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _enable_cluster_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
 
 
@@ -226,7 +225,6 @@ def _auth401_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord
 
 def test_auth_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unauthorized short-circuits remain 401 but expose the shared contract."""
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
 
     async def call_next(_request: Request) -> Response:
@@ -240,7 +238,6 @@ def test_auth_middleware_requires_cluster_auth_for_alert_reads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The webhook exemption must not expose the alerts read API."""
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
 
     async def call_next(_request: Request) -> Response:
@@ -254,7 +251,6 @@ def test_auth_middleware_leaves_alert_webhook_auth_to_router(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only the POST alert webhook reaches its router without cluster auth."""
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
 
     async def call_next(_request: Request) -> Response:
@@ -273,7 +269,6 @@ def test_auth_middleware_accepts_bearer_for_alert_reads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Authenticated alert reads continue through ordinary cluster auth."""
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
 
     async def call_next(_request: Request) -> Response:

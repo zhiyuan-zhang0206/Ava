@@ -2,7 +2,8 @@
 
 // Auth context — tracks session authentication state.
 //
-// On mount, checks /api/auth/check. While checking, `status === "loading"`.
+// On mount, redeems a one-time login ticket from the URL fragment (if any),
+// then checks /api/auth/check. While checking, `status === "loading"`.
 // Once resolved, `status` is "authenticated" or "unauthenticated".
 // Call `login(password)` to authenticate; `logout()` to clear.
 
@@ -16,6 +17,7 @@ import {
 } from "react";
 
 import { ApiError, api } from "../transport/api";
+import { redeemTicketFromLocation } from "./login-ticket";
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -27,8 +29,13 @@ type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 // can't masquerade as a bad password.
 type LoginResult = "ok" | "invalid-credentials" | "rate-limited" | "network-error";
 
+// Why a one-time login link did not sign the user in. Shown on the login form
+// only while the user is signed out; the cluster password still works.
+type LoginNotice = "ticket-rejected" | "ticket-unreachable";
+
 interface AuthState {
   status: AuthStatus;
+  loginNotice: LoginNotice | null;
   login: (username: string, password: string) => Promise<LoginResult>;
   logout: () => Promise<void>;
 }
@@ -46,17 +53,24 @@ export function notifySessionInvalid(): void {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
+  const [loginNotice, setLoginNotice] = useState<LoginNotice | null>(null);
 
   useEffect(() => {
     setSessionInvalidHandler(() => setStatus("unauthenticated"));
     return () => setSessionInvalidHandler(null);
   }, []);
 
-  // Check auth on mount
+  // Check auth on mount. A one-time login link is redeemed first; the session
+  // check then decides, so a redeemed cookie that does not actually reach the
+  // gateway still lands on the login page.
   useEffect(() => {
     let cancelled = false;
-    api
-      .checkAuth()
+    redeemTicketFromLocation()
+      .then((outcome) => {
+        if (!cancelled && outcome === "rejected") setLoginNotice("ticket-rejected");
+        if (!cancelled && outcome === "unreachable") setLoginNotice("ticket-unreachable");
+        return api.checkAuth();
+      })
       .then((res) => {
         if (!cancelled) setStatus(res.authenticated ? "authenticated" : "unauthenticated");
       })
@@ -72,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (username: string, password: string): Promise<LoginResult> => {
       try {
         await api.login(username, password);
+        setLoginNotice(null);
         setStatus("authenticated");
         return "ok";
       } catch (e) {
@@ -103,7 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ status, login, logout }}>
+    <AuthContext.Provider value={{ status, loginNotice, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

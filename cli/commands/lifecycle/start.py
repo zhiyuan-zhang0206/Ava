@@ -23,6 +23,7 @@ from cli.commands._repo import _repo_root
 from cli.commands._setup import SetupValues, _missing_setup_message
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
 from cli.commands.lifecycle._start_bookmarks import record_running_sha as _record_running_sha
+from cli.commands.lifecycle.login_link import print_login_link
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.status import cmd_status
 from cli.start_runtime import StartRuntime
@@ -326,7 +327,7 @@ def _register_and_probe(state: _StartState) -> int | None:
 
 
 def _print_gateway_hint() -> None:
-    """Where a remote agent-runner dials this gateway.
+    """Where a remote agent-runner dials this gateway, and how a browser logs in.
 
     The gateway's own .env holds the loopback URL (a box reaches its own gateway over
     loopback); this prints the OTHER address, so whoever just brought the gateway up can
@@ -335,9 +336,14 @@ def _print_gateway_hint() -> None:
     from base.cluster.machine import reachable_host
     from base.config import settings as _settings
     from base.host.net.predicates import is_loopback_host
+    from base.paths import ava_home
 
     port = _settings.gateway.gateway_port
     host = reachable_host()
+    print(
+        f"\n→ web login password: the AVA_CLUSTER_SECRET value in {ava_home() / '.env'} "
+        "(the CLI, SDK and local services present their own credentials)"
+    )
     if is_loopback_host(host):
         print(
             f"\n→ gateway reachable at http://{host}:{port} (loopback only — set "
@@ -472,6 +478,7 @@ def _cmd_start_body(
     # 7) gateway reachability hint.
     if any(spec.session == "gateway" for spec in started) and not wait.unready:
         _print_gateway_hint()
+        print_login_link({spec.session for spec in started})
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
     rc = _readiness_verdict(launch, wait)

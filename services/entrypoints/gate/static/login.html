@@ -146,7 +146,8 @@ button:disabled {
       "signingIn": "\u767b\u5f55\u4e2d\u2026",
       "connectionFailed": "\u8fde\u63a5\u5931\u8d25\u2014\u2014gateway \u662f\u5426\u5728\u8fd0\u884c\uff1f",
       "invalidPassword": "\u5bc6\u7801\u9519\u8bef",
-      "signInFailed": "\u767b\u5f55\u5931\u8d25\uff08"
+      "signInFailed": "\u767b\u5f55\u5931\u8d25\uff08",
+      "ticketRejected": "\u767b\u5f55\u94fe\u63a5\u5df2\u8fc7\u671f\u6216\u5df2\u88ab\u4f7f\u7528\u2014\u2014\u8bf7\u4f7f\u7528\u96c6\u7fa4\u5bc6\u7801\u767b\u5f55"
     };
     var AVA_LOCALE = (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
     function t(key) {
@@ -193,6 +194,13 @@ button:disabled {
       idle();
     }
 
+    // A configured HTTPS entry routes auth and SSE directly to the gateway.
+    // Keep the direct HTTP entry working during rollout and rollback.
+    function gatewayBase() {
+      return window.location.origin === /*__BROWSER_ORIGIN__*/
+        ? "" : "__GATEWAY_BASE__";
+    }
+
     form.addEventListener("submit", async function (event) {
       event.preventDefault();
       var password = passwordField.value.trim();
@@ -202,11 +210,7 @@ button:disabled {
       submit.textContent = t("signingIn") || "Signing in…";
       var response;
       try {
-        // A configured HTTPS entry routes auth and SSE directly to the gateway.
-        // Keep the direct HTTP entry working during rollout and rollback.
-        var gatewayBase = window.location.origin === /*__BROWSER_ORIGIN__*/
-          ? "" : "__GATEWAY_BASE__";
-        response = await fetch(gatewayBase + "/api/auth/login", {
+        response = await fetch(gatewayBase() + "/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -223,6 +227,43 @@ button:disabled {
       else if (response.status === 401) fail(t("invalidPassword") || "Invalid password");
       else fail((t("signInFailed") || "Sign-in failed (") + response.status + ")");
     });
+
+    // A one-time login link (`/#ticket=<ticket>`, printed by `ava start`): the
+    // fragment is removed from the address bar before the ticket is sent, then
+    // the gateway spends the ticket and sets the same session cookie a password
+    // login does. A refused ticket leaves the password form usable.
+    async function redeemTicket(ticket) {
+      submit.disabled = true;
+      submit.textContent = t("signingIn") || "Signing in…";
+      var response;
+      try {
+        response = await fetch(gatewayBase() + "/api/auth/login-ticket/redeem", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ ticket: ticket }),
+        });
+      } catch {
+        fail(t("connectionFailed") || "Connection failed — is the gateway running?");
+        return;
+      }
+      if (response.ok) location.replace("/");
+      else if (response.status < 500)
+        fail(t("ticketRejected") || "This login link has expired or was already used \u2014 sign in with the cluster password");
+      else fail((t("signInFailed") || "Sign-in failed (") + response.status + ")");
+    }
+
+    var ticketParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    if (ticketParams.has("ticket")) {
+      var ticket = ticketParams.get("ticket");
+      ticketParams.delete("ticket");
+      var restOfFragment = ticketParams.toString();
+      history.replaceState(
+        null, "",
+        window.location.pathname + window.location.search + (restOfFragment ? "#" + restOfFragment : "")
+      );
+      if (ticket) redeemTicket(ticket);
+    }
   </script>
 </body>
 </html>
