@@ -225,7 +225,7 @@ def test_codeact_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect
 def test_codeact_section_urges_batching(monkeypatch: pytest.MonkeyPatch):
     """When it renders, the section pushes the batching behavior by name:
     known operations together, branches folded into one script, and the
-    intermediate review, approval and evidence boundaries that require a split."""
+    absence of an intermediate result to inspect as the condition for batching."""
     monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", True)
 
     from agent.graph.prompt._codeact import _codeact_section
@@ -236,8 +236,7 @@ def test_codeact_section_urges_batching(monkeypatch: pytest.MonkeyPatch):
     assert "Read independent files together" in rendered
     assert "inspect an intermediate result" in rendered
     assert "if-else" in rendered
-    assert "need approval" in rendered
-    assert "partial effects" in rendered
+    assert "Split calls" not in rendered
 
 
 def test_codeact_section_in_full_prompt_when_on(monkeypatch: pytest.MonkeyPatch):
