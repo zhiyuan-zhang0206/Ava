@@ -1,4 +1,3 @@
 # Only the provisioning scripts the Dockerfile copies enter the build context.
 *
 !scripts/provision
-!scripts/install-cli-tools.sh
