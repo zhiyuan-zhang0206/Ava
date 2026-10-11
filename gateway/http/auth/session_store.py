@@ -39,6 +39,30 @@ def session_mint(session_id: str) -> str | None:
     return mint if dot and mint and rest else None
 
 
+# A login ticket is a short-lived `web_sessions` row whose id is
+# `ticket.<mint>.<random>`: the leading `ticket` is never an admitted mint
+# (admitted mints are `human-<mac>` / `runner-<mac>`), so a ticket presented as
+# a session cookie authenticates nothing and never appears in the session list.
+# Redeeming revokes the row (single use) and mints a regular session with the
+# issuer's mint.
+LOGIN_TICKET_TTL_SECONDS = 120
+_TICKET_PREFIX = "ticket"
+
+
+def minted_ticket_id(mint: str) -> str:
+    """A new opaque login ticket bound to `mint` (256 random bits after it)."""
+    return f"{_TICKET_PREFIX}.{mint}.{new_session_id()}"
+
+
+def ticket_mint(ticket: str) -> str | None:
+    """The mint a login ticket carries, or None for a string that is not a ticket."""
+    prefix, _, rest = ticket.partition(".")
+    if prefix != _TICKET_PREFIX:
+        return None
+    mint, dot, random = rest.partition(".")
+    return mint if dot and mint and random else None
+
+
 class SessionStore:
     """The `web_sessions` rows behind one pool, with a short positive-result cache.
 

@@ -91,6 +91,13 @@ after a successful start. What start treats as already-up, what it waits for,
 and when an unready service becomes exit code 4:
 [[start-readiness.ava.okf.md]].
 
+After a ready gateway, start prints the gateway hint and, through
+`cli/commands/lifecycle/login_link.py:print_login_link`, a one-time UI login link
+(`<ui>/#ticket=<ticket>`). The ticket is minted with the home's human secret and
+only when output is a terminal and a UI service was launched; a failed mint is
+reported on stderr and never fails the start. Gateway side:
+[[gateway/http/auth/docs/web-sessions.ava.okf.md]].
+
 ## Key Dependencies
 
 - [[cli/commands/docs/commands.ava.okf.md]] — the command-package overview

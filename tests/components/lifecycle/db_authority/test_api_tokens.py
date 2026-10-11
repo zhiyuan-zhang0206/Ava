@@ -178,6 +178,24 @@ def test_login_admits_the_active_runner_token_for_the_managed_browser(gateway: P
         assert _login(client, tokens.runner) == 401
 
 
+def test_only_the_human_secret_issues_a_login_ticket(gateway: Path) -> None:
+    """A write generation's tokens, and a managed-browser session one of them
+    minted, cannot issue a browser login ticket: the ticket would open a session
+    the generation's revocation could not be sure to end."""
+    tokens = _tokens(gateway).api
+    ticket_path = "/api/auth/login-ticket"
+    with gateway_test_client(config_app()) as client:
+        for machine in (tokens.runner, tokens.gateway):
+            assert client.post(ticket_path, headers=bearer_header(machine)).status_code == 403
+        runner_cookie = client.post("/api/auth/login", json={"password": tokens.runner}).cookies[
+            cookie_name()
+        ]
+        client.cookies.clear()
+        cookie_headers = {"Cookie": f"{cookie_name()}={runner_cookie}"}
+        assert client.post(ticket_path, headers=cookie_headers).status_code == 403
+        assert client.post(ticket_path, headers=bearer_header(_HUMAN)).status_code == 200
+
+
 def _cookie_authenticates(client: TestClient, cookie: str) -> tuple[int, bool]:
     """(`GET /api/agents` status, `/api/auth/check` verdict) presenting only `cookie`."""
     client.cookies.clear()
