@@ -119,7 +119,7 @@ def test_outside_an_exec_turn_a_read_succeeds_and_notes_nothing(fake_skills_dir:
     _skills(fake_skills_dir)
     ava.unbind_exec_turn()
 
-    assert "# A" in ava.skills.alpha.__doc__
+    assert "# A" in (ava.skills.alpha.__doc__ or "")
 
 
 def test_agent_code_that_replaced_the_update_does_not_break_the_read(
@@ -130,7 +130,7 @@ def test_agent_code_that_replaced_the_update_does_not_break_the_read(
     _skills(fake_skills_dir)
     ava.state_update = "not a dict"  # pyright: ignore[reportAttributeAccessIssue]
 
-    assert "# A" in ava.skills.alpha.__doc__
+    assert "# A" in (ava.skills.alpha.__doc__ or "")
 
 
 def test_the_audit_is_still_written_when_the_read_is_noted(
