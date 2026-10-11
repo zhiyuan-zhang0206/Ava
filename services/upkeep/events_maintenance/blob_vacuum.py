@@ -206,8 +206,7 @@ def run_blob_vacuum(db: Database, *, timezone: str, force: bool = False) -> Vacu
     `force`), then dial a direct autocommit connection and vacuum.
 
     A fresh cluster before the PostgresSaver has created its tables reads as a
-    no-op (logged, not raised) — same defensive posture as the checkpoint
-    reaper's `_thread_counts`: a missing table here must not crash the
+    no-op (logged, not raised): a missing table here must not crash the
     maintenance daemon (its ProgrammingError handler exits the daemon), which
     would turn the daily window into a crash loop on greenfield clusters.
     """

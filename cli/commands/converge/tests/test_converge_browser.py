@@ -1,4 +1,4 @@
-"""Converge browser step: sheds the legacy plugin file; preflight when enabled."""
+"""Converge browser step: preflight when enabled."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -33,53 +33,7 @@ def _ctx(
     )
 
 
-def _plugin_path(home: Path) -> Path:
-    return home / "plugins" / "ava_chrome" / ".mcp.json"
-
-
-def test_always_sheds_legacy_plugin_file(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    """The legacy converge-written file is removed (chrome is now built-in)."""
-    ctx = _ctx(
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
-    )
-    ctx.config.set_field("browser_enabled", False)
-    legacy = _plugin_path(tmp_path)
-    legacy.parent.mkdir(parents=True)
-    legacy.write_text("{}")
-    cv._ensure_browser(ctx)
-    assert not legacy.exists()
-
-
-def test_disabled_noop_when_already_absent(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    ctx = _ctx(
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
-    )
-    ctx.config.set_field("browser_enabled", False)
-    cv._ensure_browser(ctx)  # no raise, nothing to remove
-    assert not _plugin_path(tmp_path).exists()
-
-
-def test_enabled_runs_preflight_writes_nothing(
+def test_enabled_runs_preflight(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -99,7 +53,6 @@ def test_enabled_runs_preflight_writes_nothing(
     monkeypatch.setattr(cv, "browser_incapability", lambda: None)
     monkeypatch.setattr(bp, "ensure_browser_profile", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     cv._ensure_browser(ctx)
-    assert not _plugin_path(tmp_path).exists()
 
 
 def test_capable_offers_profile_seed_with_tty_flag(
@@ -183,8 +136,6 @@ def test_enabled_but_incapable_warns_not_raises(
     stderr = capsys.readouterr().err
     assert "not applicable" in stderr
     assert "Install Node.js" not in stderr
-    # Legacy plugin file is still shed.
-    assert not _plugin_path(tmp_path).exists()
 
 
 def test_enabled_with_missing_npx_prints_the_repair_box(
@@ -282,7 +233,7 @@ def test_context_read_failure_keeps_the_original_error(
 
 
 def test_step_registered_agent_runner_only() -> None:
-    step = next(s for s in cv.CONVERGE_STEPS if s.name == "browser capability + plugin")
+    step = next(s for s in cv.CONVERGE_STEPS if s.name == "browser capability")
     assert step.roles == frozenset({"agent-runner"})
     assert step.requires_unit_config is True
 

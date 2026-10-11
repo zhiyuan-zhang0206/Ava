@@ -4,8 +4,8 @@
 # namespace and its own release.
 #
 # A manual dispatch may omit signing secrets and produces unsigned validation
-# artifacts. A release tag fails closed unless updater, platform signing, and
-# (on macOS) notarization credentials are all present: unsigned binaries must
+# artifacts. A release tag fails closed unless updater signing and Apple
+# signing and notarization credentials are all present: unsigned binaries must
 # never become public release assets.
 #
 # The gating secrets are lifted into job-level `env` because a step's `if` is
@@ -15,7 +15,6 @@
 #   TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]  updater signatures + latest.json
 #   APPLE_CERTIFICATE[_PASSWORD], APPLE_SIGNING_IDENTITY,
 #     APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID    Developer ID + notarization
-#   WINDOWS_CERTIFICATE[_PASSWORD]               Authenticode
 # #
 # `uses:` is pinned to a commit SHA with the version in a trailing comment, for
 # the same supply-chain reason as ci.yml.
@@ -90,11 +89,6 @@ jobs:
             target: universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             bundles: app,dmg
-          - label: Windows (NSIS)
-            runner: windows-2022
-            target: x86_64-pc-windows-msvc
-            rust-targets: x86_64-pc-windows-msvc
-            bundles: nsis
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -102,8 +96,6 @@ jobs:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
       EVENT_NAME: ${{ github.event_name }}
       APP_VERSION: ${{ needs.prepare.outputs.version }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -141,14 +133,9 @@ jobs:
               exit 1
             fi
           }
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            require_group "Apple code-signing" \
-              "$APPLE_CERTIFICATE" "$APPLE_CERTIFICATE_PASSWORD" "$APPLE_SIGNING_IDENTITY"
-            require_group "Apple notarization" "$APPLE_ID" "$APPLE_PASSWORD" "$APPLE_TEAM_ID"
-          else
-            require_group "Windows code-signing" \
-              "$WINDOWS_CERTIFICATE" "$WINDOWS_CERTIFICATE_PASSWORD"
-          fi
+          require_group "Apple code-signing" \
+            "$APPLE_CERTIFICATE" "$APPLE_CERTIFICATE_PASSWORD" "$APPLE_SIGNING_IDENTITY"
+          require_group "Apple notarization" "$APPLE_ID" "$APPLE_PASSWORD" "$APPLE_TEAM_ID"
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ] && [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             echo "Updater signing password is configured without a private key" >&2
             exit 1
@@ -158,16 +145,10 @@ jobs:
               echo "Release tags require updater signing" >&2
               exit 1
             fi
-            if [ "$RUNNER_OS" = "macOS" ] && \
-               { [ -z "$APPLE_CERTIFICATE" ] || [ -z "$APPLE_CERTIFICATE_PASSWORD" ] || \
-                 [ -z "$APPLE_SIGNING_IDENTITY" ] || [ -z "$APPLE_ID" ] || \
-                 [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; }; then
+            if [ -z "$APPLE_CERTIFICATE" ] || [ -z "$APPLE_CERTIFICATE_PASSWORD" ] || \
+               [ -z "$APPLE_SIGNING_IDENTITY" ] || [ -z "$APPLE_ID" ] || \
+               [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
               echo "Release tags require Apple signing and notarization" >&2
-              exit 1
-            fi
-            if [ "$RUNNER_OS" = "Windows" ] && \
-               { [ -z "$WINDOWS_CERTIFICATE" ] || [ -z "$WINDOWS_CERTIFICATE_PASSWORD" ]; }; then
-              echo "Release tags require Windows code-signing" >&2
               exit 1
             fi
           fi
@@ -175,7 +156,7 @@ jobs:
       # Without the certificate the app is built ad-hoc signed, which still
       # runs locally (Gatekeeper prompts on first open).
       - name: Import the Apple Developer ID certificate
-        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
+        if: env.APPLE_CERTIFICATE != ''
         run: |
           KEYCHAIN="$RUNNER_TEMP/build.keychain"
           security create-keychain -p "" "$KEYCHAIN"
@@ -188,19 +169,6 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN"
           rm "$RUNNER_TEMP/certificate.p12"
 
-      # Tauri signs Windows bundles by thumbprint from the machine's cert store,
-      # so the PFX is imported and the thumbprint handed to the build below.
-      - name: Import the Windows signing certificate
-        if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE != ''
-        shell: pwsh
-        run: |
-          $pfx = Join-Path $env:RUNNER_TEMP "certificate.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          "WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Remove-Item $pfx
-
       - name: Build
         working-directory: ui/app
         shell: bash
@@ -211,9 +179,6 @@ jobs:
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             EXTRA+=(--no-sign)
           fi
-          if [ -n "${WINDOWS_CERTIFICATE_THUMBPRINT:-}" ]; then
-            EXTRA+=(--config "{\"bundle\":{\"windows\":{\"certificateThumbprint\":\"$WINDOWS_CERTIFICATE_THUMBPRINT\",\"timestampUrl\":\"http://timestamp.digicert.com\"}}}")
-          fi
           cargo tauri build --target "${{ matrix.target }}" \
             --bundles "${{ matrix.bundles }}" "${EXTRA[@]}"
 
@@ -222,8 +187,8 @@ jobs:
         run: |
           mkdir -p dist
           find ui/app/src-tauri/target -path '*/release/bundle/*' \
-            \( -name '*.dmg' -o -name '*-setup.exe' -o -name '*.app.tar.gz' \
-               -o -name '*.nsis.zip' -o -name '*.sig' \) -exec cp {} dist/ \;
+            \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.sig' \) \
+            -exec cp {} dist/ \;
           ls -l dist
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

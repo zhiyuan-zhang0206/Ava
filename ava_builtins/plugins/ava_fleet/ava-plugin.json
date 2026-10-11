@@ -1,0 +1,30 @@
+{
+  "apiVersion": 2,
+  "name": "ava_fleet",
+  "version": "1.0.0",
+  "engines": {
+    "ava": ">=2026.10.1"
+  },
+  "contributions": {
+    "sdkNamespaces": [
+      "tasks"
+    ],
+    "sdkWraps": [
+      "agents.spawn"
+    ],
+    "systemPromptSections": [
+      "_fleet_self_section",
+      "_reduce_context_switch_section"
+    ],
+    "metrics": [
+      "ava_fleet_task_done_rate",
+      "ava_fleet_agent_task_done_rate"
+    ],
+    "inspectWidgets": [
+      "today-tasks"
+    ],
+    "config": {
+      "schema": "default_config.py"
+    }
+  }
+}

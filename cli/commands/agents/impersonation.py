@@ -259,11 +259,11 @@ def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int
 def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     """`impersonate request` — create the lease, then hand its relay the credential."""
     from base.agents.impersonation import sessions
+    from base.agents.impersonation.host_transport import require_control_endpoint
     from base.config import Settings, settings
     from base.config.service_read import ConfigAuthority
     from base.native_process.ownership import process_metadata
     from base.paths import ava_home
-    from cli.commands.agents.codex_app_server import require_control_endpoint
 
     _reject_used_resident_relay()
     dsh_stub = _dsh_relay_stub() if args.relay_provider == "dsh" else None

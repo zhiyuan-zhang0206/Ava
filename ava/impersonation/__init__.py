@@ -1,4 +1,4 @@
-"""External takeover consent handshake (legacy import surface)."""
+"""External takeover consent handshake."""
 
 # Package door. This `__init__` is the consent handshake an agent calls
 # (`ava.impersonation.accept` / `reject`); its docstring stays the one-liner the
@@ -15,8 +15,8 @@ from ava.sdk_surface.validation import coerce_str
 from base.agents.lifecycle import AgentImpersonation
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
-# Existing in-flight consent requests may still call accept/reject by name.
-# New sessions prepare automatically, so these are absent from normal discovery.
+# The consent request message names accept/reject directly, so they are absent
+# from normal discovery.
 # The reply path (say) is CLI-only (task #3658) — nothing here is discovered.
 __all_for_ava__ = []
 

@@ -200,17 +200,6 @@ class ContextTokenStore:
             logger.warning("weixin: failed to persist context tokens: {}", exc)
 
 
-def _legacy_sync_cursor() -> str | None:
-    """Unbound legacy continuation evidence is held until explicitly account-bound."""
-    path = _state_dir() / "weixin_sync.json"
-    if not path.exists():
-        return None
-    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or not isinstance(data.get("get_updates_buf"), str):
-        raise TypeError("legacy Weixin cursor requires operator inspection before binding")
-    return data["get_updates_buf"]
-
-
 def _random_wechat_uin() -> str:
     """A random per-request X-WECHAT-UIN value (base64 of a uint32)."""
     value = struct.unpack(">I", secrets.token_bytes(4))[0]
@@ -518,15 +507,10 @@ class WeixinAdapter(IMAdapter):
                 self._ingress = WeixinIngress(
                     self.core, WeixinIngressStore(self.core.notice_bridge.db_pool), self
                 )
-                self._binding = await self._ingress.initialize(
-                    namespace, self._account_id, _legacy_sync_cursor()
-                )
-            previous_state = self._binding.state
+                self._binding = await self._ingress.initialize(namespace, self._account_id)
             self._binding = await asyncio.to_thread(
                 self._ingress.store.refresh_binding, self._binding
             )
-            if previous_state == IngressBindingState.HELD:
-                await asyncio.to_thread(self._ingress.store.recover_claims, self._binding)
             return self._ingress, self._binding
 
     async def _poll_once(self, sync_buf: str, timeout_ms: int) -> tuple[str, int]:
@@ -540,7 +524,7 @@ class WeixinAdapter(IMAdapter):
         if binding.state == IngressBindingState.ACTIVE:
             await ingress.recover_retained(binding)
             await ingress.recover_subscriptions(binding)
-        # SQL owns the opaque cursor; a local or legacy JSON value cannot move it.
+        # SQL owns the opaque cursor; a local value cannot move it.
         if sync_buf and sync_buf != binding.cursor:
             raise StalePollBindingError("local Weixin cursor differs from durable binding")
         sync_buf = binding.cursor

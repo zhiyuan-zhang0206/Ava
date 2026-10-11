@@ -27,8 +27,8 @@ remain ineligible; receipt replay does not reset their resource state.
 The browser captures the observation promise and key before its compaction
 mutation can retry. Its stop action observes native work before submitting
 cancel. CLI cancel and compact validate both the observation and acceptance
-against the requested agent, and print only acceptance. There is no fallback to
-retired ingress or implicit resurrection for manual compaction.
+against the requested agent, and print only acceptance. There is no implicit
+resurrection for manual compaction.
 
 Canonical owners describe native admission, checkpoint recovery and settlement:
 [[base/agents/incarnation/docs/native-work-cancel.ava.okf.md]] and

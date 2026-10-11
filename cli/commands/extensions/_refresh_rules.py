@@ -151,7 +151,7 @@ def staged_gate_error(staged: Path, repo: Path) -> str | None:
     if critical:
         return f"refused_scan: {', '.join(scan.rule_ids(critical))}"
     try:
-        manifest = manifest_module.load_manifest(staged)
+        manifest = manifest_module.load_optional_manifest(staged)
     except manifest_module.ManifestError as exc:
         return f"error: manifest invalid: {exc}"
     if manifest is None:

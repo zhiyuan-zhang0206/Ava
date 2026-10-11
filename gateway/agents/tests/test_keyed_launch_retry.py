@@ -3,7 +3,7 @@
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import httpx2 as httpx
 import psycopg
@@ -356,21 +356,6 @@ def test_unverified_principal_guard_when_auth_disabled(
     agent_id, prior = birth(client)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
     assert submit(client, agent_id, prior).status_code == 400
-    assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone() == (0,)
-
-
-def test_old_http_router_has_no_guarded_retry_endpoint(db_conn: psycopg.Connection[Any]) -> None:
-    from fastapi import FastAPI
-
-    old = FastAPI()
-    old.include_router(birth_router.router)
-    with TestClient(old) as older:
-        response = older.post(
-            "/api/keyed/v1/agents/42/retry-launch",
-            json={"expected_prior_attempt_id": str(uuid4())},
-            headers={"Idempotency-Key": "op", "Idempotency-Scope": "principal-v1"},
-        )
-    assert response.status_code == 404
     assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone() == (0,)
 
 

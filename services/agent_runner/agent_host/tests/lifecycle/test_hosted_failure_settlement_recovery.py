@@ -28,7 +28,7 @@ from agent.turn.runloop import PendingTurnFailure, settle_turn_failure
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
-from base.db import Database
+from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -65,8 +65,6 @@ async def _admitted_descendant(
 ) -> tuple[int, int, RuntimeIncarnation]:
     ancestor = agent_row(conn)
     await _admit(pool, ancestor, database_gate=database_gate)
-    from base.db import create_agent
-
     agent = create_agent(conn)
     conn.execute(
         "INSERT INTO agents_meta(id,status,machine,spawner,born_spawner) "

@@ -8,14 +8,29 @@ an agent running on this remote host can read it off its own disk.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
+from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.config import settings
 from ops.rpc_schemas import UploadReceivePayload
 from ops.uploads import upload_receive_op
 from tests.fixtures.unit.identity import machine_identity as machine_identity
+
+
+@pytest.fixture
+def pool(db_conn: object) -> Iterator[ConnectionPool]:
+    with ConnectionPool(
+        settings.data_plane.db_url,
+        min_size=1,
+        max_size=1,
+        kwargs={"prepare_threshold": None},
+    ) as value:
+        yield cast(ConnectionPool, value)
 
 
 def _stub_gateway(monkeypatch: pytest.MonkeyPatch, raw: bytes) -> dict[str, list[str]]:
@@ -44,7 +59,12 @@ def _stub_gateway(monkeypatch: pytest.MonkeyPatch, raw: bytes) -> dict[str, list
 
 class TestUploadReceiveOp:
     def test_pulls_upload_into_local_uploads_dir(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        pool: ConnectionPool,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Happy path: fetches the file from the gateway and writes it into
         ~/Downloads/AvaAgent-<id>/ on this runner; returns the local path."""
@@ -57,6 +77,7 @@ class TestUploadReceiveOp:
 
         result = upload_receive_op(
             UploadReceivePayload(agent_id=7, name="report.pdf"),
+            pool=pool,
             local_machine=machine_identity.name(),
         )
 
@@ -68,14 +89,21 @@ class TestUploadReceiveOp:
         assert result.path == str(dest)
 
     def test_sanitizes_filename(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        pool: ConnectionPool,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A name with separators is sanitized before it hits the disk."""
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         _stub_gateway(monkeypatch, b"data")
 
         result = upload_receive_op(
-            UploadReceivePayload(agent_id=7, name="a/b.txt"), local_machine=machine_identity.name()
+            UploadReceivePayload(agent_id=7, name="a/b.txt"),
+            pool=pool,
+            local_machine=machine_identity.name(),
         )
 
         dest = tmp_path / "Downloads" / "AvaAgent-7" / "a_b.txt"
@@ -83,7 +111,12 @@ class TestUploadReceiveOp:
         assert result.path == str(dest)
 
     def test_gateway_unreachable_raises_oserror(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        pool: ConnectionPool,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A failed fetch raises OSError — the daemon surfaces it as a 'failed'
         op result and the gateway degrades to the URL-only message."""
@@ -101,11 +134,17 @@ class TestUploadReceiveOp:
         with pytest.raises(OSError):
             upload_receive_op(
                 UploadReceivePayload(agent_id=7, name="report.pdf"),
+                pool=pool,
                 local_machine=machine_identity.name(),
             )
 
     def test_gateway_404_raises_oserror(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        pool: ConnectionPool,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A 404 (file gone on the gateway) raises OSError, not a silent
         partial write."""
@@ -133,6 +172,7 @@ class TestUploadReceiveOp:
         with pytest.raises(OSError):
             upload_receive_op(
                 UploadReceivePayload(agent_id=7, name="report.pdf"),
+                pool=pool,
                 local_machine=machine_identity.name(),
             )
         # Nothing was written.

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Build Tauri's static ``latest.json`` from app release artifacts.
 
-The desktop updater consumes signed ``.app.tar.gz`` and ``.nsis.zip``
-archives, not the user-facing DMG/EXE installers. A release built without the
-optional updater key still gets a valid manifest with no platform entries: the
-release pipeline remains testable, while clients correctly find no installable
-update rather than being handed an unverifiable archive.
+The desktop updater consumes signed ``.app.tar.gz`` archives, not the
+user-facing DMG installer. A release built without the optional updater key
+still gets a valid manifest with no platform entries: the release pipeline
+remains testable, while clients correctly find no installable update rather
+than being handed an unverifiable archive.
 """
 
 from __future__ import annotations
@@ -61,16 +61,6 @@ def build_manifest(*, tag: str, artifacts: Path, repo: str) -> dict[str, Any]:
         # the running slice, so both target keys point at the same asset.
         platforms["darwin-aarch64"] = entry
         platforms["darwin-x86_64"] = entry
-
-    windows = _signed_archive(artifacts, "*.nsis.zip", "Windows")
-    if windows is not None:
-        archive, signature = windows
-        entry = _platform_entry(repo, tag, archive, signature)
-        # Updater 2 prefers the installer-qualified key and falls back to the
-        # unqualified target. Publishing both keeps the feed compatible with
-        # clients from either side of that change.
-        platforms["windows-x86_64-nsis"] = entry
-        platforms["windows-x86_64"] = entry
 
     return {"version": match.group("version"), "platforms": platforms}
 

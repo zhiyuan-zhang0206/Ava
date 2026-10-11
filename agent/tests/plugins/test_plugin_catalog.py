@@ -10,6 +10,7 @@ disagree, or whose state declaration is invalid, is left out and reported) is co
 bottom, on the same harness.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
 from base.packages.plugins.gate import ContributionMismatch
+from base.packages.plugins.manifest import ManifestError
 
 
 @pytest.fixture(autouse=True)
@@ -82,16 +84,34 @@ def contribute() -> PluginContributions:
 """
 
 
+def _demo_manifest(name: str, *, runtime: bool) -> str:
+    """The manifest `_DEMO_PLUGIN` (and `_DEMO_RUNTIME` when `runtime`) agree with."""
+    contributions: dict[str, list[str]] = {"sdkWraps": ["files.read"]}
+    if runtime:
+        contributions |= {"hooks": ["before_llm"], "systemPromptSections": ["demo_section"]}
+    return json.dumps(
+        {
+            "apiVersion": 2,
+            "name": name,
+            "version": "1.0.0",
+            "engines": {"ava": ">=0.1.0"},
+            "contributions": contributions,
+        }
+    )
+
+
 def _write_plugin(
     name: str, body: str, *, manifest: str | None = None, runtime: str | None = None
 ) -> Path:
+    """A plugin on disk; its manifest defaults to the one `_DEMO_PLUGIN` agrees with."""
     plugin_dir = paths.repo_plugins_dir() / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body)
     if runtime is not None:
         (plugin_dir / "agent_runtime.py").write_text(runtime)
-    if manifest is not None:
-        (plugin_dir / "ava-plugin.json").write_text(manifest)
+    (plugin_dir / "ava-plugin.json").write_text(
+        manifest if manifest is not None else _demo_manifest(name, runtime=runtime is not None)
+    )
     return plugin_dir
 
 
@@ -250,16 +270,15 @@ def test_declared_vs_registered_reports_both_directions():
     assert statuses[("sdkWraps", "files.write")] == "registered-not-declared"
 
 
-def test_a_plugin_without_a_manifest_has_no_diff():
-    """No manifest means nothing was declared — which is not the same as
-    agreement, so the diff is empty rather than all-ok."""
-    _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
+def test_a_plugin_without_a_manifest_fails_the_catalog():
+    """`ava plugins inspect` cannot describe a plugin that declares nothing to diff against: the
+    missing manifest raises rather than reading as an empty diff."""
+    plugin_dir = _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
+    (plugin_dir / "ava-plugin.json").unlink()
     _enable(demo=True)
 
-    view = catalog_mod.build_catalog().plugin("demo")
-
-    assert view.manifest is None
-    assert catalog_mod.declared_vs_registered(view) == ()
+    with pytest.raises(ManifestError, match=r"demo.*ava-plugin\.json not found"):
+        catalog_mod.build_catalog()
 
 
 def test_install_time_manifest_keys_have_no_runtime_registry():
@@ -331,8 +350,6 @@ def _gate_runtime(
 def _gate_manifest(
     name: str, *, hooks: tuple[str, ...] = (), sections: tuple[str, ...] = ()
 ) -> str:
-    import json
-
     return json.dumps(
         {
             "apiVersion": 2,
@@ -469,30 +486,44 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_sections_is_excluded
     assert problem in str(exc)
 
 
-def test_a_plugin_without_a_manifest_is_never_gated(load_failures: list[tuple[str, BaseException]]):
-    """No `ava-plugin.json` means nothing declared, so nothing to disagree with: whatever
-    `contribute()` provides is admitted."""
-    _write_plugin(
-        "gate_bare",
-        _GATE_PLUGIN,
-        runtime=_gate_runtime(("before_llm", "after_exec")),
+def test_a_plugin_without_a_manifest_is_excluded(load_failures: list[tuple[str, BaseException]]):
+    """A plugin with no `ava-plugin.json` is a load failure of that plugin, whatever its
+    `contribute()` provides; the other plugins load."""
+    bare = _write_plugin(
+        "gate_bare", _GATE_PLUGIN, runtime=_gate_runtime(("before_llm", "after_exec"))
     )
-    _enable(gate_bare=True)
+    (bare / "ava-plugin.json").unlink()
+    _write_plugin(
+        "gate_ok",
+        _GATE_PLUGIN,
+        manifest=_gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",)),
+        runtime=_gate_runtime(("before_llm",)),
+    )
+    _enable(gate_bare=True, gate_ok=True)
 
-    assert _registered() == {"gate_bare": ("before_llm", "after_exec")}
-    assert load_failures == []
+    assert _registered() == {"gate_ok": ("before_llm",)}
+    [(name, exc)] = load_failures
+    assert name == "gate_bare"
+    assert isinstance(exc, ManifestError)
+    assert "ava-plugin.json not found" in str(exc)
 
 
 def test_an_invalid_state_declaration_excludes_the_plugin(
     load_failures: list[tuple[str, BaseException]],
 ):
     """A core channel (`halted`) is framework-managed every turn: a plugin declaring it is a load
-    failure of that plugin, whether or not it ships a manifest, and its other declarations go too."""
+    failure of that plugin, and its other declarations go too."""
     core_state = "class GateState(BaseModel):\n    halted: bool = False\n"
+    ok_manifest = _gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",))
     _write_plugin(
-        "gate_state", _GATE_PLUGIN, runtime=_gate_runtime(("before_llm",), state=core_state)
+        "gate_state",
+        _GATE_PLUGIN,
+        manifest=ok_manifest,
+        runtime=_gate_runtime(("before_llm",), state=core_state),
     )
-    _write_plugin("gate_ok", _GATE_PLUGIN, runtime=_gate_runtime(("before_llm",)))
+    _write_plugin(
+        "gate_ok", _GATE_PLUGIN, manifest=ok_manifest, runtime=_gate_runtime(("before_llm",))
+    )
     _enable(gate_state=True, gate_ok=True)
 
     assert _registered() == {"gate_ok": ("before_llm",)}
@@ -504,7 +535,12 @@ def test_an_invalid_state_declaration_excludes_the_plugin(
 
 def test_a_valid_state_declaration_is_admitted(load_failures: list[tuple[str, BaseException]]):
     state = "class GateState(BaseModel):\n    counter: int = 0\n"
-    _write_plugin("gate_state", _GATE_PLUGIN, runtime=_gate_runtime(state=state))
+    _write_plugin(
+        "gate_state",
+        _GATE_PLUGIN,
+        manifest=_gate_manifest("gate_state", sections=("gate_section",)),
+        runtime=_gate_runtime(state=state),
+    )
     _enable(gate_state=True)
 
     registry = load_extensions().registry

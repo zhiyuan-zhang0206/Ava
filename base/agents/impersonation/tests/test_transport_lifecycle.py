@@ -35,7 +35,7 @@ def active(
     owner = RuntimeIncarnation(aid, uuid4(), uuid4())
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
-        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',clock_timestamp()+interval '1 hour')",
+        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'hosted',clock_timestamp()+interval '1 hour')",
         (aid, local_machine, owner.generation, owner.owner),
     )
     db_conn.commit()

@@ -34,8 +34,7 @@ def test_atomic_chat_receipt_replay_survives_deletion_and_selection_change(
     first, later = create_agent(db_conn), create_agent(db_conn)
     with database.pool(min_size=1, max_size=2) as pool:
         store = WeixinIngressStore(pool)
-        binding = store.initialize("https://provider.example", "account", None)
-        binding = store.begin_cutover(binding, expected_cursor="")
+        binding = store.initialize("https://provider.example", "account")
         binding = store.checkpoint(binding, "", "", provider_empty=True)
         accepted = store.retain(
             binding,
@@ -79,8 +78,7 @@ def test_fresh_concurrent_sources_commit_only_one_inbound(
     barrier = Barrier(2)
     with database.pool(min_size=2, max_size=2) as pool:
         store = WeixinIngressStore(pool)
-        binding = store.initialize("https://provider.example", "account", None)
-        binding = store.begin_cutover(binding, expected_cursor="")
+        binding = store.initialize("https://provider.example", "account")
         binding = store.checkpoint(binding, "", "", provider_empty=True)
 
         def accept(_index: int) -> int:
@@ -107,8 +105,7 @@ def test_command_crash_is_retained_uncertain_and_cursor_can_continue(
 ) -> None:
     with database.pool(min_size=1, max_size=2) as pool:
         store = WeixinIngressStore(pool)
-        binding = store.initialize("https://provider.example", "account", None)
-        binding = store.begin_cutover(binding, expected_cursor="")
+        binding = store.initialize("https://provider.example", "account")
         binding = store.checkpoint(binding, "", "", provider_empty=True)
         retained = store.retain(
             binding,
@@ -122,7 +119,7 @@ def test_command_crash_is_retained_uncertain_and_cursor_can_continue(
             store.checkpoint(binding, "", "opaque-next")
         claimed = store.claim(binding, retained.id)
         assert claimed is not None and claimed.attempt_id is not None
-        restarted = store.initialize("https://provider.example", "account", None)
+        restarted = store.initialize("https://provider.example", "account")
         store.recover_claims(restarted)
         replay = store.lookup(restarted, source(), {"text": "/spawn"})
         assert replay is not None and replay.status == IngressStatus.UNCERTAIN
@@ -136,19 +133,17 @@ def test_command_crash_is_retained_uncertain_and_cursor_can_continue(
             store.checkpoint(restarted, "", "wrong-cursor")
 
 
-def test_absent_json_is_not_history_proof_and_operator_binding_only_drains(
+def test_fresh_binding_drains_unproven_backlog_until_a_real_empty_commit(
     db_conn: psycopg.Connection,
     database: Database,
 ) -> None:
     agent = create_agent(db_conn)
     with database.pool(min_size=1, max_size=2) as pool:
         store = WeixinIngressStore(pool)
-        held = store.initialize("https://provider.example", "account", None)
-        assert held.held
-        with pytest.raises(RuntimeError, match="operator account binding"):
-            store.lookup(held, source(), {"text": "unknown"})
-        draining = store.begin_cutover(held, expected_cursor="")
-        with pytest.raises(RuntimeError, match="active cutover"):
+        draining = store.initialize("https://provider.example", "account")
+        assert draining.state.value == "draining" and draining.cursor == ""
+        assert store.lookup(draining, source(), {"text": "unknown"}) is None
+        with pytest.raises(RuntimeError, match="active binding"):
             store.retain(
                 draining,
                 source(),
@@ -158,20 +153,14 @@ def test_absent_json_is_not_history_proof_and_operator_binding_only_drains(
                 "new-key",
             )
         for message_id, text in [("1", "spawn:go"), ("2", "/switch 4"), ("3", "ordinary")]:
-            quarantined = store.quarantine_or_adopt(
-                draining,
-                source(message_id),
-                {"text": text},
-                {"message_id": message_id},
-                text,
-                "key" + message_id,
+            quarantined = store.quarantine(
+                draining, source(message_id), {"text": text}, {"message_id": message_id}, text
             )
-            assert quarantined is not None
             assert quarantined.status == IngressStatus.QUARANTINED
             assert quarantined.attempt_id is None and quarantined.inbound_id is None
             assert store.claim(draining, quarantined.id) is None
         later = store.checkpoint(draining, "", "opaque-intermediate")
-        assert not later.held and later.state.value == "draining"
+        assert later.state.value == "draining"
         final = store.checkpoint(later, "opaque-intermediate", "opaque-empty", provider_empty=True)
         assert final.state.value == "active"
         assert db_conn.execute(
@@ -180,25 +169,22 @@ def test_absent_json_is_not_history_proof_and_operator_binding_only_drains(
         assert db_conn.execute(
             "SELECT count(*) FROM weixin_ingress_receipts WHERE status='quarantined'"
         ).fetchone() == (3,)
+        with pytest.raises(StalePollBindingError, match="state changed"):
+            store.quarantine(final, source("4"), {"text": "late"}, {}, "late")
 
 
-def test_legacy_account_binding_preserves_opaque_cursor_and_fences_previous_owner(
+def test_account_replacement_fences_the_previous_owner_and_keeps_its_cursor(
     database: Database,
 ) -> None:
     with database.pool(min_size=1, max_size=2) as pool:
         store = WeixinIngressStore(pool)
-        held = store.initialize("https://provider.example", "account", "opaque-old")
-        assert held.held and held.cursor == "opaque-old"
-        with pytest.raises(ValueError, match="exact held cursor"):
-            store.begin_cutover(held, expected_cursor="")
-        replacement = store.initialize("https://provider.example", "other-account", None)
+        first = store.initialize("https://provider.example", "account")
+        advanced = store.checkpoint(first, "", "opaque-progress")
+        store.initialize("https://provider.example", "other-account")
         with pytest.raises(StalePollBindingError):
-            store.begin_cutover(held, expected_cursor="opaque-old")
-        assert replacement.held
-        resumed = store.initialize("https://provider.example", "account", None)
-        assert resumed.held and resumed.cursor == "opaque-old"
-        draining = store.begin_cutover(resumed, expected_cursor="opaque-old")
-        assert draining.cursor == "opaque-old"
+            store.checkpoint(advanced, "opaque-progress", "opaque-late")
+        resumed = store.initialize("https://provider.example", "account")
+        assert resumed.cursor == "opaque-progress" and resumed.state.value == "draining"
 
 
 def test_post_insert_failure_rolls_back_provider_receipt_chat_and_central_audit(
@@ -211,8 +197,7 @@ def test_post_insert_failure_rolls_back_provider_receipt_chat_and_central_audit(
     agent = create_agent(db_conn)
     with database.pool(min_size=1, max_size=2) as pool:
         store = WeixinIngressStore(pool)
-        binding = store.initialize("https://provider.example", "account", None)
-        binding = store.begin_cutover(binding, expected_cursor="")
+        binding = store.initialize("https://provider.example", "account")
         binding = store.checkpoint(binding, "", "", provider_empty=True)
 
         def fail_after_real_insert(_row: tuple[object, ...]) -> None:
@@ -251,8 +236,9 @@ def test_failed_empty_checkpoint_rolls_back_cursor_and_activation_together(
     original_transaction = store_owner.write_transaction
     with database.pool(min_size=1, max_size=2) as pool:
         store = WeixinIngressStore(pool)
-        held = store.initialize("https://provider.example", "account", "legacy-opaque")
-        draining = store.begin_cutover(held, expected_cursor="legacy-opaque")
+        draining = store.checkpoint(
+            store.initialize("https://provider.example", "account"), "", "opaque-start"
+        )
 
         @contextmanager
         def fail_before_commit(
@@ -268,11 +254,11 @@ def test_failed_empty_checkpoint_rolls_back_cursor_and_activation_together(
 
         monkeypatch.setattr(store_owner, "write_transaction", fail_before_commit)
         with pytest.raises(RuntimeError, match="checkpoint commit interruption"):
-            store.checkpoint(draining, "legacy-opaque", "new-empty-opaque", provider_empty=True)
+            store.checkpoint(draining, "opaque-start", "new-empty-opaque", provider_empty=True)
         monkeypatch.setattr(store_owner, "write_transaction", original_transaction)
         restored = store.refresh_binding(draining)
-        assert restored.cursor == "legacy-opaque" and restored.state.value == "draining"
+        assert restored.cursor == "opaque-start" and restored.state.value == "draining"
         committed = store.checkpoint(
-            restored, "legacy-opaque", "new-empty-opaque", provider_empty=True
+            restored, "opaque-start", "new-empty-opaque", provider_empty=True
         )
         assert committed.cursor == "new-empty-opaque" and committed.state.value == "active"

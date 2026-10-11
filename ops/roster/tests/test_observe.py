@@ -135,7 +135,7 @@ def test_observe_leaves_detail_empty_on_a_healthy_service(
 
 
 def test_reported_kind_agrees_with_the_probe_actually_run() -> None:
-    from ops.spec import build_services
+    from ops.roster import build_services
 
     for spec in build_services():
         kind, _target = observe._probe_kind_target(spec)

@@ -9,7 +9,6 @@ endpoint smoke tests live in tests/components/gateway/test_cluster_endpoints.py.
 
 from __future__ import annotations
 
-import re
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -441,24 +440,6 @@ async def test_guarded_resurrect_path_requires_trigger(
         )
 
 
-@pytest.mark.parametrize(
-    "new_path",
-    [
-        "/api/agents/42/resurrect-explicit-v2",
-        "/api/agents/42/resurrect-if-pending-work-v2",
-    ],
-)
-def test_versioned_resurrect_paths_are_unknown_to_legacy_runner(new_path: str) -> None:
-    """Freeze the pre-v2 runner parser: a new gateway's two versioned paths
-    cannot match its legacy lifecycle regex, so rollout skew fails closed."""
-    legacy_lifecycle_path = re.compile(
-        r"^/api/agents/(?P<id>\d+)/(?P<action>terminate|resurrect|restart)$"
-    )
-
-    assert legacy_lifecycle_path.fullmatch(new_path) is None
-    assert legacy_lifecycle_path.fullmatch("/api/agents/42/resurrect") is not None
-
-
 @pytest.mark.asyncio
 async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
     stub_pool: MagicMock,
@@ -473,34 +454,12 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
         await lifecycle.lifecycle_op(
             database,
             event_bus,
-            "/api/agents/42/resurrect",
+            "/api/agents/42/resurrect-explicit-v2",
             {"resurrected_by": "system"},
             stub_pool,  # type: ignore[arg-type]
             trigger_inbound_id=99,
             trigger_inbound_kind=InboundKind.CHAT,
             catalog=build_model_catalog(),
-            local_machine=machine_identity.name(),
-        )
-
-
-@pytest.mark.asyncio
-async def test_legacy_resurrect_path_fails_closed_without_trigger(
-    stub_pool: MagicMock,
-    database: Database,
-    event_bus: EventBus,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A new runner rejects an old gateway's ambiguous resurrection even when
-    no new trigger field is present; mixed-version rollback cannot revive."""
-    with pytest.raises(ValueError, match="legacy /resurrect is refused"):
-        await lifecycle.lifecycle_op(
-            database,
-            event_bus,
-            "/api/agents/42/resurrect",
-            {"resurrected_by": "user"},
-            stub_pool,
-            catalog=build_model_catalog(),  # type: ignore[arg-type]
             local_machine=machine_identity.name(),
         )
 

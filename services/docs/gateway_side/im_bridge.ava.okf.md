@@ -46,8 +46,8 @@ The IM Bridge daemon runs every configured IM channel adapter (Telegram / WeChat
 ## Weixin inbound identity
 
 Weixin sources commit native receipts and frozen routes before cursor checkpoint.
-Account/history cutover holds, drains unproven backlog, then activates on a
-committed real empty response. Unproven commands remain uncertain.
+A new account binding drains unproven backlog into quarantine, then activates on
+a committed real empty response. Unproven commands remain uncertain.
 See [[weixin-inbound-identity]].
 
 

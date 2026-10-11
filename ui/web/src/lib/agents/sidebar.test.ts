@@ -105,7 +105,6 @@ describe("useStatsDashboard shared polling", () => {
       avg_turn_seconds: null,
       warnings: 0,
       errors: 0,
-      total_events: 0,
       plugin_stats: [],
     });
     const queryClient = new QueryClient({
@@ -176,7 +175,6 @@ describe("useStatsDashboard shared polling", () => {
       avg_turn_seconds: null,
       warnings: 0,
       errors: 0,
-      total_events: 0,
       plugin_stats: [],
     });
     await tick(240_000);

@@ -75,9 +75,8 @@ this check does see: `uv.lock`, `ui/web/package-lock.json`,
 `ui/web/openapi.json`, `ui/web/src/lib/contracts/types-generated.ts`,
 `base/host/env/config_lite_table.json`, `base/events/registry.md`,
 `db/schema.sql`, `scripts/zombie_pyright_ignores.registry`, the generated
-`api.txt` files under `base/agents` and `base/events` (and their
-pre-2026-09-29 `shared/` layout), `scripts/structure/baseline/`, and
-`migrations/`.
+`api.txt` files under `base/agents` and `base/events`,
+`scripts/structure/baseline/`, and `migrations/`.
 
 Exit codes: 0 clean or fully allowed, 1 blocking hits, 2 usage or git failure.
 
@@ -133,12 +132,6 @@ the sweep is the tool for that. Recorded passes and residual classes:
 - Pass 2's largest flag is 3116eb0f "docs: restore the decision records
   that described since-removed mechanisms" (66 hits): a deliberate
   restoration - exactly the case the allowance line is for.
-- 2026-10-04, the check's own introduction: the skip table names the
-  pre-2026-09-29 `shared/` locations; those literals are text the shared ->
-  base move (9ae6105a6) had deleted. Under pass-1 thresholds the check
-  flagged its own PR and a sha-scoped `Resurrects:` line demonstrated the
-  allowance; the pass-2 thresholds drop the two-line match below the minimum
-  unit and the trailer was removed.
 - 2026-10-11, #5165: adding a required ConfigBoot reader removed an obsolete
   unused-argument comment from a retained function header. Other matches were
   a Mock's string target and a standard exception type assertion, deleted from

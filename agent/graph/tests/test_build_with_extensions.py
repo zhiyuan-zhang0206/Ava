@@ -7,6 +7,7 @@ Confirms:
 - A repeat load re-executes the module already in sys.modules (issue #147)
 """
 
+import json
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -53,11 +54,28 @@ def _restore_plugin_modules() -> Iterator[None]:
     sys.modules.update(before)
 
 
+def _write_manifest(plugin_dir: Path, *, sections: tuple[str, ...] = ()) -> None:
+    """The `ava-plugin.json` every plugin ships, declaring the given system prompt sections."""
+    contributions = {"systemPromptSections": list(sections)} if sections else {}
+    (plugin_dir / "ava-plugin.json").write_text(
+        json.dumps(
+            {
+                "apiVersion": 2,
+                "name": plugin_dir.name,
+                "version": "1.0.0",
+                "engines": {"ava": ">=0.1.0"},
+                "contributions": contributions,
+            }
+        )
+    )
+
+
 def _make_plugin(name: str, body: str | None = None) -> None:
     root = paths.repo_plugins_dir()
     plugin_dir = root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body or f"__description__ = '{name}'\n")
+    _write_manifest(plugin_dir)
 
 
 def _make_external_plugin(name: str) -> None:
@@ -65,6 +83,7 @@ def _make_external_plugin(name: str) -> None:
     plugin_dir = root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(f"__description__ = '{name}'\n")
+    _write_manifest(plugin_dir)
 
 
 def test_only_enabled_plugins_are_imported(monkeypatch: pytest.MonkeyPatch):
@@ -248,9 +267,11 @@ def test_duplicate_plugin_name_raises(monkeypatch: pytest.MonkeyPatch):
         discover_plugins()
 
 
-def _make_face(name: str, body: str) -> None:
-    """Give an existing test plugin an `agent_runtime` face."""
-    (paths.repo_plugins_dir() / name / "agent_runtime.py").write_text(body)
+def _make_face(name: str, body: str, *, sections: tuple[str, ...] = ()) -> None:
+    """Give an existing test plugin an `agent_runtime` face; its manifest declares `sections`."""
+    plugin_dir = paths.repo_plugins_dir() / name
+    (plugin_dir / "agent_runtime.py").write_text(body)
+    _write_manifest(plugin_dir, sections=sections)
 
 
 _CONTRIBUTING_FACE = """
@@ -279,7 +300,7 @@ def test_build_registry_holds_what_each_enabled_plugin_declares():
     is simply absent from it."""
     for name in ("beta", "alpha"):
         _make_plugin(name)
-        _make_face(name, _CONTRIBUTING_FACE.format(name=name))
+        _make_face(name, _CONTRIBUTING_FACE.format(name=name), sections=(f"{name}_section",))
     write_local({"plugins": {"alpha": {"enabled": True}, "beta": {"enabled": True}}})
 
     from agent import extensions as _loader
@@ -310,7 +331,7 @@ def test_build_registry_holds_what_each_enabled_plugin_declares():
 def test_a_face_whose_contribute_misbehaves_is_skipped_not_fatal(contribute_body: str):
     """Same fail-soft contract as a plugin that fails to import: report it, keep the others."""
     _make_plugin("good")
-    _make_face("good", _CONTRIBUTING_FACE.format(name="good"))
+    _make_face("good", _CONTRIBUTING_FACE.format(name="good"), sections=("good_section",))
     _make_plugin("bad")
     _make_face("bad", f"def contribute():\n{contribute_body}\n")
     write_local({"plugins": {"good": {"enabled": True}, "bad": {"enabled": True}}})
@@ -332,6 +353,7 @@ def _make_external_plugin_with(name: str, body: str) -> None:
     plugin_dir = paths.plugins_dir() / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body, encoding="utf-8")
+    _write_manifest(plugin_dir)
 
 
 def _capture_plugin_load_events(
@@ -435,6 +457,7 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
         encoding="utf-8",
     )
     (pdir / "_helper.py").write_text("VALUE = 7\n", encoding="utf-8")
+    _write_manifest(pdir)
     write_local({"plugins": {"ava_ledger": {"enabled": True}}})
 
     from agent import extensions as _loader

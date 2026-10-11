@@ -58,7 +58,6 @@ from ops.cluster_status import ClusterStatus, check_pidfile
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 
 router = APIRouter()
-ARCHIVE_TOTAL_ROWS = 4_813_148  # frozen archive rows at the #1823 drop (pg_dump-verified)
 _log = logging.getLogger(__name__)
 _STATUS_CACHE_TTL_S = 15.0
 
@@ -113,8 +112,6 @@ def get_stats_dashboard(
     - warning/error event totals and class counts: the SELECTED window's warning, error and
       critical `telemetry_events` rows grouped by class; a class is dismissed when an active
       `event_dismissals` row cancels it (`gateway.cluster.alert_classes`)
-    - `total_events`: archived event row count — frozen historical constant
-      (task #1281 parity run; PG events dropped; not a live gauge)
 
     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
     hours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is
@@ -144,11 +141,6 @@ def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours)
                 0
             ]
         )
-        # total_events is a historical constant — the frozen pre-cutover
-        # archive's parity row count (task #1281), not a live gauge: the PG
-        # events table was dropped with the #1823 cleanup; the dashboard's
-        # "total events" card shows the archive's size. See ARCHIVE_TOTAL_ROWS.
-        total_events = ARCHIVE_TOTAL_ROWS
     cache_hit_pct = round(totals.cache_read / totals.in_total * 100, 2) if totals.in_total else 0.0
     return StatsDashboard(
         live_count=live_count,
@@ -166,7 +158,6 @@ def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours)
         errors=sum(row.count for row in alert_classes if row.level != "warning"),
         alert_classes_active=sum(row.dismissal_id is None for row in alert_classes),
         alert_classes_dismissed=sum(row.dismissal_id is not None for row in alert_classes),
-        total_events=total_events,
         plugin_stats=_plugin_stat_rows(pool),
         as_of=datetime.now(UTC),
     )

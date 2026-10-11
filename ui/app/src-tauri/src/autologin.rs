@@ -204,13 +204,9 @@ fn env_file() -> Option<PathBuf> {
     Some(home.join(".env"))
 }
 
-/// Home directory without pulling in a crate for it: `$HOME` on unix,
-/// `%USERPROFILE%` on Windows.
+/// Home directory without pulling in a crate for it: `$HOME`.
 #[cfg(desktop)]
 fn dirs_home() -> Option<PathBuf> {
-    #[cfg(windows)]
-    let raw = env::var("USERPROFILE").ok();
-    #[cfg(not(windows))]
     let raw = env::var("HOME").ok();
     raw.filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)

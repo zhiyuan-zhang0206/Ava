@@ -1,4 +1,4 @@
-"""Ava Guide entry — /api/guide/draft.
+"""Ava Guide entry — /api/keyed/v1/guide/draft.
 
 Hands a natural-language operations request to an ava-guide agent: spawns an
 agent that loads the ROOT `ava.skills.ava_guide` skill (the map for operating the
@@ -29,24 +29,13 @@ class GuideDraftResponse(BaseModel):
     agent_id: int
 
 
-@router.post("/api/guide/draft")
-async def draft_guide(body: GuideDraftRequest, request: Request) -> GuideDraftResponse:
-    """Spawn an ava-guide agent for a natural-language ops request and return its
-    id so the UI can open the conversation."""
-    return await _draft_guide(body, request)
-
-
 @router.post("/api/keyed/v1/guide/draft")
 async def guarded_draft_guide(
     body: GuideDraftRequest, request: Request, key: str = Depends(guarded_draft_key)
 ) -> GuideDraftResponse:
-    """Replay one raw draft intent and its original birth without legacy fallback."""
-    return await _draft_guide(body, request, key)
-
-
-async def _draft_guide(
-    body: GuideDraftRequest, request: Request, key: str | None = None
-) -> GuideDraftResponse:
+    """Spawn an ava-guide agent for a natural-language ops request and return its
+    id so the UI can open the conversation. Replays one raw draft intent and its
+    original birth."""
     prompt = (
         "You are an Ava operations assistant. Read and follow ava.skills.ava_guide "
         "to help with this request — operate the cluster via the `ava` CLI (run / "
@@ -59,9 +48,10 @@ async def _draft_guide(
         prompt_source="user",
         label="ava-guide",
     )
-    identity: CreationLaunchArguments = {}
-    if key is not None:
-        identity = {"creation_key": key, "creation_identity": body.model_dump(mode="json")}
+    identity: CreationLaunchArguments = {
+        "creation_key": key,
+        "creation_identity": body.model_dump(mode="json"),
+    }
     spawned = await create_and_launch_agent(
         body_obj,
         request.app.state.machine.name(),

@@ -188,7 +188,7 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
     """Deliver a metadata-only permanent-provider report to the nearest live parent.
 
     The recursive walk follows only the immutable ``agents_meta.born_spawner``
-    ``agent:<id>`` edge, falling back to ``spawner`` for pre-migration rows.
+    ``agent:<id>`` edge.
     It deliberately ignores fleet-view relationships and stops when no
     ancestor has the canonical live status-and-lease predicate.
     The note text is assembled from structured classifier fields; it never
@@ -211,10 +211,10 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
         await cur.execute(
             "WITH RECURSIVE spawner_walk(agent_id, spawner, status, lease_expires_at, path, depth) "
             "AS ("
-            "  SELECT id, COALESCE(born_spawner, spawner), status, lease_expires_at, ARRAY[id], 0 "
+            "  SELECT id, born_spawner, status, lease_expires_at, ARRAY[id], 0 "
             "  FROM agents_meta WHERE id = %s "
             "  UNION ALL "
-            "  SELECT parent.id, COALESCE(parent.born_spawner, parent.spawner), parent.status, parent.lease_expires_at, "
+            "  SELECT parent.id, parent.born_spawner, parent.status, parent.lease_expires_at, "
             "         walk.path || parent.id, walk.depth + 1 "
             "  FROM spawner_walk walk "
             "  JOIN agents_meta parent "
@@ -346,7 +346,7 @@ async def claim_inbound_batch(
             raise CompactHeldError("guarded compact must settle before generic inbound claim")
         await cur.execute("SELECT runtime_kind FROM agents_meta WHERE id=%s", (agent_id,))
         runtime = await cur.fetchone()
-        runtime_owned = runtime in (("process",), ("hosted",))
+        runtime_owned = runtime == ("hosted",)
         if runtime_owned:
             accepted = await _claim_lifecycle_command(conn, cur, agent_id, incarnation=incarnation)
             if accepted is not None:
@@ -429,8 +429,7 @@ async def reconcile_claimed_inbounds(
         successfully before exit;
       - **dead-lettered to `'done'`** if it is older than the stale-claimed
         threshold (`settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds`,
-        age from `claimed_at`, falling back to `created_at` for pre-column
-        rows) — a claim that old is either already answered or hopelessly
+        age from `claimed_at`) — a claim that old is either already answered or hopelessly
         stale, and re-delivering it would surface an ancient message as
         fresh (Task #654: terminated agents pile up claimed rows forever;
         a resurrect with a pruned checkpoint would otherwise reset them all
@@ -465,7 +464,7 @@ async def reconcile_claimed_inbounds(
             await cur.execute(
                 "UPDATE inbound_messages SET status = 'done' "
                 "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s "
-                "  AND COALESCE(claimed_at, created_at) "
+                "  AND claimed_at "
                 "      < now() - make_interval(secs => %s)",
                 (agent_id, stale_cutoff_s),
             )
@@ -493,7 +492,7 @@ async def reconcile_claimed_inbounds(
         await cur.execute(
             "UPDATE inbound_messages SET status = 'done' "
             "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s "
-            "  AND COALESCE(claimed_at, created_at) "
+            "  AND claimed_at "
             "      < now() - make_interval(secs => %s)",
             (agent_id, stale_cutoff_s),
         )

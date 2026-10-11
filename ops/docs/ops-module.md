@@ -50,8 +50,7 @@ Timeout fails without implicit force. The complete operator contract is in
 
 A fleet update is `python -m cli.fleet_update`. What the update path still lacks
 is recorded in the
-[unified lifecycle plan](../../future/infra/lifecycle/unified-cluster-lifecycle.md). Retired
-updater RPCs cannot be used to fill those gaps.
+[unified lifecycle plan](../../future/infra/lifecycle/unified-cluster-lifecycle.md).
 
 The native OS unit supervises the application root, which owns its service
 subprocesses. Agent shells are held by the `pty-sessions` service. Stop verifies captured
@@ -68,11 +67,8 @@ vocabulary lives in the `ops/rpc_schemas/` door; focused agent contracts live in
 its `terminate`, `content`, and `billing_recovery` submodules. Gateway-only
 schemas stay in `gateway/schemas/`.
 The client and daemon reject unknown kinds before machine lookup, maintenance
-admission, dedupe, or dispatch. Retired updater fetch, prepare, bootstrap, and
-continuation requests have no wire registration or handler. Their handlers, schemas, command producers and session/log status projections
-are absent. Callers import live pause, status and recovery definitions directly.
-The maintenance fences still enforce admission; removing an updater command
-does not remove them.
+admission, dedupe, or dispatch. Callers import live pause, status and recovery
+definitions directly. The maintenance fences enforce admission.
 Cluster identity remains the installed home path, resolved before runtime
 configuration construction.
 

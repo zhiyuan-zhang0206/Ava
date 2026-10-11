@@ -2,8 +2,8 @@
 writer of the model catalog — installs it after the manifest gate.
 
 A provider plugin whose `ava-plugin.json` disagrees with what its `contribute()` provides on the
-`providers` key (a prefix declared but not provided, or provided but not declared), or whose
-`provider.py` has no usable `contribute()`, refuses the complete catalog build.
+`providers` key (a prefix declared but not provided, or provided but not declared), that ships no
+manifest, or whose `provider.py` has no usable `contribute()`, refuses the complete catalog build.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from base.lm.provider_api import ProviderBinding, ProviderContribution
 from base.lm.tests.providers.provider_plugin_support import provider_plugin as provider_plugin
 from base.packages.plugins.extensions import PluginContributions
 from base.packages.plugins.gate import ContributionMismatch
+from base.packages.plugins.manifest import ManifestError
 
 
 def _manifest(name: str, providers: list[str]) -> str:
@@ -61,6 +62,16 @@ def test_a_manifest_that_disagrees_refuses_the_catalog_and_can_be_corrected(
     catalog = build_model_catalog()
     assert "kept-1" in catalog.models
     assert "gated-1" in catalog.models
+
+
+def test_a_provider_plugin_without_a_manifest_refuses_the_catalog(
+    provider_plugin: Callable[..., None],
+) -> None:
+    provider_plugin(prefix="bare-", model="bare-1", dir_name="bare_provider")
+    (paths.plugins_dir() / "bare_provider" / "ava-plugin.json").unlink()
+
+    with pytest.raises(ManifestError, match=r"bare_provider.*ava-plugin\.json not found"):
+        build_model_catalog()
 
 
 def test_a_provider_py_without_contribute_is_a_load_failure(

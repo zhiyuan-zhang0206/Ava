@@ -230,26 +230,6 @@ def test_unverified_principal_cannot_create_receipt(
     assert db_conn.execute("SELECT count(*) FROM notice_operation_receipts").fetchone() == (0,)
 
 
-@pytest.mark.parametrize("dismiss", [False, True])
-def test_old_routing_cannot_execute_guarded_request(
-    db_conn: psycopg.Connection, dismiss: bool
-) -> None:
-    from fastapi import FastAPI
-
-    from gateway.agents.notices import router
-
-    legacy = FastAPI()
-    legacy.include_router(router)
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
-    with TestClient(legacy) as client:
-        response = _send(client, agent, notice, dismiss)
-    assert response.status_code in (404, 405)
-    assert db_conn.execute(
-        "SELECT title,resolved_at FROM agent_notices WHERE id=%s", (notice,)
-    ).fetchone() == ("A", None)
-
-
 def test_reply_concurrent_with_guarded_edit_has_no_lock_cycle(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:

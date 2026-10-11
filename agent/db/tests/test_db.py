@@ -501,56 +501,6 @@ class TestReconcileClaimedInbounds:
                 young_iid: "pending",
             }
 
-    async def test_null_claimed_at_stale_by_created_at(
-        self,
-        db_conn: psycopg.Connection,
-        aops_pool: AsyncConnectionPool,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        """Rows claimed before the claimed_at column existed (2026-08-02)
-        carry NULL claimed_at; created_at is their only age evidence and is
-        stale by now — dead-letter them instead of re-delivering."""
-        from agent.db import reconcile_claimed_inbounds
-
-        tid = spawn_agent(
-            catalog=model_catalog,
-            authority=config_authority,
-            database_gate=database_gate,
-            machine=machine_identity,
-        )
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inbound_messages "
-                "(agent_id, content, kind, source, status, claimed_at, created_at) "
-                "VALUES (%s, 'pre-column', 'chat', 'user', 'claimed', NULL, "
-                "now() - interval '10 days') RETURNING id",
-                (tid,),
-            )
-            old_iid = cur.fetchone()[0]  # type: ignore[index]
-            cur.execute(
-                "INSERT INTO inbound_messages "
-                "(agent_id, content, kind, source, status, claimed_at, created_at) "
-                "VALUES (%s, 'null-but-fresh', 'chat', 'user', 'claimed', NULL, now()) RETURNING id",
-                (tid,),
-            )
-            fresh_iid = cur.fetchone()[0]  # type: ignore[index]
-        db_conn.commit()
-
-        committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids=set(), incarnation=None
-        )
-        assert (committed, reset, dead_lettered) == (0, 1, 1)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, status FROM inbound_messages WHERE id IN (%s, %s) ORDER BY id",
-                (old_iid, fresh_iid),  # pyright: ignore[reportUnknownArgumentType]
-            )
-            assert dict(cur.fetchall()) == {old_iid: "done", fresh_iid: "pending"}
-
 
 def test_claimed_inbound_from_row_keeps_created_at_and_claimed_at():
     """from_row must carry the RETURNING created_at + claimed_at (7th/8th

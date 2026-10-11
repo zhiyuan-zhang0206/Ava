@@ -64,7 +64,6 @@ async def load_open_nodes(
         await cur.execute(
             "SELECT id, span_start, span_end, start_ts, end_ts, text FROM understanding_nodes"
             " WHERE agent_id = %s AND depth = %s AND parent_id IS NULL"
-            " AND (engine_version LIKE 'chunk-%%' OR engine_version LIKE 'group-%%')"
             " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
             " AND (%s::bigint IS NULL OR span_end <= %s::bigint)"
             " ORDER BY span_start",
@@ -183,7 +182,7 @@ async def write_groups(
         # have landed while the call ran, and the baseline must include it.
         await cur.execute(
             "SELECT count(*) FROM understanding_nodes WHERE agent_id = %s AND depth = %s"
-            " AND parent_id IS NULL AND (engine_version LIKE 'chunk-%%' OR engine_version LIKE 'group-%%')"
+            " AND parent_id IS NULL"
             " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
             " AND (%s::bigint IS NULL OR span_end <= %s::bigint)",
             (agent_id, level, upto, upto),
@@ -206,7 +205,7 @@ async def _require_no_earlier_open_node(
     """
     await cur.execute(
         "SELECT id, span_start FROM understanding_nodes WHERE agent_id = %s AND depth = %s"
-        " AND parent_id IS NULL AND (engine_version LIKE 'chunk-%%' OR engine_version LIKE 'group-%%')"
+        " AND parent_id IS NULL"
         " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
         " AND span_start < %s AND NOT (id = ANY(%s)) ORDER BY span_start LIMIT 1",
         (agent_id, level, children[-1].span_end, [c.id for c in children]),
