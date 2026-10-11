@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import json
 import stat
 import threading
@@ -32,8 +31,7 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 @pytest.fixture(autouse=True)
 def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = importlib.import_module("cli.commands.extensions.external_skills")
-    monkeypatch.setattr(module, "_SKILL_NAMES", ("operating-ava-cluster",))
+    monkeypatch.setattr(bridge, "_SKILL_NAMES", ("operating-ava-cluster",))
 
 
 def test_source_change_after_snapshot_does_not_mix_generations(

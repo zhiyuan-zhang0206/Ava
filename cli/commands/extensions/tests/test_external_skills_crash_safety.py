@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import os
 import stat
@@ -31,8 +30,7 @@ SKILL = "operating-ava-cluster"
 
 @pytest.fixture(autouse=True)
 def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = importlib.import_module("cli.commands.extensions.external_skills")
-    monkeypatch.setattr(module, "_SKILL_NAMES", ("operating-ava-cluster",))
+    monkeypatch.setattr(bridge, "_SKILL_NAMES", ("operating-ava-cluster",))
 
 
 def _world(
