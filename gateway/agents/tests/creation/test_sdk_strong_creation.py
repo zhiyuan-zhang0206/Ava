@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 import ava
 import ava.agents
 from ava.gateway_client import spawn, transport
+from ava.sdk_surface import agent_identity
 from base.agents import GatewayUnavailable
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -189,7 +190,7 @@ def test_changed_sdk_context_same_principal_key_conflicts(
         return _response(client.post(path, **kwargs))
 
     http.post.side_effect = submit
-    monkeypatch.setattr(ava.sdk_surface.agent_identity, "require_actor", lambda: "user")
+    monkeypatch.setattr(agent_identity, "require_actor", lambda: "user")
     ava.context.require_machine().set(name="local-test")
     original = ava.agents.spawn(prompt="same raw inputs", idempotency_key="context")
     ava.context.require_machine().set(name="another-machine")
