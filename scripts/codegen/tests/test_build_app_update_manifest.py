@@ -1,23 +1,10 @@
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPT = _REPO_ROOT / "scripts" / "codegen" / "build_app_update_manifest.py"
-
-
-def _load_script():
-    spec = importlib.util.spec_from_file_location("build_app_update_manifest", _SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-manifest_builder = _load_script()
+from scripts.codegen import build_app_update_manifest as manifest_builder
 
 
 def _artifact(directory: Path, name: str, signature: str | None = None) -> None:

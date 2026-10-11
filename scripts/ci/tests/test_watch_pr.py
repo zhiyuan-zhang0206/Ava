@@ -14,33 +14,20 @@ exhausted delivery exits 2 with the persisted verdict left behind).
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 from collections.abc import Callable
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from scripts.ci.cli import CIStatus
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TEMPLATE = _REPO_ROOT / "scripts" / "ci" / "pull_requests" / "watch_pr.py"
 # The substitution below pins PR_NUMBER = "1234"; the verdict file name follows
 # from it (the template's VERDICT_FILE).
 _VERDICT_NAME = "ci-verdict-1234.txt"
-
-
-@lru_cache(maxsize=1)
-def _ci_status() -> Any:
-    """The repo's own CIStatus enum — the watcher branches on it, never strings."""
-    spec = importlib.util.spec_from_file_location(
-        "ci_utils_under_watcher_test", _REPO_ROOT / "scripts" / "ci" / "cli.py"
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module.CIStatus
 
 
 class _Result:
@@ -123,7 +110,6 @@ def _run_watcher(
     watcher raises (the exhausted-delivery or probe-error exit) passes its own
     fake; `raise_on_poll` makes the probe raise instead of answering.
     """
-    statuses = _ci_status()
     polled: list[Any] = []
 
     def _check_ci(_pr: str | int) -> _Result:
@@ -167,7 +153,7 @@ def _run_watcher(
             {
                 "__name__": run_name,
                 "ava": fake_ava,
-                "CIStatus": statuses,
+                "CIStatus": CIStatus,
                 "check_ci": _check_ci,
             },
         )
@@ -183,11 +169,10 @@ def test_attach_window_does_not_wake_as_no_checks(
     """The reported bug (2026-09-12, PR #2249): the watcher starts right after
     the push, and the empty rollup while the checks attach must not be reported
     as a settled NO_CHECKS — the wake comes only once CI actually settles."""
-    statuses = _ci_status()
     wakes, polled, _ = _run_watcher(
         monkeypatch,
         tmp_path,
-        [statuses.NO_CHECKS, statuses.NO_CHECKS, statuses.PENDING, statuses.ALL_PASSED],
+        [CIStatus.NO_CHECKS, CIStatus.NO_CHECKS, CIStatus.PENDING, CIStatus.ALL_PASSED],
     )
 
     assert len(polled) == 4  # both attach-window NO_CHECKS verdicts were absorbed
@@ -202,8 +187,7 @@ def test_persistent_no_checks_is_reported_after_bounded_retries(
 ) -> None:
     """A rollup that stays empty is still reported — never swallowed: after its
     retry budget the watcher wakes with the verdict and says it re-polled."""
-    statuses = _ci_status()
-    wakes, polled, _ = _run_watcher(monkeypatch, tmp_path, [statuses.NO_CHECKS])
+    wakes, polled, _ = _run_watcher(monkeypatch, tmp_path, [CIStatus.NO_CHECKS])
 
     assert len(polled) == 4  # the 3 retries + the poll that reports
     assert len(wakes) == 1
@@ -217,8 +201,7 @@ def test_settled_verdict_wakes_on_the_first_poll(
 ) -> None:
     """Retries are confined to NO_CHECKS: any other settled verdict — a red PR or
     a failed probe — wakes on the first poll."""
-    statuses = _ci_status()
-    wakes, polled, _ = _run_watcher(monkeypatch, tmp_path, [getattr(statuses, member)])
+    wakes, polled, _ = _run_watcher(monkeypatch, tmp_path, [getattr(CIStatus, member)])
 
     assert len(polled) == 1
     assert len(wakes) == 1
@@ -232,8 +215,7 @@ def test_settled_verdict_is_persisted_before_the_wake(
     written to the agent workspace before the first send attempt and holds
     exactly the message the wake delivers — one representation, so a wake lost
     in a restart window still leaves the verdict behind."""
-    statuses = _ci_status()
-    wakes, _, fake = _run_watcher(monkeypatch, tmp_path, [statuses.FAILED])
+    wakes, _, fake = _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED])
 
     assert fake.send_calls == 1
     assert fake.verdict_written_at_send == [True]
@@ -248,9 +230,8 @@ def test_wake_retries_across_a_restart_window(
 ) -> None:
     """Two refused sends — a gateway restart window — and the third lands: the
     retry loop delivers the verdict the single send would have dropped."""
-    statuses = _ci_status()
     wakes, _, fake = _run_watcher(
-        monkeypatch, tmp_path, [statuses.ALL_PASSED], fake=_FakeAva(tmp_path, send_failures=2)
+        monkeypatch, tmp_path, [CIStatus.ALL_PASSED], fake=_FakeAva(tmp_path, send_failures=2)
     )
 
     assert fake.send_calls == 3
@@ -266,10 +247,9 @@ def test_exhausted_delivery_exits_2_and_keeps_the_verdict(
     """Every attempt refused is not a silent death: the watcher exits 2 (the
     exit notice is the second delivery path) and the persisted verdict remains
     for a later read."""
-    statuses = _ci_status()
     fake = _FakeAva(tmp_path, send_failures=100)
     with pytest.raises(SystemExit) as excinfo:
-        _run_watcher(monkeypatch, tmp_path, [statuses.FAILED], fake=fake)
+        _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake)
 
     assert excinfo.value.code == 2
     assert fake.send_calls == 8  # WAKE_ATTEMPTS, exhaustion really tried
@@ -313,7 +293,7 @@ def test_persistent_owner_url_error_stops_early_with_absolute_fallback(
         _Guarded()
     fake = _FakeAva(tmp_path, send_error=error.value)
     with pytest.raises(SystemExit) as exited:
-        _run_watcher(monkeypatch, tmp_path, [_ci_status().ALL_PASSED], fake=fake)
+        _run_watcher(monkeypatch, tmp_path, [CIStatus.ALL_PASSED], fake=fake)
 
     assert exited.value.code == 2
     assert fake.send_calls == 1
@@ -351,7 +331,7 @@ def test_exit_notice_tail_keeps_path_and_cause_after_boot_cleanup(
         _run_watcher(
             monkeypatch,
             tmp_path,
-            [_ci_status().ALL_PASSED],
+            [CIStatus.ALL_PASSED],
             fake=_FakeAva(tmp_path, send_error=error.value),
             run_name="__main__",
         )
@@ -371,10 +351,9 @@ def test_persist_failure_does_not_claim_a_stored_verdict(
     """A persist failure must not be reported as a stored verdict (2026-09-17
     review): the message still goes out, and the exhaustion report says the log
     holds the only copy."""
-    statuses = _ci_status()
     fake = _FakeAva(tmp_path, send_failures=100, write_failures=100)
     with pytest.raises(SystemExit) as excinfo:
-        _run_watcher(monkeypatch, tmp_path, [statuses.FAILED], fake=fake)
+        _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake)
 
     assert excinfo.value.code == 2
     out = capsys.readouterr().out

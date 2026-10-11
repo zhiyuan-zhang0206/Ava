@@ -2,29 +2,19 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import subprocess
-import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "pull_requests" / "accounting.py"
+from scripts.ci.pull_requests import accounting
 
-
-def _load_script():
-    spec = importlib.util.spec_from_file_location("accounting", _SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-accounting = _load_script()
+# The script's entries are unparameterized dicts: the call-site rules stay at warning.
+# pyright: reportUnknownMemberType = warning
+# pyright: reportUnknownArgumentType = warning
 
 
 def _gh_queue(responses: list[tuple[str, str]]):
@@ -225,7 +215,7 @@ def test_report_rollup_days_and_cost() -> None:
     today = datetime.now(UTC).date()
     recent = (today - timedelta(days=1)).isoformat()
     stale = (today - timedelta(days=30)).isoformat()
-    entries = [
+    entries: list[dict[str, Any]] = [
         {
             "run_id": 1,
             "day": recent,

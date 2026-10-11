@@ -2,30 +2,19 @@
 
 The keyed spawn route is authenticated; the bootstrap-spawn script must carry
 `Authorization: Bearer <cluster secret>` or a multi-host gateway 401s it, plus the
-keyed-admission headers. Load the script by path (it is not a package module) and
-assert the headers.
+keyed-admission headers.
 """
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
 from typing import cast
 
 import pytest
 
-
-def _load_start_agent():
-    path = Path(__file__).resolve().parents[3] / "scripts" / "entrypoints" / "agent.py"
-    spec = importlib.util.spec_from_file_location("start_agent_under_test", path)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from scripts.entrypoints import agent as mod
 
 
 def test_start_agent_posts_with_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
-    mod = _load_start_agent()
     captured: dict[str, object] = {}
 
     class _Resp:
