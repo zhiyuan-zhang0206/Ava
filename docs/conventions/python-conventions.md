@@ -368,6 +368,17 @@ into a new SDK method. If size limits or shared implementation require a governe
 keep the workflow entry in the skill and the helper internal; placement under
 `ava/` alone does not justify adding it to `__all_for_ava__`.
 
+## SDK return shapes
+
+A public SDK function or constant that returns a record (a fixed set of
+meaningful fields) returns a `NamedTuple`, never a bare `tuple[A, B]` whose
+meaning depends on position. The type must be listed in `__all_for_ava__` of the
+namespace that returns it, so `help()` renders its fields; document each field in
+the class docstring. Use `tuple[T, ...]` or a list for a variable-length
+sequence of one type, and a frozen dataclass when the record has many fields,
+optional fields or is expected to change. A constant of a `NamedTuple` type
+cannot be wrapped with `ava.const()`; document it with a PEP 224 docstring.
+
 ## Import layering
 
 Which package may import which, and how it is enforced:

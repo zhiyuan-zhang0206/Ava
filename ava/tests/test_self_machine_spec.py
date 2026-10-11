@@ -1,4 +1,4 @@
-"""ava.self.MACHINE_SPEC = (name, description) from local config; "" when unset."""
+"""ava.self.MACHINE_SPEC = MachineSpec(name, description) from local config; "" when unset."""
 
 from __future__ import annotations
 
@@ -10,7 +10,12 @@ def test_machine_spec_tuple_with_description() -> None:
 
     set_identity(name="test-host", description="voice IO + browser")
     try:
-        assert ava_self_machine_spec() == ("test-host", "voice IO + browser")
+        spec = ava_self_machine_spec()
+        assert spec == ("test-host", "voice IO + browser")
+        assert isinstance(spec, self_mod.MachineSpec)
+        assert (spec.name, spec.description) == ("test-host", "voice IO + browser")
+        name, description = spec
+        assert name == "test-host" and description == "voice IO + browser"
     finally:
         reset_identity()
 
