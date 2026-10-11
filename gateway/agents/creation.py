@@ -31,7 +31,7 @@ from ops.rpc_schemas import ConfigNormalization, LaunchAgentRequest, SpawnAgentR
 
 
 class CreationLaunchArguments(TypedDict, total=False):
-    """Typed opt-in arguments; legacy handler calls pass no new keywords."""
+    """Typed opt-in arguments for keyed creation."""
 
     creation_key: str
     creation_identity: dict[str, object]

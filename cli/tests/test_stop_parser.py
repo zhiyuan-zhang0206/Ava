@@ -34,11 +34,3 @@ def test_pause_is_not_a_verb(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args(["pause"])
     assert "invalid choice: 'pause'" in capsys.readouterr().err
-
-
-def test_removed_stop_and_restart_flags_are_refused() -> None:
-    """The zero-effect `stop --stop-browser` and `restart --force-reap` no-ops are gone."""
-    parser = build_parser()
-    for argv in (["stop", "--stop-browser"], ["restart", "--force-reap"]):
-        with pytest.raises(SystemExit):
-            parser.parse_args(argv)

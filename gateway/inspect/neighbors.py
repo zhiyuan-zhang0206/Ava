@@ -2,11 +2,9 @@
 
 The tie graph reads the audit record: `audit_events` in Postgres
 (base/events/reads/audit_rows.py), aggregated per (agent, target, event) pair. The
-retired `agent_neighbors()` SQL function read the old `events` table; the walks
-run in Python (the SQL recursive CTE had no equivalent over the event stream).
+walks run in Python.
 
-Weight semantics are unchanged from the retired SQL function: a tie between
-two agents is undirected; lineage events (spawn/fork/resurrect) weigh
+Weight semantics: a tie between two agents is undirected; lineage events (spawn/fork/resurrect) weigh
 LN(1+count) permanently, message events (send_message) weigh
 EXP(-k * days_since_last) * LN(1+count). The recursive walk is a BFS/DFS
 path walk in Python: `max_depth` bounds the hop count, each extra hop discounts
@@ -139,7 +137,7 @@ def _walk(
     gamma: float,
     limit: int,
 ) -> list[tuple[int, int, float]]:
-    """Path walk from `root`, replicating the retired SQL recursive CTE.
+    """Path walk from `root`.
 
     Every path that never revisits a node is followed to `max_depth`; a
     node's result is its shallowest arrival depth with the best score
@@ -201,9 +199,8 @@ def compute(
     gamma: float = 0.5,
 ) -> tuple[list[tuple[int, int, float]], list[tuple[int, int, float]]]:
     """(neighbors, ancestors) for `root` — lists of (agent_id, depth, score)
-    rows; neighbors strongest first, ancestors nearest first. The Python
-    counterpart of the retired agent_neighbors() SQL function, plus the
-    immutable spawn-chain read it never had."""
+    rows; neighbors strongest first, ancestors nearest first, with the
+    immutable spawn-chain read."""
     now = datetime.now(UTC)
     weights = _weights(_fetch_edge_counts(db_pool), k=k, now=now)
     parents = _fetch_born_spawner_parents(db_pool, root=root)

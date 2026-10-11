@@ -231,8 +231,6 @@ class StatsDashboard(BaseModel):
       cancels the class — exact, or a wildcard row with an empty `process`.
       The sidebar card shows `alert_classes_active`; the classes themselves
       are `GET /api/stats/alert-classes`, which reads the same rows.
-    - `total_events`: archived event row count (frozen — the PG events copy
-      stopped growing at the LGTM cutover; not a live gauge)
 
     `avg_turn_seconds` None = zero turns in the window (new DB / no
     activity); frontend renders "—".
@@ -255,7 +253,6 @@ class StatsDashboard(BaseModel):
     errors: NonNegativeInt
     alert_classes_active: NonNegativeInt
     alert_classes_dismissed: NonNegativeInt
-    total_events: NonNegativeInt
     plugin_stats: list[PluginStat]
     as_of: datetime | None = None
 

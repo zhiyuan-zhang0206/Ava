@@ -30,8 +30,8 @@ def _ensure_ava_on_path(ctx: ConvergeCtx) -> None:
     A plain symlink: the host runs one cluster, so the CLI needs no routing. Which
     home it acts on is `AVA_HOME`, else `~/.ava`, like every CLI, and the checkout
     guard (`cli.preflight.require_own_checkout`) refuses every command from a
-    checkout that is not the home's own. An existing link to anything else (the
-    retired launcher script) is repointed.
+    checkout that is not the home's own. An existing link to anything else is
+    repointed.
 
     On Windows the `ava` entry point is `.venv\\Scripts\\ava.exe`, reached via the
     uv/venv on PATH (or the install.ps1 shim) — there is no `~/.local/bin/ava`

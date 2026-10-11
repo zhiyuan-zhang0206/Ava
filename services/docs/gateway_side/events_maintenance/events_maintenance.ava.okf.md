@@ -31,6 +31,3 @@ Gateway-owned background daemon (`services/upkeep/events_maintenance/daemon.py`)
 - `services/upkeep/events_maintenance/rollup.py` — also the operator CLI for a range of days
 - `services/upkeep/events_maintenance/resolution.py:run_resolution_slice` — immutable Loki class resolution, marker transitions, and the unresolved/dismissed gauges
 - Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`ops/roster/healthz.py`)
-
-## Notes
-- Sidebar `total_events` is a historical parity constant (see `gateway/cluster/status.py` `ARCHIVE_TOTAL_ROWS`) — the PG archive it once counted was dropped with the task #1281/#1823 cleanup

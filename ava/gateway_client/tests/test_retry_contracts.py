@@ -87,7 +87,7 @@ def test_new_keyed_route_does_not_activate_ambiguous_retry(
     monkeypatch.setitem(
         contracts.ROUTE_CONTRACTS,
         ("POST", path),
-        RouteContract(Idempotency.AT_LEAST_ONCE_WITH_KEY, transactional_idempotency=True),
+        RouteContract(Idempotency.AT_LEAST_ONCE_WITH_KEY),
     )
     requests: list[httpx.Request] = []
 

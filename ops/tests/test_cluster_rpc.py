@@ -18,6 +18,7 @@ import pytest
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered
 from base.db import Database
 from ops.cluster import rpc as cluster_rpc
+from ops.rpc_schemas import OpKind
 
 
 def _db() -> Database:
@@ -488,7 +489,7 @@ async def test_only_spawn_launch_reuses_a_business_idempotency_key(
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),
     )
 
-    operations: tuple[tuple[cluster_rpc.OpKind, dict[str, Any]], ...] = (
+    operations: tuple[tuple[OpKind, dict[str, Any]], ...] = (
         ("lifecycle", {"trigger_inbound_id": 17, "action": "restart"}),
     )
     for kind, payload in operations:
@@ -608,11 +609,11 @@ async def test_retries_default_from_settings(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
-async def test_retired_launch_is_rejected_before_machine_lookup(
+async def test_unknown_kind_is_rejected_before_machine_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def forbidden(*_args: object, **_kwargs: object) -> str:
-        raise AssertionError("retired operation cannot resolve or contact a machine")
+        raise AssertionError("an unknown operation cannot resolve or contact a machine")
 
     monkeypatch.setattr(cluster_rpc, "lookup_machine_url", forbidden)
     monkeypatch.setattr(cluster_rpc, "_default_idempotency_key", forbidden)
@@ -620,7 +621,7 @@ async def test_retired_launch_is_rejected_before_machine_lookup(
         await cluster_rpc.dispatch_to_machine(
             _db(),
             "wsl",
-            "spawn-launch",
+            "no-such-op",  # pyright: ignore[reportArgumentType]
             {},
-            idempotency_key="historical-key",  # pyright: ignore[reportArgumentType]
+            idempotency_key="explicit-key",
         )

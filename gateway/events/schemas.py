@@ -29,10 +29,7 @@ class AgentEventRow(BaseModel):
     / runner / etc.) and an int for agent process lines. `payload` keeps the
     full structured record (msg, kwargs from logger.bind / kwargs from the
     call, plus traceback fields when an exception was attached).
-    `level` is LOWERCASE (`debug`/`info`/`warning`/`error`/`critical`): the
-    W9 switch from the legacy `agent_events` table (loguru's uppercase `INFO`/`WARNING`/
-    `ERROR`) flipped the wire values — consumers matching uppercase must
-    adapt."""
+    `level` is LOWERCASE (`debug`/`info`/`warning`/`error`/`critical`)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -56,15 +53,13 @@ class AgentEventsResponse(BaseModel):
 class EventRow(BaseModel):
     """One row of the unified event stream.
 
-    Every signal shares this shape (event-system design doc §1): audit
-    (legacy `event_log`), telemetry and log (formerly `agent_events`) all land
-    in it, written through the unified emitter (`base/telemetry/emitter.py`).
+    Every signal shares this shape (event-system design doc §1): audit,
+    telemetry and log all land in it, written through the unified emitter
+    (`base/telemetry/emitter.py`).
     `trace_id` is the correlation key — one turn = one trace id, every event
     inside it carries the same value. `agent_id` is None for service-level
     events (gateway / daemons); `machine` is the host dimension. `level` is
-    LOWERCASE (`debug`/`info`/`warning`/`error`/`critical`) — the retired
-    `agent_events` mirror stored loguru's uppercase; the W9 read-path switch
-    flipped API consumers to lowercase."""
+    LOWERCASE (`debug`/`info`/`warning`/`error`/`critical`)."""
 
     model_config = ConfigDict(frozen=True)
 

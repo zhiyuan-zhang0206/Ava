@@ -110,16 +110,14 @@ def _converge_skills_step(ctx: ConvergeCtx) -> None:
         print(f"  ! skills: {warning}", file=sys.stderr)
 
 
-def _ensure_browser(ctx: ConvergeCtx) -> None:
-    """Preflight the shared headed Chrome and shed the legacy plugin file.
+def _ensure_browser(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Preflight the shared headed Chrome.
 
-    chrome's MCP config now ships in `<repo>/ava_builtins/mcps/chrome/.mcp.json` (a built-in
-    source the loader scans), so this step no longer writes a plugin `.mcp.json`;
-    it just removes the one earlier versions wrote. When the browser is enabled,
-    probe host capability; on an incapable machine emit a prominent actionable
-    warning instead of failing so the rest of converge (and ava start) proceeds.
+    chrome's MCP config ships in `<repo>/ava_builtins/mcps/chrome/.mcp.json` (a built-in
+    source the loader scans). When the browser is enabled, probe host capability;
+    on an incapable machine emit a prominent actionable warning instead of
+    failing so the rest of converge (and ava start) proceeds.
     """
-    (ctx.ava_home / "plugins" / "ava_chrome" / ".mcp.json").unlink(missing_ok=True)
     if not settings.services.browser_enabled:
         return
     reason = browser_incapability()
@@ -399,7 +397,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ),
     ConvergeStep("lgtm native backends", ensure_lgtm_native_step, services=frozenset(BACKENDS)),
     ConvergeStep(
-        "browser capability + plugin",
+        "browser capability",
         _ensure_browser,
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
