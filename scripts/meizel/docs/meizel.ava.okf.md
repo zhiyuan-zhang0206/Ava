@@ -82,7 +82,9 @@ For a fact edge `f -> t`, `L` is the deepest directory containing both; `cf` and
    path. `__init__.py` is the door and needs no export; a child whose name starts
    with an underscore can never be exported.
 3. Every name used from `t` is public. A leading underscore (dunders excepted)
-   makes a name private to its defining file, tests included.
+   makes a name private to its defining file, tests included; that covers
+   fixtures too, so an underscore fixture serves its own file or applies as
+   autouse, and a fixture requested from another file has a public name.
 
 Local graphs are acyclic. A test's use of a fixture from an ancestor
 `conftest.py` is contained in the tree and needs no declaration. Importing
@@ -95,7 +97,11 @@ import_module as im`): `importlib.import_module`, `__import__`,
 `runpy.run_module`, `runpy.run_path`, `importlib.util.spec_from_file_location`,
 `exec`, `compile`, `python -c` source that imports first-party code or cannot be
 read as a literal, a `pytest_plugins` that is not a literal, and string patch
-targets (`mock.patch("a.b")`, `monkeypatch.setattr("a.b", v)`). A file that owns
+targets that name first-party code (`mock.patch("a.b")`, `monkeypatch.setattr("a.b", v)`;
+stdlib and third-party targets are fine, an unreadable target is not), and reaching
+a first-party module by name through `sys.modules` (`sys.modules["a.b"] = ...`,
+`monkeypatch.setitem(sys.modules, "a.b", ...)`, `patch.dict(sys.modules, {...})`),
+which belongs to the same class as a string patch target. A file that owns
 a dynamic load declares it:
 
 ```toml
@@ -104,7 +110,8 @@ a dynamic load declares it:
 ```
 
 Each entry becomes a fact edge from the file to the directory, judged by the
-same rule; the file is then exempt from the restricted-form errors.
+same rule; the file is then exempt from the restricted-form errors. A loading
+file should do only the loading.
 
 ## Manifest
 

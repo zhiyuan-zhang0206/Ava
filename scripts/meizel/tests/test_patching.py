@@ -51,3 +51,15 @@ def test_patching_a_private_module_name_is_a_private_use(make_repo: RepoFactory)
 def test_other_receivers_named_setattr_are_not_patches(make_repo: RepoFactory) -> None:
     source = "from lib import m\n\ndef test_a(box):\n    box.setattr(m, 'f', 1)\n    setattr(m, 'f', 1)\n"
     assert patched(make_repo, source) == set()
+
+
+def test_patching_through_a_private_class_name_is_a_private_use(make_repo: RepoFactory) -> None:
+    root = make_repo(
+        {
+            "lib/__init__.py": "",
+            "lib/m.py": "class _Hidden:\n    attr = 1\n",
+            "t/test_a.py": "from lib import m\n\ndef test_a(monkeypatch):\n    monkeypatch.setattr(m._Hidden, 'attr', 2)\n",
+        }
+    )
+    [found] = diagnostics(root, "private-name")
+    assert (found.path, found.line) == ("t/test_a.py", 4)
