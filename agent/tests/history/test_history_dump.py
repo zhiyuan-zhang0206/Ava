@@ -483,6 +483,7 @@ async def test_auto_compact_proceeds_when_dump_fails(
 
 
 async def test_claim_compact_summary_parks_dump_note_after_summary(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -538,6 +539,7 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
 
 
 async def test_claim_compact_summary_no_note_when_disabled(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,

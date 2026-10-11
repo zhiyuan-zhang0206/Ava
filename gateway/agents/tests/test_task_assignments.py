@@ -27,7 +27,11 @@ SECRET = "compound-test-secret"  # noqa: S105 -- isolated test authentication
 
 @pytest.fixture
 def client(
-    monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any, *, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    monkeypatch: pytest.MonkeyPatch,
+    set_machine_identity: Any,
+    *,
+    machine_identity: MachineIdentity,
 ) -> Iterator[TestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)

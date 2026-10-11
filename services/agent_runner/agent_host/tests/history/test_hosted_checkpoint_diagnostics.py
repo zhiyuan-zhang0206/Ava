@@ -16,7 +16,7 @@ from services.agent_runner.agent_host.daemon import _build_checkpointer
 
 @pytest.mark.parametrize("method", ["aput", "aput_writes", "flush"])
 async def test_shared_saver_reports_each_failed_write_owner_without_swallowing(
-    monkeypatch: pytest.MonkeyPatch, method: str
+    db_url: str, monkeypatch: pytest.MonkeyPatch, method: str
 ) -> None:
     monkeypatch.setattr(settings.agent, "checkpoint_interval", 100)
     pool: AsyncConnectionPool[Any] = AsyncConnectionPool(

@@ -110,6 +110,7 @@ async def test_llm_node_cancel_does_not_close_circuit(
 
 
 async def test_first_permanent_rejection_trips_the_recovery_breaker(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
@@ -162,6 +163,7 @@ async def test_first_permanent_rejection_trips_the_recovery_breaker(
 
 
 async def test_transient_rejection_does_not_count_or_trip(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -198,6 +200,7 @@ async def test_transient_rejection_does_not_count_or_trip(
 
 
 async def test_completed_turn_resets_the_streak_and_clears_the_marker(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,

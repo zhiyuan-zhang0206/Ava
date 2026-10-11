@@ -13,6 +13,7 @@ from services.agent_runner.agent_host.tests.guarded_compact.admission import adm
 
 
 async def test_actual_scan_keeps_pending_compact_and_later_chat_on_work_lane(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

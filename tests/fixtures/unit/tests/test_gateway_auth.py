@@ -14,7 +14,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_a_gateway_client_carries_the_cluster_secret_by_default(
-    machine_identity: MachineIdentity,
+    gateway_data_plane: None, machine_identity: MachineIdentity
 ) -> None:
     from gateway.app import app
 
@@ -35,7 +35,7 @@ def test_an_explicit_authorization_header_wins(machine_identity: MachineIdentity
 
 
 def test_the_default_follows_the_secret_current_when_the_client_is_built(
-    monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
+    gateway_data_plane: None, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
 ) -> None:
     from gateway.app import app
 

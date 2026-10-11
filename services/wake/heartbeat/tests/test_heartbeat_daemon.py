@@ -40,6 +40,7 @@ def _selected(pool: ConnectionPool) -> dict[int, float]:
 class TestSelectIdleAgents:
     def test_idle_past_threshold_unpaused_is_selected(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -62,6 +63,7 @@ class TestSelectIdleAgents:
 
     def test_idling_without_a_lease_is_selected(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -89,6 +91,7 @@ class TestSelectIdleAgents:
 
     def test_idle_under_threshold_unpaused_excluded(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -111,6 +114,7 @@ class TestSelectIdleAgents:
 
     def test_running_agent_excluded(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -133,6 +137,7 @@ class TestSelectIdleAgents:
 
     def test_pending_inbound_excluded(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -162,6 +167,7 @@ class TestSelectIdleAgents:
     @pytest.mark.parametrize("status", ["requested", "accepted"])
     def test_agent_under_open_impersonation_lease_excluded(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         status: str,
@@ -188,6 +194,7 @@ class TestSelectIdleAgents:
 
     def test_terminal_impersonation_lease_does_not_block_checkin(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -211,6 +218,7 @@ class TestSelectIdleAgents:
 
     def test_unapplied_impersonation_delta_excludes_agent(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -241,6 +249,7 @@ class TestSelectIdleAgents:
 
     def test_unapplied_automatic_handoff_excludes_agent(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -264,6 +273,7 @@ class TestSelectIdleAgents:
 
     def test_applied_automatic_handoff_does_not_block_checkin(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -292,6 +302,7 @@ class TestSelectIdleAgents:
 
     def test_active_pause_suppresses_even_when_idle_past_threshold(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -315,6 +326,7 @@ class TestSelectIdleAgents:
 
     def test_real_turn_during_pause_delays_checkin_past_window(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -340,6 +352,7 @@ class TestSelectIdleAgents:
 
     def test_open_pause_window_still_suppresses_checkin_after_real_turn(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -376,6 +389,7 @@ class TestSelectIdleAgents:
 
     def test_pause_expired_before_last_wake_uses_normal_clock(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -401,6 +415,7 @@ class TestSelectIdleAgents:
 
     def test_pause_expired_after_long_idle_is_due(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -430,6 +445,7 @@ class TestIdleClockCountsRealActivityOnly:
 
     def test_ops_restart_does_not_reset_idle_clock(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -455,6 +471,7 @@ class TestIdleClockCountsRealActivityOnly:
 
     def test_ops_restart_does_not_make_long_idle_agent_look_fresh(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -482,6 +499,7 @@ class TestIdleClockCountsRealActivityOnly:
 
     def test_recent_real_turn_resets_idle_clock(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -525,6 +543,7 @@ class TestWakeupStormFlattening:
 
     def test_jitter_offsets_due_time_by_id_mod_span(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -558,6 +577,7 @@ class TestWakeupStormFlattening:
 
     def test_zero_jitter_matches_plain_threshold(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -581,6 +601,7 @@ class TestWakeupStormFlattening:
 
     def test_limit_caps_batch_oldest_idle_first(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,

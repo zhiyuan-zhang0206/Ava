@@ -38,7 +38,7 @@ def _fresh_identity() -> str:
     return f"ava_provtest_{os.getpid()}_{int(time.time() * 1_000_000)}"
 
 
-def test_provision_database_creates_db_and_applies_schema(_provisioned_db: str) -> None:
+def test_provision_database_creates_db_and_applies_schema(db_conn: object) -> None:
     """provision_database creates the identity db, applies schema.sql (tables present)."""
     identity = _fresh_identity()
     expected_db = identity
@@ -78,7 +78,7 @@ def test_provision_database_creates_db_and_applies_schema(_provisioned_db: str) 
             conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(expected_db)))
 
 
-def test_drop_database_removes_db_idempotent(_provisioned_db: str) -> None:
+def test_drop_database_removes_db_idempotent(db_conn: object) -> None:
     """drop_database removes the identity db; a second drop on the now-absent DB is a
     no-op (IF EXISTS), not an error."""
     identity = _fresh_identity()
@@ -103,7 +103,7 @@ def test_drop_database_removes_db_idempotent(_provisioned_db: str) -> None:
     drop_database(identity, base_admin_url=admin_url)
 
 
-def test_provision_database_idempotent(_provisioned_db: str) -> None:
+def test_provision_database_idempotent(db_conn: object) -> None:
     """Calling provision_database twice does not raise and does not re-apply schema."""
     identity = _fresh_identity()
     expected_db = identity
@@ -133,7 +133,7 @@ def test_provision_database_idempotent(_provisioned_db: str) -> None:
             conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(expected_db)))
 
 
-def test_provisioned_role_is_nosuperuser_and_owns_db(_provisioned_db: str) -> None:
+def test_provisioned_role_is_nosuperuser_and_owns_db(db_conn: object) -> None:
     """The cluster role is created NOLOGIN NOSUPERUSER without a password and owns
     its database — it never logs in, bypasses no grant, and application logins
     reach the data only through the capability groups."""
@@ -156,7 +156,7 @@ def test_provisioned_role_is_nosuperuser_and_owns_db(_provisioned_db: str) -> No
         _drop_db_and_role(admin_url, expected_db)
 
 
-def test_role_cannot_read_another_clusters_database(_provisioned_db: str) -> None:
+def test_role_cannot_read_another_clusters_database(db_conn: object) -> None:
     """Isolation: cluster B's role, connecting to cluster A's database, cannot read
     A's tables — it owns nothing there and holds no grant (NOSUPERUSER bypasses none)."""
     # Distinct suffixes off one base — two _fresh_identity() calls can collide on
@@ -295,7 +295,7 @@ def test_ensure_pgvector_extension_noop_on_connect_failure(
     assert "(connection is bad)" in warning["message"]
 
 
-def test_interrupted_empty_database_requires_initialization_authority(_provisioned_db: str) -> None:
+def test_interrupted_empty_database_requires_initialization_authority(db_conn: object) -> None:
     """Only the durable first-start owner can complete a crash after CREATE DATABASE."""
     identity = _fresh_identity()
     admin_url = _admin_url()
@@ -318,7 +318,7 @@ def test_interrupted_empty_database_requires_initialization_authority(_provision
         _drop_db_and_role(admin_url, identity)
 
 
-def test_interrupted_database_with_unknown_objects_is_preserved(_provisioned_db: str) -> None:
+def test_interrupted_database_with_unknown_objects_is_preserved(db_conn: object) -> None:
     identity = _fresh_identity()
     admin_url = _admin_url()
     with psycopg.connect(admin_url, autocommit=True) as conn:

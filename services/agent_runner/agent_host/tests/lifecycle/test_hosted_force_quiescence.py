@@ -238,6 +238,7 @@ def _exec_delivery_environment() -> Iterator[None]:
 @pytest.mark.usefixtures("_exec_delivery_environment")
 @pytest.mark.parametrize("work_kind", ["thread", "exec"])
 async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,

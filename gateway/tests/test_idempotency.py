@@ -27,7 +27,7 @@ from gateway.app import app
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def client(gateway_data_plane: None) -> Iterator[TestClient]:
     # A real lifespan boots its own delivered environment; restore that root's
     # projection as well as closing its HTTP/database resources.
     with patch.dict(os.environ), TestClient(app) as c:

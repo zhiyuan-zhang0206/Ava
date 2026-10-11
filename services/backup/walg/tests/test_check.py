@@ -139,7 +139,7 @@ def test_a_round_trip_that_returns_other_bytes_fails(sandbox: Sandbox) -> None:
 
 
 def test_postgres_facts_are_reported_not_judged(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, postgres_access: None
 ) -> None:
     steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
     assert steps[-1].ok and "not read" in steps[-1].detail

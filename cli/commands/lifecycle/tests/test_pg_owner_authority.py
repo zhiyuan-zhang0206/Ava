@@ -128,7 +128,11 @@ def _free_port() -> int:
 
 @pytest.fixture()
 def owned_pg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, command_runtime: CommandRuntime
+    postgres_access: None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_runtime: CommandRuntime,
 ) -> Iterator[int]:
     """A home-owned Postgres (native launch receipt, owner-only socket) whose
     cluster record `local_owner_authority` resolves; yields its port."""

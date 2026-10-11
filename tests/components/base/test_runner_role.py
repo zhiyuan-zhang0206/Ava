@@ -49,7 +49,7 @@ def _schema_sql() -> str:
 
 
 @pytest.fixture()
-def runner_db() -> Generator[str, None, None]:
+def runner_db(postgres_access: None) -> Generator[str, None, None]:
     """A throwaway Postgres with schema.sql + checkpoint tables applied."""
     with throwaway_postgres(schema_sql=_schema_sql()) as url:
         yield url

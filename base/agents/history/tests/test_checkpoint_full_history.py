@@ -103,7 +103,9 @@ def _contents(messages: Sequence[BaseMessage]) -> list[str]:
     return [str(cast(object, cast(Any, message).content)) for message in messages]
 
 
-def test_load_full_history_returns_empty_without_checkpoint(database_gate: ProcessDbGate) -> None:
+def test_load_full_history_returns_empty_without_checkpoint(
+    db_url: str, database_gate: ProcessDbGate
+) -> None:
     assert load_checkpoint_messages_full(_db(database_gate=database_gate), 1) == []
 
 

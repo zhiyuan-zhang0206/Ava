@@ -232,7 +232,7 @@ def _spawn_child(tmp_path: Path, slug: str) -> _Child:
 
 
 @pytest.mark.parametrize("slug", sorted(_CASES))
-def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path, slug: str) -> None:
+def test_sigterm_bounded_exit_with_wedged_executor(db_url: str, tmp_path: Path, slug: str) -> None:
     """SIGTERM exits within the bound while a wedged executor job is in flight."""
     # The exit bound only matters relative to the stop budget it protects:
     # assert the relationship, not just the number.

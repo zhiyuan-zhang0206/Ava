@@ -14,6 +14,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -42,7 +43,7 @@ def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
 
 
 def test_receipt_replays_after_schedule_deletion(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
         sid = client.post("/api/schedules", json={"name": "deleted", "script": "pass"}).json()["id"]
@@ -56,6 +57,7 @@ def test_receipt_replays_after_schedule_deletion(
 
 
 def test_delete_cleanup_enqueue_failure_preserves_schedule(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,

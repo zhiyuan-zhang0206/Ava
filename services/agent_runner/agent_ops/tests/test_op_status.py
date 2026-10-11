@@ -21,7 +21,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
-def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+def pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
     resource = db_pool(max_size=2, gate=database_gate)
     try:
         yield resource

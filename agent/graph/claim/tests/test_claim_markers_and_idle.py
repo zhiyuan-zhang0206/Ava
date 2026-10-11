@@ -85,6 +85,7 @@ def test_render_restart_completed_marker_external_source_unchanged():
 
 
 async def test_claim_node_idle_enter_publishes_full_window_snapshot(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,

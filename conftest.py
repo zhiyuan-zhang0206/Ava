@@ -3,12 +3,13 @@
 Only `pytest_plugins` belongs here (pytest accepts it in a root conftest only).
 Living at the repo root, these plugins apply to every test file in the repository
 instead of just the `tests/` tree, so a test in any package directory gets the
-same isolation guards and throwaway data plane as one under `tests/`.
+same isolation guards as one under `tests/`. Ordinary fixture dependencies
+admit configuration and throwaway resources only for their real consumers.
 
 Order is load-bearing:
 
 1. `env_bootstrap` first. It redirects `AVA_HOME`, pins the cluster-scope
-   environment, and builds Settings; all of that must happen before any project
+   environment without building Settings; isolation must happen before any project
    module is imported, and it fails the run loudly when a project module was
    already loaded (`_assert_env_precedes_project_imports`).
 2. `leak_guard` second, ahead of every other function-scoped autouse fixture:
@@ -22,12 +23,11 @@ Order is load-bearing:
    so these two restore-after-every-test fixtures see (and put back) whatever
    the later autouse fixtures do. The identity guard receives its SDK context
    slot through a consumer-local fixture override; unrelated tests have no slot.
-4. The hook-only `static_environment` loads before `provisioning`, which imports
-   its mode predicate. It changes data-plane setup only for an explicit static
-   process. `provisioning` stays before `guards`: autouse fixtures are set up
-   alphabetically, and `_clean_state` (in `provisioning`) sorts ahead of the
-   `_guard_*` fixtures. The hooks in `provisioning` also stay registered
-   before `collection_guard` and the stall probe, as they were.
+4. `static_environment` loads before its mode consumer `provisioning`.
+   `guards` also owns the shared native driver boundary.
+   The default driver refusal applies to every test; resource fixtures open
+   their own access and cleanup windows. Static processes never admit resources.
+   Heavy CLI and Gateway behavior guards bind beside their actual consumers.
 5. The remaining hook plugins and pytester subprocess harness follow.
    Opt-in unit, SDK, model, serving, logging and retry fixtures bind beside consumers.
 """
@@ -40,7 +40,6 @@ pytest_plugins = [
     "tests.fixtures.static_environment",
     "tests.fixtures.provisioning",
     "tests.fixtures.guards",
-    "cli.commands.tests.health_port_guard",
     # Directory-level fixtures that follow their tests (`PATH_SCOPES`), not a conftest.
     "tests.fixtures.path_scopes",
     # Stall forensics (task #3513: the asyncio probe under `-o faulthandler_timeout=N`)

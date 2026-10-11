@@ -43,6 +43,7 @@ def pg_data(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def test_foreign_redis_keeps_acl_and_config(
+    redis_access: None,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -147,6 +148,7 @@ def test_pooler_birth_change_prevents_reload(
 
 
 def test_redis_maintenance_reconnect_cannot_shutdown_another_connection(
+    redis_access: None,
     monkeypatch: pytest.MonkeyPatch,
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
@@ -242,6 +244,7 @@ def _assert_warm_pg_repeat(
 
 
 def test_real_owned_postgres_resume_and_fast_stop(
+    postgres_access: None,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
@@ -366,6 +369,7 @@ def test_pgdata_symlink_cannot_adopt_another_homes_receipt(
 
 
 def test_real_stopped_postmaster_cannot_pass_warm_readiness(
+    postgres_access: None,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
@@ -402,6 +406,7 @@ def test_real_stopped_postmaster_cannot_pass_warm_readiness(
 
 
 def test_real_interrupted_admission_completes_same_postmaster(
+    postgres_access: None,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],

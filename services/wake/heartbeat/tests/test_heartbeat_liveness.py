@@ -154,6 +154,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_missing_probe_never_fabricates_online_or_observation_time(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         *,
@@ -176,6 +177,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_merge_retains_actual_probe_time(
         self,
+        redis_url: str,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         *,
@@ -208,6 +210,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_probe_timeout_comes_from_settings(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
@@ -258,6 +261,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_lease_expired_idling_goes_offline(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -294,6 +298,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_live_idling_stays_online(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -326,6 +331,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_machine_offline_marks_every_agent_offline(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -365,6 +371,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_single_probe_failure_is_not_offline(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -392,6 +399,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_probe_failures_accumulate_and_reset(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -472,6 +480,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_pass_announces_only_liveness_edges(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
@@ -566,6 +575,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_preclaim_idling_stays_unknown(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -601,6 +611,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_terminated_rows_are_never_judged(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -641,6 +652,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_unregistered_machine_stays_unknown(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -675,6 +687,7 @@ class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_merge_is_offline_recovery_ready(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,

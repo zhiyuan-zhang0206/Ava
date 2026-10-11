@@ -291,7 +291,7 @@ def test_data_plane_unconfigured_skipped(
     assert _upstream["pg"] == [] and _upstream["redis"] == []
 
 
-def test_probe_postgres_reports_refused():
+def test_probe_postgres_reports_refused(postgres_access: None):
     """A dead endpoint yields an error string, not an exception. (The exact
     wording differs by platform — "Connection refused" on Linux, "Connection
     reset" on macOS — so only the failure is asserted.)"""
@@ -299,7 +299,7 @@ def test_probe_postgres_reports_refused():
     assert err is not None and "connection" in err.lower()
 
 
-def test_probe_redis_reports_refused():
+def test_probe_redis_reports_refused(redis_access: None):
     """A dead endpoint yields an error string, not an exception. (Wording varies
     by platform — see probe_postgres's twin.)"""
     err = _hp.probe_redis(f"redis://127.0.0.1:{_free_port()}/0")

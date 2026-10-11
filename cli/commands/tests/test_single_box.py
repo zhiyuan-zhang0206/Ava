@@ -229,7 +229,9 @@ def _birth(
 
 
 @pytest.fixture
-def configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Born]:
+def configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, postgres_access: None, redis_access: None
+) -> Iterator[Born]:
     # These commands simulate a process entry and deliver its unit environment.
     with patch.dict(os.environ):
         born = _configure(monkeypatch, tmp_path)

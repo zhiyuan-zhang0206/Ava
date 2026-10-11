@@ -34,7 +34,7 @@ def _own_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool[Any]]:
+def pool(db_url: str) -> Iterator[ConnectionPool[Any]]:
     """The daemon's shape: one pool on the cluster DB, shared across "restarts"."""
     p = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
     try:

@@ -64,6 +64,7 @@ async def test_merged_effort_refusal_has_no_restart_or_config_effects(
 
 
 async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
+    redis_url: str,
     op_executor: ThreadPoolExecutor,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,

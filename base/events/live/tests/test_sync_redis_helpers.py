@@ -5,7 +5,7 @@ from __future__ import annotations
 from base.events.live.bus import EventBus
 
 
-def test_sync_redis_ping() -> None:
+def test_sync_redis_ping(redis_url: str) -> None:
     client = EventBus.from_settings().sync_redis()
     try:
         assert client.ping() is True  # pyright: ignore[reportUnknownMemberType]
@@ -13,7 +13,7 @@ def test_sync_redis_ping() -> None:
         client.close()
 
 
-def test_sync_redis_decode_responses_passthrough() -> None:
+def test_sync_redis_decode_responses_passthrough(redis_url: str) -> None:
     client = EventBus.from_settings().sync_redis(decode_responses=True)
     try:
         client.set("ava:test:connect-helper", "v")

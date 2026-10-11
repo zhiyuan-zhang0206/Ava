@@ -29,6 +29,22 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
+@pytest.fixture
+def _dashboard_supply_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Endpoint rendering does not dial its synthetic connection inputs.
+
+    The optional dashboard supplier retains its existing unavailable fallback;
+    the separate native endpoint test still dials the actual private database.
+    """
+
+    def unavailable(_database: object) -> None:
+        raise RuntimeError("native dashboard supply is unavailable in this rendering test")
+
+    monkeypatch.setattr(
+        "base.telemetry.metrics.grafana_dashboard_supply.render_dashboard_json", unavailable
+    )
+
+
 def _render(
     tmp_path: Path,
     *,
@@ -62,6 +78,7 @@ def _render(
     ],
 )
 def test_rendered_pg_endpoint_follows_connection_config(
+    _dashboard_supply_unavailable: None,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -92,6 +109,7 @@ def test_rendered_pg_endpoint_follows_connection_config(
 
 
 def test_registered_pooler_is_rendered_as_direct_postgres(
+    _dashboard_supply_unavailable: None,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_database: Callable[[], Any],
@@ -148,6 +166,7 @@ def test_registered_pooler_is_rendered_as_direct_postgres(
     ],
 )
 def test_webhook_uses_local_bind_or_reachable_gateway(
+    _dashboard_supply_unavailable: None,
     monkeypatch: pytest.MonkeyPatch,
     observatory: str,
     gateway_url: str,
@@ -181,6 +200,7 @@ def test_webhook_rejects_url_credentials_without_reporting_them(
 
 @pytest.mark.parametrize("path", ["$AVA_REVIEW_LITERAL", "$(touch${IFS}webhook-command-ran)"])
 def test_real_grafana_launcher_preserves_webhook_url_literal(
+    db_url: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     path: str,
@@ -226,6 +246,7 @@ def test_real_grafana_launcher_preserves_webhook_url_literal(
 
 @pytest.mark.parametrize("observatory", ["", "http://observatory.test"])
 def test_rendered_endpoints_reach_private_postgres_and_http_listener(
+    db_conn: None,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     observatory: str,

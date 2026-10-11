@@ -266,7 +266,9 @@ class TestUnderstandEntries:
 
 
 class TestSelfEntries:
-    def test_compact_summary_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_compact_summary_unwraps(
+        self, db_url: str, redis_url: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The summary tuple unwraps before the framework's boot guard runs —
         the DB write then receives the unwrapped string."""
         from ava import self as self_mod

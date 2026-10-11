@@ -45,7 +45,7 @@ def _stub_pool() -> ConnectionPool:
 
 
 @pytest.fixture
-def ops_pool() -> object:
+def ops_pool(db_url: str) -> object:
     """A real ConnectionPool on the session test DB (the dedup path writes the
     shared `api_idempotency` table, method='ops' rows; `_stub_pool` is a
     non-DB stand-in and cannot serve it)."""

@@ -144,6 +144,7 @@ async def _borrow_every_lease_then_release(
 
 
 async def test_more_than_twenty_workload_leases_share_bounded_backends(
+    postgres_access: None,
     record_property: Callable[[str, object], None],
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -307,6 +308,7 @@ async def _settle_requests_across_pools(
 
 
 async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbouncer(
+    postgres_access: None,
     record_property: Callable[[str, object], None],
     monkeypatch: pytest.MonkeyPatch,
     *,

@@ -132,7 +132,7 @@ async def _collect_frames(
 
 
 @pytest.fixture
-def redis_client() -> sync_redis.Redis:
+def redis_client(redis_url: None) -> sync_redis.Redis:
     return sync_redis.Redis.from_url(settings.data_plane.redis_url, decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
 
 

@@ -189,6 +189,7 @@ def test_recycled_pooler_pid_is_not_stopped(
 
 
 def test_real_redis_stops_owned_instance_only(
+    redis_access: None,
     local_plane: None,
     monkeypatch: pytest.MonkeyPatch,
     operator_pipeline: Callable[[], EventPipeline],
@@ -256,6 +257,7 @@ def test_real_redis_stops_owned_instance_only(
 
 
 def test_foreign_redis_directory_refuses_before_local_signals(
+    redis_access: None,
     local_plane: None,
     monkeypatch: pytest.MonkeyPatch,
     operator_pipeline: Callable[[], EventPipeline],
@@ -311,6 +313,7 @@ def test_a_dead_service_whose_ledger_names_only_dead_processes_does_not_refuse(
 
 
 def test_redis_admin_credential_is_independent_of_runtime_url(
+    redis_access: None,
     local_plane: None,
     monkeypatch: pytest.MonkeyPatch,
     operator_pipeline: Callable[[], EventPipeline],
@@ -380,6 +383,7 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
 
 
 def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
+    db_url: str,
     local_plane: None,
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -599,6 +603,7 @@ def _kill_test_poolers(*pids: int | None) -> None:
 
 
 def test_real_start_retains_pooler_with_held_client(
+    db_url: str,
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,

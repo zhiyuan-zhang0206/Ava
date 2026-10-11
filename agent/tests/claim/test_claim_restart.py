@@ -36,6 +36,7 @@ from tests.fixtures.units import spawn_agent
 
 
 async def test_claim_restart_completed_kind_appends_marker_and_continues(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -74,6 +75,7 @@ async def test_claim_restart_completed_kind_appends_marker_and_continues(
 
 
 async def test_claim_system_note_kind_appends_system_note_and_continues(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -130,6 +132,7 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
 
 
 async def test_claim_co_batched_task_notes_preserve_task_links(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -171,6 +174,7 @@ async def test_claim_co_batched_task_notes_preserve_task_links(
 
 
 async def test_claim_system_note_unknown_tag_fails_loud(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -366,6 +370,7 @@ async def test_claim_second_restart_batched_with_restart_completed_exits_again(
 
 
 async def test_claim_restart_completed_while_idle_stays_silent(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -470,6 +475,7 @@ async def test_claim_restart_kind_does_not_publish_committed(
 
 
 async def test_claim_restart_completed_with_payload_overlay_preserves_args(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -545,6 +551,7 @@ async def test_claim_restart_self_source_sets_update_initiated(
 
 
 async def test_claim_restart_completed_system_update_clears_update_initiated(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -577,6 +584,7 @@ async def test_claim_restart_completed_system_update_clears_update_initiated(
 
 
 async def test_claim_restart_completed_non_system_update_preserves_update_initiated(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,

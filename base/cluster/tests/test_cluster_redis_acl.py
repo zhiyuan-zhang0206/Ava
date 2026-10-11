@@ -29,7 +29,7 @@ def _acl_users(admin_url: str) -> list[str]:
         return r.execute_command("ACL", "LIST")  # pyright: ignore[reportUnknownMemberType,reportReturnType]
 
 
-def test_ensure_creates_enabled_channel_scoped_user() -> None:
+def test_ensure_creates_enabled_channel_scoped_user(redis_access: None) -> None:
     with redis_server() as admin_url:
         with redis.Redis.from_url(admin_url, decode_responses=True) as admin:  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
             directory = Path(str(admin.config_get("dir")["dir"]))  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
@@ -56,7 +56,9 @@ def test_ensure_creates_enabled_channel_scoped_user() -> None:
                 r.publish("ava:other:events", "denied")  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_owned_acl_refuses_reconnect_before_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_owned_acl_refuses_reconnect_before_mutation(
+    monkeypatch: pytest.MonkeyPatch, redis_access: None
+) -> None:
     with redis_server() as url:
         with redis.Redis.from_url(url, decode_responses=True) as admin:  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
             directory = Path(str(admin.config_get("dir")["dir"]))  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
@@ -91,7 +93,7 @@ def test_owned_acl_refuses_reconnect_before_mutation(monkeypatch: pytest.MonkeyP
         assert _acl_users(url) == before
 
 
-def test_ensure_grants_the_hosted_dispatcher_psubscribe_pattern() -> None:
+def test_ensure_grants_the_hosted_dispatcher_psubscribe_pattern(redis_access: None) -> None:
     """The hosted agent-host dispatcher PSUBSCRIBEs `<prefix>:inbound:*`. Redis
     ACL checks the subscription PATTERN, not the channels it would match, and
     `&<prefix>:*` alone rejects it — the dispatcher reconnect-looped on
@@ -121,7 +123,7 @@ def test_ensure_grants_the_hosted_dispatcher_psubscribe_pattern() -> None:
             )
 
 
-def test_ensure_is_idempotent() -> None:
+def test_ensure_is_idempotent(redis_access: None) -> None:
     with redis_server() as admin_url:
         for _ in range(2):
             ensure_cluster_redis_acl(
@@ -133,7 +135,7 @@ def test_ensure_is_idempotent() -> None:
         assert sum("ava_feat_x" in u for u in _acl_users(admin_url)) == 1
 
 
-def test_ensure_invalidates_the_previous_secret_on_rotation() -> None:
+def test_ensure_invalidates_the_previous_secret_on_rotation(redis_access: None) -> None:
     """Redis ACL passwords are additive by default (`>password` ADDS to the
     valid set rather than replacing it) — re-affirming with a NEW secret must
     still drop the old one, or a "rotated" secret keeps working forever."""
@@ -166,7 +168,7 @@ def test_ensure_invalidates_the_previous_secret_on_rotation() -> None:
             assert r.ping()  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_ensure_refuses_empty_runtime_password() -> None:
+def test_ensure_refuses_empty_runtime_password(redis_access: None) -> None:
     """Redis always authenticates: an empty runtime password is refused before
     any ACL effect, never turned into a password-less (`nopass`) user."""
     with redis_server() as admin_url:
@@ -181,7 +183,7 @@ def test_ensure_refuses_empty_runtime_password() -> None:
         assert _acl_users(admin_url) == before
 
 
-def test_runtime_user_is_confined_to_cluster_data_and_channel_prefix() -> None:
+def test_runtime_user_is_confined_to_cluster_data_and_channel_prefix(redis_access: None) -> None:
     """The runtime identity reads and writes this cluster's own instance keyspace
     (every cluster owns its Redis, and `ava.REDIS` plus the gateway caches use
     unprefixed keys) and publishes only under its channel prefix; it cannot

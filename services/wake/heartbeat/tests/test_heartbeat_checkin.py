@@ -251,6 +251,7 @@ class TestConsecutiveFailureBackoff:
 
     def test_backoff_skips_agent_until_deadline(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -281,6 +282,7 @@ class TestConsecutiveFailureBackoff:
 
     def test_backed_off_agent_does_not_consume_limit_slots(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -360,6 +362,7 @@ class TestConsecutiveFailureBackoff:
 
     def test_reconcile_increments_streak_when_checkin_produced_no_turn(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -390,6 +393,7 @@ class TestConsecutiveFailureBackoff:
 
     def test_reconcile_resets_streak_when_checkin_produced_a_turn(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -425,6 +429,7 @@ class TestConsecutiveFailureBackoff:
 
     def test_reconcile_resets_streak_on_fresh_activity_without_pending(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,
@@ -460,6 +465,7 @@ class TestConsecutiveFailureBackoff:
 
     def test_reconcile_stops_tracking_agents_outside_daemon_lanes(
         self,
+        redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         *,

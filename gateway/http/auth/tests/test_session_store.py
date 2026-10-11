@@ -29,7 +29,7 @@ def _id(name: str) -> str:
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool[psycopg.Connection[Any]]]:
+def pool(db_url: str) -> Iterator[ConnectionPool[psycopg.Connection[Any]]]:
     session_pool: ConnectionPool[psycopg.Connection[Any]] = ConnectionPool(
         settings.data_plane.db_url,
         min_size=1,

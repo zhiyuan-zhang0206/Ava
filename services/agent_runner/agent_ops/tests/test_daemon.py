@@ -548,7 +548,7 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
 
 
 @pytest.fixture
-def ops_pool() -> object:
+def ops_pool(db_url: str) -> object:
     """A real ConnectionPool on the session test DB (the dedup path writes the
     shared `api_idempotency` table, method='ops' rows; `_stub_pool` is a
     non-DB stand-in and cannot serve it)."""

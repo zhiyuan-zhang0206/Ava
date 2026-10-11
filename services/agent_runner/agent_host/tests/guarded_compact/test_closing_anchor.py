@@ -31,6 +31,7 @@ class UsageSummary(SummaryModel):
 
 @pytest.mark.parametrize("fault", ["none", "after_result", "after_ack"])
 async def test_saved_original_closing_usage_stamps_source_before_replacement(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

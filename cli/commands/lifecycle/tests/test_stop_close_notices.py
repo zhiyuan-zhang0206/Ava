@@ -183,6 +183,7 @@ def test_notices_are_written_once_in_the_terminals_phase_before_the_data_plane_s
 
 
 def test_the_stop_writes_the_owners_inbound_to_the_database(
+    redis_url: str,
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,

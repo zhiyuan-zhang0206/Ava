@@ -140,7 +140,7 @@ def test_module_dir_lists_skills_with_attr_form(fake_skills_dir: Path) -> None:
 # ─── module-level __getattr__ → SkillProxy ───────────────────────────────
 
 
-def test_module_getattr_returns_proxy(fake_skills_dir: Path) -> None:
+def test_module_getattr_returns_proxy(db_url: str, fake_skills_dir: Path) -> None:
     body = "# Steps\n\n1. Do X\n"
     _write_skill(fake_skills_dir, "sk", "name: sk\ndescription: d", body=body)
     proxy = skills_mod.sk
@@ -157,7 +157,7 @@ def test_module_getattr_returns_proxy(fake_skills_dir: Path) -> None:
 
 @pytest.mark.usefixtures("sdk_model_owner")
 def test_help_on_skill_renders_full_body(
-    fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
+    db_url: str, fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Regression: `ava.help(skill)` must render the full SKILL.md, not just
     the heading. The body lives in ``__doc__`` (path line + full body); the
@@ -379,7 +379,7 @@ def _fake_plugin_skills(fake_skills_dir: Path, plugin: str) -> Path:
     return d
 
 
-def test_plugin_skill_nested_access(fake_skills_dir: Path) -> None:
+def test_plugin_skill_nested_access(db_url: str, fake_skills_dir: Path) -> None:
     d = _fake_plugin_skills(fake_skills_dir, "superpowers")
     _write_skill(d, "brainstorming", "name: brainstorming\ndescription: bs", body="# Steps\n")
     ns = skills_mod.superpowers
@@ -468,7 +468,7 @@ def _root_skill_repo(root: Path) -> None:
     )
 
 
-def test_root_skill_is_both_skill_and_namespace(fake_skills_dir: Path) -> None:
+def test_root_skill_is_both_skill_and_namespace(db_url: str, fake_skills_dir: Path) -> None:
     """A folder with its own SKILL.md AND skill-bearing children is a root skill:
     the node descends to children AND carries the folder's own skill."""
     _root_skill_repo(fake_skills_dir)
@@ -490,7 +490,7 @@ def test_root_skill_is_both_skill_and_namespace(fake_skills_dir: Path) -> None:
 
 @pytest.mark.usefixtures("sdk_model_owner")
 def test_root_skill_help_renders_body_then_children(
-    fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
+    db_url: str, fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`ava.help` on a root skill shows its own SKILL.md (router) AND lists its
     child adapters — the package-with-a-body view."""

@@ -303,7 +303,7 @@ def test_every_consumption_records_one_event_and_nothing_is_remembered(
     assert not hasattr(skills_mod, "_recorded_skill_invocations")
 
 
-def test_files_read_skill_md_silent_outside_agent(fake_skills_dir: Path) -> None:
+def test_files_read_skill_md_silent_outside_agent(db_url: str, fake_skills_dir: Path) -> None:
     """Outside an agent process (no bound identity) `require_agent_id` raises
     and attribution skips silently — the read itself keeps working (skill
     attribution is telemetry, and this helper must never break a file read)."""
@@ -353,6 +353,7 @@ def test_proxy_doc_consumes_and_records(
 
 
 def test_consuming_a_skill_lands_a_skill_invoked_row(
+    redis_url: str,
     fake_skills_dir: Path,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,

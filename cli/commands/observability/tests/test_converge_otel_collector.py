@@ -84,6 +84,7 @@ def test_generate_config_bakes_settings(
 
 
 def test_generate_config_two_state_observability_url(
+    db_url: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_database: Callable[[], Any],

@@ -18,6 +18,7 @@ from tests.fixtures.model_catalog import AddBindings
 
 
 async def test_commit_response_lost_before_provider_call_is_unknown_without_retry(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

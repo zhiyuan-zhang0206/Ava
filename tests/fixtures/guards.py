@@ -1,26 +1,29 @@
 """Autouse guards: keep every test hermetic and off the host.
 
-The autouse fixtures either forbid a real host effect (native helper
-converge, os.exec*, the bootstrap fetch, service readiness / health-port probes,
-the schedule manager's session backend, the label LLM) or restores process-global
-state a test may have leaked (metering wraps, OTLP export, the stdlib logging
-bridge and its logger levels, the database-authority refusal; a leaked environment key,
-`AVA_HOME` included, is the root leak guard's: `tests/fixtures/leak_guard.py`). Opt-outs are per-test
+Lightweight autouse fixtures forbid real host effects at their execution
+boundaries (helper converge, os.exec* and bootstrap fetch) or restore
+process-global state (metering, existing telemetry and stdlib logger state).
+CLI and Gateway owners request their heavier readiness, native helper,
+schedule-control and label-LLM guards through ordinary fixture dependencies.
+A leaked environment key,
+`AVA_HOME` included, is the root leak guard's: `tests/fixtures/leak_guard.py`. Opt-outs are per-test
 markers documented on the fixture that honours them.
-
-Order matters and is kept: pytest sets same-scope autouse fixtures up in
-registration order, and within one module alphabetically, so this module is
-listed after `tests.fixtures.provisioning` (`_clean_state` sorts before `_guard_*`)
-in the root `conftest.py`.
 """
 
 import contextlib
 import os
 import sys
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from typing import Any
 
+import psycopg
 import pytest
+import redis
+import redis.asyncio
+from redis.asyncio.connection import AbstractConnection as AsyncRedisConnection
+from redis.connection import AbstractConnection as RedisConnection
+
+__all__ = ["refuse_native_data_plane", "stub_everywhere"]
 
 
 @pytest.fixture(autouse=True)
@@ -47,19 +50,34 @@ def _otlp_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
     event-emitting test. base/telemetry/otlp/tests/test_telemetry_otlp.py re-enables the
     flag and installs in-memory providers where the OTLP path is under test.
     """
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", False)
+    module = sys.modules.get("base.config")
+    if module is not None and "Settings" in vars(module):
+        from tests.fixtures.env_bootstrap import permissions_helper_port
+
+        monkeypatch.setattr(module.settings.observability, "telemetry_otlp_enabled", False)
+        monkeypatch.setattr(
+            module.settings.services, "permissions_helper_port", permissions_helper_port
+        )
 
 
 @pytest.fixture(autouse=True)
-def _telemetry_event_store_off() -> None:
-    """Keep the emitter's telemetry_events sink off for the whole test session: the drain
-    thread would otherwise write the shared test database from every event-emitting test,
-    and a late batch could land in the next test's rows. Tests of the sink and of its
-    readers call `event_store.set_enabled(enabled=True)` themselves and switch it off again.
-    """
-    from base.telemetry import event_store
+def _telemetry_event_store_off() -> Iterator[None]:
+    """Restore an existing telemetry sink without loading telemetry for a pure test.
 
-    event_store.set_enabled(enabled=False)
+    DB consumers disable the sink before admitting writes. A late telemetry
+    producer with no DB dependency remains behind the default driver refusal.
+    Drain any pipeline created by this test before its access window closes.
+    """
+    event_store = sys.modules.get("base.telemetry.event_store")
+    if event_store is not None:
+        event_store.set_enabled(enabled=False)
+    yield
+    module = sys.modules.get("base.telemetry.emitter")
+    if module is not None:
+        module.sync()
+        event_store = sys.modules.get("base.telemetry.event_store")
+        if event_store is not None:
+            event_store.set_enabled(enabled=False)
 
 
 @pytest.fixture
@@ -98,11 +116,11 @@ def _restore_metering(sdk_metering: None) -> None:
     # Its consumer-local override reads the real installation ledger.
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Spawn with prompt runs `generate_label_async` in gateway BackgroundTasks, which
     calls `build_chat_model` and really hits the DeepSeek API — polluting network,
-    slowing the suite, making it unstable. The autouse stub returns a fake that
+    slowing the suite, making it unstable. The Gateway owner's stub returns a fake that
     raises RuntimeError; a triggered BackgroundTask just writes the error into
     loguru (label stays NULL, spawn unaffected). `tests/components/gateway/test_labels.py`
     monkeypatches a new fake LLM, overriding this default.
@@ -118,9 +136,9 @@ def _stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
         return _RaiseLLM()
 
     # `services.derived.labeler.labeler` is where `generate_label_async` actually resides;
-    # ImportError/AttributeError suppress a module or attribute that is not importable.
-    with contextlib.suppress(ImportError, AttributeError):
-        monkeypatch.setattr("services.derived.labeler.labeler.build_chat_model", _fake_factory)
+    from services.derived.labeler import labeler
+
+    monkeypatch.setattr(labeler, "build_chat_model", _fake_factory)
 
 
 # The old `_stub_os_cron` patched only pytest; registration leaked in the e2e
@@ -128,7 +146,7 @@ def _stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
 # `AVA_OS_JOBS_ENABLED=false` setting covers both processes.
 
 
-def _stub_everywhere(
+def stub_everywhere(
     monkeypatch: pytest.MonkeyPatch, module: object, name: str, stub: object
 ) -> None:
     """Replace `module.name` AND every already-imported alias of it.
@@ -180,7 +198,6 @@ def _guard_permissions_helper_native_io(
     if request.node.get_closest_marker("native_permissions_helper") is not None:
         return
     from services.desktop import permissions_helper
-    from services.desktop.permissions_helper import launchd_job, lifecycle
 
     def forbidden(*_args: object, **_kwargs: object) -> Any:
         pytest.fail(
@@ -189,14 +206,28 @@ def _guard_permissions_helper_native_io(
             "proof with exact-home cleanup may use @pytest.mark.native_permissions_helper"
         )
 
-    _stub_everywhere(monkeypatch, permissions_helper, "converge", forbidden)
+    stub_everywhere(monkeypatch, permissions_helper, "converge", forbidden)
+
+
+@pytest.fixture
+def permissions_helper_native_io(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Protect direct owner-private native calls beside helper and CLI consumers."""
+    if request.node.get_closest_marker("native_permissions_helper") is not None:
+        return
+    from services.desktop.permissions_helper import launchd_job, lifecycle
+
+    def forbidden(*_args: object, **_kwargs: object) -> Any:
+        pytest.fail("permissions helper native effect forbidden: mock its native command boundary")
+
     monkeypatch.setattr(lifecycle, "run_bounded", forbidden)
     monkeypatch.setattr(launchd_job, "run_bounded", forbidden)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _guard_schedule_session_control(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Autouse safety net: the schedule API's control paths reach the real session
+    """The Gateway owner's schedule guard: control paths reach the real session
     backend (`capture`) and wait for a schedule-manager service that no test
     runs (`request_sync` waits for its queued row to be consumed). Under
     `TestClient(app)` that would hit the real backend and stall every start /
@@ -214,11 +245,11 @@ def _guard_schedule_session_control(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gateway.schedules.session_control.capture", _noop_capture)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _guard_service_readiness(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Autouse safety net: `cli.commands.lifecycle.root_driver.wait_for_service_tree` reports every
+    """The CLI owner's guard: `cli.commands.lifecycle.root_driver.wait_for_service_tree` reports every
     service ready without polling anything.
 
     The start path's readiness wait is bounded by `SERVICE_READY_TIMEOUT_S` (180 s),
@@ -241,7 +272,7 @@ def _guard_service_readiness(
     )
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _test_homes_get_their_own_ports(
     monkeypatch: pytest.MonkeyPatch, session_ports: dict[str, int]
 ) -> None:
@@ -379,27 +410,30 @@ def stdlib_logging_isolated() -> Generator[None]:
     """
     import logging
 
-    from base.log import _FIRST_PARTY_LOGGER_NAMES, _StdlibInterceptHandler
-
     root = logging.getLogger()
     saved_handlers = root.handlers[:]
-    saved_levels = [
-        (logger, logger.level)
-        for logger in (
-            root,
-            *(
-                logging.getLogger(name)
-                for name in (*_FIRST_PARTY_LOGGER_NAMES, *_INTERCEPT_LEVELED_THIRD_PARTY)
-            ),
+    saved_levels = {
+        name: logger.level
+        for name, logger in logging.Logger.manager.loggerDict.items()
+        if isinstance(logger, logging.Logger)
+    }
+    root_level = root.level
+    root.handlers = [
+        handler
+        for handler in saved_handlers
+        if not (
+            type(handler).__module__ == "base.log.sinks"
+            and type(handler).__name__ == "_StdlibInterceptHandler"
         )
     ]
-    root.handlers = [h for h in saved_handlers if not isinstance(h, _StdlibInterceptHandler)]
     try:
         yield
     finally:
         root.handlers = saved_handlers
-        for logger, level in saved_levels:
-            logger.setLevel(level)
+        root.setLevel(root_level)
+        for name, logger in logging.Logger.manager.loggerDict.items():
+            if isinstance(logger, logging.Logger):
+                logger.setLevel(saved_levels.get(name, logging.NOTSET))
 
 
 @pytest.fixture(autouse=True)
@@ -419,3 +453,80 @@ def _no_stdlib_telemetry_bridge() -> Iterator[None]:
     """
     with stdlib_logging_isolated():
         yield
+
+
+# Save each public/class descriptor before monkeypatching, preserving classmethod
+# binding when a resource fixture restores it in its own monkeypatch window.
+_POSTGRES_BOUNDARIES: list[tuple[Any, str]] = [(psycopg, "connect")]
+for _connection in (psycopg.Connection, psycopg.AsyncConnection):
+    _POSTGRES_BOUNDARIES.extend((_connection, name) for name in ("connect", "cursor", "execute"))
+for _cursor in (psycopg.Cursor, psycopg.AsyncCursor):
+    _POSTGRES_BOUNDARIES.extend((_cursor, name) for name in ("execute", "executemany"))
+_REDIS_BOUNDARIES: list[tuple[Any, str]] = [
+    (client, "execute_command") for client in (redis.Redis, redis.asyncio.Redis)
+]
+for _transport in (RedisConnection, AsyncRedisConnection):
+    _REDIS_BOUNDARIES.extend((_transport, name) for name in ("connect", "send_packed_command"))
+
+Boundary = tuple[Any, str, Any, Any]
+
+
+def _save(boundaries: list[tuple[Any, str]]) -> list[Boundary]:
+    return [(owner, name, vars(owner)[name], getattr(owner, name)) for owner, name in boundaries]
+
+
+def _refusal(resource: str, *, reason: str | None = None) -> Callable[..., Any]:
+    def forbidden(*_args: object, **_kwargs: object) -> Any:
+        pytest.fail(
+            reason
+            or (
+                f"Unrequested {resource} access: request the corresponding resource fixture "
+                "(db_url/db_conn/database or redis_url/event_bus) on the real consumer."
+            )
+        )
+
+    return forbidden
+
+
+def refuse_native_data_plane(patch: pytest.MonkeyPatch, *, reason: str | None = None) -> None:
+    """Install the same driver boundary for an entire static process or a test."""
+    for boundaries, resource in ((_POSTGRES_BOUNDARIES, "Postgres"), (_REDIS_BOUNDARIES, "Redis")):
+        for owner, name in boundaries:
+            forbidden = _refusal(resource, reason=reason)
+            stub_everywhere(patch, owner, name, forbidden)
+
+
+@pytest.fixture(autouse=True)
+def native_data_plane_guard(
+    monkeypatch: pytest.MonkeyPatch,
+    pytestconfig: pytest.Config,
+) -> tuple[list[Boundary], list[Boundary]]:
+    """Refuse both drivers until an explicit resource dependency admits one."""
+    postgres, redis_driver = _save(_POSTGRES_BOUNDARIES), _save(_REDIS_BOUNDARIES)
+    reason = (
+        "Static tests cannot use Postgres or Redis; use the native test environment."
+        if pytestconfig.getoption("test_environment", default="native") == "static"
+        else None
+    )
+    refuse_native_data_plane(monkeypatch, reason=reason)
+    return postgres, redis_driver
+
+
+@pytest.fixture
+def postgres_access(
+    native_data_plane_guard, process_config: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The database fixture's access window; teardown restores the refusal first."""
+    for owner, name, original, bound in native_data_plane_guard[0]:
+        stub_everywhere(monkeypatch, owner, name, bound)
+        monkeypatch.setattr(owner, name, original)
+
+
+@pytest.fixture
+def redis_access(
+    native_data_plane_guard, process_config: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Redis fixture's access window, independent of database access."""
+    for owner, name, original, bound in native_data_plane_guard[1]:
+        stub_everywhere(monkeypatch, owner, name, bound)
+        monkeypatch.setattr(owner, name, original)

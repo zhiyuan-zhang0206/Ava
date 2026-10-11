@@ -13,7 +13,7 @@ MACHINE = "test-runner-1"
 
 
 @pytest.fixture
-def pool():
+def pool(db_url: str):
     p = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
     try:
         yield p

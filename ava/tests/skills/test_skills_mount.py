@@ -202,7 +202,7 @@ def _redundant_skill_structure(root: Path) -> None:
     )
 
 
-def test_auto_promote_same_named_child_to_root(fake_skills_dir: Path) -> None:
+def test_auto_promote_same_named_child_to_root(db_url: str, fake_skills_dir: Path) -> None:
     """When a namespace has no own SKILL.md but a child with the same name
     has one, the child is auto-promoted to root skill. `ava.skills.ava_fleet`
     works directly — no more `ava_fleet.ava_fleet` redundancy."""
@@ -223,6 +223,7 @@ def test_auto_promote_same_named_child_to_root(fake_skills_dir: Path) -> None:
 
 
 def test_auto_promote_backward_compat_child_still_accessible(
+    db_url: str,
     fake_skills_dir: Path,
 ) -> None:
     """`ava.skills.ava_fleet.ava_fleet` still works after auto-promotion —
@@ -255,6 +256,7 @@ def test_auto_promote_names_only_emits_root_not_duplicate(
 
 
 def test_auto_promote_does_not_override_existing_root_skill(
+    db_url: str,
     fake_skills_dir: Path,
 ) -> None:
     """When a folder already has its own SKILL.md (a natural root skill),
@@ -313,7 +315,7 @@ def test_auto_promote_deep_nesting(fake_skills_dir: Path) -> None:
 
 @pytest.mark.usefixtures("sdk_model_owner")
 def test_auto_promote_help_renders_root_skill(
-    fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
+    db_url: str, fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`ava.help` on an auto-promoted skill shows the full SKILL.md body
     and lists its children."""

@@ -19,8 +19,8 @@ from base.telemetry import event_store
 from base.telemetry.emitter import Event, category_for_kind
 
 
-@pytest.fixture(autouse=True)
-def _fresh_sink() -> Iterator[None]:
+@pytest.fixture
+def _fresh_sink(db_url: str) -> Iterator[None]:
     event_store.set_enabled(enabled=True)
     event_store.reset_store()
     yield
@@ -55,6 +55,7 @@ def _rows(db_conn: psycopg.Connection[Any], marker: str) -> list[tuple[Any, ...]
 
 
 def test_telemetry_and_log_events_land_and_audit_events_do_not(
+    _fresh_sink: None,
     db_conn: psycopg.Connection[Any],
     database: Database,
 ) -> None:
@@ -74,7 +75,7 @@ def test_telemetry_and_log_events_land_and_audit_events_do_not(
 
 
 def test_only_events_somebody_reads_land(
-    db_conn: psycopg.Connection[Any], database: Database
+    _fresh_sink: None, db_conn: psycopg.Connection[Any], database: Database
 ) -> None:
     marker = uuid4().hex
     event_store.store_events(
@@ -148,7 +149,7 @@ def test_the_mirror_replay_applies_the_same_judgment() -> None:
 
 
 def test_a_nul_character_is_replaced_not_fatal(
-    db_conn: psycopg.Connection[Any], database: Database
+    _fresh_sink: None, db_conn: psycopg.Connection[Any], database: Database
 ) -> None:
     marker = uuid4().hex
     event_store.store_events(database, [_event("exec", marker, body="a\x00b")])
@@ -158,7 +159,10 @@ def test_a_nul_character_is_replaced_not_fatal(
 
 
 def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, database: Database
+    _fresh_sink: None,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     marker = uuid4().hex
     emitted: list[dict[str, Any]] = []
@@ -193,6 +197,7 @@ def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
 
 
 def test_a_process_without_database_authority_turns_the_sink_off(
+    _fresh_sink: None,
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
 ) -> None:

@@ -92,6 +92,7 @@ async def _resurrected(
 
 @pytest.mark.parametrize("missing", ["applied", "observed", "resource_closure"])
 async def test_same_host_cannot_skip_missing_predecessor_evidence(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     missing: str,
@@ -149,6 +150,7 @@ async def test_same_host_cannot_skip_missing_predecessor_evidence(
 
 
 async def test_same_pid_different_birth_requires_exact_predecessor_exit(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,

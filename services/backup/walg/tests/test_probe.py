@@ -206,7 +206,7 @@ def _dial(pg: PgInstance, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_a_healthy_archiver_reads_healthy_and_an_idle_one_is_not_late(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, postgres_access: None
 ) -> None:
     with archiving_postgres() as pg, pg.connect() as conn:
         _dial(pg, monkeypatch)
@@ -234,7 +234,7 @@ def test_a_healthy_archiver_reads_healthy_and_an_idle_one_is_not_late(
 
 
 def test_a_failing_archive_command_is_reported_with_work_waiting(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, postgres_access: None
 ) -> None:
     sandbox.set_mode("fail")
     with archiving_postgres() as pg, pg.connect() as conn:
@@ -252,7 +252,7 @@ def test_a_failing_archive_command_is_reported_with_work_waiting(
 
 
 def test_a_hung_archive_command_is_caught_by_the_age_of_the_waiting_wal(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, postgres_access: None
 ) -> None:
     """A command that neither succeeds nor fails leaves `failing_now` false: only the
     age of the queued segment shows it."""
@@ -283,7 +283,9 @@ def test_a_hung_archive_command_is_caught_by_the_age_of_the_waiting_wal(
         sandbox.set_mode("ok")
 
 
-def test_the_application_login_cannot_list_the_archive_queue(sandbox: Sandbox) -> None:
+def test_the_application_login_cannot_list_the_archive_queue(
+    sandbox: Sandbox, postgres_access: None
+) -> None:
     """Why the probe dials the administrator socket: the unprivileged login the other
     health checks use is refused the queue listing, the only way to see how long a
     segment has been waiting."""

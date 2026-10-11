@@ -68,7 +68,7 @@ def _wait_for(path: Path) -> None:
 
 
 @pytest.fixture
-def throwaway_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+def throwaway_root(monkeypatch: pytest.MonkeyPatch, postgres_access: None) -> Iterator[Path]:
     """Point the throwaway root (instance dirs + registry) at a scratch dir.
 
     Deliberately NOT `tmp_path`: the Postgres socket path (`<dir>/.s.PGSQL.<port>`)

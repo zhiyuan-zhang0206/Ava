@@ -26,6 +26,7 @@ from tests.fixtures.units import spawn_agent
 @pytest.mark.parametrize("probe_age", [None, 0, 600])
 @pytest.mark.parametrize("lease_offset", [None, -60, 60])
 def test_snapshot_retains_independent_probe_and_lease_clocks(
+    redis_url: str,
     db_conn: psycopg.Connection,
     probe_age: int | None,
     lease_offset: int | None,
@@ -172,6 +173,7 @@ def test_launch_failure_remains_visible_without_a_fresh_host_probe() -> None:
 
 
 def test_launch_failure_projects_on_card_and_detail(
+    redis_url: str,
     db_conn: psycopg.Connection,
     *,
     model_catalog: ModelCatalog,

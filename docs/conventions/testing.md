@@ -21,7 +21,15 @@ env -u VIRTUAL_ENV python scripts/host_ops/guard_editable_venv.py .
 env -u VIRTUAL_ENV uv sync --frozen
 ```
 
-Pytest isolates its home and defaults to throwaway native Postgres/Redis. Other development
+Pytest isolates its home and refuses unrequested data-plane access. Native
+resources start only through real fixture dependencies: `db_url`, `db_conn`,
+`database`, `redis_url` or `event_bus`. An assembled Gateway consumer requests
+`gateway_data_plane` (or its existing Gateway owner fixture). A test owning its
+own native instance requests `postgres_access` or `redis_access` and retains
+responsibility for that instance's cleanup. These access fixtures do not start
+the shared resources. Resource URLs and per-test cleanup belong to function
+fixtures; the session holds only requested instances and configuration values.
+Other development
 tools that import application code must set a temporary `AVA_HOME` before doing
 so; unset `AVA_HOME` selects `~/.ava`, which can be a running deployment.
 See [development setup](dev-setup.md#development-in-a-worktree).

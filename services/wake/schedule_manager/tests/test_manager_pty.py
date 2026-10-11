@@ -35,15 +35,15 @@ pytestmark = [
 ]
 
 
-@pytest.fixture(scope="module")
-def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+@pytest.fixture
+def _pty_home(
+    db_url: str, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[str]:
     """A DEDICATED home, with its own pty-sessions service, for the schedule sessions.
 
     The service is a subprocess pinned to this home; each schedule launch creates a
     session in it. Torn down by closing every session and stopping the service, so
     no shell outlives the test run."""
-    import os
-
     home = tmp_path_factory.mktemp("pty-sched-home")
     # The schedule runner builds the full gateway settings from the home's
     # .env; point it at the test database so a `sleep 30` schedule stays up
@@ -52,8 +52,7 @@ def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     from base.config import settings as _settings
 
     (home / ".env").write_text(f"AVA_DB_URL={_settings.data_plane.db_url}\n")
-    prior_home = os.environ.get("AVA_HOME")
-    os.environ["AVA_HOME"] = str(home)
+    monkeypatch.setenv("AVA_HOME", str(home))
     service = PtyServiceProcess(home)
     try:
         service.start()
@@ -62,14 +61,10 @@ def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         with contextlib.suppress(client.ServiceUnavailableError, client.ServiceError):
             client.close_all(grace_s=0.5, kill_s=2.0)
         service.stop()
-        if prior_home is None:
-            os.environ.pop("AVA_HOME", None)
-        else:
-            os.environ["AVA_HOME"] = prior_home
 
 
-@pytest.fixture(scope="module")
-def pool() -> Iterator[ConnectionPool[psycopg.Connection]]:
+@pytest.fixture
+def pool(db_url: str, _host_is_serving: None) -> Iterator[ConnectionPool[psycopg.Connection]]:
     from base.config import settings
 
     p: ConnectionPool[psycopg.Connection] = ConnectionPool(
@@ -101,14 +96,14 @@ def _insert_schedule(
     return int(row[0])
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _point_backend_home(monkeypatch: pytest.MonkeyPatch, _pty_home: str) -> None:
     # One variable names the dedicated home for every resolver: the client dials the
     # service socket under it, so the in-process resolver and the service agree.
     monkeypatch.setitem(os.environ, "AVA_HOME", _pty_home)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _host_is_serving(serving_root: RootBirth, _point_backend_home: None) -> Iterator[None]:
     """PTY schedule cases model a gateway that completed its start gate."""
     from base.deploy.lifecycle import start_serving

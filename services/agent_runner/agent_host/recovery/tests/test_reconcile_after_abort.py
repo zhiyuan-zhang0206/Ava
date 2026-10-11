@@ -117,6 +117,7 @@ async def seed_checkpoint(
 
 
 async def test_settled_abort_splits_committed_orphan_and_stale_rows(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
@@ -156,6 +157,7 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
 
 
 async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
@@ -198,6 +200,7 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
 
 
 async def test_next_claim_does_not_re_deliver_any_interrupted_row(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -288,6 +291,7 @@ async def _seed_delta_written_checkpoint(
 
 
 async def test_no_claimed_rows_never_reads_the_checkpoint(
+    redis_url: str,
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
     model_catalog: ModelCatalog,
@@ -318,6 +322,7 @@ async def test_no_claimed_rows_never_reads_the_checkpoint(
 
 
 async def test_only_stale_claims_skip_the_read_and_dead_letter(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
@@ -353,6 +358,7 @@ async def test_only_stale_claims_skip_the_read_and_dead_letter(
 
 
 async def test_mixed_claims_fall_back_for_unproven_orphan(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
@@ -389,6 +395,7 @@ async def test_mixed_claims_fall_back_for_unproven_orphan(
 
 
 async def test_committed_and_later_removed_is_finalized_not_reset(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -421,6 +428,7 @@ async def test_committed_and_later_removed_is_finalized_not_reset(
 
 
 async def test_pending_write_without_successor_is_consumed(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -467,6 +475,7 @@ async def test_pending_write_without_successor_is_consumed(
 
 
 async def test_pending_write_with_unrelated_successor_is_consumed(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -513,6 +522,7 @@ async def test_pending_write_with_unrelated_successor_is_consumed(
 
 
 async def test_unresolved_window_falls_back_to_the_full_read(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: Any,
@@ -553,6 +563,7 @@ async def test_unresolved_window_falls_back_to_the_full_read(
 
 
 async def test_thread_without_messages_writes_falls_back_to_the_full_read(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -586,6 +597,7 @@ async def test_thread_without_messages_writes_falls_back_to_the_full_read(
 
 
 async def test_materialized_thread_with_only_pending_write_falls_back(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,
@@ -734,6 +746,7 @@ async def test_sideload_decodes_inbound_ids_from_write_rows(
 
 
 async def test_reclaimed_row_keeps_its_first_claim_window(
+    redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     model_catalog: ModelCatalog,

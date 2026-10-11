@@ -24,8 +24,6 @@ from pathlib import Path
 
 import psycopg
 
-from base.config import settings
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PROVISIONING = _REPO_ROOT / "tests" / "fixtures" / "provisioning.py"
 
@@ -148,13 +146,13 @@ _EXEMPT: dict[str, str] = {
 }
 
 
-def test_truncate_list_covers_every_public_table() -> None:
+def test_truncate_list_covers_every_public_table(db_url: str) -> None:
     """Every public table is truncated per test (directly, via FK cascade, or
     explicitly exempted) — a new table silently added by a migration fails
     this guard instead of leaking state across tests."""
     truncate = _truncate_list_from_provisioning()
     tables = _schema_tables()
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
+    with psycopg.connect(db_url, autocommit=True) as conn:
         edges = _fk_edges(conn)
 
     covered = _cascade_closure(truncate, edges)
@@ -166,12 +164,12 @@ def test_truncate_list_covers_every_public_table() -> None:
     )
 
 
-def test_exemption_list_has_no_stale_entries() -> None:
+def test_exemption_list_has_no_stale_entries(db_url: str) -> None:
     """An exemption whose table no longer exists (or is now covered by the
     TRUNCATE list) must be dropped — the exemption list is a liability ledger."""
     truncate = _truncate_list_from_provisioning()
     tables = _schema_tables()
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
+    with psycopg.connect(db_url, autocommit=True) as conn:
         edges = _fk_edges(conn)
 
     covered = _cascade_closure(truncate, edges)

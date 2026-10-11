@@ -20,6 +20,7 @@ from tests.fixtures.model_catalog import AddBindings
 
 
 async def test_actual_persisted_pending_write_is_not_materialized_summary_input(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     client: TestClient,

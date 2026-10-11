@@ -159,7 +159,9 @@ def test_format_bytes_reads_at_both_scales() -> None:
     assert base.format_bytes(2**20) == "1 MiB"
 
 
-def test_throwaway_postgres_creates_the_instance_under_the_given_base() -> None:
+def test_throwaway_postgres_creates_the_instance_under_the_given_base(
+    postgres_access: None,
+) -> None:
     """`base=` is where the instance dir actually lands, and teardown removes it
     again — the drill's chosen base is the base used. A short `/tmp` root: the
     Postgres socket path (`<dir>/.s.PGSQL.<port>`) is capped at 103 bytes, so a

@@ -207,6 +207,7 @@ def test_non_git_dir_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
 
 def test_apply_multi_statement_migration_over_prepared_conn(
+    db_conn: None,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
