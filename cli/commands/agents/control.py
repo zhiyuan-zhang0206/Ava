@@ -188,7 +188,7 @@ def send_agent_message(
     import time
     from uuid import uuid4
 
-    from base.agents.messages.delivery.retry import NETWORK_ERRORS, retryable_response
+    from base.agents.messages.delivery.retry import network_errors, retryable_response
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
     from base.host.net.http_dial import post as dial_post
 
@@ -204,7 +204,7 @@ def send_agent_message(
     for attempt in range(3):
         try:
             response = dial_post(url, json=body, timeout=_TIMEOUT_S, headers=headers)
-        except NETWORK_ERRORS:
+        except network_errors():
             if attempt == 2:
                 raise
         else:

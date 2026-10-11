@@ -35,6 +35,8 @@ if TYPE_CHECKING:
 
 type DatabaseHandle = Database
 type DatabaseFactory = Callable[[], DatabaseHandle]
+# The gateway client by name, for SDK modules on the `import ava` path that must not import httpx.
+type GatewayHandle = httpx.Client
 
 
 def _connection_dead(conn: object) -> bool:
