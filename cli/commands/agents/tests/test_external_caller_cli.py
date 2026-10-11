@@ -37,10 +37,15 @@ def post(monkeypatch: pytest.MonkeyPatch) -> Mock:
 # -- send: the explicit --source is the only provenance --
 
 
-def test_send_carries_explicit_source(post: Mock, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "source", ["user", "external_agent:claude_code", "external_agent:codex:run-42"]
+)
+def test_send_carries_explicit_source(
+    post: Mock, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
     monkeypatch.delenv("AVA_CALLER_IDENTITY")
-    agents_control.cmd_agents_send(42, "hello", "user")
-    assert post.call_args.kwargs["json"]["source"] == "user"
+    agents_control.cmd_agents_send(42, "hello", source)
+    assert post.call_args.kwargs["json"]["source"] == source
 
 
 def test_send_honours_explicit_source_under_profile(post: Mock) -> None:
@@ -87,6 +92,27 @@ def test_send_requires_source_at_parse_time(capsys: pytest.CaptureFixture[str]) 
         build_parser().parse_args(["agents", "send", "1", "hi"])
     assert exit_info.value.code == 2
     assert "--source" in capsys.readouterr().err
+
+
+def test_send_accepts_declared_external_agent_at_parse_time() -> None:
+    from cli.parsers import build_parser
+
+    args = build_parser().parse_args(
+        ["agents", "send", "1", "hi", "--source", "external_agent:claude_code:s1"]
+    )
+    assert args.source == "external_agent:claude_code:s1"
+
+
+@pytest.mark.parametrize("source", ["claude_code", "external_agent:", "external_agent:a b"])
+def test_send_rejects_malformed_external_agent_at_parse_time(
+    capsys: pytest.CaptureFixture[str], source: str
+) -> None:
+    from cli.parsers import build_parser
+
+    with pytest.raises(SystemExit) as exit_info:
+        build_parser().parse_args(["agents", "send", "1", "hi", "--source", source])
+    assert exit_info.value.code == 2
+    assert "source" in capsys.readouterr().err
 
 
 def test_send_rejects_unknown_source_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:

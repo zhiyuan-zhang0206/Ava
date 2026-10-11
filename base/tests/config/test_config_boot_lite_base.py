@@ -7,12 +7,25 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.fixture(autouse=True)
+def _empty_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the children at an empty home: no `.env`, so the skip-mode placeholders apply."""
+    home = tmp_path / "empty-home"
+    home.mkdir()
+    monkeypatch.setenv("AVA_HOME", str(home))
 
 
 def _clean_env(**overrides: str) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.pop("VIRTUAL_ENV", None)
+    # Stripping AVA_* must not strip the home: a child without AVA_HOME falls back to the
+    # operator's `~/.ava` and boots against its production `.env`.
+    env["AVA_HOME"] = os.environ["AVA_HOME"]
     env.update(overrides)
     return env
 

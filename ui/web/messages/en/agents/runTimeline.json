@@ -51,6 +51,7 @@
   "legendSource": "Source",
   "sourceAll": "All sources",
   "sourceFromAgent": "Inbound from agent {id}",
+  "sourceFromExternalAgent": "Inbound from external agent {name}",
   "readoutIdle": "Hover a block or node for details.",
   "readoutNoSource": "no source",
   "readoutUnit": "{kind} · {count, plural, one {# message} other {# messages}} · read {time} · {source} · {preview}",

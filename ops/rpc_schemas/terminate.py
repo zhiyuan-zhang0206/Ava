@@ -8,7 +8,8 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from base.agents import ShellSessionKillTiming, TerminateResult
-from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
+from base.agents.messages.caller_identity import CallerIdentity, is_caller_source
+from base.agents.messages.envelope import validate_source
 from ops.rpc_schemas.content import UserContent
 
 
@@ -47,15 +48,17 @@ class TerminateAgentRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _check_source(cls, value: str) -> str:
-        # Lifecycle audit reasons include opaque legacy values such as
-        # machine-pause; they are not chat envelope source identifiers.
-        reject_unnegotiated_caller(value)
+        # Lifecycle audit reasons include opaque values such as machine-pause;
+        # they are not chat envelope source identifiers, except a declared
+        # external agent, which must be well-formed.
+        if is_caller_source(value):
+            CallerIdentity.from_source(value)
         return value
 
     @model_validator(mode="after")
     def _validate_message_source(self) -> "TerminateAgentRequest":
         if self.message is not None:
-            validate_writable_source(self.source)
+            validate_source(self.source)
         return self
 
 

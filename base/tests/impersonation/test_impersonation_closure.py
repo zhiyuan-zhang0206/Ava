@@ -44,8 +44,7 @@ def test_closure_restores_six_native_owners(
         db_conn.commit()
         lease = _active(owner, authority=config_authority, database_gate=database_gate)
         before = db_conn.execute(
-            "SELECT runtime_kind,runtime_protocol_version,lease_expires_at FROM agents_meta "
-            "WHERE id=%s",
+            "SELECT runtime_kind,lease_expires_at FROM agents_meta WHERE id=%s",
             (owner.agent_id,),
         ).fetchone()
         assert before is not None
@@ -70,7 +69,7 @@ def test_closure_restores_six_native_owners(
                 assert reap_impersonations(reaper_pool, database, event_bus) == 1
                 assert reap_impersonations(reaper_pool, database, event_bus) == 0
         assert db_conn.execute(
-            "SELECT runtime_generation,runtime_owner,runtime_kind,runtime_protocol_version,"
+            "SELECT runtime_generation,runtime_owner,runtime_kind,"
             "lease_expires_at FROM agents_meta WHERE id=%s",
             (owner.agent_id,),
         ).fetchone() == (owner.generation, host, *before)
