@@ -296,7 +296,7 @@ Rules:
 ### 5.6 Executor, scheduling, and surfaces
 
 - **Executor**: one CLI verb, `ava packages refresh [--check] [--package NAME] [--json]` — the same code path for manual runs, the OS job, and (later) a gateway-triggered host pass. `--check` = check-only.
-- **Scheduler**: one OS job per machine, registered by converge exactly like the existing ones (new module `base/host/system/packages_job.py` → platform backend; idempotent; `AVA_OS_JOBS_ENABLED=false` respected; Windows degrades to a loud warning like its siblings). Base tick every 15 min; per-package intervals are data, so the tick only bounds granularity — one job, no job churn when policies change. Rationale for per-machine: installs are per-machine today, each machine has its own load dirs, and the OS job is the established, service-independent primitive (it fires whether or not the gateway is up).
+- **Scheduler**: one OS job per machine, registered by converge exactly like the existing ones (new module `base/host/system/packages_job.py` → platform backend; idempotent; `AVA_OS_JOBS_ENABLED=false` respected). Base tick every 15 min; per-package intervals are data, so the tick only bounds granularity — one job, no job churn when policies change. Rationale for per-machine: installs are per-machine today, each machine has its own load dirs, and the OS job is the established, service-independent primitive (it fires whether or not the gateway is up).
 - **Status surface**: `ava packages status` — per package: kind, origin, channel, policy, applied rev, last check/apply result, pending update, and next check; plus channel line (core@main head + last fetch). A machine-readable `--json` for the console later.
 - **Observability**: registry fields + log lines (existing `base.log`); optional dedicated events (`package_refresh_applied` etc. into the event registry) in a later slice — not POC.
 - **Frontend** (later): the existing Skills/Plugins panel sections gain "update available / auto / interval" per row, driven by `--json`.
@@ -372,7 +372,6 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 | Core-plugin materialization changes module identity (import context is now uniform) | P2 verifies/locks the identity-observing surfaces (§6 P2b) + probe + atomic swap before any live path; isolation gates §3.9 |
 | Version gates go stale — a host upgrade strands content, blocked refreshes pile up | keep-old + visible `blocked_version` state + the core-content CI check; `ava packages rollback` recovers the moved-past-max case |
 | Complexity creep | one channel concept, one executor verb, one job, policy as data; explicit non-goals below; reuse of existing contracts wherever possible |
-| Windows | job registration degrades to warning (existing backend behavior); atomic dir swap caveats checked in P2 (files are not held open after import) |
 | Silent drift of the *policy* itself (e.g. defaults changed by an update) | defaults live in settings, written into rows at first sight; status shows resolved values |
 
 ## 8. Explicit non-goals
