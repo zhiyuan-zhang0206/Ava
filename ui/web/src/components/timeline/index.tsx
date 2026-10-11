@@ -599,8 +599,8 @@ export const TimelineView = memo(function TimelineView({
     };
     viewport.addEventListener("wheel", onWheel, { passive: true });
 
-    // Touch start/end feed the sticky controller only — the pull-down-to-load
-    // gesture retired with the auto-load change (task #4186).
+    // Touch start/end feed the sticky controller only; older history loads
+    // automatically.
     const onTouchStart = () => {
       controller.handleTouchStart();
     };

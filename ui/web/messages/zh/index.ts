@@ -18,7 +18,6 @@ import inventory from "./operations/inventory.json";
 import login from "./interface/login.json";
 import markers from "./agents/markers.json";
 import memoryGraph from "./operations/memoryGraph.json";
-import metrics from "./operations/metrics.json";
 import nav from "./interface/nav.json";
 import noticeDetail from "./interface/noticeDetail.json";
 import openTasksNotice from "./interface/openTasksNotice.json";
@@ -49,7 +48,6 @@ const messages = {
   login,
   markers,
   memoryGraph,
-  metrics,
   nav,
   noticeDetail,
   openTasksNotice,

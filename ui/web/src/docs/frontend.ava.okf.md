@@ -40,7 +40,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
                               inventory/page.tsx exports PluginsInventory/McpInventory (shared /api/inventory query) as Plugins+MCP sections
 /insights                     Observation surface (read) — Status + Ops + Alerts sections, same shell as Control (sharing ControlNav + single scroll container INSIGHTS_SCROLL_ID)
                               Visibility-bounded Status polling (15s); readiness, host roster and reported release observations. No deployment mutation or source-checkout update preflight.
-                              Ops links to Grafana; Alerts is live via SSE. Retired Metrics bookmarks transition through insights/metrics/page.tsx to Ops when Grafana is reachable.
+                              Ops links to Grafana; Alerts is live via SSE.
                               Section components are also bare routes: insights/{status,ops}/page.tsx; insights/alerts/page.tsx redirects to the Alerts anchor
 /insights/run/[agentId]       Run-level tracing view — a direct, shareable linear turn track for one agent, with prioritized event connectors and click-through turn details (time, usage, cost, model, execs, anomalies). It reads the gateway's bounded run session, offers explicit start/end and zoom windows, requests one-hour buckets up front for explicit windows of at least six hours, and switches after a turn response above 400 rows. Insights and the active inspector link here.
 /control#skills               Installed skills read-only table: name/layer origin (core=repo|plugin|machine=user|untracked)/enabled/local drift (GET /api/skills, single-machine gateway local read)

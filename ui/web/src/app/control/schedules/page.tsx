@@ -6,7 +6,7 @@
 //
 // Backed by /api/schedules (gateway/schedules/router.py). The gateway's
 // ScheduleManager supervises one session per enabled schedule; this page is
-// the management surface. Supersedes the Cron tab (removed once migration lands).
+// the management surface.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
