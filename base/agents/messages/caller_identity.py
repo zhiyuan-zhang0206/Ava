@@ -1,7 +1,8 @@
-"""Asserted caller provenance, never an authentication or authorization principal.
+"""Asserted external-agent provenance, never an authentication or authorization principal.
 
-This is reader support, not permission to emit to old consumers. Producers must
-wait for consumer convergence. No caller-supplied field grants authority.
+An external agent (Claude Code, Codex, ...) that messages an Ava agent declares
+who it is as ``external_agent:<subject>[:<instance>]``. The declaration is
+self-asserted: no caller-supplied field grants authority.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 _PART = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
-PREFIXES = ("external_agent:", "unknown:")
+EXTERNAL_AGENT_PREFIX = "external_agent:"
 
 
 class CallerIdentity(BaseModel):
@@ -20,23 +21,23 @@ class CallerIdentity(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    kind: Literal["external_agent", "unknown"]
+    kind: Literal["external_agent"]
     subject: str = Field(min_length=1, max_length=20, pattern=_PART)
     instance: str | None = Field(default=None, min_length=1, max_length=20, pattern=_PART)
 
     def source(self) -> str:
-        """Return the display projection, understood only by v1 consumers."""
+        """Return the ``source`` string that carries this identity."""
         suffix = f":{self.instance}" if self.instance is not None else ""
         return f"{self.kind}:{self.subject}{suffix}"
 
     @classmethod
     def from_source(cls, source: str) -> CallerIdentity:
         """Decode only our explicit namespace, rejecting malformed identities."""
-        if not source.startswith(PREFIXES):
+        if not is_caller_source(source):
             raise ValueError("not a caller identity source")
         parts = source.split(":")
         if len(parts) not in (2, 3):
-            raise ValueError("caller source requires kind:subject[:instance]")
+            raise ValueError("caller source requires external_agent:<subject>[:<instance>]")
         return cls.model_validate(
             {
                 "kind": parts[0],
@@ -46,14 +47,19 @@ class CallerIdentity(BaseModel):
         )
 
 
+def is_caller_source(source: str) -> bool:
+    """Recognize caller namespaces so malformed and retired kinds reach validation."""
+    return source.startswith((EXTERNAL_AGENT_PREFIX, "unknown:"))
+
+
 def caller_payload(source: str, payload: Mapping[str, object] | None) -> dict[str, object] | None:
     """Persist asserted structured provenance without changing unrelated payload.
 
     The reserved caller_identity key cannot contradict the source, inject an
-    authenticated principal, or annotate a legacy source as a known caller.
-    Existing legacy rows stay absent; reading a source proves no credentials.
+    authenticated principal, or annotate a non-external source as a known caller.
+    Reading a source proves no credentials.
     """
-    caller = CallerIdentity.from_source(source) if source.startswith(PREFIXES) else None
+    caller = CallerIdentity.from_source(source) if is_caller_source(source) else None
     if payload is not None and "caller_identity" in payload:
         supplied = CallerIdentity.model_validate(payload["caller_identity"])
         if supplied != caller:

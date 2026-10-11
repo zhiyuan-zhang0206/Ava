@@ -25,7 +25,6 @@ async def claim_admission_row(
             "runtime_generation = CASE WHEN runtime_owner = %s AND runtime_kind = 'hosted' "
             "AND runtime_generation IS NOT NULL "
             "THEN runtime_generation ELSE %s END, runtime_owner = %s, "
-            "runtime_protocol_version = 0, "
             "last_admission_outcome = 'admitted', "
             "last_admission_at = clock_timestamp(), "
             "last_launch_failure_reason = NULL, last_launch_failure_at = NULL, "

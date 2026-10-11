@@ -365,7 +365,7 @@ export const ItemView = memo(function ItemView({
           payload={item.payload}
           images={item.images}
           plainMessage={!!item.impersonation}
-          markdown={inboundKind(item.source) === "agent"}
+          markdown={["agent", "external_agent"].includes(inboundKind(item.source))}
         />
       );
     case "inbound_compact_summary":

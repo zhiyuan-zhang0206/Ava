@@ -8,6 +8,7 @@ import type {
   RunTimelineUnit,
 } from "@/lib/contracts/types";
 import { categoryColor } from "@/lib/context-colors";
+import { EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
 
 export interface TimelineWindow {
   from: string;
@@ -182,7 +183,9 @@ export const BLOCK_CLASSES: readonly BlockClass[] = [
 ];
 
 export function blockClass(unit: Pick<RunTimelineUnit, "kind" | "source">): BlockClass {
-  if (unit.kind === "inbound") return unit.source?.startsWith("agent:") ? "agent" : "human";
+  if (unit.kind === "inbound") {
+    return unit.source?.startsWith("agent:") || unit.source?.startsWith(EXTERNAL_AGENT_PREFIX) ? "agent" : "human";
+  }
   return unit.kind;
 }
 

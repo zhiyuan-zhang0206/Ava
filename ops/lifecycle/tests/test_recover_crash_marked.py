@@ -198,13 +198,13 @@ class TestRecoverCrashMarkedOp:
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT status, termination_source, lease_expires_at, "
-                "runtime_protocol_version, last_turn_fatal_at IS NOT NULL "
+                "last_turn_fatal_at IS NOT NULL "
                 "FROM agents_meta WHERE id = %s",
                 (aid,),
             )
             row = cur.fetchone()
         assert row is not None
-        assert tuple(row) == ("terminated", "reaper", None, 0, True)
+        assert tuple(row) == ("terminated", "reaper", None, True)
         # The marker is KEPT (never cleared): the relaxed trigger must still
         # match the harvested row.
         assert stubs.events == [

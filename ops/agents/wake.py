@@ -92,8 +92,7 @@ def _transition_terminated_to_unclaimed_idling(
                 "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
                 "termination_source = NULL, lease_expires_at = NULL, "
                 "last_turn_fatal_at = NULL, "
-                "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
-                "runtime_protocol_version = 0 "
+                "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL "
                 "WHERE id = %s AND status = %s AND {} "
                 "AND pid IS NULL AND lifecycle_command_id IS NULL "
                 "AND NOT {} "
@@ -121,8 +120,7 @@ def _transition_terminated_to_unclaimed_idling(
                 "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
                 "termination_source = NULL, lease_expires_at = NULL, "
                 "last_turn_fatal_at = NULL, "
-                "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
-                "runtime_protocol_version = 0 "
+                "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL "
                 "WHERE id = %s AND status = %s AND {} "
                 "AND pid IS NULL AND lifecycle_command_id IS NULL RETURNING status_changed_at"
             ).format(sql.SQL(_RESURRECTION_TARGET)),
@@ -204,9 +202,7 @@ def _prepare_resurrect_attempt(
     """
     from base.agents.incarnation.exec_owner_recovery import recover_local_resources
     from base.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_resurrect
-    from base.agents.messages.envelope import reject_unnegotiated_caller
 
-    reject_unnegotiated_caller(resurrected_by)
     recover_local_resources(db, agent_id, local_machine)
     with db.write_transaction() as conn, conn.cursor() as cur:
         # Task before agent: producers hold the task while inserting an inbound

@@ -176,4 +176,9 @@ Python surfaces, so they keep heading form rather than stub form).
    skill discovery belongs to the skills index section. `ava/skills/__init__.py` is the
    one exempt module (enforced by `agent_docstrings`).
 
+8. **Record-shaped returns are a type, not prose** — when a function returns a
+   record, return a `NamedTuple` that is listed in `__all_for_ava__` and describe
+   the fields in its class docstring; `Returns:` then only names the type. See
+   [SDK return shapes](python-conventions.md#sdk-return-shapes).
+
 Every other `ava/` module — framework code such as `ava/sdk_surface/wraps.py` or `ava/sdk_surface/plugin_loader.py`, whatever its name — is out of scope (audience is the framework or plugin authors, not the agent) and may keep the dev perspective.

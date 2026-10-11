@@ -11,9 +11,9 @@ from fastapi.testclient import TestClient
 
 from ava.gateway_client import transport
 from ava_builtins.plugins.ava_fleet import task_registry
+from ava_builtins.plugins.ava_fleet.task_registry import TaskAssignment
 from base.agents import GatewayUnavailable
 from base.agents.context.identity import ExternalLease
-from base.agents.tasks.model import Task
 from base.cluster.machine import MachineIdentity
 from gateway.agents import router as agent_router
 from gateway.agents.tests.test_task_assignments import HEADERS, PATH, SECRET
@@ -34,7 +34,7 @@ def _response(response: Any) -> httpx.Response:
     )
 
 
-def _sdk(body: dict[str, Any], **overrides: Any) -> tuple[Task, int]:
+def _sdk(body: dict[str, Any], **overrides: Any) -> TaskAssignment:
     pin_agent(body["actor_agent_id"])
     return task_registry.create_and_assign(
         body["task"]["title"],
@@ -69,8 +69,11 @@ def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
         with pytest.raises(GatewayUnavailable):
             _sdk(body)
         assert len(captured) == 1
-        task, agent_id = _sdk(body)
+        assignment = _sdk(body)
     assert original is not None
+    assert isinstance(assignment, TaskAssignment)
+    task, agent_id = assignment
+    assert assignment.task is task and assignment.agent_id == agent_id
     assert task.id == original["task"]["id"] and agent_id == original["agent_id"]
     assert captured[0] == captured[1]
     assert captured[0][0] == PATH

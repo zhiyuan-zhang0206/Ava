@@ -135,6 +135,9 @@ _TAIL_BYTES = 2048
 _SEND_SOURCE_GUIDE = (
     "send requires --source (explicit provenance); nothing was sent.\n"
     "  --source user                  send as the user (the human operator)\n"
+    "  --source external_agent:NAME[:INSTANCE]\n"
+    "                                 send as the external agent NAME (e.g. claude_code),\n"
+    "                                 distinct from the user (self-asserted, not authenticated)\n"
     "  --source shell:N | watcher:N   a machine notice (N = the producing session id)\n"
     "  --source schedule:N            a gateway schedule\n"
     "See `ava agents send --help` for the full source set."
@@ -169,7 +172,9 @@ def cmd_agents_send(
     unknown source is a usage error (exit 2) before any command code runs, and
     no environment fallback is consulted on this path (user ruling 2026-09-20:
     explicit parameters only). Machine callers pass `shell:N` / `watcher:N`; a
-    human operator — or an agent acting as one — passes `user`. A source that
+    human operator — or a tool acting for one — passes `user`; a tool that
+    collaborates beside the user declares `external_agent:NAME[:INSTANCE]`, which
+    the target reads as a message from that external agent. A source that
     still reaches the gateway is re-validated there (`AgentMessageIn.source` ->
     `base.agents.messages.envelope.validate_source`) and rejected 422 with the legal set
     printed. A programmatic caller with no source gets this option list as a

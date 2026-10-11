@@ -38,7 +38,12 @@ def _machine(name: str, description: str | None) -> MachineIdentity:
 @pytest.mark.usefixtures("restore_context")
 def test_machine_spec_tuple_with_description() -> None:
     ava.bind_context(AvaContext(machine=_machine("test-host", "voice IO + browser")))
-    assert self_mod.MACHINE_SPEC == ("test-host", "voice IO + browser")
+    spec = self_mod.MACHINE_SPEC
+    assert spec == ("test-host", "voice IO + browser")
+    assert isinstance(spec, self_mod.MachineSpec)
+    assert (spec.name, spec.description) == ("test-host", "voice IO + browser")
+    name, description = spec
+    assert name == "test-host" and description == "voice IO + browser"
     assert self_mod.SELF_MACHINE_NAME == "test-host"
 
 

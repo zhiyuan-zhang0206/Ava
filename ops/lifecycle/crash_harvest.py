@@ -135,8 +135,7 @@ def _recover_crash_marked_blocking(
             )
         conn.execute(
             "UPDATE agents_meta SET status = 'terminated', "
-            "termination_source = 'reaper', lease_expires_at = NULL, "
-            "runtime_protocol_version = 0 "
+            "termination_source = 'reaper', lease_expires_at = NULL "
             "WHERE id = %s AND status = 'idling' AND last_turn_fatal_at IS NOT NULL",
             (agent_id,),
         )
