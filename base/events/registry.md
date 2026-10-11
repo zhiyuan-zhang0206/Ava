@@ -260,7 +260,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `launch_force_terminated` | launch force-terminated | anomaly | — | — | events | — |
 | `launch_force_terminated_skipped` | launch force-terminate skipped | noise | — | — | events | — |
 | `launch_retry` | launch retried | observation | — | — | events | — |
-| `idle_wake` | agent woken from idle | noise | degraded, elapsed_s, rounds, timeout_s, wake_state | — | events | ✓ |
 | `wake_degraded` | RedisInboundListener wake path degraded (instant pub/sub wake off) | anomaly | — | — | events | — |
 | `wake_restored` | RedisInboundListener wake path recovered (clean consume restored instant wake) | noise | — | — | events | — |
 | `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, unpriced, usage_kind, source, cache_mechanism, cache_scope | — | events | ✓ |
