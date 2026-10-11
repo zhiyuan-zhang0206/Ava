@@ -58,9 +58,7 @@ def get_metrics(
             agg = fetch_aggregate(conn, days, agent, since_compact=since_compact)
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="metrics read timed out; retry") from exc
-    _, data = build_report_from_aggregate(
-        agg, days, agent, since_compact=since_compact, prices=request.app.state.catalog.prices
-    )
+    _, data = build_report_from_aggregate(agg, days, agent, since_compact=since_compact)
     return MetricsReport(**data)
 
 
@@ -85,9 +83,7 @@ def get_metrics_agents(
     try:
         with request.app.state.db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)
-            total_events, rollups = fetch_agent_rollups(
-                conn, days, since_compact=since_compact, prices=request.app.state.catalog.prices
-            )
+            total_events, rollups = fetch_agent_rollups(conn, days, since_compact=since_compact)
             labels: dict[int, str | None] = {}
             if rollups:
                 rows = conn.execute(
