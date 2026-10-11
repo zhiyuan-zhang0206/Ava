@@ -18,7 +18,6 @@
     "test_plugin_scaffold.py",
 ]
 "tests.fixtures.unit.sdk" = [
-    "bootstrap/test_boot_retry.py",
     "bootstrap/test_checkout_guard.py",
     "bootstrap/test_dotenv_boot_launcher_context_cli.py",
     "bootstrap/test_init.py",

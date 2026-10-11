@@ -4,7 +4,6 @@ import json
 import logging
 import socket
 
-from base.host.system.probes import unix_sockets_available
 from base.paths import mcp_daemon_shared_socket
 
 _log = logging.getLogger("services.supervision.healthchecks.mcp_daemon")
@@ -35,18 +34,9 @@ def _probe() -> bool:
 def _is_alive() -> bool:
     """True when the daemon answers a ping; ANY probe failure means "not alive".
 
-    First line of defence: where AF_UNIX is absent (a Windows agent-runner) the
-    daemon cannot run at all — it binds this very socket — and is gated out of
-    the ops roster (`ops.spec._gate_reason`), so the watchdog never schedules
-    this check. A manual run still no-ops as alive instead of walking the
-    dead -> restart path against a service that can never start (which would
-    log an ERROR every minute on the win runner; measured 1,257/24h). The
-    broad except below is the second line: an unforeseen probe failure still
-    degrades to a verdict the watchdog can act on.
+    The broad except below makes an unforeseen probe failure degrade to a verdict
+    the watchdog can act on.
     """
-    if not unix_sockets_available():
-        _log.debug("[mcp-daemon healthcheck] no AF_UNIX on this host; service gated out, no-op")
-        return True
     try:
         return _probe()
     except (OSError, json.JSONDecodeError):

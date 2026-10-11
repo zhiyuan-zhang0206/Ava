@@ -39,7 +39,7 @@ def _write_atomic(
     tmp = Path(raw_tmp)
     replaced = False
     try:
-        if mode is not None and os.name != "nt":
+        if mode is not None:
             os.fchmod(fd, mode)
         if isinstance(data, bytes):
             stream = os.fdopen(fd, "wb")

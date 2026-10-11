@@ -2,7 +2,7 @@
 
 The platform default is `/dev/shm` on Linux — RAM-sized — while a full-restore
 drill needs disk-sized room: on 2026-09-14 the throwaway postmaster died
-mid-restore when the cluster outgrew WSL's 7.8 GiB /dev/shm (dmesg signal 6; the
+mid-restore when the cluster outgrew a 7.8 GiB /dev/shm (dmesg signal 6; the
 drill surfaced only `PQputCopyData: server closed the connection`), and on
 2026-10-05 a 15.4 GiB estimate cleared /dev/shm's 16 GiB while the actual restore
 did not. A caller that declares its footprint therefore takes the durable disk
@@ -25,7 +25,6 @@ import pytest
 from base.cluster.dataplane import pg_throwaway_base as base
 from base.cluster.dataplane import pg_tools
 from base.config import settings
-from base.native_process.os_platform import is_windows
 
 
 @pytest.fixture
@@ -106,7 +105,7 @@ def test_a_single_base_serves_or_the_selection_refuses(
     scratch_bases: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Hosts where the disk fallback resolves to the platform default (no /var/tmp,
-    the Windows temp dir): one candidate — it serves a declared capacity when it
+    the OS temp dir): one candidate — it serves a declared capacity when it
     can hold it, and a shortage refuses instead of returning a base that cannot."""
     default, _fallback = scratch_bases
     monkeypatch.setattr(base, "disk_fallback_base", lambda: default)
@@ -160,7 +159,6 @@ def test_format_bytes_reads_at_both_scales() -> None:
     assert base.format_bytes(2**20) == "1 MiB"
 
 
-@pytest.mark.skipif(is_windows(), reason="throwaway clusters are POSIX-only in this suite")
 def test_throwaway_postgres_creates_the_instance_under_the_given_base() -> None:
     """`base=` is where the instance dir actually lands, and teardown removes it
     again — the drill's chosen base is the base used. A short `/tmp` root: the

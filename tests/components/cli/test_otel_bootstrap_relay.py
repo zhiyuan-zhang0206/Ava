@@ -23,7 +23,7 @@ from gateway.app import app
 def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     db_conn, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, gateway_port: int, local_port: int
 ) -> None:
-    """The current split and mirrored Windows/WSL migration both keep local ports."""
+    """The current split and a mirrored-loopback migration both keep local ports."""
     (tmp_path / ".env").write_text(
         f"AVA_DB_URL={config.settings.data_plane.db_url}\n"
         "AVA_RUNNER_DB_PASSWORD=relay-test-password\n"

@@ -100,7 +100,7 @@ def _restore_failure_message(proc: subprocess.CompletedProcess[bytes], base: Pat
     """The pg_restore failure with the capacity context an operator needs.
 
     A scratch restore that outgrows its base dies server-side mid-COPY, so the
-    client-side failure carries no diagnosis of its own: the 2026-09-14 WSL run
+    client-side failure carries no diagnosis of its own: the 2026-09-14 run
     surfaced only `pg_restore exited 1` while the postmaster had been killed by
     the full tmpfs (dmesg signal 6; PQputCopyData: server closed the connection).
     Naming the base and its free space makes the next occurrence diagnosable from
@@ -168,7 +168,7 @@ _SCRATCH_SPACE_FACTOR = 3.0
 """Scratch space the drill reserves on the base holding the restored copy, as a
 multiple of the (decrypted) dump's size. A floor for picking the base, not a size
 prediction: the restore holds the dump's content decompressed, and in-dump zstd
-ratios vary with content mix. Measured on the WSL daily drill: 2026-09-14 restored
+ratios vary with content mix. Measured on the daily drill: 2026-09-14 restored
 >=17 GiB from a 10.16 GiB artifact (~1.7x); 2026-09-19 restored ~8 GiB from a
 ~3.0 GiB artifact (>=2.7x at 60s sampling — it outgrew the 7.8 GiB tmpfs that 2x
 had cleared, task #4033). 3x keeps margin above the observed maximum while

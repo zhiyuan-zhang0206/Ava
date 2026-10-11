@@ -50,7 +50,6 @@ from base.clock import Clock
 from base.cluster.machine import is_agent_runner, is_gateway, machine_name
 from base.config import settings
 from base.host.proc import run_bounded
-from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import gateway_memory_dir, memory_dir
 
 # Memory pool physical path is `$AVA_HOME/memory` via `memory_dir()` (same
@@ -177,16 +176,14 @@ def _run_git(*args: str, cwd: Path | None = None) -> str:
     """
     cwd_path = cwd if cwd is not None else memory_dir()
     argv = ["git", *args]
-    # run_bounded, not `subprocess.run(timeout=...)`: on Windows the direct child
-    # is Git-for-Windows' launcher stub, so a plain timeout kills the stub and
-    # leaves the real git running (base/host/proc.py).
+    # run_bounded, not `subprocess.run(timeout=...)`: a plain timeout kills only
+    # the direct child and leaves its descendants running (base/host/proc.py).
     result = run_bounded(
         argv,
         timeout=_GIT_TIMEOUT_S,
         cwd=str(cwd_path),
         capture_output=True,
         text=True,
-        creationflags=CREATE_NO_WINDOW,
     )
     # run_bounded has no `check=` (a non-zero exit must never be confused with
     # the timeout path), so the raise-on-non-zero half of the contract is here.
@@ -203,7 +200,7 @@ def _init_local_repo(branch: str, cwd: Path) -> None:
     where the pool never connects to a central remote."""
     cwd.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(  # noqa: S603
-        ["git", "init", "-q", "-b", branch, str(cwd)], check=True, creationflags=CREATE_NO_WINDOW
+        ["git", "init", "-q", "-b", branch, str(cwd)], check=True
     )
     _run_git("config", "user.email", "ava@local", cwd=cwd)
     _run_git("config", "user.name", "Ava Local", cwd=cwd)
@@ -480,7 +477,6 @@ def init() -> None:
     subprocess.run(  # noqa: S603
         ["git", "clone", remote, str(memory_dir())],
         check=True,
-        creationflags=CREATE_NO_WINDOW,
     )
 
     # Whether the remote already has this branch (another host or our
@@ -559,7 +555,6 @@ def init_gateway() -> None:
     subprocess.run(  # noqa: S603
         ["git", "clone", remote, str(gmd)],
         check=True,
-        creationflags=CREATE_NO_WINDOW,
     )
 
     # Whether the remote already has `main`

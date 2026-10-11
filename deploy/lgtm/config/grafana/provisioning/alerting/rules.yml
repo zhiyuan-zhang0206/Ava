@@ -26,7 +26,7 @@
 #   queue/drop/uptime scrape) and live under `job="ava-infra"` with both
 #   `host` = the OS hostname (physical identity) and `machine_name` = the Ava
 #   roster identity baked from the unit at converge. Per the 2026-08-24 user
-#   ruling, rules group by `machine_name`, so win and wsl remain separate
+#   ruling, rules group by `machine_name`, so units on one host remain separate
 #   series; each label keeps one meaning. Names below were read off a live
 #   Prometheus 3.13.2, not inferred from the OTLP names.
 # - RECEIVER metrics (R24) come from Prometheus's own scrape target and report
@@ -887,9 +887,7 @@ groups:
       # on macOS the volumes of one APFS container all report the container's
       # fullness, so a single full disk legitimately fires twice.
       # Excluded: non-asset mounts whose reported fullness is foreign or
-      # transient, never the Ava data plane. The wsl machine's docker-desktop
-      # VM image (a loop device under /mnt/wsl/docker-desktop/* reporting a
-      # constant 1.0, task #2024); macOS /Volumes/* (removable, external and
+      # transient, never the Ava data plane. macOS /Volumes/* (removable, external and
       # network volumes plus mounted DMG installers — internal volumes live
       # under /System/Volumes/*); /private/tmp/* and /private/var/folders/*
       # (scratch mounts, not persistent assets). These recur with every
@@ -897,7 +895,7 @@ groups:
       # and macbook-air and /private/tmp/monsora154 on company-mini alerted
       # at 0.99 — DMG images read ~100% full by construction (task #3958).
       # The Ava data plane (root volume, /System/Volumes/Data,
-      # /Users/*/OrbStack on macOS; / on wsl) keeps its watermark.
+      # /Users/*/OrbStack on macOS; / on Linux) keeps its watermark.
       - uid: ava-ops-host-disk-watermark
         title: "Filesystem over watermark"
         condition: D
@@ -931,7 +929,7 @@ groups:
               editorMode: code
               expr: >-
                 round(max by (machine_name, mountpoint)
-                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*|/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
+                (system_filesystem_utilization_ratio{mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -1002,7 +1000,7 @@ groups:
               editorMode: code
               expr: >-
                 round(max by (machine_name, mountpoint)
-                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*|/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
+                (system_filesystem_utilization_ratio{mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -1069,7 +1067,7 @@ groups:
               editorMode: code
               expr: >-
                 round(max by (machine_name, mountpoint)
-                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*|/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
+                (system_filesystem_utilization_ratio{mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
               instant: true
               range: false
             relativeTimeRange:

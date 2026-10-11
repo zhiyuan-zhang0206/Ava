@@ -16,7 +16,6 @@ import shutil
 import subprocess
 
 from base.deploy.git.memory_repo import memory_remote
-from base.native_process.os_platform import CREATE_NO_WINDOW
 
 __all__ = ["github_pr_blocker", "memory_repo_slug"]
 
@@ -66,7 +65,6 @@ def github_pr_blocker() -> str | None:
             text=True,
             timeout=_GH_TIMEOUT,
             check=False,
-            creationflags=CREATE_NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         return "gh auth status timed out"
@@ -81,7 +79,6 @@ def github_pr_blocker() -> str | None:
             text=True,
             timeout=_GH_TIMEOUT,
             check=False,
-            creationflags=CREATE_NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         return f"reading permission on {slug} via gh timed out"

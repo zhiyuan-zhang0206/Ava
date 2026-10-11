@@ -107,7 +107,6 @@ def _state_file(tmp_path: Any, name: str) -> Path:
     return tmp_path / "state" / "im_bridge" / name
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX modes are not Windows ACLs")
 def test_atomic_json_preserves_bytes_and_tightens_private_modes(tmp_path: Path) -> None:
     path = tmp_path / "state" / "im_bridge" / "weixin_sync.json"
     path.parent.mkdir(parents=True, mode=0o755)

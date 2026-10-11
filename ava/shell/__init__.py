@@ -13,7 +13,6 @@ from ava.sdk_surface import agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from base.log import logger
-from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import workspace_dir
 
 from . import background
@@ -104,7 +103,6 @@ def run(
         text=True,
         timeout=timeout,
         check=False,
-        creationflags=CREATE_NO_WINDOW,
     )
     # The command itself is deliberately not part of `source`: it routinely
     # carries credentials (a curl with an Authorization header), and the

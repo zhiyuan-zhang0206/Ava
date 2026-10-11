@@ -1,7 +1,6 @@
 """Unit tests for base.native_process.os_platform — host detection + the disk-path probe.
 
-The primary-disk-path probe samples the macOS data volume or the POSIX root,
-including a WSL process's own root filesystem.
+The primary-disk-path probe samples the macOS data volume or the POSIX root.
 """
 
 from __future__ import annotations

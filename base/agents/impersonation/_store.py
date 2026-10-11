@@ -197,8 +197,6 @@ def _valid_ticks(ticks: object) -> bool:
 
 
 def _valid_boot_id(boot: object) -> bool:
-    if sys.platform == "win32":
-        return boot is None
     if not isinstance(boot, str):
         return False
     try:

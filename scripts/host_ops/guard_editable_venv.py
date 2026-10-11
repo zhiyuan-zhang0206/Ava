@@ -1,8 +1,8 @@
 """Refuse a worktree sync when its virtualenv can write outside the checkout.
 
 This module depends only on the standard library so it can run before uv builds
-or imports a project environment. It validates the same POSIX, lib64, and
-Windows editable-install layouts as ``base.deploy.release.editable_install`` without
+or imports a project environment. It validates the same lib and lib64
+editable-install layouts as ``base.deploy.release.editable_install`` without
 importing project dependencies.
 """
 
@@ -18,12 +18,10 @@ from typing import cast
 _EDITABLE_PTH_NAME = "_editable_impl_ava.pth"
 _EDITABLE_DIST_INFO_GLOB = "ava-*.dist-info/direct_url.json"
 _RECORD_PATTERNS = (
-    f"Lib/site-packages/{_EDITABLE_PTH_NAME}",
     f"lib/python*/site-packages/{_EDITABLE_PTH_NAME}",
     f"lib64/python*/site-packages/{_EDITABLE_PTH_NAME}",
 )
 _DIRECT_URL_PATTERNS = (
-    f"Lib/site-packages/{_EDITABLE_DIST_INFO_GLOB}",
     f"lib/python*/site-packages/{_EDITABLE_DIST_INFO_GLOB}",
     f"lib64/python*/site-packages/{_EDITABLE_DIST_INFO_GLOB}",
 )
