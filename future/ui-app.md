@@ -7,12 +7,12 @@ alone.
 
 ## Signing and store distribution
 
-- Provision Apple Developer ID/notarization credentials, a Windows code-signing
-  certificate, and an Android upload keystore as GitHub secrets. Tag releases
+- Provision Apple Developer ID/notarization credentials and an Android upload
+  keystore as GitHub secrets. Tag releases
   fail closed until every group exists; manual dispatch keeps unsigned
   validation builds available without publishing them.
 - Exercise a real `app-v*` tag with every signing group present, then verify
-  installation and updater replacement on clean macOS and Windows machines.
+  installation and updater replacement on clean macOS machines.
 - Decide whether the Android APK remains a direct GitHub Release download or is
   distributed through a store. Android's `specialUse` foreground-service type
   requires an explicit use-case declaration during store review.
