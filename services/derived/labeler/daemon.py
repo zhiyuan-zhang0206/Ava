@@ -65,9 +65,8 @@ def labeler_config() -> LabelerConfig:
 def labeler_model_overrides(*, profile: str | None, lm: LmSettings) -> ModelOverrides:
     """Freeze this caller's tuning at the composition boundary.
 
-    Gateway boot removes agent-only tuning aliases, so the old model factory
-    resolved this caller through model defaults. Do not read those stripped
-    fields. A full or agent-side boot retains its explicit tuning as before.
+    Gateway boot removes agent-only tuning aliases, so this caller resolves
+    through model defaults. Do not read those stripped fields. A full or agent-side boot retains its explicit tuning as before.
     """
     if profile is not None and profile not in PROCESS_PROFILES:
         raise profile_unknown_error(profile)

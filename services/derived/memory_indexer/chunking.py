@@ -1,9 +1,5 @@
 """Note-text chunking for the embedding index.
 
-Split out of `services/derived/memory_indexer/daemon.py` (2026-09-20, task #4222) when
-the daemon's hard-exit migration pushed that file against its 800-line budget;
-the daemon re-exports the private names for its existing test surface.
-
 A long note's single embedding dilutes the entities mentioned in it (queries
 like "hand off to 402" missed notes whose body carried the id). The body is
 split at paragraph boundaries into blocks of ~1800 chars (~512 tokens),

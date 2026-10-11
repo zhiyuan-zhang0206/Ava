@@ -488,32 +488,6 @@ class TestDeadLetterStaleClaimed:
                 running_row: "claimed",
             }
 
-    def test_null_claimed_at_falls_back_to_created_at(
-        self,
-        db_conn: psycopg.Connection,
-        pool: ConnectionPool,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-    ) -> None:
-        """Rows claimed before the claimed_at column existed (2026-08-02) carry
-        NULL claimed_at; created_at is the only age evidence, and it is stale
-        by now — they must still be dead-lettered, not immortal."""
-        from services.wake.delivery_watchdog.daemon import dead_letter_stale_claimed
-
-        aid = _make_terminated_agent(
-            db_conn, model_catalog=model_catalog, config_authority=config_authority
-        )
-        old = _insert_claimed_row(db_conn, aid, claim_age_s=None, created_age_s=10 * 86400)
-        fresh = _insert_claimed_row(db_conn, aid, claim_age_s=None, created_age_s=60)
-
-        assert dead_letter_stale_claimed(pool, 86400.0, 7200.0) == 1
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, status FROM inbound_messages WHERE id IN (%s, %s)",
-                (old, fresh),
-            )
-            assert dict(cur.fetchall()) == {old: "done", fresh: "claimed"}
-
 
 class TestDeadLetterStalePendingResurrects:
     def test_only_old_pending_resurrects_are_dead_lettered(

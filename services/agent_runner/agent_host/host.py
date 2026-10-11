@@ -115,7 +115,7 @@ from services.agent_runner.agent_host.settlement import (
     wait_shielded_task,
 )
 from services.agent_runner.agent_host.stall_guard import run_invocation_with_stall_guard
-from services.agent_runner.agent_host.wake_screening import _is_runnable, _read_stored_config
+from services.agent_runner.agent_host.wake_screening import _is_runnable, read_stored_config
 
 _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
 
@@ -290,7 +290,7 @@ class AgentHost:
         # Reset before any admission await: recovery may take time, and the
         # dispatcher's stall scan must not cancel this turn using its predecessor's clock.
         self.turn_progress.reset(agent_id)
-        stored = await _read_stored_config(self._control_pool, agent_id)
+        stored = await read_stored_config(self._control_pool, agent_id)
         if stored is None or not _is_runnable(self._machine, agent_id, stored):
             self.stats.wakes_skipped += 1
             return

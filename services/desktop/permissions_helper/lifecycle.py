@@ -45,7 +45,6 @@ from services.desktop.permissions_helper.launchd_job import (
 )
 
 _CERT_CN = "Ava Permissions Helper Code Signing"
-_BUNDLE_ID = HELPER_BUNDLE_ID  # alias: the job identity lives in launchd_job
 _SERVICE_DIR = Path(__file__).resolve().parent
 _SOURCE = _SERVICE_DIR / "helper" / "main.swift"
 _INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
@@ -293,7 +292,7 @@ def _expected_dr() -> str:
             f"code-signing identity {_CERT_CN!r} is missing or name mismatch prevented "
             "its SHA-1 from being resolved"
         )
-    return f'identifier "{_BUNDLE_ID}" and certificate leaf = H"{match.group(1).lower()}"'
+    return f'identifier "{HELPER_BUNDLE_ID}" and certificate leaf = H"{match.group(1).lower()}"'
 
 
 def _source_content_hash() -> str:
@@ -352,7 +351,7 @@ def preflight_signing_smoke() -> None:
                         _CERT_CN,
                         "-v",
                         "--identifier",
-                        _BUNDLE_ID,
+                        HELPER_BUNDLE_ID,
                         "--requirements",
                         f"=designated => {expected_dr}",
                         str(scratch),
@@ -579,7 +578,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
                 "--entitlements",
                 str(_ENTITLEMENTS),
                 "--identifier",
-                _BUNDLE_ID,
+                HELPER_BUNDLE_ID,
                 "--requirements",
                 f"=designated => {expected_dr}",
                 str(app),
@@ -622,16 +621,16 @@ def _is_loaded() -> bool:
     return helper_job_loaded()
 
 
-def _stale_plists() -> list[Path]:
+def _foreign_label_plists() -> list[Path]:
     """LaunchAgent plists bound to this cluster's socket under a foreign label.
 
     A job whose plist pins this cluster's socket but carries a label other than
-    the current one is a leftover racing this cluster's own job for the same
-    socket; which one a client reaches then depends on the last bind. Other
+    the current one races this cluster's own job for the same socket; which one
+    a client reaches then depends on the last bind. Other
     clusters' jobs are left alone -- they pin their own sockets."""
     sock = str(permissions_helper_socket())
-    stale: list[Path] = []
-    for plist in _agents_dir().glob(f"{_BUNDLE_ID}.*.plist"):
+    foreign: list[Path] = []
+    for plist in _agents_dir().glob(f"{HELPER_BUNDLE_ID}.*.plist"):
         try:
             data = plistlib.loads(plist.read_bytes())
         except (plistlib.InvalidFileException, OSError):
@@ -640,16 +639,16 @@ def _stale_plists() -> list[Path]:
             continue
         env: dict[str, object] = data.get("EnvironmentVariables") or {}
         if env.get("AVA_PERMISSIONS_HELPER_SOCKET") == sock:
-            stale.append(plist)
-    return stale
+            foreign.append(plist)
+    return foreign
 
 
-def _refuse_stale_jobs() -> None:
-    stale = _stale_plists()
-    if stale:
+def _refuse_foreign_label_jobs() -> None:
+    foreign = _foreign_label_plists()
+    if foreign:
         raise PermissionsHelperBuildError(
             "foreign helper labels bind this home's socket; reconcile them externally before start: "
-            + ", ".join(str(path) for path in stale)
+            + ", ".join(str(path) for path in foreign)
         )
 
 
@@ -658,7 +657,7 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
 
     A loaded helper is only observed. Replacement requires an external stop
     and exact-home unregister first, so a descendant cannot unload its parent."""
-    _refuse_stale_jobs()
+    _refuse_foreign_label_jobs()
     exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
     log = logs_dir() / "permissions-helper.log"
     plist = {

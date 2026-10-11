@@ -123,7 +123,7 @@ def test_expected_dr_uses_the_named_identity_sha1(
     )
 
     assert lifecycle._expected_dr() == (
-        f'identifier "{lifecycle._BUNDLE_ID}" and certificate leaf = H"{mixed_case_sha1.lower()}"'
+        f'identifier "{lifecycle.HELPER_BUNDLE_ID}" and certificate leaf = H"{mixed_case_sha1.lower()}"'
     )
 
 
@@ -315,7 +315,7 @@ def test_signing_smoke_signs_scratch_and_reads_matching_requirement(
         lifecycle._CERT_CN,
         "-v",
         "--identifier",
-        lifecycle._BUNDLE_ID,
+        lifecycle.HELPER_BUNDLE_ID,
         "--requirements",
         f"=designated => {_test_dr()}",
     ]

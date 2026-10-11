@@ -31,8 +31,7 @@ While it is on, it is the cluster's point-in-time recovery path.
   `OSS_REGION` is the bare region id (`cn-shanghai`), not the endpoint's `oss-` form:
   OSS rejects the signature with "Invalid signing region" otherwise, and the
   configuration check refuses an `oss-` value. The prefix names a path (the PG major and a generation number belong in it) and
-  cannot sit under `ava-logical/` (the daily dump), `ava-pitr-scratch/` or
-  `ava-wsl-cutover-*`. Use a dedicated storage account whose policy is limited to that
+  cannot sit under `ava-logical/` (the daily dump) or `ava-pitr-scratch/`. Use a dedicated storage account whose policy is limited to that
   prefix with Get, Put, List and Delete (plus AbortMultipartUpload and ListParts):
   retention deletes, and the logical-dump upload credential must not be able to touch
   the physical chain.

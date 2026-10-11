@@ -622,7 +622,7 @@ def _install_env(
     log = tmp_path / "logs" / "permissions-helper.log"
     socket_path = tmp_path / "run" / "permissions-helper.sock"
     monkeypatch.setattr(lifecycle.base.paths, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(lifecycle, "_refuse_stale_jobs", lambda: None)
+    monkeypatch.setattr(lifecycle, "_refuse_foreign_label_jobs", lambda: None)
     monkeypatch.setattr(lifecycle, "_label", lambda: "com.ava.permissions-helper.test")
     monkeypatch.setattr(lifecycle, "_domain", lambda: "gui/501")
     monkeypatch.setattr(lifecycle, "_plist_path", lambda: plist_path)
@@ -668,11 +668,9 @@ def _skip_sleep(_seconds: float) -> None:
     return
 
 
-# --- Old-layout job retirement -------------------------------------------
-# Labels used to be the fixed `com.ava.permissions-helper.main`; after
-# per-cluster home-slug labels arrived, converge wrote the slugged job but never
-# retired a `main` job already loaded, so two KeepAlive jobs raced the same
-# socket.
+# --- Foreign-label job refusal -------------------------------------------
+# A LaunchAgent under another label that pins this home's socket would race the
+# home's own KeepAlive job for it.
 
 
 def _write_agent_plist(
