@@ -205,70 +205,6 @@ def _restore_claimed_previous(
     write_ledger(ledger_path, ledger)
 
 
-def _reconcile_stage_publication(
-    ledger_path: Path,
-    ledger: dict[str, Any],
-    skills_root: Path,
-    transaction: dict[str, Any],
-    *,
-    skill_name: str = SKILL_NAME,
-) -> None:
-    if transaction["stage_state"] != "publishing":
-        return
-    generation_id = transaction["generation_id"]
-    prepared = _prepared_stage_path(ledger_path, generation_id)
-    stage = transaction_path(skills_root, "stage", generation_id, skill_name=skill_name)
-    prepared_exists = exists(prepared)
-    stage_exists = exists(stage)
-    if prepared_exists and stage_exists:
-        raise ClientConflictError("stage source and destination both exist")
-    if prepared_exists:
-        if tree_manifest(prepared) != transaction["expected_manifest"]:
-            raise ClientConflictError("prepared Ava stage was modified")
-        rename_no_replace(prepared, stage)
-    elif stage_exists:
-        _verify_marker(stage, ledger["installation_id"], generation_id, skill_name=skill_name)
-        if tree_manifest(stage) != transaction["expected_manifest"]:
-            raise ClientConflictError("published Ava stage was modified")
-    else:
-        raise ClientConflictError("stage publication outcome is ambiguous")
-    transaction["stage_state"] = "published"
-    write_ledger(ledger_path, ledger)
-
-
-def _reconcile_target_claim(
-    ledger_path: Path,
-    ledger: dict[str, Any],
-    transaction: dict[str, Any],
-    previous: Path,
-    target: Path,
-) -> None:
-    if transaction["claim_state"] != "claiming":
-        return
-    old = ledger["installed"]
-    if old is None:
-        raise ClientConflictError("target claim has no installed ownership record")
-    previous_exists = exists(previous)
-    target_exists = exists(target)
-    if previous_exists and target_exists:
-        raise ClientConflictError("target claim outcome is ambiguous")
-    if previous_exists:
-        _verify_marker(
-            previous, ledger["installation_id"], old["generation_id"], skill_name=target.name
-        )
-        _require_digest(previous, old["digest"], "claimed managed target was modified")
-        transaction["claim_state"] = "claimed"
-    elif target_exists:
-        _verify_marker(
-            target, ledger["installation_id"], old["generation_id"], skill_name=target.name
-        )
-        _require_digest(target, old["digest"], "managed target changed during claim")
-        transaction["claim_state"] = "idle"
-    else:
-        raise ClientConflictError("target claim outcome is ambiguous")
-    write_ledger(ledger_path, ledger)
-
-
 def _commit_activation(
     ledger_path: Path,
     ledger: dict[str, Any],
@@ -342,46 +278,6 @@ def _activate(
         raise ClientConflictError("activated Ava target failed verification")
     _commit_activation(ledger_path, ledger, transaction, previous)
     return action
-
-
-def _recover(
-    ledger_path: Path,
-    ledger: dict[str, Any],
-    skills_root: Path,
-    target: Path,
-) -> str | None:
-    transaction = ledger["transaction"]
-    if transaction is None:
-        return None
-    stage = transaction_path(
-        skills_root, "stage", transaction["generation_id"], skill_name=target.name
-    )
-    previous = transaction_path(
-        skills_root, "previous", transaction["generation_id"], skill_name=target.name
-    )
-    _reconcile_stage_publication(
-        ledger_path, ledger, skills_root, transaction, skill_name=target.name
-    )
-    if transaction["stage_state"] == "published" and exists(target) and not exists(stage):
-        _verify_marker(
-            target, ledger["installation_id"], transaction["generation_id"], skill_name=target.name
-        )
-        _require_digest(
-            target, transaction["expected_digest"], "activated transaction was modified"
-        )
-        action = "installed" if ledger["installed"] is None else "updated"
-        _commit_activation(ledger_path, ledger, transaction, previous)
-        return action
-    _reconcile_target_claim(ledger_path, ledger, transaction, previous, target)
-    if transaction["claim_state"] == "claimed":
-        if exists(previous) and exists(target):
-            raise ClientConflictError("late target prevents restoration of claimed copy")
-        _restore_claimed_previous(ledger_path, ledger, transaction, previous, target)
-    if transaction["stage_state"] == "published" and exists(stage):
-        return _activate(ledger_path, ledger, skills_root, target)
-    if _abandon_transaction(ledger_path, ledger, skills_root, skill_name=target.name):
-        return None
-    raise ClientConflictError("incomplete Ava transaction still owns a claimed target")
 
 
 def _validate_source_path(repo: Path, source: Path) -> None:
@@ -475,12 +371,16 @@ def _converge_locked(
     target = skills_root / skill_name
     ledger = _ledger_for(ledger_path, client_key, target)
     _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
-    recovered = _recover(ledger_path, ledger, skills_root, target)
-    if recovered is not None:
-        print(f"  · {label} external operator skill {recovered}: skills/{skill_name}")
-        _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
-        return
-    _cleanup_garbage(ledger_path, ledger, skills_root, label, skill_name=skill_name)
+    if ledger["transaction"] is not None:
+        # An earlier converge was cut off mid-publication. Nothing here finishes
+        # or rolls it back: the claimed/staged paths belong to that run, so the
+        # skill is skipped (and re-reported on every converge) until a person has
+        # looked at the residue and removed the ledger.
+        raise ClientConflictError(
+            "an earlier publication was interrupted and is not resumed; inspect the "
+            f"Ava stage/previous directories beside skills/{skill_name}, then remove "
+            f"{ledger_path} (and skills/{skill_name} if it is Ava's copy) and run `ava start`"
+        )
     if _managed_target_current(ledger, target, source_digest):
         return
     try:
