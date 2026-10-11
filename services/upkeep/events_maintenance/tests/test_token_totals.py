@@ -21,7 +21,7 @@ from base.config import ConfigBoot
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
-from services.upkeep.events_maintenance import daemon, rollup, token_totals
+from services.upkeep.events_maintenance import rollup, token_totals
 
 _TODAY = date(2026, 6, 30)
 
@@ -176,7 +176,7 @@ def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_wa
         assert gate.application_name() == "ava:rollup-operator:v7"
         return _Database()
 
-    monkeypatch.setattr(daemon, "events_maintenance_db", database)
+    monkeypatch.setattr(rollup, "events_maintenance_db", database)
     _raw_usage(db, agent, old, 150)  # the backfilled history of a folded day
 
     recent = (today - timedelta(days=1)).strftime("%Y%m%d")

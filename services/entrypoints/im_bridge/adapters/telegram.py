@@ -27,15 +27,13 @@ import httpx
 from base.log import logger
 from base.paths import ava_home
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
-from services.entrypoints.im_bridge.outbound.types import (
-    OutboundAdapterKind,
-    OutboundChunk,
-    PreparedOutboundSend,
-)
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
     IMAdapter,
     InboundMessage,
+    OutboundAdapterKind,
+    OutboundChunk,
+    PreparedOutboundSend,
     RetryableTransportError,
     SendNotStartedError,
     SendOutcomeUncertainError,

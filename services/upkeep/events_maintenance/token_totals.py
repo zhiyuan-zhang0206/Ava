@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 import psycopg
 
-from services.upkeep.events_maintenance.rollup import RECOMPUTE_DAYS
+from services.upkeep.events_maintenance.config import RECOMPUTE_DAYS
 
 # A day is folded once it is this many days behind today: past the recompute horizon, with a
 # margin for a pass that straddles midnight.

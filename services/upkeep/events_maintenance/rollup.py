@@ -33,6 +33,8 @@ from datetime import UTC, date, datetime, timedelta
 
 import psycopg
 
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 from base.db.code_version_gate import ProcessDbGate
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
 from base.native_process.code_version import CodeVersion
@@ -40,10 +42,8 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import process_name
 from base.telemetry.event_sql import numeric
 from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
-
-# Late writes arrive up to the mirror's seven-day retention after the event; one more day of
-# margin covers a replay that straddles midnight.
-RECOMPUTE_DAYS = 8
+from services.upkeep.events_maintenance.config import RECOMPUTE_DAYS, events_maintenance_db
+from services.upkeep.events_maintenance.token_totals import folded_through, rebuild_totals
 
 
 @dataclass(frozen=True)
@@ -178,18 +178,12 @@ def _day_arg(value: str) -> date:
 
 def main(argv: list[str] | None = None) -> int:
     """Operator CLI: recompute a range of closed UTC days (monotone guard applies)."""
-    from services.upkeep.events_maintenance.daemon import events_maintenance_db
-
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     parser.add_argument("--from", dest="first", type=_day_arg, required=True, metavar="YYYYMMDD")
     parser.add_argument("--to", dest="last", type=_day_arg, required=True, metavar="YYYYMMDD")
     args = parser.parse_args(argv)
     if args.first > args.last:
         parser.error("--from is after --to")
-    from base.cluster.machine.boot import machine_from_boot
-    from base.config import ConfigBoot
-    from services.upkeep.events_maintenance.token_totals import folded_through, rebuild_totals
-
     config = ConfigBoot()
     config.boot()
     machine = machine_from_boot(config)

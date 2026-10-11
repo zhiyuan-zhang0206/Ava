@@ -219,12 +219,12 @@ def test_compute_rollup_recomputes_the_last_closed_days_but_not_today(
 def test_operator_rejects_an_inverted_range_before_capture_or_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from services.upkeep.events_maintenance import daemon, rollup
+    from services.upkeep.events_maintenance import rollup
 
     capture = Mock()
     database = Mock()
     monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(daemon, "events_maintenance_db", database)
+    monkeypatch.setattr(rollup, "events_maintenance_db", database)
     with pytest.raises(SystemExit) as caught:
         rollup.main(["--from", "20261002", "--to", "20261001"])
     assert caught.value.code == 2
