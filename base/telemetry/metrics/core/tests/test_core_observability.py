@@ -211,19 +211,17 @@ def test_cost_queries_unwrap_cost_usd() -> None:
 # ── per-panel filter semantics (rendered-template locks) ─────────────────────
 
 
-def test_exec_breakdown_covers_legacy_spellings() -> None:
+def test_exec_breakdown_covers_every_outcome() -> None:
     """exec panel series: ok / failed / timeout / cancelled / node_timeout /
-    other — parenthesized legacy spellings counted via RE2 character classes,
-    unknown exec* events fall into other (legacy exec_thread_stuck rows now
-    land in other — the thread backend stopped emitting them, PR3)."""
+    other — unknown exec* events fall into other."""
     exprs = _all_rendered()["ava_obs_exec_success_rate"]
     # event_name is a promoted stream label (2026-08-23 cutover, task #1467):
     # every matcher sits in the stream selector, before the | json stage.
     assert all("event_name=" in e.split("| json")[0] for e in exprs), exprs
     assert 'event_name="exec"' in exprs[0]
-    assert 'event_name=~"exec_failed|exec[(]failed[)]"' in exprs[1]
-    assert 'event_name=~"exec_timeout|exec[(]timeout[)]"' in exprs[2]
-    assert 'event_name=~"exec_cancelled|exec[(]cancelled[)]"' in exprs[3]
+    assert 'event_name="exec_failed"' in exprs[1]
+    assert 'event_name="exec_timeout"' in exprs[2]
+    assert 'event_name="exec_cancelled"' in exprs[3]
     assert 'event_name="exec_node_timeout"' in exprs[4]
     # other: exec prefix minus every known spelling. Selector matchers are
     # full-string regexes, so the negated list excludes exactly the named
@@ -233,9 +231,8 @@ def test_exec_breakdown_covers_legacy_spellings() -> None:
     # semantic change and must fail here.
     assert (
         'event_name=~"exec.*", '
-        'event_name!~"exec|exec_envelope|exec_failed|exec[(]failed[)]|exec_timeout|'
-        "exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|"
-        'exec_node_timeout"'
+        'event_name!~"exec|exec_envelope|exec_failed|exec_timeout|'
+        'exec_cancelled|exec_node_timeout"'
     ) in exprs[5]
 
 

@@ -8,9 +8,8 @@ Same report shape and the same fixed bucket grid as always (`OPS_GRID_ORIGIN`-al
   kind count toward neither) + `event_log_drop`, per bucket.
 - **llm** — from the `llm_usage` rows: calls, tokens, latency sum, exact p50 / p95 / max latency
   per bucket (and over the whole window), plus the LLM error family events per bucket.
-- **restarts** — `agent_restarted` + `service_started` per bucket, plus whole-window breakdowns:
-  services by `attributes.name` (count and last start), agents by `agent_id` (top 20; labels from
-  the `agents` registry).
+- **restarts** — `service_started` per bucket, plus a whole-window breakdown of services by
+  `attributes.name` (count and last start).
 
 A bucket is half-open, `[start, start + bucket)`, as `meta.bucket_starts` says; the in-progress
 bucket is partial. Counts and sums are exact; percentiles are exact over the rows of the bucket
@@ -19,7 +18,6 @@ bucket is partial. Counts and sums are exact; percentiles are exact over the row
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, LiteralString, cast
 
@@ -215,25 +213,18 @@ def _llm_series(conn: psycopg.Connection[Any], window: _Window) -> dict[str, Any
     }
 
 
-def _restart_series(
-    conn: psycopg.Connection[Any],
-    window: _Window,
-    label_lookup: Callable[[list[int]], dict[int, str | None]] | None,
-) -> dict[str, Any]:
+def _restart_series(conn: psycopg.Connection[Any], window: _Window) -> dict[str, Any]:
     rows = _execute(
         conn,
         f"""
-        SELECT {window.bucket_sql} AS bkt,
-               count(*) FILTER (WHERE event_name = 'agent_restarted'),
-               count(*) FILTER (WHERE event_name = 'service_started')
+        SELECT {window.bucket_sql} AS bkt, count(*)
         FROM telemetry_events
-        WHERE event_name IN ('agent_restarted', 'service_started') AND ts >= %s AND ts < %s
+        WHERE event_name = 'service_started' AND ts >= %s AND ts < %s
         GROUP BY bkt
         """,  # noqa: S608 — the bucket expression is built from integers
         (window.start, window.end),
     ).fetchall()
-    cells = window.fill({int(r[0]): (int(r[1]), int(r[2])) for r in rows}, (0, 0))
-    agent_restarts, service_starts = (list(column) for column in zip(*cells, strict=True))
+    cells = window.fill({int(r[0]): int(r[1]) for r in rows}, 0)
 
     name = f"btrim(COALESCE({SERVICE_STARTED_KEYS['name']}, ''))"
     services: list[dict[str, Any]] = [
@@ -249,45 +240,16 @@ def _restart_series(
             (window.start, window.end),
         ).fetchall()
     ]
-    top = [
-        (int(r[0]), int(r[1]))
-        for r in conn.execute(
-            """
-            SELECT agent_id, count(*) FROM telemetry_events
-            WHERE event_name = 'agent_restarted' AND agent_id IS NOT NULL
-              AND ts >= %s AND ts < %s
-            GROUP BY agent_id ORDER BY count(*) DESC, agent_id LIMIT 20
-            """,
-            (window.start, window.end),
-        ).fetchall()
-    ]
-    labels: dict[int, str | None] = {}
-    if top and label_lookup is not None:
-        labels = label_lookup([aid for aid, _ in top])
-    agents = [{"agent_id": aid, "label": labels.get(aid), "restarts": c} for aid, c in top]
     return {
-        "series": [
-            {"bucket": i, "agent_restarts": a, "service_starts": s}
-            for i, (a, s) in enumerate(zip(agent_restarts, service_starts, strict=True))
-        ],
+        "series": [{"bucket": i, "service_starts": s} for i, s in enumerate(cells)],
         "services": services,
-        "agents": agents,
-        "totals": {"agent_restarts": sum(agent_restarts), "service_starts": sum(service_starts)},
+        "totals": {"service_starts": sum(cells)},
     }
 
 
-def fetch_ops_series(
-    conn: psycopg.Connection[Any],
-    window: str,
-    *,
-    label_lookup: Callable[[list[int]], dict[int, str | None]] | None = None,
-) -> dict[str, Any]:
+def fetch_ops_series(conn: psycopg.Connection[Any], window: str) -> dict[str, Any]:
     """Run every registered ops series for `window` and return the full report
-    dict — meta + the three groups — ready for `OpsMonitorReport(**data)`.
-
-    `label_lookup`, when supplied, resolves the agents-registry labels of the restart
-    breakdown.
-    """
+    dict — meta + the three groups — ready for `OpsMonitorReport(**data)`."""
     window_s, bucket_s = WINDOWS[window]
     anchor = datetime.now(UTC)
     bucket_starts = _bucket_starts(anchor, window_s, bucket_s)
@@ -301,5 +263,5 @@ def fetch_ops_series(
         },
         "sse": _sse_series(conn, grid),
         "llm": _llm_series(conn, grid),
-        "restarts": _restart_series(conn, grid, label_lookup),
+        "restarts": _restart_series(conn, grid),
     }

@@ -16,9 +16,7 @@ from services.upkeep.events_maintenance import telemetry_replay as replay
 _TS = "2026-10-02T12:00:00+00:00"
 
 
-def _line(
-    name: str, category: str, marker: str, *, with_id: bool = True, level: str = "info"
-) -> bytes:
+def _line(name: str, category: str, marker: str, *, level: str = "info") -> bytes:
     body: dict[str, Any] = {
         "ts": _TS,
         "trace_id": None,
@@ -35,8 +33,7 @@ def _line(
         "attributes": {"n": name},
     }
     text = json.dumps(body, separators=(",", ":"))
-    if with_id:
-        body["id"] = event_id(text, int(1_790_000_000 * 1e9))
+    body["id"] = event_id(text, int(1_790_000_000 * 1e9))
     return (json.dumps(body, separators=(",", ":")) + "\n").encode()
 
 
@@ -93,19 +90,6 @@ def test_a_row_the_live_writer_already_stored_is_not_stored_twice(
     db_conn.commit()
 
     assert replay.recover_telemetry_events(db_conn) == 0
-    assert _stored(db_conn, marker) == ["llm_usage"]
-
-
-def test_rows_written_before_the_mirror_held_an_id_get_the_derived_one(
-    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    marker = f"replay-{time.monotonic_ns()}"
-    (tmp_path / "events-20261002.jsonl").write_bytes(
-        _line("llm_usage", "telemetry", marker, with_id=False)
-    )
-    monkeypatch.setattr(replay, "logs_dir", lambda: tmp_path)
-
-    assert replay.recover_telemetry_events(db_conn) == 1
     assert _stored(db_conn, marker) == ["llm_usage"]
 
 

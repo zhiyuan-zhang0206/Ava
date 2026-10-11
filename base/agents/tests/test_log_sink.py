@@ -217,8 +217,7 @@ def test_sink_exception_includes_traceback_in_payload(
     sink_logger,
 ) -> None:
     """When logger.opt(exception=True), payload should carry traceback / exception_type /
-    exception_value fields — for diagnosing exception turns in the event stream (turn_end ok=False
-    / process_exit reason='exception:X' scenarios)."""
+    exception_value fields — for diagnosing exception turns in the event stream (turn_end ok=False scenarios)."""
     try:
         raise RuntimeError("simulated LLM timeout")  # noqa: TRY301 — set sys.exc_info()
     except RuntimeError:
@@ -267,14 +266,12 @@ def test_sink_opt_exception_without_active_exc_skips_garbage_payload(
 # `_message_to_params` is pure: a record's level is the level the caller logged,
 # except psycopg's `query cancellation failed` line — a host-stall companion
 # whose emitted event is demoted to info (2026-10-03 triage #13). Predictable
-# side effects of an update window (slow pool acquires, DB-outage pauses) keep
-# their WARNING; the sink consults no deploy state and never reads the
+# side effects of an update window (slow pool acquires) keep their WARNING; the sink consults no deploy state and never reads the
 # database.
 
 
-def test_slow_acquire_and_db_outage_warnings_keep_their_level(sink_logger) -> None:
-    """db_pool_acquire_slow and every db_outage_* category stay WARNING in the
-    events row — nothing rewrites them."""
+def test_slow_acquire_warning_keeps_its_level(sink_logger) -> None:
+    """db_pool_acquire_slow stays WARNING in the events row — nothing rewrites it."""
     sink_logger.warning(  # pyright: ignore[reportUnknownMemberType]
         "[db pool] acquire took 2.0s (slow — Postgres under load)",
         event="db_pool_acquire_slow",
@@ -283,11 +280,6 @@ def test_slow_acquire_and_db_outage_warnings_keep_their_level(sink_logger) -> No
     )
     _event, _agent_id, level, _payload = _last_event()
     assert level == "warning"
-
-    for event in ("db_outage_wait", "db_outage_pause", "db_outage_reconcile_retry"):
-        sink_logger.warning("db unreachable — pausing", event=event, agent_id="-")  # pyright: ignore[reportUnknownMemberType]
-        _event, _agent_id, level, _payload = _last_event()
-        assert level == "warning", f"{event} must keep its WARNING level"
 
 
 def test_host_stall_companion_demotes_only_its_emitted_event(sink_logger) -> None:
