@@ -99,11 +99,9 @@ async def post_force_expire_impersonation(
     verified_by = getattr(request.state, "source_verified_by", None)
     principal = getattr(request.state, "auth_principal", None)
     subject = getattr(principal, "subject", None)
-    actor = (
-        f"{verified_by}:{subject}"
-        if isinstance(verified_by, str) and isinstance(subject, str)
-        else "local_operator"
-    )
+    if verified_by is None or subject is None:
+        raise RuntimeError("force-expire reached its handler without a verified principal")
+    actor = f"{verified_by}:{subject}"
     try:
         status = await asyncio.to_thread(
             force_expire_impersonation,

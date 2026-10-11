@@ -134,7 +134,7 @@ class GenerationRef(_Record):
 
 
 class UnitApi(_Record):
-    """The unit's HTTP admission for one generation (authenticated clusters only)."""
+    """The unit's HTTP admission for one generation."""
 
     token: Secret  # the generation's runner API token, presented by the unit
     gateway: Digest  # digest of the gateway API token, accepted by its ops server
@@ -143,7 +143,7 @@ class UnitApi(_Record):
 
 class UnitCapability(_Record):
     """`unit.json`: the runner login of one write generation for one unit, and
-    its API admission when the cluster's API is authenticated."""
+    its API admission."""
 
     version: Literal[1]
     unit: UnitIdentity
@@ -152,7 +152,7 @@ class UnitCapability(_Record):
     role: RoleName
     password: Secret
     bundle: Hex32
-    api: UnitApi | None
+    api: UnitApi
 
     @property
     def dsn(self) -> str:
@@ -268,7 +268,7 @@ def issue_bundle(
     `home` is the gateway home keeping the ledger; `endpoint` is the
     credential-free database URL bootstrap serves to runners;
     `cluster_secret` is the gateway's human secret, from which only the
-    telemetry token is derived (empty = an open API: no `UnitApi`). A home
+    telemetry token is derived (`telemetry_token` refuses an empty one). A home
     without an active generation raises (a pending one is never issued).
     """
     if urlsplit(endpoint).password is not None:
@@ -280,14 +280,10 @@ def issue_bundle(
         )
     generation = active_generation(home)
     secret = read_secret(home, generation)
-    api = (
-        UnitApi(
-            token=secret.api.runner,
-            gateway=token_digest(secret.api.gateway),
-            telemetry=telemetry_token(cluster_secret),
-        )
-        if cluster_secret
-        else None
+    api = UnitApi(
+        token=secret.api.runner,
+        gateway=token_digest(secret.api.gateway),
+        telemetry=telemetry_token(cluster_secret),
     )
     issued_at = time.time() if now is None else now
     capability = UnitCapability(
@@ -470,10 +466,8 @@ def unit_delivery(home: Path) -> dict[str, str]:
 
 
 def unit_api_delivery(home: Path) -> dict[str, str]:
-    """The launch-environment API token of the installed capability; none when
-    the cluster's API is open."""
-    api = require_unit_capability(home).api
-    return {} if api is None else {API_TOKEN_ENV: api.token}
+    """The launch-environment API token of the installed capability."""
+    return {API_TOKEN_ENV: require_unit_capability(home).api.token}
 
 
 def unit_reference(home: Path) -> dict[str, object] | None:
@@ -503,14 +497,14 @@ def consume_unit(home: Path) -> UnitCapability:
 
 
 def telemetry_bearer(home: Path, cluster_secret: str) -> str | None:
-    """The OTLP relay ingress bearer `home` presents and accepts, or None (open).
+    """The OTLP relay ingress bearer `home` presents and accepts, or None when the
+    unit holds neither a capability nor the human secret.
 
     A remote unit (an installed capability) uses the telemetry token its
     capability carries; it holds no human secret. The gateway derives the same
-    token from its human secret. None means the cluster's API is open: no
-    authenticated ingress exists.
+    token from its human secret.
     """
     capability = load_unit_capability(home)
     if capability is not None:
-        return None if capability.api is None else capability.api.telemetry
+        return capability.api.telemetry
     return telemetry_token(cluster_secret) if cluster_secret else None

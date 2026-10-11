@@ -35,7 +35,7 @@ a text summary on stdout.
 Gateway auth: `Authorization: Bearer <token>` — the process's machine API token
 (`AVA_API_TOKEN`, set in every launched service and agent), else
 `AVA_CLUSTER_SECRET` from the environment or `$AVA_HOME/.env` (the gateway
-home; no header when empty — a single-box no-auth cluster). `$AVA_HOME` is
+home). `$AVA_HOME` is
 resolved the way every other Ava process resolves it (see `_common.source_root`
 / `base.host.env.dotenv_boot.resolve_ava_home`): the variable when set, else
 `~/.ava`. The gateway listens on :8000.

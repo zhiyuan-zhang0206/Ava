@@ -67,11 +67,6 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
 
     On failure, returns a typed 401 error envelope with detail ``"invalid password"``.
 
-    A no-secret cluster (single-box no-auth posture) has no credential: login
-    is a no-op 200 success, deliberately BEFORE the rate limiter — there is
-    nothing to guess, and no-secret requests must never count into the
-    limiter's failure records.
-
     Brute-force guard: an IP that fails ``gateway.login_max_failures`` times in
     a row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on
     those config fields; enforcement in base/cluster/rate_limit.py).
@@ -81,9 +76,6 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
     """
     ip = request.client.host if request.client else "unknown"
     secret = settings.data_plane.cluster_secret
-
-    if not secret:
-        return JSONResponse(content={"ok": True})
 
     login_limiter: LoginRateLimiter = request.app.state.login_limiter
     remaining = login_limiter.lockout_remaining(ip)
@@ -164,15 +156,6 @@ async def check(request: Request) -> JSONResponse:
     Returns ``{"authenticated": true}`` or ``{"authenticated": false}``.
     Always 200 — the caller uses the body, not the status code.
     """
-    # When auth is disabled (e2e) OR the cluster has no secret, report
-    # authenticated so the frontend AuthGuard renders the app instead of
-    # redirecting to /login. The session cookie cannot be carried here in e2e:
-    # the browser page is on a different host than the gateway, so a
-    # SameSite=Lax cookie is dropped on the cross-site check request. A
-    # no-secret cluster has no credential to verify, so there is nothing to
-    # check.
-    if not settings.gateway.auth_middleware_enabled or not settings.data_plane.cluster_secret:
-        return JSONResponse(content={"authenticated": True})
     token = request.cookies.get(cookie_name())
     fact = await asyncio.to_thread(
         current_session_fact,

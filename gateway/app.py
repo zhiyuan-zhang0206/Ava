@@ -403,8 +403,7 @@ async def _cluster_pause_middleware(
 # network; login is how the browser obtains a session cookie.
 # Every other API route requires either a valid session cookie or a
 # Bearer token carrying the cluster secret or a machine API token of the active
-# write generation — unless the cluster has no secret at all (no-auth posture)
-# or the middleware is disabled for e2e.
+# write generation.
 _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
     {
         "/api/health",
@@ -468,13 +467,9 @@ async def _cluster_auth_middleware(
        SDK / scripts), or the active write generation's machine API token that
        the launcher delivers to every service and agent (``AVA_API_TOKEN``).
 
-    Two states serve the API unauthenticated, both first-class:
-    - ``cluster_secret`` empty — a no-secret cluster is fully unauthenticated by
-      design (single-box posture; the gateway then binds loopback only, see
-      ``main()``).
-    - ``auth_middleware_enabled=false`` — the e2e/test knob: bypass the
-      middleware while keeping the cluster secret for internal
-      service-to-service auth (ops / agent-host).
+    There is no unauthenticated posture: every cluster has a human secret
+    (``server.main`` refuses to start without one), and a blank secret never
+    verifies as a bearer.
     """
     from gateway.http.auth.request_principal import AuthPrincipal, cluster_credential
 
@@ -482,8 +477,6 @@ async def _cluster_auth_middleware(
     request.state.auth_principal = None
     request.state.source_verified_by = None
     secret = settings.data_plane.cluster_secret
-    if not settings.gateway.auth_middleware_enabled or not secret:
-        return await call_next(request)
     # CORS preflight (OPTIONS) carries no credentials by spec, so it can never
     # satisfy the cookie/Bearer check below. CORSMiddleware is now OUTERMOST and
     # answers preflights before this middleware runs, so this branch is a
@@ -646,8 +639,8 @@ app.include_router(upload_delivery_router.router)
 # /mcp — MCP control plane (design task #1212 step 1). Mounted always; the
 # wrapper answers 404 while settings.gateway.mcp_endpoint_enabled is off, so
 # the route surface is stable and the flag is a pure on/off switch. Auth is
-# the mounted wrapper requires its own revocable client token, including on
-# no-secret clusters; cluster cookies and Bearer secrets are not MCP identities.
+# the mounted wrapper requires its own revocable client token; cluster cookies
+# and Bearer secrets are not MCP identities.
 app.mount("/mcp", mcp_server_endpoint.mcp_gateway(app))
 
 
