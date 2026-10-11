@@ -22,28 +22,16 @@ from base.native_process.os_platform import (
     pty_max,
 )
 
+_CHILD = Path(__file__).with_name("_os_platform_child.py")
+
 
 def test_cold_import_does_not_probe_uname() -> None:
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 -- fixed argv, the venv interpreter runs the child script
         [
             ".venv/bin/python",
             "-I",
-            "-c",
-            """
-import platform
-import sys
-import uuid
-
-# Linux's stdlib UUID initialization probes the OS independently of Ava.
-assert "base.native_process" not in sys.modules
-assert "base.native_process.os_platform" not in sys.modules
-
-def refuse_probe():
-    raise AssertionError("platform import must not probe uname")
-
-platform.uname = refuse_probe
-import base.native_process.os_platform
-""",
+            str(_CHILD),
+            "cold_import_does_not_probe_uname",
         ],
         capture_output=True,
         text=True,
@@ -87,16 +75,8 @@ class TestEnsureLineBufferedStdio:
         child that prints and then blocks, and assert the line is readable while it
         is still alive."""
         repo_root = str(Path(__file__).resolve().parents[3])
-        script = (
-            "import sys, time\n"
-            "sys.path.insert(0, sys.argv[1])\n"
-            "from base.native_process.os_platform import ensure_line_buffered_stdio\n"
-            "ensure_line_buffered_stdio()\n"
-            "print('[update] header')\n"
-            "time.sleep(30)\n"
-        )
-        proc = subprocess.Popen(  # noqa: S603 — this interpreter, a literal script
-            [sys.executable, "-c", script, repo_root],
+        proc = subprocess.Popen(  # noqa: S603 — this interpreter, a fixed child script
+            [sys.executable, str(_CHILD), "pipe_stdout_streams_before_exit", repo_root],
             stdout=subprocess.PIPE,
             text=True,
         )

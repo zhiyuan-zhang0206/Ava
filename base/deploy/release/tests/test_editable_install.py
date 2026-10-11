@@ -543,15 +543,7 @@ def test_editable_import_gate_requires_the_checkout_editable_import(
     assert editable_install.editable_import_gate(source_root) == ("venv python missing",)
 
 
-# Literal source with paths in argv, so test selection can read the probe's imports.
-_GUARD_PROBE = """
-import sys
-from pathlib import Path
-from base.deploy.release.editable_install import editable_install_violations
-raise SystemExit(
-    bool(editable_install_violations(Path(sys.argv[1]), allowed_roots=(Path(sys.argv[2]),)))
-)
-"""
+_GUARD_PROBE = Path(__file__).with_name("_guard_probe_child.py")
 
 
 @pytest.mark.skipif(
@@ -605,11 +597,10 @@ def test_uv_native_editable_records_are_legal_and_exec_guard_accepts_them(tmp_pa
 
     child_env = dict(os.environ)
     child_env["PYTHONPATH"] = str(checkout)
-    child = subprocess.run(  # noqa: S603 — current test interpreter and test-owned code
+    child = subprocess.run(  # noqa: S603 — current test interpreter and test-owned child script
         [
             sys.executable,
-            "-c",
-            _GUARD_PROBE,
+            str(_GUARD_PROBE),
             str(uv_built_venv_root),
             str(checkout),
         ],
