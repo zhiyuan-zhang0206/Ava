@@ -1,4 +1,4 @@
-"""Native hard-death staging, bounded wake fairness and actual future draining."""
+"""Native hard-death staging, single wake, bounded copy attempts and actual future draining."""
 
 import asyncio
 import os
@@ -12,7 +12,6 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.upload_delivery import source, storage
 from base.agents.upload_delivery.models import UploadDeliveryConflictError
 from base.db import Database
@@ -136,37 +135,71 @@ async def test_shutdown_drains_native_future_after_cancelled_http_wait(
 
 
 @pytest.mark.asyncio
-async def test_wake_round_rotates_and_one_failure_does_not_starve_later_pending(
+async def test_accepted_upload_wakes_once_and_a_lost_wake_is_not_repeated(
     uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
 ):
-    _client, agent = uploaded_agent
-    for ordinal in range(40):
-        value = source.accept(
-            app.state.db_pool,
-            f"wake:{ordinal}",
-            agent,
-            ["f"],
-            [("f", b"x", "text/plain")],
-            InboundProvenance("cluster_bearer", "http"),
-        )
-        request = request_for(app.state.db_pool, value.batch_id)
-        source.complete(app.state.db_pool, request, proof_for(request))
-    ordered = source.pending_wakes(app.state.db_pool, "", 100)
-    first_iid = ordered[0][2]
-    reached: set[int] = set()
+    client, agent = uploaded_agent
+    batch_id = post(client, agent).json()["batch_id"]
+    woken: list[int] = []
 
-    def wake(_db: Database, _bus: EventBus, _agent: int, iid: str):
-        reached.add(int(iid))
-        if int(iid) == first_iid:
-            raise RuntimeError("first target unavailable")
-        return True
+    def lost_wake(_db: Database, _bus: EventBus, _agent: int, iid: str):
+        woken.append(int(iid))
+        raise RuntimeError("redis unavailable")
 
-    monkeypatch.setattr(worker, "publish_inbound_wake", wake)
+    async def copied(_self: worker.UploadRecovery, request: Any):
+        return proof_for(request)
+
+    monkeypatch.setattr(worker, "publish_inbound_wake", lost_wake)
+    monkeypatch.setattr(worker.UploadRecovery, "copy_proof", copied)
     recovery = worker.UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
     await recovery.round()
     await recovery.round()
-    assert reached == {row[2] for row in ordered}
-    assert recovery.wake_after != ""
+    await recovery.round()
+    status = source.status(app.state.db_pool, agent, batch_id)
+    assert status.state == "accepted" and status.inbound_id is not None
+    # One wake at acceptance; the still-pending chat is never re-announced by a scan.
+    assert woken == [status.inbound_id]
+    await recovery.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
+    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
+):
+    client, agent = uploaded_agent
+    batch_id = post(client, agent).json()["batch_id"]
+    calls: list[int] = []
+
+    async def unreachable(_self: worker.UploadRecovery, _request: Any):
+        calls.append(1)
+        raise OSError("receiver unreachable")
+
+    emitted: list[tuple[str, dict[str, Any]]] = []
+
+    def record(_category: str, name: str, *, attributes: dict[str, Any]) -> None:
+        emitted.append((name, attributes))
+
+    monkeypatch.setattr(worker.UploadRecovery, "copy_proof", unreachable)
+    monkeypatch.setattr(worker.telemetry, "emit", record)
+    recovery = worker.UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
+    for attempt in range(1, source.MAX_COPY_ATTEMPTS + 1):
+        with app.state.db_pool.connection() as conn:
+            conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
+        await recovery.round()
+        status = source.status(app.state.db_pool, agent, batch_id)
+        assert status.attempts == attempt
+        assert status.state == ("hold" if attempt == source.MAX_COPY_ATTEMPTS else "pending")
+    assert emitted == [
+        (
+            "upload_delivery_held",
+            {"agent_id": agent, "batch_id": batch_id, "reason": "OSError"},
+        )
+    ]
+    # Held means held: no later round copies it again.
+    with app.state.db_pool.connection() as conn:
+        conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
+    await recovery.round()
+    assert len(calls) == source.MAX_COPY_ATTEMPTS
     await recovery.close()
 
 

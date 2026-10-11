@@ -30,7 +30,7 @@ consumer loop lives with the agent host.
 Segments are append-only, so a live chunk's end is verified by the id of its
 last message at the recorded index: a checkpoint that has not caught up yet
 (the checkpoint writer persists every Nth super-step) is `ChunkNotReadyError` and
-retried; an id that sits elsewhere (a synthetic message inserted mid-segment by
+waited for, within a bound; an id that sits elsewhere (a synthetic message inserted mid-segment by
 crash repair shifts later indices) is `ChunkDriftError` and fails the job loudly.
 A segment's closing chunk instead names its compaction boundary checkpoint and
 is cut to what that snapshot holds.
@@ -63,17 +63,14 @@ from base.log import logger
 CHUNK_ENGINE_VERSION = "chunk-0.2"
 CHUNK_PROMPT_VERSION = "chunk-0.13"
 
-# A job handed back to the queue is retried this long after it was handed back (`release_job`
-# stamps the time), and a `running` claim older than the lease is taken over (a crashed host).
-# The lease is not renewed while a job runs, so it is set well above the slowest honest job: three
-# model rounds (the answer and two corrections), each up to five rate-limit retries of up to 30 s
-# plus a reasoning call of a few minutes, come to well under half an hour. A takeover of a live
-# job costs a second run of its model calls; a crash only delays the retry by the lease, which
-# makes the long lease the cheaper side (and simpler than a heartbeat task per job).
+# A job handed back to the queue to wait for its checkpoint (`release_job`) is claimed again
+# this long after it was handed back; the upper-level rebuild queue shares the spacing. A `running`
+# claim older than the lease is a claimer that died: `claim_job` fails it, since a chunk is
+# attempted once. The lease is not renewed while a job runs, so it is set well above the slowest
+# honest job: three model rounds (the answer and two corrections), each up to five rate-limit
+# retries of up to 30 s plus a reasoning call of a few minutes, come to well under half an hour.
 RETRY_SPACING_SECONDS = 30.0
 CLAIM_LEASE_SECONDS = 3600.0
-# Claims of one job (generation retries and crashed-claim takeovers) before it is given up on.
-MAX_ATTEMPTS = 20
 # A job whose chunk the checkpoint never reaches (waiting is free: it does not count as an
 # attempt) is failed after waiting this long; the clock starts when it first waits, so a job that
 # sits in the queue while the feature is off is not timed.
@@ -260,8 +257,7 @@ class ChunkJob:
     age_seconds: float = 0.0
 
 
-# Claim: a pending row not retried within the spacing, or a running row whose
-# lease lapsed (its claimer died), and only the oldest live job of its agent (the
+# Claim: a pending row not waiting within the spacing, and only the oldest live job of its agent (the
 # next chunk starts where the previous one left an open group, so one agent's jobs
 # never run side by side or out of order). SKIP LOCKED lets several runners poll
 # one queue without ever taking the same row, and one runner's concurrent claims
@@ -273,9 +269,8 @@ _CLAIM_SQL = """
 UPDATE understanding_chunk_jobs SET status = 'running', attempts = attempts + 1, claimed_at = now()
 WHERE id = (
     SELECT j.id FROM understanding_chunk_jobs j
-    WHERE ((j.status = 'pending'
-            AND (j.claimed_at IS NULL OR j.claimed_at < now() - make_interval(secs => %(spacing)s)))
-        OR (j.status = 'running' AND j.claimed_at < now() - make_interval(secs => %(lease)s)))
+    WHERE j.status = 'pending'
+      AND (j.claimed_at IS NULL OR j.claimed_at < now() - make_interval(secs => %(spacing)s))
       AND NOT EXISTS (
         SELECT 1 FROM understanding_chunk_jobs o
         WHERE o.agent_id = j.agent_id AND o.id < j.id AND o.status IN ('pending', 'running')
@@ -293,6 +288,16 @@ RETURNING id, agent_id, compact_version, start_index, end_index, end_msg_id,
           boundary_checkpoint_id, attempts, coalesce(extract(epoch FROM now() - waiting_since), 0)
 """
 
+# A `running` claim past the lease: its claimer died. The chunk is not attempted again, and the row
+# must not stay live, or it would block every later job of its agent.
+_FAIL_LOST_SQL = """
+UPDATE understanding_chunk_jobs SET status = 'failed', error = 'claimer lost: lease expired',
+    finished_at = now()
+WHERE status = 'running' AND claimed_at < now() - make_interval(secs => %(lease)s)
+  AND (%(agent)s::bigint IS NULL OR agent_id = %(agent)s::bigint)
+RETURNING id, agent_id, attempts
+"""
+
 
 async def claim_job(
     pool: AsyncConnectionPool, *, agent_id: int | None = None, segment_parallel: bool = False
@@ -300,9 +305,13 @@ async def claim_job(
     """Claim the oldest claimable job, or None when the queue has nothing due.
 
     Live consumers use the defaults: any agent, one agent's jobs strictly in order.
-    `agent_id` and `segment_parallel` are the replay tool's (see `_CLAIM_SQL`).
+    `agent_id` and `segment_parallel` are the replay tool's (see `_CLAIM_SQL`). A job whose
+    claimer died (its lease lapsed) is failed with `understanding_chunk_failed`, never claimed
+    again.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+        await cur.execute(_FAIL_LOST_SQL, {"lease": CLAIM_LEASE_SECONDS, "agent": agent_id})
+        lost = await cur.fetchall()
         await cur.execute(
             _CLAIM_SQL,
             {
@@ -313,6 +322,17 @@ async def claim_job(
             },
         )
         row = await cur.fetchone()
+    for lost_id, lost_agent, lost_attempts in lost:
+        telemetry.emit(
+            "telemetry",
+            "understanding_chunk_failed",
+            attributes={
+                "agent_id": int(lost_agent),
+                "job_id": int(lost_id),
+                "attempts": int(lost_attempts),
+                "error": "claimer lost: lease expired",
+            },
+        )
     if row is None:
         return None
     return ChunkJob(
@@ -342,29 +362,20 @@ async def finish_job(
         )
 
 
-async def release_job(
-    pool: AsyncConnectionPool,
-    job_id: int,
-    *,
-    error: str,
-    count_attempt: bool = True,
-    waiting: bool | None = False,
-) -> None:
-    """Hand a claimed job back to the queue; it is retried after the spacing, counted from now.
+async def release_job(pool: AsyncConnectionPool, job_id: int, *, error: str) -> None:
+    """Hand a claimed job back to the queue to wait for its checkpoint; claimed again after the
+    spacing, counted from now.
 
-    A generation failure counts as an attempt (`waiting=False` ends any wait); a wait (the
-    checkpoint has not caught up, the database blinked: `waiting=True`) does not, and starts the
-    give-up clock if it is not running; a job put back because its host is stopping
-    (`count_attempt=False, waiting=None`) changes neither.
+    A wait is not an attempt (the claim's count is given back) and starts the give-up clock if
+    it is not running. Only a wait comes back: a generation failure, a crash or a stopping host
+    ends the job as `failed`.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE understanding_chunk_jobs SET status = 'pending', error = %s, claimed_at = now(),"
-            " attempts = CASE WHEN %s::boolean THEN attempts ELSE greatest(attempts - 1, 0) END,"
-            " waiting_since = CASE WHEN %s::boolean IS NULL THEN waiting_since"
-            " WHEN %s::boolean THEN coalesce(waiting_since, now()) ELSE NULL END"
+            " attempts = greatest(attempts - 1, 0), waiting_since = coalesce(waiting_since, now())"
             " WHERE id = %s",
-            (error, count_attempt, waiting, waiting, job_id),
+            (error, job_id),
         )
 
 
@@ -634,30 +645,29 @@ async def write_group_nodes(
                     job.id,
                 ),
             )
-        requested = await _request_rebuild_if_out_of_order(cur, job.agent_id, nodes)
-    if requested is not None:
+        out_of_order = await _out_of_order_end(cur, job.agent_id, nodes)
+    if out_of_order is not None:
         telemetry.emit(
             "telemetry",
             "understanding_leaf_out_of_order",
             attributes={
                 "agent_id": job.agent_id,
                 "job_id": job.id,
-                "span_end": requested,
+                "span_end": out_of_order,
             },
         )
 
 
-async def _request_rebuild_if_out_of_order(
+async def _out_of_order_end(
     cur: AsyncCursor[Any], agent_id: int, nodes: Sequence[GroupNode]
 ) -> int | None:
-    """Queue one upper-level rebuild when a just-written leaf lies before a leaf that already has a
-    parent; the earliest such leaf's span end, else None.
+    """The earliest span end of a just-written leaf that lies before a leaf that already has a
+    parent, else None.
 
     The upper levels grow on the assumption that leaves land in message order, so open nodes are
-    only ever at the tail. A leaf landing before a grouped one breaks it, and only the rebuild
-    (`rebuild.py`), which replays the leaves in message order, repairs it. Joins the agent's
-    pending rebuild when there is one, under the lock that serializes builds of the agent
-    (`build.enqueue_build`); the live consumer then leaves grouping to the rebuild.
+    only ever at the tail. A leaf landing before a grouped one breaks it; the caller reports it,
+    and only a manual build's rebuild (`rebuild.py`), which replays the leaves in message order,
+    repairs it.
     """
     if not nodes:
         return None
@@ -670,18 +680,7 @@ async def _request_rebuild_if_out_of_order(
     )
     row = await cur.fetchone()
     assert row is not None, "an EXISTS query always returns one row"  # noqa: S101
-    if not row[0]:
-        return None
-    await cur.execute(
-        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-        (f"understanding-build:{agent_id}",),
-    )
-    await cur.execute(
-        "INSERT INTO understanding_rebuilds (agent_id) SELECT %s WHERE NOT EXISTS"
-        " (SELECT 1 FROM understanding_rebuilds WHERE agent_id = %s AND status = 'pending')",
-        (agent_id, agent_id),
-    )
-    return earliest_end
+    return earliest_end if row[0] else None
 
 
 @dataclass(frozen=True)
