@@ -1,6 +1,7 @@
 """Lexical walking preserves definition-time inputs and excludes nested bodies."""
 
 import ast
+from collections.abc import Iterator
 
 import pytest
 
@@ -147,3 +148,51 @@ def test_binding_projection_keeps_writes_in_unselected_expression_children() -> 
     scope = bindings.Scope(tree, "probe.py")
     assert scope.stores == {"result": 1, "extra": 1}
     assert [ast.unparse(n.func) for n in scope.calls] == ["sink", "read"]
+
+
+def test_binding_projection_retains_stores_and_definition_time_annotation_calls() -> None:
+    tree = ast.parse(
+        "left, right = source()\n"
+        "annotated: annotation[(captured := argument())] = value\n"
+        "del removed\n"
+        "def nested(arg: parameter() = default()) -> returns():\n hidden = body()\n"
+    )
+    scope = bindings.Scope(tree, "probe.py")
+
+    assert scope.stores == {
+        "left": 1,
+        "right": 1,
+        "annotated": 1,
+        "captured": 1,
+        "nested": 1,
+    }
+    assert [ast.unparse(n.func) for n in scope.calls] == [
+        "source",
+        "argument",
+        "parameter",
+        "default",
+        "returns",
+    ]
+
+
+def test_binding_projection_does_not_expand_inert_leaf_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tree = ast.parse("target = sink([name, *range(1000), 'literal'])\n")
+    original = ast.iter_child_nodes
+    expanded_leaves: list[ast.AST] = []
+
+    def observe(node: ast.AST) -> Iterator[ast.AST]:
+        if isinstance(node, ast.Name | ast.Constant):
+            expanded_leaves.append(node)
+        return original(node)
+
+    monkeypatch.setattr(ast, "iter_child_nodes", observe)
+
+    projected = list(bindings.local_nodes(tree, bindings_only=True))
+
+    assert [n.id for n in projected if isinstance(n, ast.Name)] == ["target"]
+    assert [ast.unparse(n.func) for n in projected if isinstance(n, ast.Call)] == ["sink", "range"]
+    assert expanded_leaves == []
+    list(bindings.local_nodes(tree))
+    assert expanded_leaves  # The default public walk still visits these fields.

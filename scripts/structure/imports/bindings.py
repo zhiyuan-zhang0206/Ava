@@ -216,6 +216,13 @@ def local_nodes(tree: ast.AST, *, bindings_only: bool = False) -> Iterator[ast.A
         if child is None:
             pending.pop()
             continue
+        if bindings_only:
+            if isinstance(child, ast.Name):
+                if isinstance(child.ctx, ast.Store):
+                    yield child
+                continue  # Its context cannot contain another binding or call.
+            if isinstance(child, ast.Constant) or not child._fields:
+                continue
         if not bindings_only or _binding_input(child):
             yield child
         if isinstance(child, _SCOPE_NODES):
