@@ -21,7 +21,8 @@ import pytest_asyncio
 from psycopg_pool import AsyncConnectionPool
 
 from base.events.live.bus import EventBus
-from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, PendingInboundWake
+from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
+from services.agent_runner.agent_host.scheduling.pending_wakes import PendingInboundWake
 
 
 class _IdleScheduler:

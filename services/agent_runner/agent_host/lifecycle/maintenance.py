@@ -10,7 +10,6 @@ from psycopg_pool import AsyncConnectionPool
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.deploy.maintenance import admission
 from base.log import logger
-from services.agent_runner.agent_host.dispatcher import PendingInboundWake
 
 FailureFences = dict[int, tuple[str | None, datetime | None]]
 
@@ -88,18 +87,3 @@ async def run_held(
     if not failed and admission.pending_command(agent_id) is not None:
         await control(agent_id, status)
     return True
-
-
-def pending_wakes(fences: FailureFences) -> list[PendingInboundWake] | None:
-    current = admission.snapshot()
-    if current is None or current.maintenance is None:
-        return None
-    # A stale-turn cancel could interrupt the action maintenance is draining.
-    # Persisted failures also fence fresh hosts until an explicit resume.
-    return [
-        PendingInboundWake(agent_id=agent, stale=False)
-        for agent in current.maintenance.commands
-        if agent not in current.maintenance.failures
-        and admission.pending_command(agent) is not None
-        and fences.get(agent) not in ((None, None), (current.holder, current.acquired_at))
-    ]
