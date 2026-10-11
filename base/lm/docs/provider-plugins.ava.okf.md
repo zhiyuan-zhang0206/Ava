@@ -37,8 +37,8 @@ be retried by constructing a new catalog.
   `concurrency`'s known-key set is derived from the supplied catalog's bindings.
 - Plugin rates are the runtime source for chat models. Registration removes an
   overlapping archive row from the in-memory catalog view; `rates_at` therefore
-  selects plugin rates for bound chat models, archive rates for catalog-only
-  services, then retired rates. Each call receives the owner's `PriceBook`; its
+  selects plugin rates for bound chat models and archive rates for catalog-only
+  services. Each call receives the owner's `PriceBook`; its
   active view excludes retired-history entries. The plugin that owns a client class registers its terminal-reason
   `StopSpec`; compatible bindings share that emitted `model_provider` key.
 - A binding's optional `AttachPolicy` owns provider-specific per-media byte
