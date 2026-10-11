@@ -35,6 +35,7 @@ from services.desktop.browser.page_lifecycle import (
     PageRegistry,
     parse_page_listing,
 )
+from services.desktop.browser.tab_groups.grouping import AgentTabGroups
 
 
 class FakeUpstream:
@@ -111,10 +112,30 @@ def _err(text: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=True)
 
 
-def _new_daemon(upstream: Any, pages: PageRegistry | None = None) -> ChromeMcpDaemon:
+class NoTabGroups(AgentTabGroups):
+    """Tab grouping that touches no Chrome: the page-affinity tests do not run one."""
+
+    def __init__(self) -> None:
+        super().__init__(cdp_port=0, tasks=asyncio.TaskGroup())
+
+    async def snapshot(self) -> frozenset[str] | None:
+        return None
+
+    async def group_new_page(self, agent_id: int, before: frozenset[str] | None) -> None:
+        return None
+
+
+def _new_daemon(
+    upstream: Any, pages: PageRegistry | None = None, tab_groups: AgentTabGroups | None = None
+) -> ChromeMcpDaemon:
     """A daemon the way ``run()`` builds one: its own registry unless the caller
     passes the one an earlier daemon used (an upstream reconnect)."""
-    return ChromeMcpDaemon(upstream, pages or PageRegistry(), GatewaySession(asyncio.TaskGroup()))
+    return ChromeMcpDaemon(
+        upstream,
+        pages or PageRegistry(),
+        GatewaySession(asyncio.TaskGroup()),
+        tab_groups or NoTabGroups(),
+    )
 
 
 def _daemon() -> tuple[ChromeMcpDaemon, FakeUpstream]:

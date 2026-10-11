@@ -467,3 +467,31 @@ def test_wedged_cleanup_await_is_bounded(
         assert not (home / "chrome-mcp.1.sock").exists()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.flaky
+def test_stopping_the_daemon_drops_in_flight_tab_groupings(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Grouping runs in background tasks off the daemon's lock; a stopping daemon
+    cancels them instead of leaving them to outlive it."""
+    import services.desktop.browser.mcp_daemon as daemon_mod
+
+    cancelled: list[bool] = []
+    real = daemon_mod.AgentTabGroups.cancel_pending
+
+    def recording_cancel(self: Any) -> None:
+        cancelled.append(True)
+        real(self)
+
+    monkeypatch.setattr(daemon_mod.AgentTabGroups, "cancel_pending", recording_cancel)
+
+    async def scenario() -> None:
+        stop = asyncio.Event()
+        task, _stack = await _run_with_fakes(monkeypatch, home, stop)
+        assert cancelled == []
+        stop.set()
+        await asyncio.wait_for(task, timeout=20)
+
+    asyncio.run(scenario())
+    assert cancelled == [True]

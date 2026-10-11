@@ -79,15 +79,31 @@ async def _http_json(url: str) -> Any:
 
 
 async def _cdp_call(
-    ws: Any, ids: Iterator[int], method: str, params: dict[str, Any]
+    ws: Any,
+    ids: Iterator[int],
+    method: str,
+    params: dict[str, Any],
+    *,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Send one CDP request on an open websocket and return its ``result``.
 
+    ``session_id`` addresses a flattened target session on the browser-level
+    websocket. Messages that are not the reply to this request (CDP events, or
+    a reply on another session's traffic) are skipped.
+
     Raises RuntimeError on a protocol-level error response.
     """
-    await ws.send(json.dumps({"id": next(ids), "method": method, "params": params}))
-    raw = await asyncio.wait_for(ws.recv(), timeout=_WS_TIMEOUT_S)
-    resp = json.loads(raw)
+    request_id = next(ids)
+    request: dict[str, Any] = {"id": request_id, "method": method, "params": params}
+    if session_id is not None:
+        request["sessionId"] = session_id
+    await ws.send(json.dumps(request))
+    # quiesce-exempt: bounded wait for one CDP reply to a local browser; no database
+    while True:
+        resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=_WS_TIMEOUT_S))
+        if resp.get("id") == request_id:
+            break
     if "error" in resp:
         raise RuntimeError(f"CDP {method} failed: {resp['error']}")
     return resp.get("result") or {}

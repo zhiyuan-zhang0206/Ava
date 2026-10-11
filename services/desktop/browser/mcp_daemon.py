@@ -33,6 +33,12 @@ out of scope by construction, and expiry surfaces as the page simply being
 gone (next page-scoped call takes the existing no-page path) -- never as an
 invented "page expired" error. See `services.desktop.browser.page_lifecycle`.
 
+Tab groups: every page an AGENT's call creates is also filed into that agent's
+Chrome tab group (`ChromeMcpDaemon._new_page`, via
+`services.desktop.browser.tab_groups`). Presentation only: a grouping failure
+is logged and never fails the call. Nothing here removes a group -- Chrome does
+when the agent's last page closes, which every close path above ends in.
+
 Wire protocol (JSON line per request, mirrors `ava.mcps._daemon`):
   Request:  {"id": 1, "method": "list_tools"}
             {"id": 2, "method": "call_tool", "tool": "click", "args": {...}}
@@ -89,6 +95,7 @@ from services.desktop.browser.page_lifecycle import (
     renew_page_tool_dump,
 )
 from services.desktop.browser.protocol import Request, Response
+from services.desktop.browser.tab_groups.grouping import AgentTabGroups
 
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one line;
 # lift the stream buffer cap well above StreamReader's 64KiB default.
@@ -172,6 +179,16 @@ def _page_id(value: Any) -> int | None:
     return None
 
 
+def _in_isolated_context(args: dict[str, Any]) -> bool:
+    """True for a `new_page` into an isolated browser context.
+
+    Such a tab is invisible to Chrome extensions (`chrome.debugger.getTargets()`
+    does not list it), so it cannot be put in a tab group; it is left out on
+    purpose, not as a failure.
+    """
+    return args.get("isolatedContext") is not None
+
+
 def _no_page_result() -> types.CallToolResult:
     """The upstream's own no-page error, returned for a page-scoped call from a
     connection that owns no page -- forwarding it would touch another client's
@@ -208,16 +225,21 @@ class ChromeMcpDaemon:
     from the per-agent registry (generation-stamped — see page_lifecycle);
     requests without one fall back to the caller-supplied per-connection page.
 
-    ``pages`` and ``gateway`` are built once by ``run()`` and shared by every
-    daemon it creates, so their state survives upstream reconnects.
+    ``pages``, ``gateway`` and ``tab_groups`` are built once by ``run()`` and
+    shared by every daemon it creates, so their state survives upstream reconnects.
     """
 
     def __init__(
-        self, upstream: ClientSession, pages: PageRegistry, gateway: GatewaySession
+        self,
+        upstream: ClientSession,
+        pages: PageRegistry,
+        gateway: GatewaySession,
+        tab_groups: AgentTabGroups,
     ) -> None:
         self._upstream = upstream
         self.pages = pages
         self.gateway = gateway
+        self.tab_groups = tab_groups
         self._lock = asyncio.Lock()
         self._tools: list[types.Tool] | None = None
         # Set when an upstream call hits a closed session; run() watches it to
@@ -298,7 +320,7 @@ class ChromeMcpDaemon:
             # page is already closed and the next call cold-starts).
             self.pages.touch_agent_page(agent_id)
             page = self.pages.get_agent_page(agent_id, self.generation)
-            result, updated = await self._affinity_call(name, args, page)
+            result, updated = await self._affinity_call(name, args, page, agent_id)
             self.pages.set_agent_page(agent_id, updated, self.generation)
             return result
 
@@ -319,25 +341,50 @@ class ChromeMcpDaemon:
             return None
         return current_page
 
+    async def _new_page(self, args: dict[str, Any], agent_id: int | None) -> types.CallToolResult:
+        """Forward a `new_page` and do the bookkeeping for the page it created.
+
+        The one place a page comes into being (an explicit `new_page`, or the
+        auto-created page of a page-less first navigate): the created page gets
+        its TTL deadline, and, when the caller is an agent, is filed into that
+        agent's tab group. Grouping is presentation only and reports its own
+        failures (see `AgentTabGroups`); it can never fail the page creation.
+        """
+        group = agent_id is not None
+        if group and _in_isolated_context(args):
+            group = False
+            logger.info(
+                "[browser-mcp] agent {}'s page in isolated context {!r} is not tab-grouped "
+                "(extensions cannot see isolated-context tabs)",
+                agent_id,
+                args["isolatedContext"],
+            )
+        before = await self.tab_groups.snapshot() if group else None
+        result = await self._call("new_page", args)
+        if not result.is_error:
+            self.pages.register_created_page(_selected_id(result), self.generation)
+            if group and agent_id is not None:
+                await self.tab_groups.group_new_page(agent_id, before)
+        return result
+
     async def _bootstrap_page(
-        self, name: str, args: dict[str, Any], *, verify_after: bool
+        self, name: str, args: dict[str, Any], *, verify_after: bool, agent_id: int | None
     ) -> tuple[types.CallToolResult, int | None]:
         """No tab of our own to act on. navigate_page can bootstrap one; anything else fails
         fast instead of touching another client's tab."""
         if name == "navigate_page" and isinstance(args.get("url"), str):
-            result = await self._call("new_page", args)
-            if not result.is_error:
-                # The auto-created page gets its TTL deadline like an
-                # explicit new_page (the two creation paths are the
-                # whole coverage of the TTL registry).
-                self.pages.register_created_page(_selected_id(result), self.generation)
-                if verify_after:
-                    self.gateway.spawn_verify()
+            result = await self._new_page(args, agent_id)
+            if not result.is_error and verify_after:
+                self.gateway.spawn_verify()
             return result, (_selected_id(result) or None)
         return _no_page_result(), None
 
     async def _affinity_call(
-        self, name: str, args: dict[str, Any], current_page: int | None
+        self,
+        name: str,
+        args: dict[str, Any],
+        current_page: int | None,
+        agent_id: int | None = None,
     ) -> tuple[types.CallToolResult, int | None]:
         page_scoped = name not in _MANAGEMENT_TOOLS
         # A navigation to a gateway URL is the early-refresh trigger: the
@@ -348,21 +395,24 @@ class ChromeMcpDaemon:
         if page_scoped:
             current_page = await self._repin(current_page)
             if current_page is None:
-                return await self._bootstrap_page(name, args, verify_after=verify_after)
+                return await self._bootstrap_page(
+                    name, args, verify_after=verify_after, agent_id=agent_id
+                )
 
-        result = await self._call(name, args)
+        # A page created here gets its TTL slot (see `page_lifecycle`) and tab
+        # group in `_new_page`; a listing that drifted off the parseable shape
+        # registers nothing.
+        if name == "new_page":
+            result = await self._new_page(args, agent_id)
+        else:
+            result = await self._call(name, args)
         if verify_after and not result.is_error:
             self.gateway.spawn_verify()
-        if not result.is_error:
-            if name == "new_page":
-                # Page created -> TTL slot (see `page_lifecycle`); a listing
-                # that drifted off the parseable shape registers nothing.
-                self.pages.register_created_page(_selected_id(result), self.generation)
-            elif name == "close_page":
-                # A clean close drops the TTL slot with the page; the shared
-                # `_page_id` normalization accepts an integral-float pageId too
-                # (bool is rejected so a JSON `true` can never alias page id 1).
-                self.pages.drop_page_ttl(_page_id(args.get("pageId")))
+        if name == "close_page" and not result.is_error:
+            # A clean close drops the TTL slot with the page; the shared
+            # `_page_id` normalization accepts an integral-float pageId too
+            # (bool is rejected so a JSON `true` can never alias page id 1).
+            self.pages.drop_page_ttl(_page_id(args.get("pageId")))
         return result, self._next_page(name, args, result, current_page)
 
     @staticmethod
@@ -587,11 +637,13 @@ async def run(  # noqa: PLR0915 — the single-instance guard and the reconnect 
     # Composition root of the shared page/session state: built once, handed to
     # every ChromeMcpDaemon so it survives upstream reconnects. One TaskGroup owns
     # the daemon-long tasks (the session refresh loop and the gateway session's
-    # fire-and-forget one-shots); the shutdown path cancels them before it closes.
+    # fire-and-forget one-shots and the tab-grouping tasks); the shutdown path cancels
+    # them before it closes.
     pages = PageRegistry()
     stop = stop_on_signals()
     async with asyncio.TaskGroup() as tasks:
         gateway = GatewaySession(tasks)
+        tab_groups = AgentTabGroups(browser_cdp_port, tasks)
         session_task = tasks.create_task(
             contained(gateway.refresh_loop(stop), "gateway session refresh")
         )
@@ -621,7 +673,7 @@ async def run(  # noqa: PLR0915 — the single-instance guard and the reconnect 
                 if current_stack is not None:
                     await _bounded_stack_close(current_stack, "previous upstream stack close")
                 current_stack = stack
-                daemon = ChromeMcpDaemon(session, pages, gateway)
+                daemon = ChromeMcpDaemon(session, pages, gateway, tab_groups)
                 daemon_ref[0] = daemon
                 reconnect_delay = _RECONNECT_INITIAL_DELAY_S
                 logger.info(f"[browser-mcp] upstream connected, gen {daemon.generation}")
@@ -631,6 +683,7 @@ async def run(  # noqa: PLR0915 — the single-instance guard and the reconnect 
                 if daemon.dead.is_set():
                     logger.error("[browser-mcp] upstream session died; reconnecting...")
                     daemon_ref[0] = None
+                    tab_groups.cancel_pending()
                     # Close the dead upstream stack NOW — its npx/node children
                     # used to linger until the next successful reconnect (audit
                     # round 2, P2), holding resources for the whole backoff window.
@@ -646,6 +699,7 @@ async def run(  # noqa: PLR0915 — the single-instance guard and the reconnect 
             logger.info("[browser-mcp] shutting down")
             session_task.cancel()
             gateway.cancel_one_shots()
+            tab_groups.cancel_pending()
             # Two bounded steps, so the daemon may keep closing for up to
             # `shutdown_budget.SHUTDOWN_CEILING_S`; ava-root's window for this unit
             # is derived from that total.
