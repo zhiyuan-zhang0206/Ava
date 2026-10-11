@@ -24,7 +24,7 @@ python $AVA_HOME/skills/ava-self-evolution/scripts/collect.py --days 7  # Monday
 The batch command reads the past day; the Monday summary reads the past week.
 Both write one JSON record per run to `$AVA_HOME/self_evolution/dataset/<this-monday>.jsonl`.
 Each record holds the task prompt, complete transcript (see Data source), tools called, objective
-signals (turns, exec failures, compactions, delivery breach, user re-prompts,
+signals (turns, exec failures, compactions, user re-prompts,
 user corrections, peer agent feedback), skills it touched, and a rule-based
 `label` of **ok / fumbled / failed** (see `ava_builtins/skills/platform/ava-self-evolution/scripts/label.py`). The script
 prints the run counts.

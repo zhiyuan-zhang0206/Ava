@@ -16,8 +16,8 @@ class InvalidMetricQuery(PluginMetricError):  # noqa: N818
 
 # Keywords allowed anywhere in the template (upper-compared). Anything else
 # that is not a whitelisted function / macro / column / operator / literal is
-# rejected. Subqueries are allowed (FROM (SELECT ...) FROM events ...) — every
-# FROM clause is still required to reference only `events`.
+# rejected. Subqueries are allowed (FROM (SELECT ...) FROM agents_meta ...) — every
+# FROM clause is still required to reference only `agents_meta`.
 _SQL_KEYWORDS = frozenset(
     {
         "SELECT",
@@ -53,7 +53,7 @@ _SQL_KEYWORDS = frozenset(
 
 # Explicitly denied words: information keywords and set/compound-statement
 # operators. They are denied even though they would be harmless against the
-# locked `events` table — the template contract is a single plain SELECT, and
+# live `agents_meta` table — the template contract is a single plain SELECT, and
 # keeping the grammar small makes the whitelist auditable.
 _SQL_DENIED_KEYWORDS = frozenset(
     {
@@ -76,7 +76,7 @@ _SQL_DENIED_KEYWORDS = frozenset(
     }
 )
 
-# Aggregate / scalar functions that are read-only and safe on the events table.
+# Aggregate / scalar functions that are read-only and safe on the agents_meta table.
 # percentile_cont (with WITHIN GROUP) is the ordered-set aggregate used for
 # per-bucket duration percentiles (W18 ava_observability pack).
 _SQL_FUNCTIONS = frozenset(
@@ -98,29 +98,6 @@ _SQL_FUNCTIONS = frozenset(
         # Set-returning helper allowed in FROM (the FROM checker restricts
         # where it may appear; the call itself is read-only).
         "GENERATE_SERIES",
-    }
-)
-
-# Grafana Postgres macros. `$__interval_ms` is used by the ops dashboard for
-# tokens/s; `$__timeGroup` / `$__timeFilter` are the standard window macros.
-# events-table columns (plus `time`, the conventional $__timeGroup alias).
-_SQL_COLUMNS = frozenset(
-    {
-        "ts",
-        "trace_id",
-        "span_id",
-        "agent_id",
-        "machine",
-        "process",
-        "category",
-        "event_name",
-        "level",
-        "source",
-        "target_agent_id",
-        "attributes",
-        "id",
-        "time",
-        "events",
     }
 )
 
@@ -181,10 +158,10 @@ _QUOTED_RE = re.compile(r"\'(?:[^\']|\'\')*\'|\"(?:[^\"])*\"")
 _FROM_FOLLOW = frozenset({"WHERE", "GROUP", "ORDER", "LIMIT", "OFFSET"})
 # Words that may legally follow a table reference without being its alias:
 # WHERE/GROUP/... (clause keywords), LEFT (join), ON (join condition), or a
-# comma (next table in a comma list). Anything else after `events` /
-# `agents_meta` is a rejected table alias.
+# comma (next table in a comma list). Anything else after `agents_meta`
+# is a rejected table alias.
 _TABLE_END = _FROM_FOLLOW | {"LEFT", "ON"}
-_ALLOWED_FROM_TABLES = frozenset({"EVENTS", "AGENTS_META"})
+_ALLOWED_FROM_TABLES = frozenset({"AGENTS_META"})
 # Set-returning functions allowed in FROM (checked call-by-call, args still
 # pass through the normal token whitelist).
 _FROM_FUNCTIONS = frozenset({"GENERATE_SERIES"})
@@ -269,7 +246,7 @@ def _check_table_ref(
         j = _consume_alias_and_cols(tokens, j, sql, offset, alias_positions)
     else:
         raise InvalidMetricQuery(
-            f"FROM must reference only the `events` table, got {tokens[j][1]!r}: {sql!r}"
+            f"FROM must reference only the `agents_meta` table, got {tokens[j][1]!r}: {sql!r}"
         )
     return j, alias_positions
 
@@ -354,8 +331,8 @@ def _check_from_clauses(
     sql: str,
     offset: int = 0,
 ) -> set[int]:
-    """Walk every FROM clause; each table reference must be the ``events``
-    table, ``agents_meta``, a parenthesized subquery (checked recursively),
+    """Walk every FROM clause; each table reference must be
+    ``agents_meta``, a parenthesized subquery (checked recursively),
     or a whitelisted set-returning function call (``generate_series``).
     ``LEFT JOIN`` is allowed only onto a subquery (never a bare table), with
     an optional alias + ON condition whose tokens pass the normal whitelist.
@@ -388,7 +365,7 @@ def _check_from_clauses(
             # (extract(epoch FROM ts) is legal), but a parenthesized
             # subquery inside the args IS legal SQL (scalar subquery,
             # coalesce((SELECT ...), 0)) and its FROM must be validated —
-            # otherwise `pg_class` smuggles past the events-only gate.
+            # otherwise `pg_class` smuggles past the agents_meta-only gate.
             # Scan the args and recurse into every nested paren group.
             args_end = _skip_paren(tokens, i + 1, sql)
             k = i + 2

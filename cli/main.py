@@ -280,7 +280,7 @@ def main(
         telemetry = sys.modules.get("base.telemetry")
         if telemetry is not None:
             with telemetry.failure_isolated("CLI telemetry drain"):
-                telemetry.sync(timeout=5.0, bounded=True)
+                telemetry.sync(timeout=5.0)
         _close_command_pipeline(producer, primary=sys.exception())
 
 

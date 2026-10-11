@@ -88,7 +88,6 @@ from base.telemetry.trace_mirror import (
     _disk_watermark_exceeded,
     _enforce_dir_cap,
     _gzip_old_mirror,
-    _mirror_epoch,
     _mirror_size,
     _prune_old_mirror,
 )
@@ -101,7 +100,6 @@ __all__ = [
     "_disk_watermark_exceeded",
     "_enforce_dir_cap",
     "_gzip_old_mirror",
-    "_mirror_epoch",
     "_mirror_size",
     "_prune_old_mirror",
     "claim_idle_wait_span",

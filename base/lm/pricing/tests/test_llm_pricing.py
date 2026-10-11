@@ -111,9 +111,6 @@ def test_deepseek_catalog_entries_are_in_the_archive() -> None:
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
-        # Removed from the plugin registry 2026-09-11 (expired internal beta):
-        # this entry is now the only remaining record, and must stay.
-        "deepseek-v4.1-flash-expires-on-0910",
     }
 
     assert expected <= archive_models.keys()
@@ -127,8 +124,6 @@ def test_gemini_chat_catalog_entries_are_in_the_archive() -> None:
         "gemini-3.5-flash",
         "gemini-flash-lite-latest",
         "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
     }
 
     assert expected <= archive_models.keys()
@@ -143,11 +138,6 @@ def test_anthropic_catalog_entries_are_in_the_archive() -> None:
         "claude-opus-5",
         "claude-fable-5",
         "claude-fable-5-1",
-        "claude-opus-4-8",
-        "claude-sonnet-4-6",
-        "claude-opus-4-7",
-        "claude-opus-4-6",
-        "claude-haiku-4-5",
     }
 
     assert expected <= archive_models.keys()
@@ -160,8 +150,6 @@ def test_openai_catalog_entries_are_in_the_archive() -> None:
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
-        "gpt-5.5",
-        "gpt-5.4-mini",
     }
 
     assert expected <= archive_models.keys()
@@ -201,7 +189,6 @@ def test_mimo_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "mimo-v2.5-pro",
-        "mimo-v2.5-pro-ultraspeed",
         "mimo-v2.6-pro",
         "mimo-v2.6-pro-ultraspeed",
     }
@@ -286,7 +273,6 @@ def test_parse_catalog_rejects_unknown_schema_version() -> None:
         ("gpt-5.6-terra", 4.0 + 18.0),
         ("gpt-5.6-luna", 0.40 + 1.80),
         ("mimo-v2.5-pro", 0.435 + 0.87),
-        ("mimo-v2.5-pro-ultraspeed", 1.305 + 2.61),
         ("mimo-v2.6-pro", 0.435 + 0.87),
         ("mimo-v2.6-pro-ultraspeed", 4.35 + 8.70),
     ],

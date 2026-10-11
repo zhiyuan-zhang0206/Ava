@@ -129,10 +129,9 @@ def test_id_to_hex_refuses_malformed_values(bad: str) -> None:
 # --- _mirror_day ---
 
 
-def test_mirror_day_parses_rotated_and_legacy_names() -> None:
+def test_mirror_day_parses_rotated_names() -> None:
     assert ft._mirror_day(Path("spans-2026-08-25T16-14-01.621-size.jsonl")) == date(2026, 8, 25)
     assert ft._mirror_day(Path("spans-2026-08-25T16-14-01.621-time.jsonl")) == date(2026, 8, 25)
-    assert ft._mirror_day(Path("spans-20250825-12345.jsonl")) == date(2025, 8, 25)
     assert ft._mirror_day(Path("spans.jsonl")) is None
 
 

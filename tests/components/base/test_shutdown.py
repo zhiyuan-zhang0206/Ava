@@ -99,12 +99,11 @@ def test_hard_exit_reports_a_failed_step_on_stderr_and_still_exits(
     assert "sink close failed" in err
 
 
-def test_shutdown_line_avoids_the_unregistered_event_alias(
+def test_shutdown_line_logs_a_registered_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`extra["label"]` doubles as an event alias in `base.log`; the daemon
-    name it carried emitted an unregistered-event error on every stop (task
-    #3661 side fix)."""
+    """The stop line carries the daemon name as `service=` and derives a
+    registered event."""
     from base.events import EVENTS
 
     calls: list[dict[str, object]] = []
@@ -127,7 +126,7 @@ def test_shutdown_line_avoids_the_unregistered_event_alias(
     assert call["service"] == "pg-backup"
     assert call["sig"] == "SIGTERM"
     assert "label" not in call
-    assert (call.get("event") or call.get("label") or "log") in EVENTS
+    assert (call.get("event") or "log") in EVENTS
 
 
 _SERVICE = """

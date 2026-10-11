@@ -170,7 +170,7 @@ def test_log_sink_pipeline_drain_thread_stays_alive(database: db.Database) -> No
     remains live until this entry removes the adapter and performs bounded close.
     """
     pipeline = telemetry.build_pipeline(database=lambda: database)
-    sink_id = base.log.process.add_postgres_sink(
+    sink_id = base.log.process.add_event_sink(
         producer=lambda: pipeline, machine_reader=lambda: settings.cluster.self_machine_name
     )
     try:

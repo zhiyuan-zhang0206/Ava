@@ -27,7 +27,7 @@ from loguru import logger as _global_logger
 from base import telemetry
 from base.config import settings
 from base.db import Database
-from base.log.process import _postgres_sink, add_postgres_sink
+from base.log.process import _event_sink, add_event_sink
 from base.telemetry.delivery.receipts import DrainStatus
 
 
@@ -44,10 +44,10 @@ def sink_logger(database: Database):
     def producer() -> telemetry.EventPipeline:
         return pipeline
 
-    add_postgres_sink(producer=producer, machine_reader=lambda: settings.cluster.self_machine_name)
+    add_event_sink(producer=producer, machine_reader=lambda: settings.cluster.self_machine_name)
     _global_logger.remove()
     sink_id = _global_logger.add(
-        partial(_postgres_sink, producer=producer), level="INFO", enqueue=False, catch=False
+        partial(_event_sink, producer=producer), level="INFO", enqueue=False, catch=False
     )
     _global_logger.configure(extra={"agent_id": "-"})
     try:
@@ -88,22 +88,23 @@ def _last_event() -> tuple[str, int | None, str, dict]:
 
 
 def test_sink_event_resolution_explicit_event(sink_logger) -> None:
-    """Explicit event= has priority, not overridden by label= fallback."""
+    """event= names the event; label= is plain payload."""
     sink_logger.info("foo", event="turn_end", label="ignored")  # pyright: ignore[reportUnknownMemberType]
     event, _agent_id, _level, payload = _last_event()
     assert event == "turn_end"
     assert payload["label"] == "ignored"  # label still in payload, not lost
 
 
-def test_sink_event_resolution_label_fallback(sink_logger) -> None:
-    """When no event=, falls back to label= (compatible with existing [exec]/[claim] pattern)."""
+def test_sink_label_does_not_name_the_event(sink_logger) -> None:
+    """label= is never an event name: without event= the record is a bare log."""
     sink_logger.info("[{label}] {body}", label="exec", body="output...")  # pyright: ignore[reportUnknownMemberType]
-    event, _agent_id, _level, _payload = _last_event()
-    assert event == "exec"
+    event, _agent_id, _level, payload = _last_event()
+    assert event == "log"
+    assert payload["label"] == "exec"
 
 
 def test_sink_event_resolution_log_default(sink_logger) -> None:
-    """Bare logger.info with no event/label → defaults to "log"."""
+    """Bare logger.info with no event= → defaults to "log"."""
     sink_logger.info("bare message")  # pyright: ignore[reportUnknownMemberType]
     event, _agent_id, _level, _payload = _last_event()
     assert event == "log"
@@ -218,9 +219,9 @@ def test_sink_level_is_recorded(sink_logger) -> None:
 # ─── exception → payload (traceback / type / value) ───
 #
 # 161 incident: turn_end ok=False but events.payload had no traceback — logger.opt
-# (exception=True) left a stack in stderr / file sink, but _postgres_sink only dumped
+# (exception=True) left a stack in stderr / file sink, but _event_sink only dumped
 # extra, record["exception"] was not consumed, so the DB couldn't diagnose whether the LLM
-# had a timeout or a decode error. Fix: _postgres_sink detects record["exception"] and automatically
+# had a timeout or a decode error. Fix: _event_sink detects record["exception"] and automatically
 # injects traceback / exception_type / exception_value into payload.
 
 
@@ -335,12 +336,9 @@ def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> 
 
 # ─── call-site contract: the delta read-compat reconstruction (task #3897) ──
 #
-# `_log_reconstruction` was a label-only call site whose label was not a
-# registry entry: every read of a delta-written checkpoint derived its
-# event_name from the label fallback, `telemetry.emit` raised inside the sink
-# (the row was lost) and loguru logged the internal error on every such read.
-# The call now passes an explicit `event=` — registered as `delta_read_compat`
-# in base/events/declarations/agent_runtime.py (naming rules §6.2: label is display-only).
+# `_log_reconstruction` passes an explicit `event=` registered as
+# `delta_read_compat` in base/events/declarations/agent_runtime.py (naming
+# rules §6.2: label is display-only).
 
 
 def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger) -> None:
