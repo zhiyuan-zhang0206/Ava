@@ -408,6 +408,10 @@ _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
     {
         "/api/health",
         "/api/auth/login",
+        # The ticket is the credential: redemption is single-use, short-lived
+        # and shares the login limiter. Issuing one (`/api/auth/login-ticket`)
+        # is NOT bypassed: it needs the human secret.
+        "/api/auth/login-ticket/redeem",
         "/api/auth/check",
         "/api/auth/logout",
         # /mcp authenticates revocable, scoped clients in its ASGI wrapper.
