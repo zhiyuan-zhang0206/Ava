@@ -22,6 +22,7 @@ import sys
 import threading
 import types
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, NoReturn
 
 import loguru
@@ -643,17 +644,12 @@ def test_exempt_process_owner_never_needs_a_loaded_code_version() -> None:
 
 
 def test_explicit_process_gate_hard_exits_from_a_real_worker() -> None:
-    source = """
-import threading
-from base.db.code_version_gate import ProcessDbGate
-owner = ProcessDbGate(version=lambda: 1, process="worker-proof")
-worker = threading.Thread(target=lambda: owner.observe_minimum(2))
-worker.start()
-worker.join(timeout=2)
-raise RuntimeError("the stale worker did not terminate its process")
-"""
-    result = subprocess.run(  # noqa: S603 — own interpreter and fixed source in pytest isolation
-        [sys.executable, "-c", source], capture_output=True, text=True, timeout=10, check=False
+    result = subprocess.run(  # noqa: S603 — own interpreter and fixed child script in pytest isolation
+        [sys.executable, str(Path(__file__).with_name("_stale_worker_child.py"))],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
     assert result.returncode == CODE_BEHIND_MINIMUM_EXIT_CODE
     assert "process worker-proof runs code version 1" in result.stderr
