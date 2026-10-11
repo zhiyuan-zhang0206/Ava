@@ -13,25 +13,14 @@ import psutil
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
 
-# A native fork after TERM may outlive the known leader.
-_FORKED_CHILD = """
-import os, pathlib, signal, time
-def finish(*_):
-    pid = os.fork()
-    if pid == 0:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        time.sleep(60)
-        os._exit(0)
-    pathlib.Path({child_file!r}).write_text(str(pid))
-    os._exit(0)
-signal.signal(signal.SIGTERM, finish)
-pathlib.Path({ready!r}).touch()
-time.sleep(60)
-"""
+# A native fork after TERM may outlive the known leader (`child_unit.py forked_late_child`).
+_CHILD = Path(__file__).with_name("child_unit.py")
 
 
-def _supervisor(run_dir: Path, code: str) -> Supervisor:
-    unit = UnitManifest("svc", (sys.executable, "-c", code), RestartPolicy.NEVER, "root")
+def _supervisor(run_dir: Path, *scenario: str) -> Supervisor:
+    unit = UnitManifest(
+        "svc", (sys.executable, str(_CHILD), *scenario), RestartPolicy.NEVER, "root"
+    )
     return Supervisor(
         UnitRegistry([unit]), run_dir=run_dir, config=SupervisorConfig(stop_timeout_s=1.0)
     )
@@ -64,9 +53,7 @@ def _gone(process: psutil.Process | None) -> bool:
 
 async def test_late_child_is_not_a_service_replacement_gate(tmp_path: Path) -> None:
     ready, child_file = tmp_path / "ready", tmp_path / "late-child.pid"
-    owner = _supervisor(
-        tmp_path / "root", _FORKED_CHILD.format(child_file=str(child_file), ready=str(ready))
-    )
+    owner = _supervisor(tmp_path / "root", "forked_late_child", str(child_file), str(ready))
     await owner.start()
     await _wait_for(ready)
     child: psutil.Process | None = None

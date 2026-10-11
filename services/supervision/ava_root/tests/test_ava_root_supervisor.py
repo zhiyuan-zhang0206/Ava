@@ -18,10 +18,16 @@ from services.supervision.ava_root.inputs import InputSeal
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
 
+_CHILD = Path(__file__).with_name("child_unit.py")
 
-def root(tmp_path: Path, code: str, *, env: tuple[tuple[str, str], ...] = ()) -> Supervisor:
+
+def root(tmp_path: Path, *scenario: str, env: tuple[tuple[str, str], ...] = ()) -> Supervisor:
     unit = UnitManifest(
-        "worker", (sys.executable, "-u", "-c", code), RestartPolicy.ALWAYS, "root", env
+        "worker",
+        (sys.executable, "-u", str(_CHILD), *scenario),
+        RestartPolicy.ALWAYS,
+        "root",
+        env,
     )
     return Supervisor(
         UnitRegistry([unit]), run_dir=tmp_path, config=SupervisorConfig(stop_timeout_s=0.2)
@@ -44,7 +50,9 @@ async def test_parent_birth_and_private_environment_are_retained(tmp_path: Path)
     output = tmp_path / "environment"
     owner = root(
         tmp_path,
-        f"import os,pathlib,time; pathlib.Path({str(output)!r}).write_text(os.environ['ROOT_TEST']); time.sleep(60)",
+        "write_environment",
+        str(output),
+        "ROOT_TEST",
         env=(("ROOT_TEST", "projected"),),
     )
     await owner.start()
@@ -61,7 +69,7 @@ async def test_parent_birth_and_private_environment_are_retained(tmp_path: Path)
 
 
 async def test_up_is_idempotent_and_restart_stops_previous_generation(tmp_path: Path) -> None:
-    owner = root(tmp_path, "import time; time.sleep(60)")
+    owner = root(tmp_path, "sleep")
     await owner.start()
     try:
         original = (await row(owner))["pid"]
@@ -87,9 +95,10 @@ async def test_restart_refuses_changed_inputs_before_native_birth(
         "worker",
         (
             sys.executable,
-            "-c",
-            # Rename into place: the waiter polls for existence, not content.
-            f"import pathlib,time; t=pathlib.Path({str(output)!r} + '.tmp'); t.write_text(pathlib.Path({str(value)!r}).read_text()); t.replace({str(output)!r}); time.sleep(60)",
+            str(_CHILD),
+            "read_config",
+            str(output),
+            str(value),
         ),
         RestartPolicy.ALWAYS,
         "root",
@@ -128,7 +137,8 @@ async def test_live_child_timeout_requires_explicit_force(tmp_path: Path) -> Non
     ready = tmp_path / "ready"
     owner = root(
         tmp_path,
-        f"import signal,pathlib,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); pathlib.Path({str(ready)!r}).touch(); time.sleep(60)",
+        "ignore_term",
+        str(ready),
     )
     await owner.start()
     await wait_file(ready)
@@ -165,12 +175,7 @@ def test_child_exit_observation_accepts_a_reaped_process() -> None:
 
 async def test_normal_stop_signals_the_known_live_group(tmp_path: Path) -> None:
     child_file = tmp_path / "child"
-    code = (
-        "import subprocess,sys,pathlib,time; "
-        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
-        f"pathlib.Path({str(child_file)!r}).write_text(str(child.pid)); time.sleep(60)"
-    )
-    owner = root(tmp_path, code)
+    owner = root(tmp_path, "spawn_child", str(child_file))
     await owner.start()
     await wait_file(child_file)
     child = psutil.Process(int(child_file.read_text()))
@@ -195,9 +200,8 @@ async def test_unexpected_exit_can_be_replaced_without_custody_reconciliation(
     trigger = tmp_path / "exit"
     owner = root(
         tmp_path,
-        "import pathlib,time; "
-        f"p=pathlib.Path({str(trigger)!r}); "
-        "exec('while not p.exists(): time.sleep(0.01)')",
+        "wait_for_file",
+        str(trigger),
     )
     await owner.start()
     old = (await row(owner))["pid"]
@@ -246,7 +250,7 @@ async def test_obsolete_custody_records_do_not_gate_ordinary_start(tmp_path: Pat
     directory = tmp_path / "custody"
     directory.mkdir()
     (directory / "worker.json").write_text("obsolete spawning record")
-    owner = root(tmp_path, "import time; time.sleep(60)")
+    owner = root(tmp_path, "sleep")
     await owner.start()
     try:
         assert (await row(owner))["state"] == "running"

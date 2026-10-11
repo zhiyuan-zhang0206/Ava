@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import os
 import time
 from collections.abc import Callable, Coroutine, Iterator
@@ -20,11 +19,10 @@ from base.db import Database
 from base.deploy.schema import migrations
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
+from services.entrypoints.im_bridge import daemon as im_bridge_daemon
+from services.wake.heartbeat import daemon as heartbeat_daemon
 
-_ENTRIES = (
-    "services.wake.heartbeat.daemon",
-    "services.entrypoints.im_bridge.daemon",
-)
+_ENTRIES = (heartbeat_daemon, im_bridge_daemon)
 
 
 class _Runner:
@@ -32,12 +30,12 @@ class _Runner:
         asyncio.run(work)
 
 
-@pytest.fixture(params=_ENTRIES)
+@pytest.fixture(params=_ENTRIES, ids=lambda module: module.__name__)
 def entry(request: pytest.FixtureRequest) -> Iterator[ModuleType]:
     """Restore this entry test's environment delivery after its real ConfigBoot."""
     try:
         with patch.dict(os.environ):
-            yield importlib.import_module(request.param)
+            yield request.param
     finally:
         tzset = getattr(time, "tzset", None)
         if tzset is not None:

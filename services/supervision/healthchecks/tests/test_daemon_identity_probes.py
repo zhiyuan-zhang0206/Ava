@@ -10,23 +10,53 @@ in the roster (the per-module copies of this check died with the modules).
 
 from __future__ import annotations
 
-import importlib
 import inspect
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
+from types import ModuleType
 from typing import cast
 
+from ava_builtins.plugins.ava_fleet.task_maintenance import daemon as task_maintenance
 from base import paths
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
 from ops import roster
 from ops.roster.service_spec import ServiceSpec
+from services.agent_runner.agent_host import daemon as agent_host
 from services.agent_runner.agent_ops import boot as ops_boot
 from services.agent_runner.agent_ops import daemon as agent_ops
 from services.agent_runner.page_server import daemon as page_server
 from services.agent_runner.page_server import resources as page_resources
+from services.backup.scheduler import daemon as backup_scheduler
+from services.derived.labeler import daemon as labeler
+from services.derived.memory_indexer import daemon as memory_indexer
+from services.entrypoints.im_bridge import daemon as im_bridge
+from services.upkeep.events_maintenance import daemon as events_maintenance
+from services.upkeep.ttl_reaper import daemon as ttl_reaper
+from services.wake.delivery_watchdog import daemon as delivery_watchdog
+from services.wake.heartbeat import daemon as heartbeat
+from services.wake.schedule_manager import daemon as schedule_manager
+
+_DAEMON_MODULES: dict[str, ModuleType] = {
+    module.__name__: module
+    for module in (
+        im_bridge,
+        labeler,
+        heartbeat,
+        delivery_watchdog,
+        events_maintenance,
+        ttl_reaper,
+        schedule_manager,
+        backup_scheduler,
+        page_server,
+        agent_host,
+        agent_ops,
+        task_maintenance,
+        memory_indexer,
+    )
+}
 
 
 def _standard_daemons() -> list[ServiceSpec]:
@@ -62,7 +92,7 @@ def test_every_standard_daemon_records_the_pidfile_its_probe_reads(
     that same file, so the two cannot drift apart (a hyphenated `agent-host.pid`
     once sat beside the underscored health name)."""
     for spec in _standard_daemons():
-        module = importlib.import_module(spec.cmd.rsplit(" ", 1)[1])
+        module = _DAEMON_MODULES[spec.cmd.rsplit(" ", 1)[1]]
         # Resource operations are called at their actual definition owner.
         if module is page_server:
             operation = page_resources.pidfile

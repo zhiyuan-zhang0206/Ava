@@ -7,40 +7,55 @@ the write race (two daemons both pass the guard, both write, both run).
 
 from __future__ import annotations
 
-import importlib
 import os
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
 
+from ava_builtins.plugins.ava_fleet.task_maintenance import daemon as task_maintenance_daemon
 from base.config import ConfigBoot
 from base.host.proc import process_cmdline
 from services import pidfile as pidfiles
 from services.agent_runner.agent_ops import boot as ops_boot
+from services.agent_runner.agent_ops import daemon as agent_ops_daemon
+from services.agent_runner.page_server import daemon as page_server_daemon
+from services.backup.scheduler import daemon as backup_scheduler_daemon
+from services.derived.labeler import daemon as labeler_daemon
+from services.derived.memory_indexer import daemon as memory_indexer_daemon
+from services.entrypoints.im_bridge import daemon as im_bridge_daemon
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.upkeep.events_maintenance import daemon as events_maintenance_daemon
+from services.wake.delivery_watchdog import daemon as delivery_watchdog_daemon
+from services.wake.heartbeat import daemon as heartbeat_daemon
 
 
 @pytest.mark.parametrize(
-    "module_name",
+    "daemon",
     [
-        "services.derived.labeler.daemon",
-        "services.wake.heartbeat.daemon",
-        "services.backup.scheduler.daemon",
-        "services.agent_runner.page_server.daemon",
-        "services.entrypoints.im_bridge.daemon",
-        "services.derived.memory_indexer.daemon",
-        "services.wake.delivery_watchdog.daemon",
-        "services.upkeep.events_maintenance.daemon",
-        "services.agent_runner.agent_ops.daemon",
-        "ava_builtins.plugins.ava_fleet.task_maintenance.daemon",
+        labeler_daemon,
+        heartbeat_daemon,
+        backup_scheduler_daemon,
+        page_server_daemon,
+        im_bridge_daemon,
+        memory_indexer_daemon,
+        delivery_watchdog_daemon,
+        events_maintenance_daemon,
+        agent_ops_daemon,
+        task_maintenance_daemon,
     ],
+    ids=lambda module: module.__name__,
 )
 def test_daemon_guard_checks_only_current_pidfile(
-    module_name: str, monkeypatch: pytest.MonkeyPatch, *, process_config: ConfigBoot, tmp_path: Path
+    daemon: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     """Each singleton guard reads the path its daemon writes, exactly once."""
-    daemon = importlib.import_module(module_name)
+    module_name = daemon.__name__
     calls: list[tuple[Path, str]] = []
 
     def holds_daemon(path: Path, module: str) -> bool:
