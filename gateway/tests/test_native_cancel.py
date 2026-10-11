@@ -193,7 +193,6 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
             resources=resources,
             prompt_reap_enabled=configured_policy().recrash_reap_enabled,
             reconcile_inputs=configured_policy().reconcile_inputs,
-            machine=machine_identity,
         )
         assert resources.require_service().failures == [(resources, original_error)]
     row = db_conn.execute(
