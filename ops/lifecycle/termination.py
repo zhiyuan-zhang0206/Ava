@@ -12,7 +12,7 @@ from base.agents.incarnation.lifecycle_acceptance import (
     HOSTED_TURN_RECOVERY_MARKER,
     KILL_ALL_SHELL_SESSIONS,
 )
-from base.agents.messages.envelope import validate_writable_source
+from base.agents.messages.envelope import validate_source
 from base.db import Database, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
@@ -39,7 +39,7 @@ def _insert_termination_pair(
     message_id: int | None = None
     with conn.cursor() as cur:
         if message is not None:
-            validate_writable_source(source)
+            validate_source(source)
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id,content,kind,source) "
                 "VALUES (%s,%s,'chat',%s) RETURNING id",
@@ -72,7 +72,7 @@ def _insert_pending_termination_message(
     message: str,
 ) -> int:
     """Retry only the final chat after the termination command is durable."""
-    validate_writable_source(source)
+    validate_source(source)
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id,content,kind,source) "

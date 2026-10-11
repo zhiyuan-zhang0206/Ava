@@ -7,6 +7,7 @@
     | ``system``              | framework internal INSERT      | original text (no wrap)                             |
     | ``system:<subtype>``    | framework internal INSERT      | original text (no wrap)                             |
     | ``agent:N``             | peer agent N                   | "Agent N [ts]:\n\n..."                            |
+    | ``external_agent:S[:I]``| an agent outside Ava (CLI/MCP) | "External agent (S / I; asserted provenance) [ts]:\n\n..." |
     | ``user``                | the human user (the UI)        | "[ts]\n\n..."                                     |
     | ``ui:page:<name>``      | an HTML page the agent started | "[ts]\n\n..."                                     |
     | ``watcher:N``           | a watcher session's wake-up    | "Watcher (id N) [ts]:\n\n..."                       |
@@ -15,7 +16,13 @@
 
 ``user`` covers every human-originated inbound — chat from the composer,
 question / report replies, and the lifecycle triggers (restart / terminate /
-resurrect) the user fires. ``ui:page:<name>`` is a callback POSTed by an HTML
+resurrect) the user fires. A tool the user drives through the Ava CLI may also
+send as ``user`` (the user speaking through that tool); a tool that wants to
+stay distinguishable from the user declares ``external_agent:<subject>[:<instance>]``
+instead (``subject`` / ``instance`` are 1-20 characters of ``[a-zA-Z0-9_.-]``).
+The declaration is self-asserted, never authenticated: the agent reads it as
+"an external agent says it is S", and no declared field grants authority.
+``ui:page:<name>`` is a callback POSTed by an HTML
 page the agent itself started (a page registered via ``ava.ui.show``); it wraps
 as the same bare "[ts]" header as ``user``, and the agent recovers which page
 posted from ``<name>``.
@@ -35,16 +42,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from base.agents.messages.caller_identity import PREFIXES as _CALLER_PREFIXES
-from base.agents.messages.caller_identity import CallerIdentity
+from base.agents.messages.caller_identity import CallerIdentity, is_caller_source
 from base.clock import Clock
 
 __all__ = [
     "EnvelopeReadInputs",
     "inbound_head",
-    "reject_unnegotiated_caller",
     "validate_source",
-    "validate_writable_source",
     "wrap_inbound",
 ]
 
@@ -75,7 +79,7 @@ def validate_source(source: str) -> None:
     `inbound_messages` and causing the agent claim node to hit ValueError and
     kill the whole agent process.
     """
-    if source.startswith(_CALLER_PREFIXES):
+    if is_caller_source(source):
         CallerIdentity.from_source(source)
         return
     if source == "system" or source.startswith(_SYSTEM_PREFIX):
@@ -97,29 +101,9 @@ def validate_source(source: str) -> None:
         return
     raise ValueError(
         f"Unrecognized inbound source: {source!r} — "
-        "must be 'system' / 'system:<subtype>' / 'agent:N' / 'user' / 'ui:page:<name>' / "
-        "'watcher:N' / 'shell:N' / 'schedule:N'"
+        "must be 'system' / 'system:<subtype>' / 'agent:N' / 'external_agent:<subject>[:<instance>]' / "
+        "'user' / 'ui:page:<name>' / 'watcher:N' / 'shell:N' / 'schedule:N'"
     )
-
-
-def validate_writable_source(source: str) -> None:
-    """Reject v1 writes until target runtime capability negotiation exists.
-
-    Reader support alone is not evidence that the target consumer understands
-    the format. This fence also covers manually supplied sources during a mixed
-    deployment. Do not replace it with a global flag or an installed commit.
-    """
-    validate_source(source)
-    reject_unnegotiated_caller(source)
-
-
-def reject_unnegotiated_caller(source: str) -> None:
-    """Fence the new protocol without redefining legacy internal source formats."""
-    if source.startswith(_CALLER_PREFIXES):
-        raise ValueError(
-            "caller identity v1 writes are not enabled: target runtime protocol "
-            "capability must be confirmed before delivery; do not substitute user/system/agent"
-        )
 
 
 _ID_SOURCE_LABELS = (
@@ -127,13 +111,6 @@ _ID_SOURCE_LABELS = (
     (_SHELL_PREFIX, "Shell session"),
     (_SCHEDULE_PREFIX, "Schedule"),
 )
-
-
-def _caller_head(source: str) -> str:
-    caller = CallerIdentity.from_source(source)
-    instance = f" / {caller.instance}" if caller.instance is not None else ""
-    label = "External agent" if caller.kind == "external_agent" else "Unknown caller"
-    return f"{label} ({caller.subject}{instance}; asserted provenance):\n\n"
 
 
 @dataclass(frozen=True)
@@ -170,11 +147,13 @@ def inbound_head(
     even when several messages are claimed in one batch. When None (legacy
     callers / system messages), the current time is used as before.
     """
-    if source.startswith(_CALLER_PREFIXES):
-        return _caller_head(source)
     if source == "system" or source.startswith(_SYSTEM_PREFIX):
         return "[system] "
     formatted, ts = _timestamp(created_at, inputs)
+    if is_caller_source(source):
+        caller = CallerIdentity.from_source(source)
+        instance = f" / {caller.instance}" if caller.instance is not None else ""
+        return f"External agent ({caller.subject}{instance}; asserted provenance){ts}:\n\n"
     if source == "user" or source.startswith(_PAGE_PREFIX):
         # Bare "[ts]" header for both human sources (user ruling 2026-09-18):
         # no label, no colon; with timestamps off there is no header at all.
@@ -189,8 +168,8 @@ def inbound_head(
             return f"{label} (id {ident}){ts}:\n\n"
     raise ValueError(
         f"Unrecognized inbound source: {source!r} — "
-        "must be 'system' / 'system:<subtype>' / 'agent:N' / 'user' / 'ui:page:<name>' / "
-        "'watcher:N' / 'shell:N' / 'schedule:N'"
+        "must be 'system' / 'system:<subtype>' / 'agent:N' / 'external_agent:<subject>[:<instance>]' / "
+        "'user' / 'ui:page:<name>' / 'watcher:N' / 'shell:N' / 'schedule:N'"
     )
 
 

@@ -51,6 +51,7 @@
   "human": "人类",
   "system": "系统",
   "agent": "Agent {id}",
+  "externalAgent": "外部 agent {name}",
   "agentChat": "Ava ▸{suffix}",
   "compactSummarySingular": "个压缩摘要",
   "compactSummariesPlural": "个压缩摘要",
