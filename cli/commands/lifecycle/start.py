@@ -23,6 +23,7 @@ from cli.commands._repo import _repo_root
 from cli.commands._setup import SetupValues, _missing_setup_message
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
 from cli.commands.lifecycle._start_bookmarks import record_running_sha as _record_running_sha
+from cli.commands.lifecycle.login_link import print_login_link
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.status import cmd_status
 from cli.start_runtime import StartRuntime
@@ -477,6 +478,7 @@ def _cmd_start_body(
     # 7) gateway reachability hint.
     if any(spec.session == "gateway" for spec in started) and not wait.unready:
         _print_gateway_hint()
+        print_login_link({spec.session for spec in started})
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
     rc = _readiness_verdict(launch, wait)

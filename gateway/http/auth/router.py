@@ -1,8 +1,10 @@
 """Server-side browser-session authentication and revocation endpoints.
 
-POST /api/auth/login   — verify password, set session cookie
-POST /api/auth/logout  — revoke and clear the current session cookie
-GET  /api/auth/check   — report whether the current session is valid
+POST /api/auth/login               — verify password, set session cookie
+POST /api/auth/login-ticket        — issue a one-time, short-lived login ticket
+POST /api/auth/login-ticket/redeem — exchange a ticket for a session cookie
+POST /api/auth/logout              — revoke and clear the current session cookie
+GET  /api/auth/check               — report whether the current session is valid
 """
 
 from __future__ import annotations
@@ -10,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -28,13 +30,17 @@ from gateway.http.auth.request_principal import (
     SessionKeys,
     current_session_fact,
     login_mint,
+    require_human_credential,
     session_mints,
 )
 from gateway.http.auth.session_store import (
+    LOGIN_TICKET_TTL_SECONDS,
     list_sessions,
     minted_session_id,
+    minted_ticket_id,
     session_ids_with_suffix,
     session_mint,
+    ticket_mint,
 )
 from gateway.http.middleware.error_envelope import error_response
 
@@ -50,6 +56,13 @@ class LoginRequest(BaseModel):
 
     password: str = ""
     username: str | None = None
+
+
+class LoginTicketRedeemRequest(BaseModel):
+    """POST /api/auth/login-ticket/redeem body; a missing or empty ticket falls
+    through to the 401 rather than a 422, like a missing password."""
+
+    ticket: str = ""
 
 
 @router.post("/api/auth/login")
@@ -120,6 +133,11 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
         )
 
     login_limiter.record_success(ip)
+    return await _open_session(request, mint, ip)
+
+
+async def _open_session(request: Request, mint: str, ip: str) -> JSONResponse:
+    """Create a session bound to `mint` and answer with its cookie."""
     session_id = minted_session_id(mint)
     ttl_seconds = settings.gateway.session_ttl_seconds
     await asyncio.to_thread(
@@ -135,6 +153,103 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
         ttl_seconds=ttl_seconds,
     )
     return JSONResponse(content={"ok": True}, headers=headers)
+
+
+@router.post("/api/auth/login-ticket", dependencies=[Depends(require_human_credential)])
+async def issue_login_ticket(request: Request) -> JSONResponse:
+    """Issue a one-time login ticket for a browser, from a human-secret caller.
+
+    The ticket is a `web_sessions` row valid for ``LOGIN_TICKET_TTL_SECONDS``
+    and bound to the human secret's mint: redeeming it
+    (``/api/auth/login-ticket/redeem``) opens exactly the session a password
+    login with that secret would. Only the human secret (or a session it
+    minted) may issue one; a write generation's machine token gets 403, so no
+    machine credential can mint a browser session.
+
+    Returns ``{"ticket": "<opaque>", "expires_in_seconds": <int>}``.
+    """
+    secret = settings.data_plane.cluster_secret
+    mint = await asyncio.to_thread(
+        login_mint,
+        request.app.state.session_keys,
+        secret,
+        secret,
+        cache=request.app.state.machine_token_acceptance,
+    )
+    if mint is None:
+        raise RuntimeError("the gateway has no cluster secret to issue a login ticket from")
+    ticket = minted_ticket_id(mint)
+    ip = request.client.host if request.client else "unknown"
+    await asyncio.to_thread(
+        request.app.state.sessions.create,
+        ticket,
+        LOGIN_TICKET_TTL_SECONDS,
+        "login-ticket",
+        ip,
+    )
+    return JSONResponse(
+        content={"ticket": ticket, "expires_in_seconds": LOGIN_TICKET_TTL_SECONDS},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def _consume_login_ticket(request: Request, ticket: str) -> str | None:
+    """Spend `ticket` and return its mint, or None when it cannot open a session.
+
+    The revoke is the single-use gate (atomic: it matches only an unrevoked,
+    unexpired row); a spent ticket whose mint is no longer admitted (the secret
+    rotated, a generation was revoked) is still spent.
+    """
+    mint = ticket_mint(ticket)
+    if mint is None or not await asyncio.to_thread(request.app.state.sessions.revoke, ticket):
+        return None
+    admitted = await asyncio.to_thread(
+        session_mints,
+        request.app.state.session_keys,
+        settings.data_plane.cluster_secret,
+        cache=request.app.state.machine_token_acceptance,
+    )
+    return mint if mint in admitted else None
+
+
+@router.post("/api/auth/login-ticket/redeem")
+async def redeem_login_ticket(body: LoginTicketRedeemRequest, request: Request) -> JSONResponse:
+    """Exchange a login ticket for a session cookie; the ticket is consumed.
+
+    Needs no credential: the ticket is the credential. Redemption revokes the
+    ticket row in one atomic statement, so a ticket opens at most one session,
+    and only while it is unexpired and the credential that issued it is still
+    current. An unknown, malformed, replayed, expired or orphaned ticket all
+    get the same 401, and every failure counts against the login limiter
+    (429 while locked), so tickets cannot be guessed at.
+    """
+    ip = request.client.host if request.client else "unknown"
+    login_limiter: LoginRateLimiter = request.app.state.login_limiter
+    remaining = login_limiter.lockout_remaining(ip)
+    if remaining > 0:
+        return error_response(
+            request,
+            code="login_rate_limited",
+            status=429,
+            detail="too many failed login attempts",
+            retryable=True,
+            extensions={"retry_after_seconds": remaining},
+            headers={"Retry-After": str(remaining)},
+        )
+
+    mint = await _consume_login_ticket(request, body.ticket)
+    if mint is None:
+        login_limiter.record_failure(ip)
+        return error_response(
+            request,
+            code="invalid_login_ticket",
+            status=401,
+            detail="invalid or expired login ticket",
+            retryable=False,
+        )
+
+    login_limiter.record_success(ip)
+    return await _open_session(request, mint, ip)
 
 
 @router.post("/api/auth/logout")

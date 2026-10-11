@@ -31,6 +31,7 @@ const mockAuth = vi.mocked(useAuth);
 function setStatus(status: "loading" | "authenticated" | "unauthenticated") {
   mockAuth.mockReturnValue({
     status,
+    loginNotice: null,
     login: vi.fn(),
     logout: vi.fn(),
   });

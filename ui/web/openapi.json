@@ -42,6 +42,60 @@
         }
       }
     },
+    "/api/auth/login-ticket": {
+      "post": {
+        "summary": "Issue Login Ticket",
+        "description": "Issue a one-time login ticket for a browser, from a human-secret caller.\n\nThe ticket is a `web_sessions` row valid for ``LOGIN_TICKET_TTL_SECONDS``\nand bound to the human secret's mint: redeeming it\n(``/api/auth/login-ticket/redeem``) opens exactly the session a password\nlogin with that secret would. Only the human secret (or a session it\nminted) may issue one; a write generation's machine token gets 403, so no\nmachine credential can mint a browser session.\n\nReturns ``{\"ticket\": \"<opaque>\", \"expires_in_seconds\": <int>}``.",
+        "operationId": "issue_login_ticket_api_auth_login_ticket_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login-ticket/redeem": {
+      "post": {
+        "summary": "Redeem Login Ticket",
+        "description": "Exchange a login ticket for a session cookie; the ticket is consumed.\n\nNeeds no credential: the ticket is the credential. Redemption revokes the\nticket row in one atomic statement, so a ticket opens at most one session,\nand only while it is unexpired and the credential that issued it is still\ncurrent. An unknown, malformed, replayed, expired or orphaned ticket all\nget the same 401, and every failure counts against the login limiter\n(429 while locked), so tickets cannot be guessed at.",
+        "operationId": "redeem_login_ticket_api_auth_login_ticket_redeem_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginTicketRedeemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/logout": {
       "post": {
         "summary": "Logout",
@@ -12967,6 +13021,18 @@
         "type": "object",
         "title": "LoginRequest",
         "description": "POST /api/auth/login body. `password` is the cluster secret (or, for the\nmanaged browser of an agent-runner, the active generation's runner API\ntoken); a missing or empty one falls through to the 401 below rather than a\n422. `username` is accepted for Chrome password-manager compatibility but\nnever validated."
+      },
+      "LoginTicketRedeemRequest": {
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "title": "Ticket",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "LoginTicketRedeemRequest",
+        "description": "POST /api/auth/login-ticket/redeem body; a missing or empty ticket falls\nthrough to the 401 rather than a 422, like a missing password."
       },
       "MachineDeleteResponse": {
         "properties": {
