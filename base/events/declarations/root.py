@@ -26,7 +26,7 @@ class RootRestartFailed(TypedDict):
 
     Emitted when a unit enters `restart_failed`: the unit ends an interrupted
     replacement in an explicit failure state instead of a stop residue, its
-    intent stays running, and the health monitor retries under its backoff.
+    intent stays running, and the health monitor has a finite automatic restart budget.
     """
 
     unit: str
@@ -45,10 +45,9 @@ class RootUnitFailureState(TypedDict):
     """One root unit sits in an explicit failure state (task #4872).
 
     Emitted on EVERY health round while the condition holds — the unit's intent
-    is running and it has a recorded replacement failure, an open restart
-    breaker — so a rule's pending period can debounce
-    it and the stream going quiet resolves it. ``kind`` is ``restart_failed``,
-    ``breaker_open`` (the first that applies in that order);
+    is running and it has a recorded replacement failure or exhausted automatic
+    restart attempts. A rule can debounce that stream; silence resolves it. ``kind`` is ``restart_failed``,
+    ``restarts_exhausted`` (the first that applies in that order);
     ``detail`` is the bounded evidence line, never a grouping key.
     """
 
@@ -58,11 +57,12 @@ class RootUnitFailureState(TypedDict):
 
 
 class RootUnitNotRevivable(TypedDict):
-    """A unit's probe verdict is terminal: this unit cannot revive it.
+    """A unit has no automatic restart authority for its observed failure.
 
     Emitted on every health round that observes a terminal verdict (unknown
     identity, inspection error, timeout, foreign listener) outside an operator
-    stop. One round is often an inspection race; a streak is the incident —
+    stop. DOWN with NEVER policy, no restart verb or a code-gate exit also reports
+    here. One round is often an inspection race; a streak is the incident —
     the rule's pending period tells them apart. ``detail`` is the probe's
     evidence, never a grouping key.
     """
@@ -203,15 +203,10 @@ EVENTS: dict[str, EventSpec] = {
         "root self-check found a managed unit no longer a live child of the root process — one alert per episode, held until intact",
         tier="anomaly",
     ),
-    "root_restart_breaker_open": telemetry_event(
-        "root_restart_breaker_open",
-        "root health monitor restart breaker opened — repeated non-alive probe rounds held until a probe-alive round",
-        tier="anomaly",
-    ),
     "root_restart_failed": telemetry_event(
         "root_restart_failed",
         "root unit replacement failed at its down|up half — explicit failure state recorded; "
-        "intent stays running and the health monitor retries under its backoff (task #4872)",
+        "intent stays running and the health monitor has a finite automatic restart budget (task #4872)",
         payload=RootRestartFailed,
         tier="anomaly",
     ),
@@ -224,7 +219,7 @@ EVENTS: dict[str, EventSpec] = {
     "root_unit_failure_state": telemetry_event(
         "root_unit_failure_state",
         "root unit sits in an explicit failure state (intent running, and restart_failed, "
-        "breaker open) — emitted every health round while it holds "
+        "restart attempts exhausted) — emitted every health round while it holds "
         "(task #4872)",
         payload=RootUnitFailureState,
         tier="anomaly",

@@ -3082,7 +3082,7 @@ groups:
           summary: "Root unit {{ $labels.attributes_unit }}: replacement failed and is being retried"
           description: >-
             The unit's intent is running and its last replacement failed at its down or up half; the health
-            monitor retries under its backoff. root_unit_failure_state is emitted on every health round
+            monitor may retry within its finite budget. root_unit_failure_state is emitted on every health round
             (~60s) while the state holds, so the alert resolves by itself once the unit is replaced or
             stopped. Check the detail on the matching event and `ava status` on the owning machine.
         data:
@@ -3134,9 +3134,9 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-root-unit-breaker-open: replaces services/supervision/ava_root/alerts.py episode kind breaker_open (severity critical) ──
+      # Keep this rule UID so existing alert identity survives the simpler restart policy.
       - uid: ava-ops-root-unit-breaker-open
-        title: "Root unit restart breaker open"
+        title: "Root unit automatic restarts exhausted"
         condition: D
         for: 0m
         noDataState: OK
@@ -3144,16 +3144,15 @@ groups:
         labels:
           severity: critical
           ruleUID: ava-ops-root-unit-breaker-open
-          metric: root_unit_breaker_open
+          metric: root_unit_restart_attempts_exhausted
           team: ava-ops
         annotations:
-          summary: "Root unit {{ $labels.attributes_unit }}: restart breaker open, restarts held"
+          summary: "Root unit {{ $labels.attributes_unit }}: automatic restart attempts exhausted"
           description: >-
-            Repeated non-alive health rounds opened the unit's restart breaker; restarts are held until a
-            probe-alive round, so an operator must act. The state is re-emitted every health round while it
-            holds. A unit that also has a recorded replacement failure reports as restart_failed instead
-            (kind priority restart_failed > breaker_open > custody_held), so this rule only sees units whose
-            last replacement did not itself fail.
+            The unit used its finite automatic restart budget during a continuous outage. Only normal
+            health rounds now observe it; an operator must act. A fresh ALIVE observation resets the
+            budget. Units with a recorded replacement error report restart_failed instead and use that
+            alert. The query also accepts historical breaker_open events during a version transition.
         data:
           - refId: A
             datasourceUid: loki
@@ -3167,7 +3166,7 @@ groups:
               expr: >-
                 sum by (attributes_unit) (count_over_time({service_name="unknown_service",
                 event_name="root_unit_failure_state"} | json | cluster=".ava" | category="telemetry" |
-                attributes_kind="breaker_open" [3m]))
+                attributes_kind=~"restarts_exhausted|breaker_open" [3m]))
               instant: true
               queryType: instant
             relativeTimeRange:

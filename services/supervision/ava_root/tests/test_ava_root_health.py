@@ -2,8 +2,7 @@
 
 Policy tests drive the monitor with a stub supervisor and a probe whose verdict
 the test flips; two integration tests drive it against a real `Supervisor`
-replacing real generations, exercising the restart verb seam and probe
-confirmation end to end.
+replacing real generations and exercising the finite restart budget.
 """
 
 from __future__ import annotations
@@ -16,8 +15,10 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
 
+import psutil
 import pytest
 
+from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
 from services.supervision.ava_root import health as health_mod
@@ -137,302 +138,179 @@ def _config(**overrides: Any) -> HealthConfig:
     values: dict[str, Any] = {
         "interval_s": 0.01,
         "startup_grace_s": 0.0,  # Existing policy cases begin after startup grace.
-        "verify_deadline_s": 0.05,
-        "verify_interval_s": 0.001,
-        "failures_before_restart": 1,
-        "backoff_base_s": 30.0,
-        "backoff_cap_s": 120.0,
-        "breaker_rounds": 3,
+        "max_restart_attempts": 3,
     }
     values.update(overrides)
     return HealthConfig(**values)
 
 
-# -- configuration -------------------------------------------------------------
-
-
 def test_config_validation() -> None:
-    with pytest.raises(ValueError, match="failures_before_restart"):
-        _config(failures_before_restart=0)
-    with pytest.raises(ValueError, match="breaker_rounds"):
-        _config(breaker_rounds=1, failures_before_restart=1)
+    with pytest.raises(ValueError, match="max_restart_attempts"):
+        _config(max_restart_attempts=0)
     with pytest.raises(ValueError, match="interval_s"):
         _config(interval_s=0)
-    with pytest.raises(ValueError, match="verify_interval_s"):
-        _config(verify_interval_s=0)
-    with pytest.raises(ValueError, match="verify_deadline_s"):
-        _config(verify_deadline_s=0)
-    with pytest.raises(ValueError, match="backoff_base_s"):
-        _config(backoff_base_s=0)
-    with pytest.raises(ValueError, match="backoff_cap_s"):
-        _config(backoff_base_s=60.0, backoff_cap_s=10.0)
 
 
-# -- round policy --------------------------------------------------------------
-
-
-async def test_verified_restart_resets_state(
-    clock: FakeClock, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.supervision.ava_root.health")
+async def test_restart_uses_one_probe_and_next_round_observes_readiness(clock: FakeClock) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
-
-    def flip() -> None:
-        probe.verdict = DaemonProbe.up("ok")
-
-    stub.on_restart = flip
+    stub.on_restart = lambda: setattr(probe, "verdict", DaemonProbe.up("ok"))
     monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
     await monitor.run_round()
-    state = monitor.snapshot()["svc"]
+    assert probe.calls == 1  # No replacement confirmation polling.
     assert stub.restart_calls == ["svc"]
-    assert state.last_verdict == "alive"
-    assert state.consecutive_failures == 0
-    assert state.respawn_attempts == 0
-    assert state.next_respawn_at is None
-    assert state.breaker_since is None
-    assert "restarted, verified alive" in caplog.text
+    assert monitor.snapshot()["svc"].last_verdict == "down"
+    assert monitor.snapshot()["svc"].restart_attempts == 1
+    await monitor.run_round()
+    assert probe.calls == 2
+    assert monitor.snapshot()["svc"].last_verdict == "alive"
+    assert monitor.snapshot()["svc"].restart_attempts == 0
 
 
-async def test_failed_restart_backs_off_until_due(
-    clock: FakeClock, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.supervision.ava_root.health")
+async def test_three_actual_restarts_then_only_observation(clock: FakeClock) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(breaker_rounds=5))
-
-    await monitor.run_round()  # 1: the restart attempt is not verified
-    state = monitor.snapshot()["svc"]
-    assert stub.restart_calls == ["svc"]
-    assert state.respawn_attempts == 1
-    assert state.consecutive_failures == 1
-    armed = cast(float, state.next_respawn_at)
-    assert 25.0 < armed - clock.now < 30.5
-    assert "restart FAILED" in caplog.text
-
-    await monitor.run_round()  # 2: inside the backoff window — no second attempt
-    assert stub.restart_calls == ["svc"]
-    assert monitor.snapshot()["svc"].consecutive_failures == 2
-    assert "backing off" in caplog.text
-
-    clock.now += 31.0
-    await monitor.run_round()  # 3: the deadline passed — a second attempt fires
-    assert stub.restart_calls == ["svc", "svc"]
-    assert monitor.snapshot()["svc"].respawn_attempts == 2
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
+    for _ in range(8):
+        await monitor.run_round()
+    assert probe.calls == 8
+    assert stub.restart_calls == ["svc"] * 3
+    assert monitor.snapshot()["svc"].restart_attempts == 3
+    probe.verdict = DaemonProbe.up("repaired")
+    await monitor.run_round()
+    probe.verdict = DaemonProbe.down("new outage")
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 4
+    assert monitor.snapshot()["svc"].restart_attempts == 1
 
 
-async def test_breaker_opens_once_then_holds(
-    clock: FakeClock, recorder: _Recorder, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.supervision.ava_root.health")
+async def test_unknown_rounds_do_not_spend_or_replenish_attempts(clock: FakeClock) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
+    stub = StubSupervisor()
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
+    for _ in range(7):
+        probe.verdict = DaemonProbe.unavailable("inspection failed")
+        await monitor.run_round()
+        probe.verdict = DaemonProbe.down("no")
+        await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 3
+    assert monitor.snapshot()["svc"].restart_attempts == 3
+
+
+@pytest.mark.parametrize("deferral", ["policy never", "already scheduled"])
+async def test_deferred_down_reports_without_spending_attempts(
+    deferral: str, clock: FakeClock, recorder: _Recorder
+) -> None:
+    probe = CellProbe(DaemonProbe.down("no"))
+    stub = StubSupervisor({"svc": deferral})
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
+    for _ in range(7):
+        await monitor.run_round()
+    assert stub.restart_calls == []
+    assert monitor.snapshot()["svc"].restart_attempts == 0
+    assert len(recorder.events("root_unit_not_revivable")) == 7
+    stub.deferrals.clear()
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc"]
+
+
+async def test_probe_only_unit_reports_without_restarts(
+    clock: FakeClock, recorder: _Recorder
+) -> None:
+    stub = StubSupervisor(unknown_units={"helper"})
+    monitor = HealthMonitor(
+        stub, _registry("helper", CellProbe(DaemonProbe.down("missing"))), config=_config()
+    )
+    for _ in range(5):
+        await monitor.run_round()
+    assert not stub.restart_calls
+    assert monitor.snapshot()["helper"].restart_attempts == 0
+    assert len(recorder.events("root_unit_not_revivable")) == 5
+
+
+async def test_expected_stop_resets_attempts_and_alerts_nothing(
+    clock: FakeClock, recorder: _Recorder
+) -> None:
     stub = StubSupervisor()
     monitor = HealthMonitor(
-        stub,
-        _registry("svc", probe),
-        config=_config(backoff_base_s=600.0, backoff_cap_s=600.0),
+        stub, _registry("svc", CellProbe(DaemonProbe.down("no"))), config=_config()
     )
-    await monitor.run_round()  # 1: restart attempt, not verified
-    await monitor.run_round()  # 2: backing off
-    await monitor.run_round()  # 3: the third non-alive round opens the breaker
-    await monitor.run_round()  # 4: held
+    await monitor.run_round()
+    stub.deferrals["svc"] = "held down"
+    stub.failure_facts = UnitFailureFacts(intent_running=False, restart_failed=None)
+    for _ in range(4):
+        await monitor.run_round()
     assert stub.restart_calls == ["svc"]
-    opens = recorder.events("root_restart_breaker_open")
-    assert len(opens) == 1
-    assert opens[0]["unit"] == "svc"
-    assert opens[0]["rounds"] == 3
-    assert opens[0]["respawn_attempts"] == 1
-    holds = [r for r in caplog.records if "restart held" in str(r.message)]
-    assert len(holds) == 2
-    assert monitor.snapshot()["svc"].breaker_since is not None
+    assert monitor.snapshot()["svc"].restart_attempts == 0
+    assert not recorder.calls
 
 
-async def test_terminal_verdict_reports_and_resets(clock: FakeClock, recorder: _Recorder) -> None:
+async def test_terminal_verdict_reports_without_another_restart(
+    clock: FakeClock, recorder: _Recorder
+) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(breaker_rounds=5))
-    await monitor.run_round()  # leaves failure state behind
-    assert monitor.snapshot()["svc"].consecutive_failures == 1
-
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
+    await monitor.run_round()
     probe.verdict = DaemonProbe.port_taken("alien daemon")
     await monitor.run_round()
-    state = monitor.snapshot()["svc"]
-    assert state.consecutive_failures == 0
-    assert state.respawn_attempts == 0
-    assert state.next_respawn_at is None
-    assert state.breaker_since is None
-    assert state.last_verdict == "port-taken"
-    assert stub.restart_calls == ["svc"]  # only the first round's attempt
-    reports = recorder.events("root_unit_not_revivable")
-    assert [(r["unit"], r["detail"]) for r in reports] == [("svc", "alien daemon")]
+    assert monitor.snapshot()["svc"].restart_attempts == 1
+    assert stub.restart_calls == ["svc"]
+    assert recorder.events("root_unit_not_revivable")[0]["detail"] == "alien daemon"
 
 
 async def test_probe_raise_is_unavailable_and_round_continues(
     clock: FakeClock, recorder: _Recorder
 ) -> None:
-
     def raising() -> DaemonProbe:
         raise RuntimeError("boom")
 
-    registry = ProbeRegistry()
-    registry.register("unit-a", raising)
+    registry = _registry("unit-a", raising)
     registry.register("unit-b", CellProbe(DaemonProbe.up("ok")))
-    stub = StubSupervisor()
-    monitor = HealthMonitor(stub, registry, config=_config(breaker_rounds=5))
-    await monitor.run_round()
-    snapshot = monitor.snapshot()
-    assert stub.restart_calls == []  # no observed failure: no restart authority
-    assert snapshot["unit-a"].last_verdict == "unavailable"
-    assert snapshot["unit-a"].last_detail.startswith("probe raised RuntimeError")
-    assert snapshot["unit-b"].last_verdict == "alive"  # the round continued
-    reports = recorder.events("root_unit_not_revivable")
-    assert [r["unit"] for r in reports] == ["unit-a"]
-    assert str(reports[0]["detail"]).startswith("probe raised RuntimeError")
-
-
-async def test_unresolvable_probe_is_no_action(
-    clock: FakeClock, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.supervision.ava_root.health")
-    registry = ProbeRegistry()
-    registry.register_ref("svc", "tmp_ghost_health_module:probe")
     stub = StubSupervisor()
     monitor = HealthMonitor(stub, registry, config=_config())
     await monitor.run_round()
-    assert stub.restart_calls == []
-    assert "no resolvable probe" in caplog.text
+    assert not stub.restart_calls
+    assert monitor.snapshot()["unit-a"].last_detail.startswith("probe raised RuntimeError")
+    assert monitor.snapshot()["unit-b"].last_verdict == "alive"
+    assert recorder.events("root_unit_not_revivable")[0]["unit"] == "unit-a"
+
+
+async def test_unresolvable_probe_is_no_action(clock: FakeClock) -> None:
+    registry = ProbeRegistry()
+    registry.register_ref("svc", "tmp_ghost_health:probe")
+    stub = StubSupervisor()
+    monitor = HealthMonitor(stub, registry, config=_config())
+    await monitor.run_round()
+    assert not stub.restart_calls
+    assert monitor.snapshot()["svc"].last_verdict == "unavailable"
 
 
 async def test_snapshot_is_a_copy(clock: FakeClock) -> None:
-    probe = CellProbe(DaemonProbe.down("no"))
-    stub = StubSupervisor({"svc": "policy never"})
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
-    await monitor.run_round()
-    taken = monitor.snapshot()
-    taken["svc"].consecutive_failures = 99
-    assert monitor.snapshot()["svc"].consecutive_failures == 1
-
-
-# -- deferral: expected stop vs everything else --------------------------------
-
-
-async def test_expected_stop_counts_nothing_and_alerts_nothing(
-    clock: FakeClock, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.supervision.ava_root.health")
-    probe = CellProbe(DaemonProbe.down("no"))
-    stub = StubSupervisor({"svc": "held down"})
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
-    for _ in range(4):
-        await monitor.run_round()
-    state = monitor.snapshot()["svc"]
-    assert stub.restart_calls == []
-    assert state.consecutive_failures == 0
-    assert state.breaker_since is None
-    assert state.last_verdict == "down"  # the verdict still lands in the snapshot
-    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-    assert warnings == []
-    assert "expected (operator stop)" in caplog.text
-
-
-async def test_inflight_retry_counts_to_breaker_but_never_acts(
-    clock: FakeClock, recorder: _Recorder, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.supervision.ava_root.health")
-    probe = CellProbe(DaemonProbe.down("no"))
-    stub = StubSupervisor({"svc": "already scheduled"})
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
-    await monitor.run_round()  # 1: deferred
-    await monitor.run_round()  # 2: deferred, still counting
-    await monitor.run_round()  # 3: the breaker opens despite the deferral
-    state = monitor.snapshot()["svc"]
-    assert stub.restart_calls == []
-    assert state.consecutive_failures == 3
-    assert state.breaker_since is not None
-    assert len(recorder.events("root_restart_breaker_open")) == 1
-    assert "restart deferred (already scheduled)" in caplog.text
-
-
-async def test_policy_never_counts_and_surfaces_via_breaker(
-    clock: FakeClock, recorder: _Recorder, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.supervision.ava_root.health")
-    probe = CellProbe(DaemonProbe.down("no"))
-    stub = StubSupervisor({"svc": "policy never"})
     monitor = HealthMonitor(
-        stub,
-        _registry("svc", probe),
-        config=_config(backoff_base_s=600.0, backoff_cap_s=600.0),
+        StubSupervisor(), _registry("svc", CellProbe(DaemonProbe.down("no"))), config=_config()
     )
-    for _ in range(3):
-        await monitor.run_round()
-    state = monitor.snapshot()["svc"]
-    assert stub.restart_calls == []
-    assert state.consecutive_failures == 3
-    assert len(recorder.events("root_restart_breaker_open")) == 1
-    assert "policy never" in caplog.text
-
-
-async def test_out_of_tree_unit_counts_and_surfaces_via_breaker(
-    clock: FakeClock, recorder: _Recorder, caplog: pytest.LogCaptureFixture
-) -> None:
-    """A registered probe for a unit outside the tree (static path — e.g. the
-    launchd-owned permissions helper): counted, surfaced, never restarted."""
-    caplog.set_level(logging.DEBUG, logger="services.supervision.ava_root.health")
-    probe = CellProbe(DaemonProbe.down("lwcr-stuck: job state=spawn failed"))
-    stub = StubSupervisor(unknown_units={"permissions-helper"})
-    monitor = HealthMonitor(stub, _registry("permissions-helper", probe), config=_config())
-    for _ in range(3):
-        await monitor.run_round()
-    state = monitor.snapshot()["permissions-helper"]
-    assert stub.restart_calls == []
-    assert state.consecutive_failures == 3
-    assert state.breaker_since is not None
-    opens = recorder.events("root_restart_breaker_open")
-    assert len(opens) == 1
-    assert "lwcr-stuck" in cast("str", opens[0]["detail"])
-    assert "no revival verb" in caplog.text
-
-
-async def test_deferral_clears_then_the_round_acts(clock: FakeClock) -> None:
-    probe = CellProbe(DaemonProbe.down("no"))
-    stub = StubSupervisor({"svc": "already scheduled"})
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(breaker_rounds=5))
     await monitor.run_round()
-    assert stub.restart_calls == []
-    stub.deferrals.clear()
-    await monitor.run_round()
-    assert stub.restart_calls == ["svc"]
-    assert monitor.snapshot()["svc"].respawn_attempts == 1
+    monitor.snapshot()["svc"].restart_attempts = 99
+    assert monitor.snapshot()["svc"].restart_attempts == 1
 
 
-# -- the gate seam -------------------------------------------------------------
-
-
-async def test_gate_decline_resets_and_later_round_acts(
-    clock: FakeClock, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.supervision.ava_root.health")
+async def test_maintenance_gate_preserves_spent_attempts(clock: FakeClock) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
-    allowed = {"value": False}
+    allowed = {"value": True}
     monitor = HealthMonitor(
         stub,
         _registry("svc", probe),
-        config=_config(breaker_rounds=5),
+        config=_config(),
         gate=lambda: (allowed["value"], "paused"),
     )
-    await monitor.run_round()
-    await monitor.run_round()
-    state = monitor.snapshot()["svc"]
-    assert stub.restart_calls == []
-    assert state.consecutive_failures == 0  # a decline is "not yet allowed"
-    assert "not restarting this round" in caplog.text
-
-    allowed["value"] = True
-    await monitor.run_round()
-    assert stub.restart_calls == ["svc"]
+    for _ in range(6):
+        allowed["value"] = True
+        await monitor.run_round()
+        allowed["value"] = False
+        await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 3
 
 
 # -- the round loop ------------------------------------------------------------
@@ -485,169 +363,93 @@ async def started(short_tmp: Path) -> AsyncIterator[StartFactory]:
         await supervisor.shutdown()
 
 
-async def test_integration_probe_confirmed_restart_replaces_generation(
-    started: StartFactory,
-) -> None:
+async def _unit_status(supervisor: Supervisor) -> dict[str, Any]:
+    return cast("list[dict[str, Any]]", (await supervisor.status())["units"])[0]
+
+
+async def _wait_stopped(supervisor: Supervisor) -> None:
+    async with asyncio.timeout(10):
+        while (await _unit_status(supervisor))["state"] != "stopped":
+            await asyncio.sleep(0.01)
+
+
+async def test_real_children_are_replaced_only_three_times(started: StartFactory) -> None:
     supervisor = await started([_unit("svc")])
-    first = supervisor._units["svc"].generation
-    assert first is not None
-    first_pid = first.proc.pid
-
-    def probe() -> DaemonProbe:
-        generation = supervisor._units["svc"].generation
-        if generation is not None and generation.proc.pid != first_pid:
-            return DaemonProbe.up("new generation serving")
-        return DaemonProbe.down("wedged")
-
+    first_pid = int((await _unit_status(supervisor))["pid"])
+    first = OwnedProcess.capture(psutil.Process(first_pid))
+    pids = {first_pid}
     monitor = HealthMonitor(
-        supervisor,
-        _registry("svc", probe),
-        config=_config(verify_deadline_s=1.0),
+        supervisor, _registry("svc", CellProbe(DaemonProbe.down("wedged"))), config=_config()
     )
-    await monitor.run_round()
-    state = monitor.snapshot()["svc"]
-    assert state.last_verdict == "alive"
-    assert state.consecutive_failures == 0
-    current = supervisor._units["svc"].generation
-    assert current is not None and current.proc.pid != first_pid
-    assert supervisor._units["svc"].restart_count == 1
+    for _ in range(7):
+        await monitor.run_round()
+        current = await _unit_status(supervisor)
+        assert current["state"] == "running"
+        pids.add(int(current["pid"]))
+    assert len(pids) == 4
+    assert not first.live()
+    assert (await _unit_status(supervisor))["restart_count"] == 3
+    assert monitor.snapshot()["svc"].restart_attempts == 3
 
 
-async def test_integration_unconfirmed_restart_backs_off(
-    started: StartFactory, caplog: pytest.LogCaptureFixture
+async def test_code_gate_exit_is_not_automatically_restarted(
+    started: StartFactory, short_tmp: Path, recorder: _Recorder
 ) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.supervision.ava_root.health")
-    supervisor = await started([_unit("svc")])
-    first = supervisor._units["svc"].generation
-    assert first is not None
-    first_pid = first.proc.pid
+    marker = short_tmp / "starts"
+    script = (
+        "from pathlib import Path; "
+        "from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE; "
+        f"p=Path({str(marker)!r}); p.write_text(p.read_text()+'start\\n' if p.exists() else 'start\\n'); "
+        "raise SystemExit(CODE_BEHIND_MINIMUM_EXIT_CODE)"
+    )
+    unit = manifest_mod.UnitManifest(
+        "svc", (sys.executable, "-c", script), manifest_mod.RestartPolicy.ALWAYS, "root"
+    )
+    supervisor = await started([unit])
+    await _wait_stopped(supervisor)
+    assert (await _unit_status(supervisor))["last_exit"] == f"exit {CODE_BEHIND_MINIMUM_EXIT_CODE}"
+    monitor = HealthMonitor(
+        supervisor, _registry("svc", CellProbe(DaemonProbe.down("absent"))), config=_config()
+    )
+    for _ in range(6):
+        await monitor.run_round()
+    assert marker.read_text() == "start\n"
+    assert (await _unit_status(supervisor))["restart_count"] == 0
+    assert monitor.snapshot()["svc"].restart_attempts == 0
+    assert len(recorder.events("root_unit_not_revivable")) == 6
+    assert "update required" in str(recorder.events("root_unit_not_revivable")[0]["detail"])
+    # An explicit operator command still owns another attempt.
+    await supervisor.up("svc")
+    await _wait_stopped(supervisor)
+    assert marker.read_text() == "start\nstart\n"
 
-    def probe() -> DaemonProbe:
-        return DaemonProbe.down("still wedged")
 
-    monitor = HealthMonitor(supervisor, _registry("svc", probe), config=_config())
-    await monitor.run_round()
-    state = monitor.snapshot()["svc"]
-    assert state.consecutive_failures == 1
-    assert state.next_respawn_at is not None
-    assert "restart FAILED" in caplog.text
-    second = supervisor._units["svc"].generation
-    assert second is not None and second.proc.pid != first_pid
-
-    await monitor.run_round()  # inside the backoff window — no second replacement
-    assert supervisor._units["svc"].restart_count == 1
-    assert supervisor._units["svc"].generation is second
-    assert "backing off" in caplog.text
-
-
-async def _running_unit_with_unactivatable_replacement(
-    started: StartFactory, short_tmp: Path, caplog: pytest.LogCaptureFixture
-) -> tuple[Supervisor, Path, HealthMonitor]:
-    """One running sealed unit whose replacement cannot activate (matrix #1 setup)."""
-    caplog.set_level(logging.DEBUG, logger="services.supervision.ava_root.health")
+async def test_failed_replacement_remains_visible_and_budgeted(
+    started: StartFactory, short_tmp: Path, recorder: _Recorder
+) -> None:
     sealed = short_tmp / "sealed-input"
     sealed.write_text("v1")
-    seal = InputSeal.capture(sealed.resolve())
     unit = manifest_mod.UnitManifest(
         "svc",
-        (sys.executable, "-u", "-c", "import time; time.sleep(60)"),
+        tuple(_SLEEP_FOREVER),
         manifest_mod.RestartPolicy.ALWAYS,
         "root",
-        inputs=(seal,),
+        inputs=(InputSeal.capture(sealed.resolve()),),
     )
     supervisor = await started([unit])
     probe = CellProbe(DaemonProbe.up("serving"))
-    monitor = HealthMonitor(
-        supervisor,
-        _registry("svc", probe),
-        config=_config(breaker_rounds=5, verify_deadline_s=0.5),
-    )
-    await monitor.run_round()  # the running generation is observed ready (grace over)
-    assert monitor.snapshot()["svc"].generation_ready
+    monitor = HealthMonitor(supervisor, _registry("svc", probe), config=_config())
+    await monitor.run_round()
+    sealed.write_text("v2")
     probe.verdict = DaemonProbe.down("not serving")
-    sealed.write_text("v2")  # the next birth of this generation is refused
-    return supervisor, sealed, monitor
-
-
-async def test_failed_replacement_records_explicit_state_and_still_counts(
-    started: StartFactory,
-    recorder: _Recorder,
-    caplog: pytest.LogCaptureFixture,
-    short_tmp: Path,
-) -> None:
-    """A replacement that cannot activate lands in an explicit recorded failure.
-
-    The failed up half must be visible in status and as a registered event while
-    the round counts it — never read as an expected operator stop (matrix #1).
-    """
-    supervisor, _sealed, monitor = await _running_unit_with_unactivatable_replacement(
-        started, short_tmp, caplog
-    )
-    await monitor.run_round()  # the restart attempt cannot activate
-    state = monitor.snapshot()["svc"]
-    assert state.consecutive_failures == 1
-    assert state.next_respawn_at is not None
-    assert "restart FAILED" in caplog.text
-    assert "expected (operator stop)" not in caplog.text
+    for _ in range(7):
+        await monitor.run_round()
     entry = cast("list[dict[str, Any]]", (await supervisor.status())["units"])[0]
     assert entry["intent"] == "running" and entry["state"] == "stopped"
     assert entry["restart_failed"]["stage"] == "up"
-    assert supervisor._units["svc"].restart_count == 0
+    assert monitor.snapshot()["svc"].restart_attempts == 3
     assert len(recorder.events("root_restart_failed")) == 1
-
-
-async def test_failed_replacement_backs_off_then_retry_clears_the_record(
-    started: StartFactory,
-    recorder: _Recorder,
-    caplog: pytest.LogCaptureFixture,
-    short_tmp: Path,
-    clock: FakeClock,
-) -> None:
-    """The recorded failure counts under the backoff, and a successful retry clears it."""
-    supervisor, sealed, monitor = await _running_unit_with_unactivatable_replacement(
-        started, short_tmp, caplog
-    )
-    await monitor.run_round()  # 1: the failure is recorded
-    await monitor.run_round()  # 2: inside the backoff window — counting, no attempt
-    assert supervisor._units["svc"].restart_count == 0
-    assert "backing off" in caplog.text
-    assert "expected (operator stop)" not in caplog.text
-    sealed.write_text("v1")  # the retry can activate again
-    clock.now += 31.0
-    await monitor.run_round()  # 3: the retry replaces the generation and clears the record
-    assert supervisor._units["svc"].restart_count == 1
-    entry = cast("list[dict[str, Any]]", (await supervisor.status())["units"])[0]
-    assert entry["restart_failed"] is None
-    assert entry["state"] == "running"
-    assert len(recorder.events("root_restart_failed")) == 1
-    assert len(recorder.events("root_restart_cleared")) == 1
-
-
-async def test_a_probe_outlasting_the_verification_window_leaves_the_restart_unconfirmed() -> None:
-    """The window closing before the probe answers says the replacement is not confirmed
-    (DOWN: counted, backed off), not that inspection failed (terminal: state reset)."""
-    release = threading.Event()
-    answers = 0
-
-    def probe() -> DaemonProbe:
-        nonlocal answers
-        answers += 1
-        if answers > 1:
-            release.wait(timeout=10)  # the replacement's answer never comes inside the window
-        return DaemonProbe.down("wedged")
-
-    stub = StubSupervisor()
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
-    try:
-        await monitor.run_round()
-    finally:
-        release.set()
-    state = monitor.snapshot()["svc"]
-    assert stub.restart_calls == ["svc"]
-    assert state.last_verdict == "down"
-    assert state.consecutive_failures == 1
-    assert state.respawn_attempts == 1
-    assert state.next_respawn_at is not None
+    assert len(recorder.events("root_unit_failure_state")) == 7
 
 
 async def test_a_probe_outlasting_its_own_deadline_is_unavailable_and_never_restarts() -> None:
@@ -669,25 +471,20 @@ async def test_a_probe_outlasting_its_own_deadline_is_unavailable_and_never_rest
     assert not stub.restart_calls
 
 
-async def test_health_snapshot_exposes_the_status_view(clock: FakeClock) -> None:
-    probe = CellProbe(DaemonProbe.down("no"))
-    stub = StubSupervisor()
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(breaker_rounds=2))
-    await monitor.run_round()  # a failed restart arms the backoff
+async def test_health_snapshot_exposes_simple_attempt_budget(clock: FakeClock) -> None:
+    monitor = HealthMonitor(
+        StubSupervisor(), _registry("svc", CellProbe(DaemonProbe.down("no"))), config=_config()
+    )
+    await monitor.run_round()
     entry = cast("dict[str, object]", monitor.health_snapshot()["svc"])
-    assert entry["consecutive_failures"] == 1
-    assert entry["respawn_attempts"] == 1
-    assert entry["breaker_open"] is False
-    assert entry["breaker_for_s"] is None
-    remaining = entry["next_restart_in_s"]
-    assert remaining is not None and cast(float, remaining) > 0
+    assert entry["restart_attempts"] == 1
+    assert entry["restart_limit_reached"] is False
     assert entry["last_verdict"] == "down"
-
-    await monitor.run_round()  # second round opens the breaker (breaker_rounds=2)
+    for _ in range(3):
+        await monitor.run_round()
     entry = cast("dict[str, object]", monitor.health_snapshot()["svc"])
-    assert entry["breaker_open"] is True
-    age = entry["breaker_for_s"]
-    assert age is not None and cast(float, age) >= 0.0
+    assert entry["restart_attempts"] == 3
+    assert entry["restart_limit_reached"] is True
 
 
 async def test_initial_down_observation_does_not_replace_starting_generation(
@@ -709,7 +506,7 @@ async def test_initial_down_observation_does_not_replace_starting_generation(
         current = cast("list[dict[str, object]]", (await owner.status())["units"])[0]["pid"]
         assert current == original, "an unready first observation replaced the initial generation"
         assert monitor.snapshot()["starting"].last_verdict == "down"
-        assert monitor.snapshot()["starting"].consecutive_failures == 0
+        assert monitor.snapshot()["starting"].restart_attempts == 0
     finally:
         await owner.shutdown()
 
@@ -736,7 +533,7 @@ async def test_each_new_generation_has_bounded_startup_grace(
     monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(startup_grace_s=45))
     await monitor.run_round()
     assert not stub.restart_calls
-    assert monitor.snapshot()["svc"].consecutive_failures == 0
+    assert monitor.snapshot()["svc"].restart_attempts == 0
     clock.now += 46
 
     def replace_generation() -> None:
@@ -745,16 +542,16 @@ async def test_each_new_generation_has_bounded_startup_grace(
     stub.on_restart = replace_generation
     await monitor.run_round()
     assert stub.restart_calls == ["svc"]
-    # Existing restart backoff expires, but this newborn generation is still initializing.
+    # This newborn generation is still initializing; no extra verification loop runs.
     clock.now += 31
     await monitor.run_round()
     assert stub.restart_calls == ["svc"]
-    assert monitor.snapshot()["svc"].consecutive_failures == 1
+    assert monitor.snapshot()["svc"].restart_attempts == 1
     clock.now += 16
     await monitor.run_round()
     assert stub.restart_calls == ["svc", "svc"]
     assert not monitor.snapshot()["svc"].generation_ready
-    assert "replacement is initializing" in caplog.text
+    assert "startup has" in caplog.text
     assert "restart FAILED" not in caplog.text
 
 
@@ -787,7 +584,7 @@ async def test_startup_budgets_are_per_unit(clock: FakeClock) -> None:
     )
     await monitor.run_round()
     assert stub.restart_calls == ["extra"]
-    assert monitor.snapshot()["core"].consecutive_failures == 0
+    assert monitor.snapshot()["core"].restart_attempts == 0
 
 
 def test_startup_grace_rejects_unbounded_or_negative_values() -> None:

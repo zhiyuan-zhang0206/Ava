@@ -78,7 +78,7 @@ cannot mask missing rounds; the event body also carries the full home path.
 
 ## Per-generation startup observations
 
-Root observes each selected service immediately. Recovery and failure counting
+Root observes each selected service immediately. Automatic restart eligibility
 wait until that captured native generation is first observed ALIVE or its startup
 budget expires. The deadline is measured from root's retained monotonic launch
 time; a changed generation starts a new window, and a response spanning a
@@ -89,5 +89,5 @@ Deployment wiring supplies the same readiness tiers used by start:
 `base.deploy.progress_timeout.CRITICAL_SERVICE_SESSIONS` (Gate, gateway, frontend,
 agent-host, and im-bridge) uses 180 seconds; other services use 45 seconds.
 Generic root monitoring has no CLI import. A failed replacement still becomes
-eligible for bounded retry after its window; accumulated outage/backoff history
+eligible for bounded retry after its window; the spent automatic restart count
 is retained during grace, and a fresh healthy response clears it.
