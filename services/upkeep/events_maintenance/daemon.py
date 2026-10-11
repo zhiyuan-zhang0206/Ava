@@ -119,14 +119,6 @@ def events_maintenance_config(config: ConfigBoot) -> EventsMaintenanceConfig:
     )
 
 
-def events_maintenance_db(
-    config: ConfigBoot, *, gate: ProcessDbGate, local_host: Callable[[], str]
-) -> Database:
-    """The handle on the cluster database, built where the daemon (or one of its operator
-    commands) starts."""
-    return Database(db_config_from_boot(config), gate=gate, local_host=local_host)
-
-
 def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
     runtime.mkdir(parents=True, exist_ok=True)
     return ServiceEndpoints.from_boot(config, runtime=runtime).of("events_maintenance")

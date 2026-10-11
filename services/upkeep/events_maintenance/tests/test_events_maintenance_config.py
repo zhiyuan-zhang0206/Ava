@@ -12,6 +12,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
+from services.upkeep.events_maintenance import config as maintenance_config
 from services.upkeep.events_maintenance import daemon
 
 
@@ -60,9 +61,15 @@ def test_database_slice_uses_the_supplied_owner_at_each_factory_call(
         captured.append(inputs)
         return Database(inputs, gate=gate, local_host=local_host)
 
-    monkeypatch.setattr(daemon, "Database", database)
-    daemon.events_maintenance_db(first, gate=database_gate, local_host=lambda: "127.0.0.1")
-    daemon.events_maintenance_db(second, gate=database_gate, local_host=lambda: "127.0.0.1")
+    monkeypatch.setattr(maintenance_config, "Database", database)
+    maintenance_config.events_maintenance_db(
+        first, gate=database_gate, local_host=lambda: "127.0.0.1"
+    )
+    maintenance_config.events_maintenance_db(
+        second, gate=database_gate, local_host=lambda: "127.0.0.1"
+    )
     first.set_field("db_pool_max_size", 23)
-    daemon.events_maintenance_db(first, gate=database_gate, local_host=lambda: "127.0.0.1")
+    maintenance_config.events_maintenance_db(
+        first, gate=database_gate, local_host=lambda: "127.0.0.1"
+    )
     assert [inputs.db_pool_max_size for inputs in captured] == [13, 19, 23]
