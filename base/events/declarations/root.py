@@ -158,6 +158,19 @@ class ServiceStartUnready(TypedDict):
     service: str
 
 
+class BootRetriesExhausted(TypedDict):
+    """`boot_retries_exhausted` payload — cli/start_intent.py.
+
+    The OS boot job (`ava start --boot`) spent its attempt budget
+    (`base.host.system.boot_policy`): ``attempts`` boot starts failed and the last
+    one exited ``exit_code``. The scheduler is no longer asked to retry; the cause
+    is in the boot log and an operator runs `ava start`.
+    """
+
+    attempts: int
+    exit_code: int
+
+
 class ScheduleVerifyFailed(TypedDict):
     """`schedule_verify_failed` payload — cli/commands/management/schedules_verify.py.
 
@@ -319,6 +332,13 @@ EVENTS: dict[str, EventSpec] = {
         payload=ServiceStartUnready,
         tier="anomaly",
         site="cli/commands/probe.py:report_non_critical_unready_services telemetry.emit",
+    ),
+    "boot_retries_exhausted": telemetry_event(
+        "boot_retries_exhausted",
+        "the boot-time ava start failed through its whole attempt budget and is no longer retried",
+        payload=BootRetriesExhausted,
+        tier="anomaly",
+        site="cli/start_intent.py:_run_boot_attempt telemetry.emit",
     ),
     "schedule_verify_failed": telemetry_event(
         "schedule_verify_failed",

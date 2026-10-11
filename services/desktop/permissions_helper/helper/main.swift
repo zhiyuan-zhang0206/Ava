@@ -1613,6 +1613,9 @@ private enum RootKeeperTiming {
     static let maxBackoffS = 30.0
     static let stableAfterS = 10.0
     static let conflictPollS = 5.0
+    /// Consecutive unstable failures (exits before `stableAfterS`, or failed spawns)
+    /// after which the keeper stops restarting root and rests in `exited`.
+    static let maxConsecutiveFailures = 3
 }
 
 func rootKeeperLog(_ message: String) {
@@ -1822,8 +1825,11 @@ func requestHelperShutdown(runDir: String) throws -> [String: Any] {
 /// not service"). Foreign roots are never signalled; only a proven free run
 /// directory permits another spawn.
 ///
-/// An unexpected exit restarts root with bounded exponential backoff; an exit
-/// this keeper requested does not restart. Dormant when no seed is configured.
+/// An unexpected exit restarts root with bounded exponential backoff, but only
+/// until `maxConsecutiveFailures` consecutive unstable failures: a root that cannot
+/// stay up is left in `exited` for the operator (`ava start` re-seeds it with a
+/// fresh budget) instead of being restarted for ever. An exit this keeper
+/// requested does not restart. Dormant when no seed is configured.
 final class RootKeeper {
     private let lock = childOwnershipLock
     private let queue = DispatchQueue(label: "ava.permissions-helper.root-keeper")
@@ -1890,6 +1896,7 @@ final class RootKeeper {
         }
         seed = newSeed
         seedError = nil
+        if !inFlight { failures = 0 }
         if stopRequested { state = "stopped" }
         let shouldSpawn = !inFlight && !stopRequested
         lock.unlock()
@@ -1962,6 +1969,14 @@ final class RootKeeper {
             RootKeeperTiming.baseBackoffS * pow(2.0, Double(failures))
         )
         failures += 1
+        if failures >= RootKeeperTiming.maxConsecutiveFailures {
+            nextRestartAt = nil
+            state = "exited"
+            rootKeeperLog(
+                "root exited unexpectedly (\(exit["kind"] ?? "?")) \(failures) times in a row; not restarting"
+            )
+            return
+        }
         restarts += 1
         nextRestartAt = Date().addingTimeInterval(delay)
         state = "backoff"
@@ -2062,6 +2077,13 @@ final class RootKeeper {
             RootKeeperTiming.baseBackoffS * pow(2.0, Double(failures))
         )
         failures += 1
+        if failures >= RootKeeperTiming.maxConsecutiveFailures {
+            nextRestartAt = nil
+            state = "exited"
+            lock.unlock()
+            rootKeeperLog("root spawn failed (\(reason)) \(failures) times in a row; not retrying")
+            return
+        }
         nextRestartAt = Date().addingTimeInterval(delay)
         state = "backoff"
         lock.unlock()

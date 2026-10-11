@@ -436,6 +436,7 @@ def _cmd_start_body(
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
+    boot_attempt: bool = False,
 ) -> int | StartDelegation:
     """Core start logic, shared by cmd_start and cmd_restart.
 
@@ -489,6 +490,7 @@ def _cmd_start_body(
         reconcile=persist_services,
         retained_children=state.retained_children,
         runtime=runtime,
+        honor_restart_budget=boot_attempt,
     )
     started = launch.started
     # 4a) hand the launch failures to whoever runs this start from another process.
@@ -549,12 +551,14 @@ def cmd_start(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
+    boot_attempt: bool = False,
 ) -> int:
     """Converge one configured unit through storage, schema, root and readiness.
 
     `ava init` persisted the unit's identity before the public CLI reaches this
     entry. Internal restart callers reuse that identity and its durable service
-    selection.
+    selection. ``boot_attempt`` marks the OS boot job's retried start, which
+    leaves a unit whose ava-root restart budget is spent down.
     """
     if retained_children is None:
         raise ValueError("start requires its caller-owned PostgreSQL child retention")
@@ -570,4 +574,5 @@ def cmd_start(
         retained_children=retained_children,
         producer=producer,
         command=command,
+        boot_attempt=boot_attempt,
     )
