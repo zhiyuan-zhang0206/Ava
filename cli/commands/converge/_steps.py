@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 from base.host.private_storage import converge_private_tree, ensure_private_file
-from base.host.system.backend import get_backend
 from base.paths import repo_root
 from cli.commands.converge.spec import ConvergeCtx
 
@@ -32,13 +31,7 @@ def _ensure_ava_on_path(ctx: ConvergeCtx) -> None:
     guard (`cli.preflight.require_own_checkout`) refuses every command from a
     checkout that is not the home's own. An existing link to anything else (the
     retired launcher script) is repointed.
-
-    On Windows the `ava` entry point is `.venv\\Scripts\\ava.exe`, reached via the
-    uv/venv on PATH (or the install.ps1 shim) — there is no `~/.local/bin/ava`
-    symlink model, and symlink creation needs admin/dev-mode. Skip.
     """
-    if not get_backend().supports_ava_symlink():
-        return
     _ensure_symlink(Path.home() / ".local" / "bin" / "ava", ctx.repo / ".venv" / "bin" / "ava")
 
 
@@ -51,10 +44,6 @@ def _shell_rc_path() -> Path:
 
 
 def _ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    # POSIX shell-rc PATH wiring; Windows uses a different PATH model (the
-    # install.ps1 shim / venv Scripts on PATH), so there is no .bashrc to edit.
-    if not get_backend().supports_shell_rc():
-        return
     local_bin = Path.home() / ".local" / "bin"
     rc = _shell_rc_path()
     line = f'case ":$PATH:" in *":{local_bin}:"*) ;; *) export PATH="{local_bin}:$PATH" ;; esac'
@@ -84,7 +73,7 @@ def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Prepare the selected PostgreSQL 17 runtime and its pgvector extension."""
     from base.config import settings
 
-    if not get_backend().supports_data_plane() or settings.data_plane.is_remote:
+    if settings.data_plane.is_remote:
         return
     from base.cluster.dataplane.pg_runtime import ensure_pg_runtime
 

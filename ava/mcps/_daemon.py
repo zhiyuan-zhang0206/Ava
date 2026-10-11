@@ -221,7 +221,7 @@ async def _connect_server(
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    from ava.mcp_config import resolve_command, server_cwd
+    from ava.mcp_config import server_cwd
 
     from ._browser import connect_browser_direct
 
@@ -250,7 +250,7 @@ async def _connect_server(
             f"Server {server!r}: unknown shared value {shared!r} "
             f'(expected true, "browser", or "computer_use")'
         )
-    cmd = resolve_command(spec["command"])
+    cmd = spec["command"]
     args_list = spec.get("args") or []
     env_dict = spec.get("env") or {}
 

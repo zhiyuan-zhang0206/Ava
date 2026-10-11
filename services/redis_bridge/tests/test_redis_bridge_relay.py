@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import socket
 import struct
-import sys
 import threading
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -99,8 +98,7 @@ def test_reset_backend_reclaims_a_pump_blocked_on_an_open_client(
     client, backend, handler = connection
     client.sendall(b"ready")
     assert backend.recv(5) == b"ready"
-    linger_format = "HH" if sys.platform == "win32" else "ii"
-    backend.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack(linger_format, 1, 0))
+    backend.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
     backend.close()
     handler._thread.join(timeout=3.0)
     assert not handler._thread.is_alive(), "a transport failure must interrupt the reverse pump"

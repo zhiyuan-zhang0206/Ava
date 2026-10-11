@@ -136,7 +136,7 @@ def test_infra_rule_queries_its_scraped_metric(uid: str, metric: str) -> None:
 @pytest.mark.parametrize("uid", sorted(_INFRA_RULE_METRICS))
 def test_infra_rule_groups_by_machine_name(uid: str) -> None:
     """Per the 2026-08-24 user ruling, aggregation keeps the Ava roster
-    `machine_name`, so win and wsl remain distinct alert instances."""
+    `machine_name`, so units on one host remain distinct alert instances."""
     rules = {r["uid"]: r for r in _load_rules()}
     expr = _exprs(rules[uid], "prometheus")[0]
     assert "by (machine_name" in expr, f"{uid}: aggregates away the machine name:\n{expr}"
@@ -171,19 +171,14 @@ def test_disk_watermark_rule_is_per_mountpoint(uid: str) -> None:
 )
 def test_disk_watermark_rule_excludes_non_asset_mounts(uid: str) -> None:
     """Non-asset mounts report a foreign or transient fullness and must never
-    alert: the wsl machine's docker-desktop VM image (a read-only loop device
-    under /mnt/wsl/docker-desktop/* reporting a constant 1.0, task #2024);
-    macOS /Volumes/* (removable, external and network volumes plus mounted
+    alert: macOS /Volumes/* (removable, external and network volumes plus mounted
     DMG installers — internal volumes live under /System/Volumes/*); and
     scratch mounts under /private/tmp/* and /private/var/folders/* (2026-09-18,
     task #3958). The Ava data plane (root volume, /System/Volumes/Data,
-    /Users/*/OrbStack on macOS; / on wsl) stays under the watermark."""
+    /Users/*/OrbStack on macOS; / on Linux) stays under the watermark."""
     rules = {r["uid"]: r for r in _load_rules()}
     expr = _exprs(rules[uid], "prometheus")[0]
-    assert (
-        'mountpoint!~"/mnt/wsl/docker-desktop.*|/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"'
-        in expr
-    )
+    assert 'mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"' in expr
     # the grouping contract survives the matcher: still per-machine, per-mount
     assert "by (machine_name, mountpoint)" in expr
 

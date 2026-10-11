@@ -36,8 +36,6 @@ FIXED_PORTS: dict[str, int] = {
     "labeler": 8103,
     "task_maintenance": 8108,
     "memory_indexer": 8105,
-    # ops: NOT 8106 — the Windows iphlpsvc service (svchost) permanently holds
-    # 8106 on Windows hosts, so a default there makes ops fail to bind there.
     "ops": 8113,
     "browser": 9222,
     "permissions_helper": 9223,

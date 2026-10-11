@@ -34,8 +34,7 @@ FIRST execution, and two fresh connections preparing the same `_pg3_0` name on o
 backend raise DuplicatePreparedStatement), which is what makes transaction pooling
 safe across the different backends a transaction hands out.
 
-POSIX only (macOS brew / Linux apt `pgbouncer` on PATH). Windows fails fast upstream
-in `complete_gateway_data_plane`, so this module is never reached there.
+POSIX only (macOS brew / Linux apt `pgbouncer` on PATH).
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """Durable source acceptance and retained single-inbound delivery outcome."""
 
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from psycopg import Connection
@@ -254,11 +254,7 @@ def record_failure(pool: ConnectionPool, batch_id: str, reason: str, *, hold: bo
 
 
 def _proof_paths(proof: CopyProof, manifest: Manifest) -> list[str]:
-    native_directory = (
-        PurePosixPath(proof.directory)
-        if PurePosixPath(proof.directory).is_absolute()
-        else PureWindowsPath(proof.directory)
-    )
+    native_directory = PurePosixPath(proof.directory)
     if (
         native_directory.name != manifest.batch_id
         or native_directory.parent.name != NAMESPACE

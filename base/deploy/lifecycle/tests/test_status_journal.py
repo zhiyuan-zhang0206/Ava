@@ -172,8 +172,6 @@ def test_writer_alive_tracks_pid_state(home: Path) -> None:
 
     # A zombie has finished executing and can never write again — but it still
     # holds the pid, so a liveness check that misses it would block takeover.
-    if sys.platform == "win32":
-        return
     zombie = subprocess.Popen([sys.executable, "-c", "pass"])
     try:
         deadline = time.monotonic() + 30

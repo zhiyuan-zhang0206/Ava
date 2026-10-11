@@ -553,7 +553,7 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
 ) -> None:
-    """The 2026-08-12 incident in one assertion. A blocking op on the Windows
+    """The 2026-08-12 incident in one assertion. A blocking op on a
     runner stopped returning; because the arm ran inline on the
     loop it took the whole daemon with it — 2 h 03 m with not one line logged, every
     controller stopped, and the stranded-pause self-heal that exists for exactly

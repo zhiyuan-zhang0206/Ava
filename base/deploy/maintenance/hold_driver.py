@@ -22,8 +22,8 @@ session leader** (the 2026-09-13 ruling by agent #2343/#405's thread):
 - A script that drives the ladder directly (`subprocess.run("ava ...")` or
   through a relay shell) IS the root, so its exit -- and nothing weaker -- ends
   the binding.
-- Without a readable session leader (Windows has no `getsid`; a leaderless
-  session) the direct parent is the fallback, per the same ruling.
+- Without a readable session leader (a leaderless session) the direct parent is
+  the fallback, per the same ruling.
 
 The identity is a pid + birth pair judged with the discipline
 `base/native_process/ownership.py` owns (the same key pid reuse is judged by). Missing
@@ -267,12 +267,11 @@ def mint_driver() -> HoldDriver:
     raises: an unreadable environment mints an empty identity, which readers
     treat as missing evidence -- loud, never a release license.
     """
-    sid: int | None = None
-    if os.name == "posix" and hasattr(os, "getsid"):
-        try:
-            sid = os.getsid(0)
-        except OSError:
-            sid = None
+    sid: int | None
+    try:
+        sid = os.getsid(0)
+    except OSError:
+        sid = None
     try:
         ancestors = psutil.Process().parents()
     except psutil.Error:

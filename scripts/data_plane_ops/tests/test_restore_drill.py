@@ -177,7 +177,7 @@ def test_restore_failure_message_names_the_base_and_the_capacity_knob(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A server killed mid-COPY must not surface as a bare exit code (the
-    2026-09-14 WSL failure: `pg_restore exited 1` plus a host-side dmesg signal).
+    2026-09-14 failure: `pg_restore exited 1` plus a host-side dmesg signal).
     The message carries the base, its free space, the stderr tail, and the
     override knob that moves the base."""
     base = tmp_path / "fallback"

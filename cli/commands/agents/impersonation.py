@@ -78,8 +78,7 @@ def _write_relay_stub(
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        if os.name != "nt":
-            os.fchmod(fd, 0o600)  # apply the exact mode even under a permissive umask
+        os.fchmod(fd, 0o600)  # apply the exact mode even under a permissive umask
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             fd = -1
             stream.write(
