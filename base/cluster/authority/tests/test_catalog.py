@@ -14,7 +14,6 @@ from base.cluster.authority import (
     check_invariant,
     ensure_groups,
     ensure_monitor,
-    retire_legacy_logins,
     vacuum_or_fail,
 )
 from tests.path_scoped.db_authority_tests import OWNER, AuthorityCluster
@@ -180,9 +179,3 @@ def test_gateway_vacuum_requires_maintain_and_a_skip_is_a_failure(
         assert any("skipping" in notice for notice in notices)
         with pytest.raises(VacuumSkippedError, match="permission denied to vacuum"):
             vacuum_or_fail(gateway, "checkpoints")
-
-
-def test_retire_refuses_a_superuser_owner(authority_unborn: AuthorityCluster) -> None:
-    cluster = authority_unborn
-    with cluster.admin() as conn, pytest.raises(CatalogRefusedError, match="superuser"):
-        retire_legacy_logins(conn, owner="ava", groups=cluster.groups)

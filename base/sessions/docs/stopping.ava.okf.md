@@ -55,7 +55,7 @@ The retry handle is the spawn-time process group on the session record
 (`SessionRecord.pgid`): a record whose leader died is retained and listed
 exactly while that group still has members, so a stop re-entered after the
 incident converges the orphan through the recorded group instead of certifying
-the unit stopped. Legacy records without a `pgid` reap as before.
+the unit stopped. Records without a `pgid` reap as before.
 
 ### The deadline report when convergence fails
 

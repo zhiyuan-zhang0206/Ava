@@ -8,10 +8,7 @@ Every application privilege is granted to one of two groups, never to a login:
   sequence; EXECUTE on every routine, including those revoked from PUBLIC;
   PostgreSQL 17 ``MAINTAIN`` on the checkpoint tables the blob vacuum
   maintains. No TRUNCATE, REFERENCES or TRIGGER.
-- ``ava_runner``: the audited runner matrix (the single definition; the
-  historical ``ava_runner`` login is demoted in place, so grants recorded by the
-  schema and migrations keep working), including ``EXECUTE`` on the
-  publication-admission lock while that function exists.
+- ``ava_runner``: the audited runner matrix (the single definition).
 
 Both groups hold CONNECT on the cluster database, which PUBLIC loses, and
 USAGE on schema ``public``. Standing ``ALTER DEFAULT PRIVILEGES FOR ROLE
@@ -28,7 +25,6 @@ from psycopg import sql
 from psycopg.errors import Diagnostic
 
 from base.cluster.authority.catalog import (
-    BOOTSTRAP_SUPERUSER_OID,
     Conn,
     memberships,
     require_admin,
@@ -111,16 +107,6 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("ALL", CHECKPOINT_TABLES),
 )
 
-# Table writes the runner group must not hold. Earlier releases granted them
-# here, and a grant already recorded on a cluster survives its removal from the
-# matrix, so the refresh revokes them explicitly. `agents` is gateway-only
-# (labels go through the gateway; the impersonation counter is bumped by a
-# SECURITY DEFINER trigger); `alerts` is written only by the gateway's ingest.
-_RUNNER_REVOKED_WRITES: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
-    ("UPDATE", ("agents",)),
-    ("INSERT, UPDATE", ("alerts",)),
-)
-
 
 def group_violations(conn: Conn, groups: Groups) -> list[str]:
     names = (groups.gateway, groups.runner)
@@ -188,9 +174,6 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
     for privileges, tables in _RUNNER_TABLE_GRANTS:
         for table in tables:
             _grant(conn, f"GRANT {privileges} ON {{}} TO {{}}", table, runner)
-    for privileges, tables in _RUNNER_REVOKED_WRITES:
-        for table in tables:
-            _grant(conn, f"REVOKE {privileges} ON {{}} FROM {{}}", table, runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
     # The writer creates the next month's partition itself (SECURITY DEFINER).
     _grant(
@@ -204,8 +187,7 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
 def apply_group_grants(conn: Conn, *, owner: str, database: str, groups: Groups) -> None:
     """Converge both groups' grant surface in the connected cluster database.
 
-    Idempotent; grants are added, except the runner's retired write grants,
-    which are revoked. The checkpoint tables and every table the runner matrix
+    Idempotent; grants are only added. The checkpoint tables and every table the runner matrix
     names must exist, so a missing table fails loudly instead of silently
     narrowing the contract.
     """
@@ -224,8 +206,7 @@ def ensure_groups(conn: Conn, *, owner: str, database: str, groups: Groups) -> N
 
     Never changes LOGIN: a group that can log in, holds elevated attributes,
     owns objects, carries role settings or is a member of another role is an
-    unknown state and refuses. A LOGIN owner or ``ava_runner`` is demoted only by
-    ``retire_legacy_logins``, at birth.
+    unknown state and refuses.
     """
     require_admin(conn)
     with conn.transaction():
@@ -234,30 +215,6 @@ def ensure_groups(conn: Conn, *, owner: str, database: str, groups: Groups) -> N
             raise CatalogRefusedError(tuple(violations))
         _create_missing(conn, groups)
         apply_group_grants(conn, owner=owner, database=database, groups=groups)
-
-
-def retire_legacy_logins(conn: Conn, *, owner: str, groups: Groups) -> tuple[str, ...]:
-    """Demote the schema owner and existing groups to NOLOGIN without a password.
-
-    Monotone: only removes LOGIN. Refuses when the owner is the initdb bootstrap
-    superuser (it cannot become NOLOGIN safely) or a superuser at all. Returns
-    the roles this call demoted.
-    """
-    require_admin(conn)
-    demoted: list[str] = []
-    with conn.transaction():
-        facts = role_facts(conn, (owner, groups.gateway, groups.runner))
-        if owner not in facts:
-            raise CatalogRefusedError((f"schema owner {owner} does not exist",))
-        if facts[owner].oid == BOOTSTRAP_SUPERUSER_OID or facts[owner].superuser:
-            raise CatalogRefusedError(
-                (f"schema owner {owner} is a superuser and cannot be retired",)
-            )
-        for name, fact in sorted(facts.items()):
-            if fact.login or fact.password is not None:
-                _grant(conn, "ALTER ROLE {} NOLOGIN PASSWORD NULL", name)
-                demoted.append(name)
-    return tuple(demoted)
 
 
 class VacuumSkippedError(RuntimeError):
