@@ -17,6 +17,7 @@ import pytest
 
 from base.telemetry import EventPipeline
 from cli.commands.management import schedules_verify as _verify
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

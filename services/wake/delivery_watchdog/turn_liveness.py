@@ -23,6 +23,7 @@ from base import telemetry
 from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from base.agents.messages.inbound import InboundKind
 from base.agents.observation.db_wait import database_wait_matches
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
@@ -192,7 +193,12 @@ def _recovery_trigger(pool: ConnectionPool, agent_id: int) -> int:
 
 
 async def _recover_hosted_turn(
-    pool: ConnectionPool, db: Database, bus: EventBus, wedge: _HostedTurnWedge
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    wedge: _HostedTurnWedge,
+    *,
+    machine: MachineIdentity,
 ) -> None:
     """Record evidence, force-terminate the hosted incarnation together with its
     recovery wake, then resurrect."""
@@ -244,6 +250,7 @@ async def _recover_hosted_turn(
             wedge.agent_id,
             trigger_inbound_id=trigger_id,
             trigger_inbound_kind=InboundKind.CHAT,
+            local_machine=machine.name(),
         )
         _log.info(
             "[delivery] hosted turn recovery for agent %s queued trigger %s -> status %s",
@@ -270,7 +277,12 @@ def hosted_turn_threshold_seconds(authority: ConfigAuthority) -> float:
 
 
 async def _recover_within_deadline(
-    pool: ConnectionPool, db: Database, bus: EventBus, wedge: _HostedTurnWedge
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    wedge: _HostedTurnWedge,
+    *,
+    machine: MachineIdentity,
 ) -> None:
     """One recovery under the RPC deadline. A timeout between the terminate's
     commit and the resurrect leaves the committed recovery wake for the
@@ -278,7 +290,7 @@ async def _recover_within_deadline(
     try:
         try:
             async with asyncio.timeout(rounds.rpc_deadline_s()):
-                await _recover_hosted_turn(pool, db, bus, wedge)
+                await _recover_hosted_turn(pool, db, bus, wedge, machine=machine)
         except TimeoutError:
             _log.error(
                 "[delivery] hosted turn recovery for agent %s exceeded %.0fs",
@@ -290,7 +302,13 @@ async def _recover_within_deadline(
 
 
 async def hosted_turn_recovery_round(
-    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress, threshold_s: float
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    progress: LoopProgress,
+    threshold_s: float,
+    *,
+    machine: MachineIdentity,
 ) -> None:
     """One Redis-confirmed scan; recover the wedges whose per-agent cooldown
     has elapsed, then return."""
@@ -305,7 +323,10 @@ async def hosted_turn_recovery_round(
     )
     by_agent = {wedge.agent_id: wedge for wedge in wedges}
     await round_loop.fan_out(
-        [functools.partial(_recover_within_deadline, pool, db, bus, by_agent[a]) for a in claimed],
+        [
+            functools.partial(_recover_within_deadline, pool, db, bus, by_agent[a], machine=machine)
+            for a in claimed
+        ],
         concurrency=_HOSTED_TURN_RECOVERY_MAX_CONCURRENCY,
         progress=progress,
     )
@@ -318,10 +339,12 @@ async def hosted_turn_recovery_loop(
     progress: LoopProgress,
     interval_s: float,
     threshold_s: float,
+    *,
+    machine: MachineIdentity,
 ) -> None:
     """The hosted-turn liveness recovery as a resident sequential loop."""
 
     async def one_round() -> None:
-        await hosted_turn_recovery_round(pool, db, bus, progress, threshold_s)
+        await hosted_turn_recovery_round(pool, db, bus, progress, threshold_s, machine=machine)
 
     await round_loop.run_rounds("hosted-turn recovery", progress, interval_s, one_round)

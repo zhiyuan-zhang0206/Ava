@@ -10,11 +10,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import secrets
-import subprocess
-import sys
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -26,6 +23,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
+from agent import impersonation_process as _relay_process
 from agent import state as _state
 from agent.nodes import BEFORE_LLM, END, NodeName
 from base.agents.context import AvaContext, agent_id_from_config
@@ -84,7 +82,15 @@ async def claim_gate(
     incarnation = ctx.original_incarnation
     db, bus = ctx.require_db(), ctx.require_bus()
     session = await native_status(db, bus, agent_id, incarnation=incarnation)
-    await supervise_relay(db, bus, session, agent_id, ctx.relays, incarnation=incarnation)
+    await supervise_relay(
+        db,
+        bus,
+        session,
+        agent_id,
+        ctx.relays,
+        incarnation=incarnation,
+        read_local_machine=lambda: ctx.require_machine().name(),
+    )
     if session is None:
         return None
     if session["status"] == ImpersonationStatus.REQUESTED and session["automatic"]:
@@ -93,7 +99,16 @@ async def claim_gate(
 
         assert incarnation is not None  # noqa: S101 — native_status requires it
         brief = session["reason"] or "Continue the agent's work from its saved state."
-        await asyncio.to_thread(accept, db, bus, session["id"], agent_id, incarnation, brief)
+        await asyncio.to_thread(
+            accept,
+            db,
+            bus,
+            session["id"],
+            agent_id,
+            incarnation,
+            brief,
+            local_machine=ctx.require_machine().name(),
+        )
         return Command(
             update={
                 **start_update(
@@ -197,6 +212,7 @@ async def _activate_accepted(
     *,
     resources: HostedTurnResources | None,
     notes: HandoffNotes,
+    read_local_machine: Callable[[], str],
 ) -> dict[str, Any] | None:
     """Activate an accepted lease; None when the relay gate failed and native control resumes."""
     from base.agents.impersonation import activate
@@ -210,7 +226,15 @@ async def _activate_accepted(
     # The bound relay must be live before the takeover stands. On failure
     # the lease is rolled back to 'rejected' with a loud reason and the
     # native agent resumes — no silent half-takeover.
-    if not await asyncio.to_thread(establish_relay, db, bus, session, incarnation, relays):
+    if not await asyncio.to_thread(
+        establish_relay,
+        db,
+        bus,
+        session,
+        incarnation,
+        relays,
+        read_local_machine=read_local_machine,
+    ):
         return None
     return await asyncio.to_thread(activate, db, bus, session["id"], incarnation)
 
@@ -259,6 +283,7 @@ async def settle_checkpoint(
     incarnation: RuntimeIncarnation | None,
     resources: HostedTurnResources | None,
     notes: HandoffNotes,
+    read_local_machine: Callable[[], str],
 ) -> bool:
     """After invocation+flush, activate; apply terminal deltas exactly once."""
     session = await native_status(db, bus, agent_id, incarnation=incarnation)
@@ -269,7 +294,15 @@ async def settle_checkpoint(
         if not activate_accepted:
             return False
         activated = await _activate_accepted(
-            graph, db, bus, session, incarnation, relays, resources=resources, notes=notes
+            graph,
+            db,
+            bus,
+            session,
+            incarnation,
+            relays,
+            resources=resources,
+            notes=notes,
+            read_local_machine=read_local_machine,
         )
         if activated is None:
             return False
@@ -301,85 +334,14 @@ _RELAY_READY_TIMEOUT_S = 30.0
 _RELAY_READY_POLL_S = 1.0
 
 
-def _spawn_codex_relay(
-    agent_id: int,
-    lease_id: str,
-    relay_token: str,
-    thread_id: str,
-    codex_remote: str | None,
-    codex_home: str | None = None,
-    register: Callable[[subprocess.Popen[bytes]], None] | None = None,
-) -> subprocess.Popen[bytes]:
-    """Spawn the bound relay; the scoped credential travels over a private pipe.
-
-    The token never appears in argv or the environment. The child receives the
-    session environment projection and boots its cluster connections. Stdout is
-    discarded because delivery uses the app-server Steer path; stderr flows
-    into this process's log.
-    """
-    from base.sessions.env_forwarding import forward_env_dict
-
-    relay_env = forward_env_dict()
-    if codex_home is not None:
-        relay_env["CODEX_HOME"] = codex_home
-    argv = [
-        sys.executable,
-        "-m",
-        "cli",
-        "impersonate",
-        "relay",
-        str(agent_id),
-        "--lease-id",
-        lease_id,
-        "--provider",
-        "codex",
-        "--thread-id",
-        thread_id,
-        "--token-stdin",
-    ]
-    if codex_remote is not None:
-        argv.extend(["--codex-remote", codex_remote])
-    process = subprocess.Popen(  # noqa: S603 — fixed argv built from constants and lease-row fields
-        argv,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        start_new_session=True,
-        env=relay_env,
-    )
-    with contextlib.suppress(BrokenPipeError, OSError):  # child already gone; poll reports it
-        assert process.stdin is not None  # noqa: S101 — PIPE requested above
-        with process.stdin:
-            if register is not None:
-                try:
-                    register(process)
-                except Exception:
-                    process.terminate()
-                    process.wait(timeout=5)
-                    raise
-            process.stdin.write(relay_token.encode() + b"\n")
-    return process
-
-
-def _register_relay(
-    db: Database,
-    lease_id: str,
-    incarnation: RuntimeIncarnation,
-    token: str,
-    process: subprocess.Popen[bytes],
-) -> None:
-    from base.agents.impersonation.relay import record_relay_identity
-    from base.native_process.ownership import OwnedProcess
-
-    identity = OwnedProcess.capture(psutil.Process(process.pid))
-    record_relay_identity(db, lease_id, incarnation, token, asdict(identity))
-
-
 def establish_relay(
     db: Database,
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
+    *,
+    read_local_machine: Callable[[], str],
 ) -> bool:
     """Activation gate: the bound relay must be up before the takeover stands.
 
@@ -400,7 +362,9 @@ def establish_relay(
         return _roll_back_relay_failure(
             db, bus, session, incarnation, fail_acceptance, "request has no relay binding"
         )
-    return _establish_codex_relay(db, bus, session, incarnation, relays)
+    return _establish_codex_relay(
+        db, bus, session, incarnation, relays, read_local_machine=read_local_machine
+    )
 
 
 def _await_session_relay(
@@ -441,6 +405,8 @@ def _establish_codex_relay(
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
+    *,
+    read_local_machine: Callable[[], str],
 ) -> bool:
     """codex: provision the scoped credential, spawn the relay here, wait for its first heartbeat."""
     from base.agents.impersonation import (
@@ -459,14 +425,21 @@ def _establish_codex_relay(
         return False  # the lease is no longer native-held accepted state
     child = RelayChild(
         session["id"],
-        _spawn_codex_relay(
+        _relay_process.spawn_codex_relay(
             incarnation.agent_id,
             session["id"],
             relay_token,
             session["relay_thread_id"],
             session["relay_codex_remote"],
             session["process_metadata"].get("codex_home"),
-            lambda process: _register_relay(db, session["id"], incarnation, relay_token, process),
+            lambda process: _relay_process.register_relay(
+                db,
+                session["id"],
+                incarnation,
+                relay_token,
+                process,
+                read_local_machine=read_local_machine,
+            ),
         ),
         relay_token,
         time.monotonic(),
@@ -486,7 +459,9 @@ def _establish_codex_relay(
                 f"relay process exited during startup (exit code {child.process.returncode})",
             )
         try:
-            latest = relay_get(db, bus, session["id"], relay_token)
+            latest = relay_get(
+                db, bus, session["id"], relay_token, local_machine=read_local_machine()
+            )
         except ImpersonationError:
             # Token mismatch means a re-provision raced in; treat as ended here.
             return _roll_back_relay_failure(
@@ -574,6 +549,7 @@ async def supervise_relay(
     relays: RelaySupervision,
     *,
     incarnation: RuntimeIncarnation | None,
+    read_local_machine: Callable[[], str],
 ) -> None:
     """Supervise executor authority separately from recoverable relay delivery.
 
@@ -609,7 +585,15 @@ async def supervise_relay(
     if not exited and _heartbeat_fresh(session["relay_heartbeat_at"]):
         return
     await _handle_stale_relay(
-        db, bus, session, agent_id, child, relays, confirmed_exit=exited, incarnation=incarnation
+        db,
+        bus,
+        session,
+        agent_id,
+        child,
+        relays,
+        confirmed_exit=exited,
+        incarnation=incarnation,
+        read_local_machine=read_local_machine,
     )
 
 
@@ -660,6 +644,7 @@ async def _handle_stale_relay(
     *,
     confirmed_exit: bool = False,
     incarnation: RuntimeIncarnation | None,
+    read_local_machine: Callable[[], str],
 ) -> None:
     """Retire the previous sender before claiming a replacement generation."""
     from base.agents.impersonation.relay import record_degradation
@@ -702,7 +687,9 @@ async def _handle_stale_relay(
             "previous relay retirement unknown; replacement withheld",
         )
         return
-    await _reprovision_relay(db, session, agent_id, incarnation, relays)
+    await _reprovision_relay(
+        db, session, agent_id, incarnation, relays, read_local_machine=read_local_machine
+    )
 
 
 def _retire_recorded_relay(session: dict[str, Any]) -> bool:
@@ -741,6 +728,8 @@ async def _reprovision_relay(
     agent_id: int,
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
+    *,
+    read_local_machine: Callable[[], str],
 ) -> None:
     """Rotate once for the observed generation; retain lease and message budgets."""
     from base.agents.impersonation import (
@@ -774,14 +763,21 @@ async def _reprovision_relay(
     spawned_at = time.monotonic()
     relays.children[agent_id] = RelayChild(
         session["id"],
-        _spawn_codex_relay(
+        _relay_process.spawn_codex_relay(
             agent_id,
             session["id"],
             token,
             session["relay_thread_id"],
             session["relay_codex_remote"],
             session["process_metadata"].get("codex_home"),
-            lambda process: _register_relay(db, session["id"], incarnation, token, process),
+            lambda process: _relay_process.register_relay(
+                db,
+                session["id"],
+                incarnation,
+                token,
+                process,
+                read_local_machine=read_local_machine,
+            ),
         ),
         token,
         spawned_at,

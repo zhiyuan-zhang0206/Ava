@@ -27,8 +27,13 @@ def test_cluster_status_op_returns_snapshot(
     seen: list[object] = []
 
     def _snapshot(
-        _db: Database, pool: object | None = None, *, image: LoadedCommit
+        _db: Database,
+        pool: object | None = None,
+        *,
+        image: LoadedCommit,
+        local_machine: MachineIdentity,
     ) -> ClusterStatus:
+        assert local_machine is machine_identity
         assert pool is expected_pool
         assert image is expected_image
         seen.append(pool)

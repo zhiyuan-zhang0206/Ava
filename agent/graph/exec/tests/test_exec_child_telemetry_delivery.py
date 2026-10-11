@@ -279,7 +279,9 @@ def test_unfinished_ordinary_delivery_preserves_success_and_attempts_otlp_tail(
     from agent.execution import child
     from agent.graph.exec.protocol import ResultPayload, write_result
     from base import telemetry
-    from base.telemetry.otlp import telemetry_otlp
+    from base.agents.context.clients import ClientSet
+    from base.telemetry.otlp.telemetry_otlp import ExportingEventPipeline
+    from tests.fixtures.pin_agent import pin_agent
 
     result_path = str(tmp_path / "result.json")
     payload = ResultPayload(kind="done", code_reached=True)
@@ -295,10 +297,19 @@ def test_unfinished_ordinary_delivery_preserves_success_and_attempts_otlp_tail(
         ),
     )
     finalize = MagicMock()
-    monkeypatch.setattr(telemetry_otlp, "finalize", finalize)
-    child._deliver_run_telemetry(result_path, payload)
-    finalize.assert_called_once_with()
-    assert Path(result_path).read_bytes() == before
+    pipeline = ExportingEventPipeline(
+        writer=lambda _events, _exporter: None, export_allowed=lambda: False
+    )
+    clients = ClientSet(pipeline_factory=lambda: pipeline)
+    try:
+        clients.event_pipeline()
+        pin_agent(None, clients=clients)
+        monkeypatch.setattr(pipeline, "finalize_exports", finalize)
+        child._deliver_run_telemetry(result_path, payload)
+        finalize.assert_called_once_with()
+        assert Path(result_path).read_bytes() == before
+    finally:
+        clients.close()
 
 
 def test_unknown_ordinary_delivery_keeps_crash_primary(

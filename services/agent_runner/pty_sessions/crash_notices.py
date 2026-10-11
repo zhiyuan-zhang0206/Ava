@@ -25,6 +25,7 @@ import contextlib
 import sys
 from collections.abc import Sequence
 
+from base.cluster.machine import MachineIdentity
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
 from base.log import logger
 from base.native_process import child_env
@@ -40,7 +41,12 @@ NOTICE_LIMIT_S = 30.0
 CHILD_COMMAND: tuple[str, ...] = (sys.executable, "-m", "ops.pty_close_notices")
 
 
-async def send(swept: closure.Outcome, *, child_command: Sequence[str] = CHILD_COMMAND) -> None:
+async def send(
+    swept: closure.Outcome,
+    *,
+    child_command: Sequence[str] = CHILD_COMMAND,
+    machine: MachineIdentity,
+) -> None:
     """Stage the sweep's notices beside any waiting, then drain them with the one-shot child.
 
     Staging runs first and on disk, so whatever the child does not write is the
@@ -50,7 +56,7 @@ async def send(swept: closure.Outcome, *, child_command: Sequence[str] = CHILD_C
     """
     try:
         path = close_notices_path()
-        staged = pty_close_notices.stage_crash_notices(swept, path)
+        staged = pty_close_notices.stage_crash_notices(swept, path, local_machine=machine.name())
     except Exception as exc:  # staging is local I/O; its failure is loud, never fatal
         logger.error("pty crash notices could not be staged: {exc}", exc=exc)
         return

@@ -132,13 +132,21 @@ def test_annotated_roster_membership_per_capability(
 def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", lambda: False)
+    def disabled(*, machine: MachineIdentity) -> bool:
+        assert machine is machine_identity
+        return False
+
+    def enabled(*, machine: MachineIdentity) -> bool:
+        assert machine is machine_identity
+        return True
+
+    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", disabled)
     rows = spec.services_for_capabilities_annotated(
         frozenset({"observability-station"}), machine=machine_identity
     )
     assert {service.session for service, _reason in rows} == {"loki", "prometheus", "grafana"}
     assert all(reason is not None for _service, reason in rows)
-    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", lambda: True)
+    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", enabled)
     assert {
         service.session
         for service in spec.services_for_capabilities(
@@ -213,7 +221,13 @@ def test_otel_collector_gated_on_gateway_without_lgtm_marker(
     home = tmp_path / "gateway"
     home.mkdir()
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    monkeypatch.setattr(spec, "gateway_observability_home", lambda: home)
+
+    def observability_home(machine: MachineIdentity, *, home: Path) -> Path:
+        assert machine is machine_identity
+        return target_home
+
+    target_home = home
+    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
 
     annotated = {
         service.session: reason
@@ -240,7 +254,13 @@ def test_otel_collector_runs_on_gateway_with_lgtm_marker(
     home = tmp_path / "gateway"
     home.mkdir()
     (home / "lgtm-host").touch()
-    monkeypatch.setattr(spec, "gateway_observability_home", lambda: home)
+
+    def observability_home(machine: MachineIdentity, *, home: Path) -> Path:
+        assert machine is machine_identity
+        return target_home
+
+    target_home = home
+    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
 
     annotated = {
         service.session: reason
@@ -267,7 +287,13 @@ def test_otel_collector_runs_on_gateway_without_marker_when_endpoint_override_ex
     home = tmp_path / "gateway"
     home.mkdir()
     monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
-    monkeypatch.setattr(spec, "gateway_observability_home", lambda: home)
+
+    def observability_home(machine: MachineIdentity, *, home: Path) -> Path:
+        assert machine is machine_identity
+        return target_home
+
+    target_home = home
+    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
 
     annotated = {
         service.session: reason
@@ -290,7 +316,11 @@ def test_otel_collector_runs_on_pure_runner(
 ) -> None:
     home = tmp_path / "runner"
     home.mkdir()
-    monkeypatch.setattr(spec, "gateway_observability_home", lambda: None)
+
+    def observability_home(machine: MachineIdentity, *, home: Path) -> None:
+        assert machine is machine_identity
+
+    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
 
     annotated = {
         service.session: reason

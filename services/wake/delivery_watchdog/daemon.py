@@ -95,6 +95,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base import paths, telemetry
+from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, Settings, settings
 from base.config.service_read import ConfigAuthority
@@ -106,6 +107,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
@@ -138,12 +140,13 @@ from services.wake.delivery_watchdog.dead_letter import (
 _log = logging.getLogger("services.wake.delivery_watchdog.daemon")
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("delivery_watchdog")
+def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    runtime.mkdir(parents=True, exist_ok=True)
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("delivery_watchdog")
 
 
-def _pidfile() -> Path:
-    return _endpoint().pidfile
+def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
+    return _endpoint(config, runtime=runtime).pidfile
 
 
 # Liveness staleness ceiling of the scan loop. It sleeps a short inter-poll
@@ -319,22 +322,29 @@ def _alert_stalled(
         _log.exception("[delivery] delivery_stalled emit failed for inbound %s", inbound_id)
 
 
-def _write_pidfile() -> None:
-    if not acquire_pidfile(_pidfile(), "services.wake.delivery_watchdog.daemon"):
-        _log.info("[delivery_watchdog] daemon already running (pidfile=%s), exiting", _pidfile())
+def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    if not acquire_pidfile(
+        _pidfile(config, runtime=runtime), "services.wake.delivery_watchdog.daemon"
+    ):
+        _log.info(
+            "[delivery_watchdog] daemon already running (pidfile=%s), exiting",
+            _pidfile(config, runtime=runtime),
+        )
         sys.exit(1)
 
 
-def _remove_pidfile() -> None:
-    remove_pidfile(_pidfile())
+def _remove_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    remove_pidfile(_pidfile(config, runtime=runtime))
 
 
-def _is_running() -> bool:
+def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_pidfile(), "services.wake.delivery_watchdog.daemon")
+    return pidfile_holds_daemon(
+        _pidfile(config, runtime=runtime), "services.wake.delivery_watchdog.daemon"
+    )
 
 
 # Alert-dedup GC cadence (Task #945): the TTL sweep runs once per
@@ -519,6 +529,7 @@ async def _run_loops(
     liveness: LivenessGroup,
     *,
     authority: ConfigAuthority,
+    machine: MachineIdentity,
 ) -> None:
     """Own the four resident loops: the scan loop and the three recovery loops
     (resurrect retry, stalled crash-marked harvest, hosted-turn recovery).
@@ -543,6 +554,7 @@ async def _run_loops(
                 interval,
                 settings.daemon.delivery_watchdog_max_resurrect_per_tick,
                 settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds,
+                machine=machine,
             )
         )
         loops.create_task(
@@ -553,6 +565,7 @@ async def _run_loops(
                 harvest,
                 interval,
                 settings.daemon.delivery_watchdog_threshold_seconds,
+                machine=machine,
             )
         )
         loops.create_task(
@@ -563,21 +576,32 @@ async def _run_loops(
                 hosted_turn,
                 interval,
                 turn_liveness.hosted_turn_threshold_seconds(authority),
+                machine=machine,
             )
         )
 
 
-async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
+async def run(
+    *,
+    process_config: ConfigBoot,
+    runtime: Path,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    machine: MachineIdentity,
+) -> None:
     """Start the daemon: pidfile -> healthz server -> connect DB -> loops."""
-    if _is_running():
-        _log.info("[delivery] daemon already running (pidfile=%s), exiting", _pidfile())
+    if _is_running(process_config, runtime=runtime):
+        _log.info(
+            "[delivery] daemon already running (pidfile=%s), exiting",
+            _pidfile(process_config, runtime=runtime),
+        )
         sys.exit(1)
 
-    _write_pidfile()
-    _log.info("[delivery] pidfile written: %s", _pidfile())
+    _write_pidfile(process_config, runtime=runtime)
+    _log.info("[delivery] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
     liveness = LivenessGroup()
-    endpoint = _endpoint()
+    endpoint = _endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "delivery_watchdog", endpoint.health_port, liveness=liveness, image=image
     )
@@ -593,11 +617,13 @@ async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
             all_domains=settings if settings.profile is None else Settings(profile=None),
             env_path=paths.ava_home() / ".env",
         )
-        await _run_loops(pool, db, EventBus.from_settings(), liveness, authority=authority)
+        await _run_loops(
+            pool, db, EventBus.from_settings(), liveness, authority=authority, machine=machine
+        )
     finally:
         pool.close()
         await stop_health_server(health)
-        _remove_pidfile()
+        _remove_pidfile(process_config, runtime=runtime)
         _log.info("[delivery] daemon stopped")
 
 
@@ -611,12 +637,12 @@ def main() -> None:
     machine = machine_from_boot(machine_config)
     process_home = ava_home().resolve()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
-    assert_schema_current(settings.data_plane.db_url)
+    assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="delivery_watchdog")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, local_host=machine.host)
+        return Database(db_config_from_boot(machine_config), gate=gate, local_host=machine.host)
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
@@ -634,7 +660,15 @@ def main() -> None:
     # teardown is skipped by the hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run(database=database, image=image))
+        runner.run(
+            run(
+                process_config=machine_config,
+                runtime=process_home / "run",
+                database=database,
+                image=image,
+                machine=machine,
+            )
+        )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[delivery] interrupted, shutting down")

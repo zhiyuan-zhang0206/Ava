@@ -1,6 +1,7 @@
 """Assemble one host root's live policy inputs from its configuration owner."""
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ava.sdk_surface.install import Installation
@@ -13,17 +14,28 @@ from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.env.dotenv_boot import resolve_ava_home
 from base.log.process import init_gateway_process
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
 
 __all__ = [
+    "boot_process",
     "host_machine",
     "host_policy",
     "initialize_logging",
     "load_installation",
     "understanding_inputs",
 ]
+
+
+def boot_process() -> tuple[ConfigBoot, Path]:
+    """Prepare this composition root before capturing its delivered process home."""
+    config = ConfigBoot()
+    config.boot()
+    config.ensure_eager()
+    home = resolve_ava_home()
+    return config, home
 
 
 def host_policy(config: ConfigBoot) -> HostPolicy:

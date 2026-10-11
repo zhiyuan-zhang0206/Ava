@@ -93,6 +93,23 @@ def test_direct_handle_uses_owned_lazy_host_and_preserves_short_circuits(
     assert reads == ["host"]
 
 
+def test_the_direct_url_of_a_handle_without_a_pooler_is_its_url(
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    url = "postgresql://handle_user:pw@db.example:5432/handle_db"
+    config = DbConfig(
+        db_url=url,
+        db_sslmode="",
+        db_pool_min_size=1,
+        db_pool_max_size=2,
+        pgbouncer_enabled=False,
+    )
+    assert (
+        Database(config, gate=database_gate, local_host=machine_identity.host).direct_url() == url
+    )
+
+
 def test_direct_db_url_swaps_pooler_port_to_direct_pg(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_DB_URL carries the pooler port (pooling on) -> the admin plane dials
     the same URL with the port swapped to the record's direct Postgres port."""

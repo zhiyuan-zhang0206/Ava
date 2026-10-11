@@ -26,8 +26,10 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.deploy.schema.migrations import MigrationAuthorityMismatch, apply_pending_migrations
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # This host is the gateway of the DB under test in the "matching" cases.
 _GATEWAY = ("gateway-host", "/Users/ava/.ava")
@@ -86,9 +88,11 @@ def _register_gateway_unit(machine: str, home: str) -> None:
         )
 
 
-def _claim_checkout(monkeypatch: pytest.MonkeyPatch, machine: str, home: str) -> None:
+def _claim_checkout(
+    monkeypatch: pytest.MonkeyPatch, identity: MachineIdentity, machine: str, home: str
+) -> None:
     """Make the executing process claim `machine:home`."""
-    monkeypatch.setattr("base.deploy.schema.migrations.machine_name", lambda: machine)
+    identity.set(name=machine)
     monkeypatch.setenv("AVA_HOME", home)
 
 
@@ -128,19 +132,21 @@ def _synthetic_table_exists() -> bool:
 
 
 def test_refuses_when_another_unit_owns_the_cluster(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The incident itself: the runner's checkout has a migration the gateway
     lacks, and applying it would strand the gateway behind the schema."""
     _register_gateway_unit(*_GATEWAY)
-    _claim_checkout(monkeypatch, *_RUNNER)
+    _claim_checkout(monkeypatch, machine_identity, *_RUNNER)
     _pending_migration(monkeypatch, tmp_path)
 
     with (
         psycopg.connect(settings.data_plane.db_url) as conn,
         pytest.raises(MigrationAuthorityMismatch) as exc,
     ):
-        apply_pending_migrations(conn)
+        apply_pending_migrations(conn, machine_name=machine_identity.name)
 
     # The message must name both identities — the operator's first question is
     # "which host am I on, and which one owns this DB".
@@ -150,32 +156,40 @@ def test_refuses_when_another_unit_owns_the_cluster(
 
 
 def test_allows_a_fresh_birth_with_no_recorded_identity(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A brand-new cluster migrates at `ava start` step 2.5, before step 3 writes
     machine_units — an empty table means "no owner yet", not "not you"."""
-    _claim_checkout(monkeypatch, *_RUNNER)
+    _claim_checkout(monkeypatch, machine_identity, *_RUNNER)
     _pending_migration(monkeypatch, tmp_path)
 
     with psycopg.connect(settings.data_plane.db_url) as conn:
-        assert apply_pending_migrations(conn) == [_SYN]
+        assert apply_pending_migrations(conn, machine_name=machine_identity.name) == [_SYN]
     assert _synthetic_table_exists()
 
 
-def test_allows_the_gateway_unit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_allows_the_gateway_unit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    machine_identity: MachineIdentity,
+) -> None:
     """The sanctioned path — the fleet update's migrate step on the cluster's own
     gateway — is unaffected."""
     _register_gateway_unit(*_GATEWAY)
-    _claim_checkout(monkeypatch, *_GATEWAY)
+    _claim_checkout(monkeypatch, machine_identity, *_GATEWAY)
     _pending_migration(monkeypatch, tmp_path)
 
     with psycopg.connect(settings.data_plane.db_url) as conn:
-        assert apply_pending_migrations(conn) == [_SYN]
+        assert apply_pending_migrations(conn, machine_name=machine_identity.name) == [_SYN]
     assert _synthetic_table_exists()
 
 
 def test_allows_a_non_gateway_host_with_nothing_to_apply(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    machine_identity: MachineIdentity,
 ) -> None:
     """An agent-runner's ordinary `ava start` calls this against the central DB
     and legitimately applies nothing. Authority is checked only when something
@@ -189,14 +203,16 @@ def test_allows_a_non_gateway_host_with_nothing_to_apply(
     squash candidate — a mutation, which the guard is supposed to refuse.
     """
     _register_gateway_unit(*_GATEWAY)
-    _claim_checkout(monkeypatch, *_RUNNER)
+    _claim_checkout(monkeypatch, machine_identity, *_RUNNER)
 
     with psycopg.connect(settings.data_plane.db_url) as conn:
-        assert apply_pending_migrations(conn) == []
+        assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
 
 
 def test_refuses_a_foreign_checkout_even_at_the_owning_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A dev worktree that inherited the gateway's `AVA_HOME` resolves the very
     home the database names, yet its `migrations/` are not the ones the home's own
@@ -205,14 +221,14 @@ def test_refuses_a_foreign_checkout_even_at_the_owning_home(
     home = tmp_path / "gateway-home"
     (home / "source").mkdir(parents=True)
     _register_gateway_unit(_GATEWAY[0], str(home))
-    _claim_checkout(monkeypatch, _GATEWAY[0], str(home))
+    _claim_checkout(monkeypatch, machine_identity, _GATEWAY[0], str(home))
     _pending_migration(monkeypatch, tmp_path)
 
     with (
         psycopg.connect(settings.data_plane.db_url) as conn,
         pytest.raises(MigrationAuthorityMismatch) as exc,
     ):
-        apply_pending_migrations(conn)
+        apply_pending_migrations(conn, machine_name=machine_identity.name)
 
     assert "foreign checkout" in str(exc.value)
     assert not _synthetic_table_exists()

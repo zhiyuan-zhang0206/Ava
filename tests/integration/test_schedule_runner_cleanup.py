@@ -20,6 +20,9 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="gateway runner 
 
 _SCHEDULE_INPUTS = """
 from functools import partial
+from base.config import ConfigBoot
+from base.cluster.machine.boot import machine_from_boot
+from base.paths import ava_home
 from base.agents.context.clients import ClientSet
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
@@ -27,11 +30,14 @@ from base.db.code_version_gate import ProcessDbGate
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.emitter import build_pipeline
+config = ConfigBoot()
+config.read_process_environment()
+machine = machine_from_boot(config)
 image = LoadedCommit.capture()
 gate = ProcessDbGate(process="schedule-cleanup-test", version=CodeVersion(image).get)
 database = partial(Database.from_settings, gate=gate)
-clients = ClientSet(database=database, pipeline_factory=partial(build_pipeline, database=database))
-inputs = ScheduleInputs(database, clients.event_pipeline, image)
+clients = ClientSet(database=database, pipeline_factory=partial(build_pipeline, database=database, machine=machine, home=ava_home()))
+inputs = ScheduleInputs(database, clients.event_pipeline, image, machine=machine)
 """
 
 

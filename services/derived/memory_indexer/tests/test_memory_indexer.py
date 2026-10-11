@@ -630,8 +630,14 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
     visited: list[str] = []
 
     def slow_process_paths(
-        backend: Any, paths: set[Path], provider: Any, liveness: Liveness
+        backend: Any,
+        paths: set[Path],
+        provider: Any,
+        liveness: Liveness,
+        *,
+        machine: MachineIdentity,
     ) -> None:
+        assert machine is machine_identity
         chunk_sizes.append(len(paths))
         visited.extend(sorted(p.name for p in paths))
         time.sleep(0.2)

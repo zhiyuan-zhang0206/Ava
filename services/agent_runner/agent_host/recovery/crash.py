@@ -14,17 +14,21 @@ not reach the ops layer, and revival orchestration is this layer's job.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from uuid import UUID
 
-from agent.ownership.corpse_reap import ReapedCorpse
+from psycopg_pool import AsyncConnectionPool
+
+from agent.ownership.corpse_reap import ReapedCorpse, reap_crash_corpses
 from base.agents.messages.inbound import InboundKind
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
 
 
 async def recover_reaped_corpses(
-    db: Database, bus: EventBus, reaped: Sequence[ReapedCorpse]
+    db: Database, bus: EventBus, reaped: Sequence[ReapedCorpse], *, machine: MachineIdentity
 ) -> None:
     """Best-effort guarded resurrection for each freshly reaped corpse.
 
@@ -47,6 +51,7 @@ async def recover_reaped_corpses(
                 corpse.agent_id,
                 trigger_inbound_id=wake_id,
                 trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine.name(),
             )
         except Exception:
             logger.exception(
@@ -64,3 +69,26 @@ async def recover_reaped_corpses(
                 recovery_wake_id=wake_id,
                 status=status,
             )
+
+
+async def reap_and_recover(
+    pool: AsyncConnectionPool,
+    db: Database,
+    bus: EventBus,
+    local_name: str,
+    owner: UUID,
+    *,
+    machine: MachineIdentity,
+    wake_enabled: Callable[[], bool],
+) -> None:
+    """Reap corpses and retry their committed wakes after the host renews its lease."""
+    try:
+        reaped = await reap_crash_corpses(
+            pool, local_name, owner, bus=bus, wake_enabled=wake_enabled
+        )
+        await recover_reaped_corpses(db, bus, reaped, machine=machine)
+    except Exception:
+        logger.exception(
+            "corpse reap failed — retrying next beat",
+            event="corpse_reaper_failed",
+        )

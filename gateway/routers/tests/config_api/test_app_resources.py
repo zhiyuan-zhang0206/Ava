@@ -1,5 +1,6 @@
 """Configuration HTTP requests use the serving app's resources, without its lifespan."""
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock
@@ -31,6 +32,7 @@ def clients(
     apps = [FastAPI(), FastAPI()]
     for index, app in enumerate(apps):
         app.include_router(runtime.router)
+        app.state.machine = machine_identity
         app.state.db = MagicMock(spec=Database)
         app.state.db_pool = MagicMock()
         cursor = app.state.db_pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
@@ -90,7 +92,11 @@ def clients(
     monkeypatch.setattr(machines, "lookup_role", roles)
     monkeypatch.setattr(machines, "list_agent_runners", runners)
     monkeypatch.setattr(rpc, "dispatch_to_machine", dispatch)
-    monkeypatch.setattr(runtime, "check_env_integrity", lambda: None)
+
+    def check_integrity(*, machine_reader: Callable[[], str]) -> None:
+        assert machine_reader() == machine_identity.name()
+
+    monkeypatch.setattr(runtime, "check_env_integrity", check_integrity)
     return [TestClient(app) for app in apps]
 
 

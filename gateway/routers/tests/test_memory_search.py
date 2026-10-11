@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineRoles
 from base.config import settings
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
@@ -92,7 +94,7 @@ class TestPrimaryPath:
         # Use gateway_memory_dir() as the memory root for relative path resolution
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         # create a few fake markdown files in tmp so relative_to doesn't raise
         (tmp_path / "notes").mkdir()
         (tmp_path / "notes" / "foo.md").write_text("x")
@@ -139,7 +141,7 @@ class TestPrimaryPath:
         """When files have a YAML frontmatter description, results include it."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "with_desc.md").write_text(
             """---
 type: Memory
@@ -339,7 +341,7 @@ def _stub_search_backend(
     import services.derived.memory_indexer.backends.factory as _factory
     from base.config import settings
 
-    monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+    monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
     (tmp_path / "a.md").write_text("---\ntype: Memory\n---\nx\n", encoding="utf-8")
 
     # A fresh semaphore per test. asyncio.Semaphore binds itself to the event
@@ -420,3 +422,9 @@ async def test_query_usage_failure_propagates_without_network_replay(
     assert seen[0] is model_catalog
     assert fake.call_count == 1
     assert state.memory_search_gate._value == 1
+
+
+def _memory_root(root: Path, *, roles: MachineRoles) -> Path:
+    """Keep the original test filesystem while accepting the explicit role input."""
+    del roles
+    return root

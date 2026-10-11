@@ -7,7 +7,9 @@ from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from ops.spec import ServiceSpec, _gate_reason
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _spec_with_gate(gate: Callable[[], str | None] | None) -> ServiceSpec:
@@ -22,6 +24,7 @@ def _spec_with_gate(gate: Callable[[], str | None] | None) -> ServiceSpec:
 
 def test_gate_reason_reports_and_propagates_raising_gate(
     loguru_records: list[dict[str, Any]],
+    machine_identity: MachineIdentity,
 ) -> None:
     """The operation receives the original exception and no enabled decision."""
 
@@ -29,18 +32,18 @@ def test_gate_reason_reports_and_propagates_raising_gate(
         raise RuntimeError("gate exploded")
 
     with pytest.raises(RuntimeError, match="gate exploded"):
-        _gate_reason(_spec_with_gate(_boom))
+        _gate_reason(_spec_with_gate(_boom), machine=machine_identity)
     errors = [r["message"] for r in loguru_records if r["level"].name == "ERROR"]
     assert any("faulty-gate" in m and "roster evaluation aborted" in m for m in errors), errors
 
 
-def test_gate_reason_passes_through_normal_gate_result() -> None:
+def test_gate_reason_passes_through_normal_gate_result(machine_identity: MachineIdentity) -> None:
     def _gated() -> str | None:
         return "disabled (test)"
 
-    assert _gate_reason(_spec_with_gate(_gated)) == "disabled (test)"
+    assert _gate_reason(_spec_with_gate(_gated), machine=machine_identity) == "disabled (test)"
 
     def _open() -> str | None:
         return None
 
-    assert _gate_reason(_spec_with_gate(_open)) is None
+    assert _gate_reason(_spec_with_gate(_open), machine=machine_identity) is None

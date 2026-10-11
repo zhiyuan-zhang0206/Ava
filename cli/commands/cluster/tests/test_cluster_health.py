@@ -3,9 +3,9 @@ Grafana rules grade notifications from the recorded health_probe_failing event."
 
 from __future__ import annotations
 
-import os
 import subprocess
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +17,14 @@ from base.db.tests.fakes import patch_database
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster.tests.health_probe_inputs import (
     Probe,
+    bridge_status,
     healthy,
+    redis_bridge_verdict,
+    service_probe_verdict,
     unhealthy,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    all_checks_pass as all_checks_pass,
 )
 from cli.commands.cluster.tests.health_probe_inputs import (
     config_boot_environment as config_boot_environment,
@@ -115,8 +121,12 @@ def test_liveness_retry_recovers_before_reporting_outage(
     monkeypatch.setattr(cluster_health, "_agent_population", healthy)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(cluster_health, "_crash_loop_detection", healthy)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(cluster_health, "_schema_health", healthy)
-    monkeypatch.setattr(cluster_health, "_service_probes", list)
-    monkeypatch.setattr(cluster_health, "_redis_bridge_probe", lambda: None)
+    monkeypatch.setattr(
+        cluster_health, "_service_probes", partial(service_probe_verdict, failures=[])
+    )
+    monkeypatch.setattr(
+        cluster_health, "_redis_bridge_probe", partial(redis_bridge_verdict, result=None)
+    )
     monkeypatch.setattr(cluster_health, "_disk_usage_failure", lambda: None)
     # Keep the editable-install check independent of the real prod venv.
     monkeypatch.setattr(cluster_health, "_editable_install_failure", lambda: None)
@@ -175,20 +185,6 @@ def test_agent_population_classifies_db_failure_as_environment(
 
 
 @pytest.fixture
-def _all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
-    monkeypatch.setattr(cluster_health, "_agent_population", healthy)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cluster_health, "_crash_loop_detection", healthy)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cluster_health, "_schema_health", healthy)
-    monkeypatch.setattr(cluster_health, "_service_probes", list)
-    monkeypatch.setattr(cluster_health, "_redis_bridge_probe", lambda: None)
-    monkeypatch.setattr(cluster_health, "_disk_usage_failure", lambda: None)
-    monkeypatch.setattr(cluster_health, "_editable_install_failure", lambda: None)
-    # Source-tree cases below supply their own checkout outcomes.
-    monkeypatch.setattr(cluster_health, "_source_tree_failure", lambda: None)  # pyright: ignore[reportUnknownArgumentType]
-
-
-@pytest.fixture
 def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # Unit tests have no production checkout; dedicated cases pin this guard.
     from base.deploy.git import cluster_drift
@@ -199,7 +195,7 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_every_run_emits_the_heartbeat_healthy_or_not(
     probe: Probe,
-    _all_checks_pass: None,
+    all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
@@ -211,7 +207,11 @@ def test_every_run_emits_the_heartbeat_healthy_or_not(
     assert ran == [{"unhealthy_checks": 0}]
     assert signals == []
 
-    monkeypatch.setattr(cluster_health, "_service_probes", lambda: ["ava-main-frontend"])
+    monkeypatch.setattr(
+        cluster_health,
+        "_service_probes",
+        partial(service_probe_verdict, failures=["ava-main-frontend"]),
+    )
     assert probe() == 1  # the alert-only path
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
     assert probe() == 1  # the primary-check path
@@ -242,13 +242,17 @@ def test_a_refused_checkout_emits_no_heartbeat(
 
 def test_service_probe_failure_emits_the_alert_only_signal(
     probe: Probe,
-    _all_checks_pass: None,
+    all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
 ) -> None:
     """A dead selected service fails the probe and emits its failing check."""
-    monkeypatch.setattr(cluster_health, "_service_probes", lambda: ["ava-main-frontend"])
+    monkeypatch.setattr(
+        cluster_health,
+        "_service_probes",
+        partial(service_probe_verdict, failures=["ava-main-frontend"]),
+    )
 
     assert probe() == 1
 
@@ -263,7 +267,7 @@ def test_service_probe_failure_emits_the_alert_only_signal(
 
 def test_disk_over_watermark_fails_and_signals(
     probe: Probe,
-    _all_checks_pass: None,
+    all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
@@ -286,7 +290,7 @@ def test_disk_over_watermark_fails_and_signals(
 
 def test_wal_archiving_failure_signals_with_its_message(
     probe: Probe,
-    _all_checks_pass: None,
+    all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
@@ -307,7 +311,7 @@ def test_wal_archiving_failure_signals_with_its_message(
 
 
 def test_wal_archiving_is_never_dialed_while_off(
-    probe: Probe, _all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch
+    probe: Probe, all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from services.backup.walg import probe as walg_probe
 
@@ -319,7 +323,7 @@ def test_wal_archiving_is_never_dialed_while_off(
     assert probe() == 0
 
 
-def test_disk_under_watermark_passes(probe: Probe, _all_checks_pass: None, _home: Path) -> None:
+def test_disk_under_watermark_passes(probe: Probe, all_checks_pass: None, _home: Path) -> None:
     """Healthy disk usage keeps the probe green (no alert, exit 0)."""
     rc = probe()
     assert rc == 0
@@ -365,7 +369,7 @@ def test_disk_usage_failure_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_source_tree_failure_signals(
     probe: Probe,
-    _all_checks_pass: None,
+    all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
@@ -386,7 +390,7 @@ def test_source_tree_failure_signals(
 
 def test_source_tree_clean_passes(
     probe: Probe,
-    _all_checks_pass: None,
+    all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -421,7 +425,7 @@ def test_source_tree_guard_skipped_is_a_distinct_alert(
 
 def test_signal_repeats_every_unhealthy_run_and_stops_when_healthy(
     probe: Probe,
-    _all_checks_pass: None,
+    all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
@@ -442,272 +446,22 @@ def test_signal_repeats_every_unhealthy_run_and_stops_when_healthy(
 
 def test_signal_names_the_failed_check(
     probe: Probe,
-    _all_checks_pass: None,
+    all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
 ) -> None:
     """A changed failure reason is a different check, grouped separately by Grafana."""
-    monkeypatch.setattr(cluster_health, "_service_probes", lambda: ["ava-main-frontend"])
+    monkeypatch.setattr(
+        cluster_health,
+        "_service_probes",
+        partial(service_probe_verdict, failures=["ava-main-frontend"]),
+    )
     assert probe() == 1
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
     assert probe() == 1
 
     assert [signal["check"] for signal in signals] == ["service_probe", "gateway_liveness"]
-
-
-def test_service_probes_skips_gated_but_rejects_unknown_specs(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    """Every intended service needs positive evidence; disabled services do not."""
-
-    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
-        del machine
-        return frozenset({"gateway"})
-
-    import cli.commands._repo as _repo_commands
-    import cli.commands.probe as _probe_commands
-    from ops.roster.service_spec import (
-        _GATEWAY,  # typed frozenset[MachineRole]; value irrelevant (roster stubbed)
-        ServiceSpec,
-    )
-
-    # requires_db is irrelevant here (no watchdog round involved), so it is uniform.
-    def _spec(session: str) -> ServiceSpec:
-        return ServiceSpec(session=session, cmd="x", capabilities=_GATEWAY, requires_db=True)
-
-    dead = _spec("frontend")
-    alive = _spec("gateway")
-    gated = _spec("browser")
-    probeless = _spec("browser-mcp")
-
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr(
-        _repo_commands,
-        "_services_for_roles_annotated",
-        lambda _roles: (  # pyright: ignore[reportUnknownArgumentType]
-            (dead, None),
-            (alive, None),
-            (gated, "disabled (AVA_BROWSER_ENABLED off)"),
-            (probeless, None),
-        ),
-    )
-
-    def _probe(spec: ServiceSpec) -> _probe_commands.ServiceProbe:
-        alive = {"frontend": False, "gateway": True, "browser-mcp": None}[spec.session]
-        return _probe_commands.ServiceProbe(alive, "probe", "")
-
-    monkeypatch.setattr(_probe_commands, "probe_service", _probe)
-
-    assert cluster_health._service_probes(machine=command_runtime.machine) == [
-        "frontend",
-        "browser-mcp",
-    ]
-
-
-def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
-        del machine
-        return frozenset({"gateway"})
-
-    import cli.commands._repo as _repo_commands
-    import cli.commands.probe as _probe_commands
-    import ops.roster.service_spec as _service_spec
-
-    tmp_home = tmp_path / "gateway"
-    tmp_home.mkdir()
-    recorded_sessions: list[str] = []
-
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
-
-    def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
-        recorded_sessions.append(spec.session)
-        return _probe_commands.ServiceProbe(True, "probe", "")
-
-    monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
-
-    assert cluster_health._service_probes(machine=command_runtime.machine) == []
-    assert "otel-collector" not in recorded_sessions
-
-
-def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_endpoint(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
-        del machine
-        return frozenset({"gateway"})
-
-    import cli.commands._repo as _repo_commands
-    import cli.commands.probe as _probe_commands
-    import ops.roster.service_spec as _service_spec
-
-    tmp_home = tmp_path / "gateway"
-    tmp_home.mkdir()
-    recorded_sessions: list[str] = []
-
-    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
-
-    def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
-        recorded_sessions.append(spec.session)
-        return _probe_commands.ServiceProbe(True, "probe", "")
-
-    monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
-
-    assert cluster_health._service_probes(machine=command_runtime.machine) == []
-    assert "otel-collector" in recorded_sessions
-
-
-def test_service_probes_checks_otel_collector_on_lgtm_gateway(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
-        del machine
-        return frozenset({"gateway"})
-
-    import cli.commands._repo as _repo_commands
-    import cli.commands.probe as _probe_commands
-    import ops.roster.service_spec as _service_spec
-
-    tmp_home = tmp_path / "gateway"
-    tmp_home.mkdir()
-    (tmp_home / "lgtm-host").touch()
-    recorded_sessions: list[str] = []
-
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
-
-    def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
-        recorded_sessions.append(spec.session)
-        return _probe_commands.ServiceProbe(True, "probe", "")
-
-    monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
-
-    assert cluster_health._service_probes(machine=command_runtime.machine) == []
-    assert "otel-collector" in recorded_sessions
-
-
-def test_service_probes_carry_the_failing_fact(
-    monkeypatch: pytest.MonkeyPatch, *, command_runtime: CommandRuntime
-) -> None:
-    """A wrong-home listener must be diagnosed distinctly from an absent listener."""
-
-    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
-        del machine
-        return frozenset({"gateway"})
-
-    import cli.commands._repo as _repo_commands
-    import cli.commands.probe as _probe_commands
-    from ops.roster.service_spec import _GATEWAY, ServiceSpec
-
-    spec = ServiceSpec(session="ops", cmd="x", capabilities=_GATEWAY, requires_db=True)
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr(
-        _repo_commands,
-        "_services_for_roles_annotated",
-        lambda _roles: ((spec, None),),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    )  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        _probe_commands,
-        "probe_service",
-        lambda _spec: _probe_commands.ServiceProbe(
-            False, "identity", "home='/home/ava/.ava' != '/u/.ava'"
-        ),  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    assert cluster_health._service_probes(machine=command_runtime.machine) == [
-        "ops (home='/home/ava/.ava' != '/u/.ava')"
-    ]
-
-
-def test_service_probes_unknown_roster_is_unhealthy(
-    monkeypatch: pytest.MonkeyPatch, *, command_runtime: CommandRuntime
-) -> None:
-    """A responding gateway cannot replace the missing service inventory."""
-
-    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
-        del machine
-        return None
-
-    import cli.commands._repo as _repo_commands
-
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    assert cluster_health._service_probes(machine=command_runtime.machine) == [
-        "service roster unavailable"
-    ]
-
-
-@pytest.mark.parametrize("mode,names", [("only", ["gateway"]), ("except", ["frontend"])])
-def test_service_probes_respect_durable_service_intent(
-    monkeypatch: pytest.MonkeyPatch,
-    mode: str,
-    names: list[str],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
-        del machine
-        return frozenset({"gateway"})
-
-    import cli.commands._repo as _repo_commands
-    import cli.commands.probe as _probe_commands
-    import ops.roster.service_spec as _service_spec
-    from base.deploy.lifecycle import service_selection
-
-    wanted = _service_spec.ServiceSpec("gateway", "unused", frozenset({"gateway"}), True)
-    excluded = _service_spec.ServiceSpec("frontend", "unused", frozenset({"gateway"}), False)
-
-    def roster(_roles: object) -> tuple[tuple[_service_spec.ServiceSpec, None], ...]:
-        return ((wanted, None), (excluded, None))
-
-    def probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
-        assert spec is wanted
-        return _probe_commands.ServiceProbe(True, "owned", "ready")
-
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr(_repo_commands, "_services_for_roles_annotated", roster)
-    monkeypatch.setattr(_probe_commands, "probe_service", probe)
-    monkeypatch.setattr(
-        service_selection,
-        "read_selection",
-        lambda: service_selection.ServiceSelection(mode, frozenset(names)),
-    )
-    assert cluster_health._service_probes(machine=command_runtime.machine) == []
-
-
-def test_service_probes_unreadable_selection_is_unhealthy(
-    monkeypatch: pytest.MonkeyPatch, *, command_runtime: CommandRuntime
-) -> None:
-    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
-        del machine
-        return frozenset({"gateway"})
-
-    import cli.commands._repo as _repo_commands
-
-    def unreadable() -> None:
-        raise ValueError("corrupt selection")
-
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr("base.deploy.lifecycle.service_selection.read_selection", unreadable)
-    assert cluster_health._service_probes(machine=command_runtime.machine) == [
-        "service selection unavailable (corrupt selection)"
-    ]
 
 
 # ── the gate's entry port rides in check 5 (alert-only) ───────────────────────
@@ -716,7 +470,7 @@ def test_service_probes_unreadable_selection_is_unhealthy(
 def test_dark_gate_fails_the_probe_without_arming_rollback(
     probe: Probe,
     monkeypatch: pytest.MonkeyPatch,
-    _all_checks_pass: None,
+    all_checks_pass: None,
     _home: Path,
     signals: list[dict[str, object]],
 ) -> None:
@@ -725,27 +479,15 @@ def test_dark_gate_fails_the_probe_without_arming_rollback(
     job — rolling the cluster's code back would re-run that step identically, so
     rollback is not the remedy."""
     monkeypatch.setattr(
-        cluster_health, "_service_probes", lambda: ["gate entry :3000 not answering (dark)"]
+        cluster_health,
+        "_service_probes",
+        partial(service_probe_verdict, failures=["gate entry :3000 not answering (dark)"]),
     )
     assert probe() == 1
     assert any("not answering" in str(signal["message"]) for signal in signals)
 
 
 # ── the Redis bridge rides in check 5 (alert-only) ───────────────────────────
-
-
-def _redis_bridge(**kw: object) -> object:
-    import cli.commands.converge.redis_bridge as bridge
-
-    fields: dict[str, object] = {
-        "required": True,
-        "endpoint": "10.64.0.7:6380",
-        "serving": True,
-        "supervised": True,
-        "detail": "Redis PING succeeded",
-    }
-    fields.update(kw)
-    return bridge.RedisBridgeStatus(**fields)  # type: ignore[arg-type]
 
 
 def test_redis_bridge_probe_reports_running_but_dead_listener(
@@ -763,11 +505,12 @@ def test_redis_bridge_probe_reports_running_but_dead_listener(
     import cli.commands.converge.redis_bridge as bridge
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr(
-        bridge,
-        "probe_redis_bridge",
-        lambda *_a: _redis_bridge(serving=False, detail="connection refused"),  # pyright: ignore[reportUnknownArgumentType]
-    )
+
+    def probe(*, machine: MachineIdentity) -> bridge.RedisBridgeStatus:
+        assert machine is command_runtime.machine
+        return bridge_status(serving=False, detail="connection refused")
+
+    monkeypatch.setattr(bridge, "probe_redis_bridge", probe)
 
     failure = cluster_health._redis_bridge_probe(machine=command_runtime.machine)
 
@@ -779,12 +522,14 @@ def test_redis_bridge_probe_reports_running_but_dead_listener(
 def test_redis_bridge_failure_signals_without_arming_rollback(
     probe: Probe,
     monkeypatch: pytest.MonkeyPatch,
-    _all_checks_pass: None,
+    all_checks_pass: None,
     _home: Path,
     signals: list[dict[str, object]],
 ) -> None:
     failure = "Redis bridge 10.64.0.7:6380 failed authenticated PING (connection refused)"
-    monkeypatch.setattr(cluster_health, "_redis_bridge_probe", lambda: failure)
+    monkeypatch.setattr(
+        cluster_health, "_redis_bridge_probe", partial(redis_bridge_verdict, result=failure)
+    )
 
     assert probe() == 1
     assert any("Redis bridge" in str(signal["message"]) for signal in signals)

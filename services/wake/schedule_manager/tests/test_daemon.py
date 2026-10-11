@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 
 import base.db
 import gateway.app
+from base.config import ConfigBoot
 from base.daemon.loop_health import LivenessGroup
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -100,6 +101,9 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
 async def test_a_crash_leaves_run_after_releasing_its_resources(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     released: list[str] = []
 
@@ -141,7 +145,12 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     monkeypatch.setattr(daemon, "_run_loops", crashing_loops)
 
     with pytest.raises(ExceptionGroup):
-        await daemon.run(database=lambda: database, image=LoadedCommit(Path(), None))
+        await daemon.run(
+            process_config=process_config,
+            runtime=tmp_path / "run",
+            database=lambda: database,
+            image=LoadedCommit(Path(), None),
+        )
 
     assert sorted(released) == ["health", "pidfile", "pool"]
 
@@ -149,6 +158,9 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
 async def test_a_foreign_checkout_refuses_to_supervise_schedules(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     """issue #194: a service running from a worktree against the prod home must not
     supervise schedules — it would run un-reviewed code and die with the worktree.
@@ -160,7 +172,12 @@ async def test_a_foreign_checkout_refuses_to_supervise_schedules(
     monkeypatch.setattr(daemon, "prod_service_checkout_error", foreign)
 
     with pytest.raises(RuntimeError, match="foreign checkout"):
-        await daemon.run(database=lambda: database, image=LoadedCommit(Path(), None))
+        await daemon.run(
+            process_config=process_config,
+            runtime=tmp_path / "run",
+            database=lambda: database,
+            image=LoadedCommit(Path(), None),
+        )
 
 
 @pytest.mark.parametrize("quiesced", [True, False])

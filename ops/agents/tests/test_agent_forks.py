@@ -6,6 +6,8 @@ triggers, and caller fences. Host wake publication follows committed state.
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -30,6 +32,25 @@ from ops.agents.tests.test_agents_internals import (
     _spawn_agent,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
+
+
+@pytest.fixture
+def fork_events(
+    database_gate: ProcessDbGate, machine_identity: MachineIdentity, unit_home: Path
+) -> Generator[telemetry.EventPipeline]:
+    """Retain the actual writer only for fork event delivery contracts."""
+    pipeline = telemetry.build_pipeline(
+        database=lambda: Database.from_settings(gate=database_gate),
+        machine=machine_identity,
+        home=unit_home,
+    )
+    try:
+        telemetry.init_telemetry(
+            process="fork-tests", pipeline=pipeline, machine_reader=machine_identity.name
+        )
+        yield pipeline
+    finally:
+        assert pipeline.stop(timeout=2).status is telemetry.DrainStatus.COMPLETED
 
 
 class TestSpawnFork:

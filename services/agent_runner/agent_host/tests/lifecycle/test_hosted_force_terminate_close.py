@@ -31,6 +31,7 @@ from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.context import AvaContext
 from base.agents.impersonation import ImpersonationError
 from base.agents.incarnation.hosted_force import install_hosted_force
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -41,6 +42,7 @@ from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 from tests.fixtures.pin_agent import exec_context as ctx_of
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _FORCE_ERROR = "Native runtime no longer owns this agent"
 
@@ -107,6 +109,7 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     async with hosted_scope(expected_error=ImpersonationError) as resources:
         agent_id = agent_row(db_conn)
@@ -164,6 +167,7 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
             wake_enabled=configured_policy().recovery_wake_enabled,
             prompt_reap_enabled=configured_policy().recrash_reap_enabled,
             reconcile_inputs=configured_policy().reconcile_inputs,
+            machine=machine_identity,
         )
         assert db_conn.execute(
             "SELECT status, last_turn_fatal_at FROM agents_meta WHERE id=%s", (agent_id,)

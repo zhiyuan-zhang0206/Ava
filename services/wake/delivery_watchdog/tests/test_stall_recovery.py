@@ -145,7 +145,12 @@ async def test_request_runs_once_and_emits_the_decision(
     monkeypatch.setattr(stall_recovery.telemetry, "emit", record_emit)
 
     await stall_recovery.stall_recovery_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
 
     assert calls == [(zombie, inbound_id)]
@@ -191,7 +196,12 @@ async def test_one_request_per_owner_for_the_oldest_stalled_chat(
     monkeypatch.setattr(stall_recovery.telemetry, "emit", _ignore_emit)
 
     await stall_recovery.stall_recovery_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
 
     assert calls == [(zombie, oldest)]
@@ -220,16 +230,31 @@ async def test_cooldown_lives_in_the_database_and_suppresses_repeat_requests(
     monkeypatch.setattr(stall_recovery.telemetry, "emit", _ignore_emit)
 
     await stall_recovery.stall_recovery_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
     await stall_recovery.stall_recovery_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
     assert len(calls) == 1
 
     _expire_cooldown(db_conn, zombie)
     await stall_recovery.stall_recovery_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
     assert len(calls) == 2
 
@@ -257,7 +282,12 @@ async def test_disabled_knob_skips_the_round(
     monkeypatch.setattr(settings.daemon, "delivery_stalled_recovery_enabled", False)
 
     await stall_recovery.stall_recovery_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
 
     assert calls == []
@@ -300,7 +330,12 @@ async def test_hung_request_is_cut_at_the_deadline_and_reported_as_an_error(
     monkeypatch.setattr(rounds, "rpc_deadline_s", lambda: 0.05)
 
     await stall_recovery.stall_recovery_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
 
     assert emitted[0]["attributes"] == {

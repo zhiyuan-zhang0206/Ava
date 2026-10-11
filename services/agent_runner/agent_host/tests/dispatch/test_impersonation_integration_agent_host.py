@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent import impersonation
+from agent import impersonation_process
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
@@ -91,7 +91,7 @@ async def test_replacement_host_adopts_held_agent_without_model(
     # environment. The recorded controller tree is synthetic (its pids are not
     # live processes), so pin the liveness view and the fresh-start window.
     spawn = MagicMock(return_value=MagicMock(poll=MagicMock(return_value=None)))
-    monkeypatch.setattr(impersonation.subprocess, "Popen", spawn)
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     monkeypatch.setattr(
         "base.agents.impersonation.provider_anchor_states", Mock(return_value=["alive"])
     )

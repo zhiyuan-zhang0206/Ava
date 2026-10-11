@@ -1,7 +1,6 @@
 """Run local agents through a shared graph and explicit per-turn context.
-
-Each turn borrows the daemon's pools, checkpointer and machine owner. Admission and
-recovery retain task and settlement fences; expected failures settle and unknown failures propagate.
+Turns borrow the daemon's pools, checkpointer and machine; admission/recovery retain
+task/settlement fences. Expected failures settle; unknown failures propagate.
 """
 
 from __future__ import annotations
@@ -31,12 +30,11 @@ from agent.impersonation import (
     native_status,
     supervise_relay,
 )
-from agent.ownership.corpse_reap import reap_crash_corpses
+from agent.ownership import hosted
 from agent.ownership.hosted import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
     release_hosted_owner,
-    renew_hosted_owner,
     settle_hosted_runtime,
 )
 from agent.startup import reconcile_claimed_inbounds_at_startup, repair_dangling_tool_use_at_startup
@@ -92,7 +90,7 @@ from services.agent_runner.agent_host.invocation.native_work import (
 )
 from services.agent_runner.agent_host.lifecycle import maintenance as maintenance_receipts
 from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
-from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
+from services.agent_runner.agent_host.recovery.crash import reap_and_recover
 from services.agent_runner.agent_host.runtime import (
     HostPolicy,
     HostStats,
@@ -428,6 +426,7 @@ class AgentHost:
                     wake_enabled=self._policy.recovery_wake_enabled,
                     prompt_reap_enabled=self._policy.recrash_reap_enabled,
                     reconcile_inputs=self._policy.reconcile_inputs,
+                    machine=self._machine_identity,
                 )
 
     async def _run_held_controls(
@@ -464,7 +463,13 @@ class AgentHost:
         # record_failure is a no-op outside maintenance; the next wake re-drives recovery.
         session = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
         await supervise_relay(
-            self._db, self._bus, session, agent_id, self.relays, incarnation=incarnation
+            self._db,
+            self._bus,
+            session,
+            agent_id,
+            self.relays,
+            incarnation=incarnation,
+            read_local_machine=self._machine_identity.name,
         )
         # An earlier ordinary failure can leave a buffered tail. Preserve
         # it before accepting maintenance intent, without replaying graph work.
@@ -783,18 +788,13 @@ class AgentHost:
 
     async def renew_ownership(self) -> None:
         """Renew healthy leases before reaping corpses and retrying committed wakes."""
-        await renew_hosted_owner(self._control_pool, self._machine, self._owner)
-        try:
-            reaped = await reap_crash_corpses(
-                self._control_pool,
-                self._machine,
-                self._owner,
-                bus=self._bus,
-                wake_enabled=self._policy.recovery_wake_enabled,
-            )
-            await recover_reaped_corpses(self._db, self._bus, reaped)
-        except Exception:
-            logger.exception(
-                "corpse reap failed — retrying next beat",
-                event="corpse_reaper_failed",
-            )
+        await hosted.renew_hosted_owner(self._control_pool, self._machine, self._owner)
+        await reap_and_recover(
+            self._control_pool,
+            self._db,
+            self._bus,
+            self._machine,
+            self._owner,
+            machine=self._machine_identity,
+            wake_enabled=self._policy.recovery_wake_enabled,
+        )

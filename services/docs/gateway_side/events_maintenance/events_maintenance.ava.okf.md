@@ -45,3 +45,11 @@ The standalone rollup entry captures its own image and binds an explicit,
 non-exempt gate to `events_maintenance_db(gate=...)`. Argument rejection precedes
 capture and database access; the closed-day SQL and fold-watermark rules remain
 unchanged.
+
+The service entry retains its prepared `ConfigBoot` and resolved unit runtime
+path. Endpoint and pidfile operations borrow those inputs through
+`ServiceEndpoints.from_boot`; each original lookup reads the same live view.
+The work and logging database factory calls `db_config_from_boot` at each
+handle creation and retains the entry's gate and lazy machine host reader.
+Schema checks, health-before-pool ordering and shutdown stay at their original
+boundaries. Business-specific configuration slices keep their existing readers.

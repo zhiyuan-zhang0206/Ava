@@ -1,7 +1,8 @@
 """`import base.cluster` stays free of Settings and the home.
 
-The restricted restore worker imports the cluster package before either exists, so
-anything the package reads from them is imported inside the function that needs it.
+The restricted restore worker imports the cluster package before either exists.
+The typed MachineIdentity value owner stays cold; its ConfigBoot factory does not
+enter until the real composition root requests it.
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ import base.cluster
 import base.cluster.ownership
 import base.cluster.port_preflight
 
-loaded = [n for n in ("base.config", "base.paths", "base.cluster.machine") if n in sys.modules]
+assert "base.cluster.machine" in sys.modules
+loaded = [n for n in ("base.config", "base.paths", "base.cluster.machine.boot") if n in sys.modules]
 assert not loaded, loaded
 """
 

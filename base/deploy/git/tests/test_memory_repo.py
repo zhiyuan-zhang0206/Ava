@@ -176,7 +176,12 @@ def test_init_gateway_creates_checkout_on_main(
 ) -> None:
     """init_gateway() sets up a git repo on `main` at the gateway memory path."""
     machine_identity.set(role="gateway", name="cloud")
-    monkeypatch.setattr(memory_repo, "gateway_is_initialized", lambda: False)
+
+    def initialized(*, machine: MachineIdentity) -> bool:
+        assert machine is machine_identity
+        return False
+
+    monkeypatch.setattr(memory_repo, "gateway_is_initialized", initialized)
 
     calls: list[tuple[str, ...]] = []
 
@@ -218,7 +223,12 @@ def test_init_gateway_already_initialized_on_main_is_noop(
 ) -> None:
     """When the gateway checkout is already on main, init_gateway() is a noop."""
     machine_identity.set(role="gateway", name="cloud")
-    monkeypatch.setattr(memory_repo, "gateway_is_initialized", lambda: True)
+
+    def initialized(*, machine: MachineIdentity) -> bool:
+        assert machine is machine_identity
+        return True
+
+    monkeypatch.setattr(memory_repo, "gateway_is_initialized", initialized)
 
     calls: list[tuple[str, ...]] = []
 
@@ -242,7 +252,12 @@ def test_init_gateway_on_wrong_branch_auto_switches(
 ) -> None:
     """Gateway checkout on a stale branch auto-switches to main."""
     machine_identity.set(role="gateway", name="cloud")
-    monkeypatch.setattr(memory_repo, "gateway_is_initialized", lambda: True)
+
+    def initialized(*, machine: MachineIdentity) -> bool:
+        assert machine is machine_identity
+        return True
+
+    monkeypatch.setattr(memory_repo, "gateway_is_initialized", initialized)
 
     calls: list[tuple[str, ...]] = []
 
@@ -387,7 +402,12 @@ def test_init_gateway_keep_local_strips_remote(
     fetches."""
     machine_identity.set(role="gateway", name="cloud")
     monkeypatch.setattr(memory_repo.settings.general, "memory_keep_local", True)
-    monkeypatch.setattr(memory_repo, "gateway_is_initialized", lambda: True)
+
+    def initialized(*, machine: MachineIdentity) -> bool:
+        assert machine is machine_identity
+        return True
+
+    monkeypatch.setattr(memory_repo, "gateway_is_initialized", initialized)
 
     calls: list[tuple[str, ...]] = []
 

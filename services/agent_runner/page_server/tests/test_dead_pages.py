@@ -15,6 +15,7 @@ from psycopg_pool import ConnectionPool
 
 import base.db
 from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.loop_health import LivenessGroup, LoopProgress
@@ -351,12 +352,25 @@ def _patch_run(
     async def fake_stop(_server: object) -> None:
         events.append("health")
 
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(
-        daemon, "_endpoint", lambda: ServiceEndpoint("page_server", 1, Path("/nonexistent/ps.pid"))
-    )
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: events.append("pidfile"))
+    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
+        return False
+
+    monkeypatch.setattr(daemon.resources, "is_running", is_running_for_entry)
+
+    def endpoint_for_entry(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+        return ServiceEndpoint("page_server", 1, Path("/nonexistent/ps.pid"))
+
+    monkeypatch.setattr(daemon.resources, "endpoint", endpoint_for_entry)
+
+    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon.resources, "write_pidfile", write_pidfile_for_entry)
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        return events.append("pidfile")
+
+    monkeypatch.setattr(daemon.resources, "remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
 
@@ -370,13 +384,24 @@ def _patch_run(
 
 
 def test_each_loop_gets_its_own_progress_tracker(
-    monkeypatch: pytest.MonkeyPatch, database: Database, *, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    *,
+    machine_identity: MachineIdentity,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     received: dict[str, LoopProgress] = {}
 
     async def reconcile(
-        _pool: object, progress: LoopProgress, _config: object, _bus: object
+        _pool: object,
+        progress: LoopProgress,
+        _config: object,
+        _bus: object,
+        *,
+        local_machine: MachineIdentity,
     ) -> None:
+        assert local_machine is machine_identity
         received["reconcile"] = progress
 
     async def dead(
@@ -394,7 +419,13 @@ def test_each_loop_gets_its_own_progress_tracker(
     image = LoadedCommit(Path("/page-server-tests"), None)
     asyncio.run(
         asyncio.wait_for(
-            daemon.run(database=lambda: database, image=image, local_machine=machine_identity),
+            daemon.run(
+                process_config=process_config,
+                runtime=tmp_path / "run",
+                database=lambda: database,
+                image=image,
+                local_machine=machine_identity,
+            ),
             timeout=5.0,
         )
     )
@@ -411,6 +442,8 @@ def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
     database: Database,
     *,
     machine_identity: MachineIdentity,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     cancelled: list[str] = []
     events: list[str] = []
@@ -428,13 +461,23 @@ def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
 
         return run_loop
 
-    seen = _patch_run(monkeypatch, {"reconcile": loop("reconcile"), "dead": loop("dead")}, events)
+    async def reconcile_loop(*args: object, local_machine: MachineIdentity) -> None:
+        assert local_machine is machine_identity
+        await loop("reconcile")(*args)
+
+    seen = _patch_run(monkeypatch, {"reconcile": reconcile_loop, "dead": loop("dead")}, events)
     image = LoadedCommit(Path("/page-server-tests"), None)
 
     with pytest.raises(ExceptionGroup) as raised:
         asyncio.run(
             asyncio.wait_for(
-                daemon.run(database=lambda: database, image=image, local_machine=machine_identity),
+                daemon.run(
+                    process_config=process_config,
+                    runtime=tmp_path / "run",
+                    database=lambda: database,
+                    image=image,
+                    local_machine=machine_identity,
+                ),
                 timeout=5.0,
             )
         )

@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from base.config import ConfigBoot
 from base.host.proc import process_cmdline
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
@@ -34,7 +35,7 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
     ],
 )
 def test_daemon_guard_checks_only_current_pidfile(
-    module_name: str, monkeypatch: pytest.MonkeyPatch
+    module_name: str, monkeypatch: pytest.MonkeyPatch, *, process_config: ConfigBoot, tmp_path: Path
 ) -> None:
     """Each singleton guard reads the path its daemon writes, exactly once."""
     daemon = importlib.import_module(module_name)
@@ -44,9 +45,23 @@ def test_daemon_guard_checks_only_current_pidfile(
         calls.append((path, module))
         return False
 
-    monkeypatch.setattr(daemon, "pidfile_holds_daemon", holds_daemon)
-    assert daemon._is_running() is False
-    assert calls == [(daemon._pidfile(), module_name)]
+    runtime = tmp_path / "run"
+    if module_name == "services.agent_runner.page_server.daemon":
+        resources = daemon.resources
+        monkeypatch.setattr(resources.pidfiles, "pidfile_holds_daemon", holds_daemon)
+        assert resources.is_running(process_config, runtime=runtime) is False
+        assert calls == [(resources.pidfile(process_config, runtime=runtime), module_name)]
+    else:
+        monkeypatch.setattr(daemon, "pidfile_holds_daemon", holds_daemon)
+        if module_name in {
+            "services.agent_runner.agent_ops.daemon",
+            "ava_builtins.plugins.ava_fleet.task_maintenance.daemon",
+        }:
+            assert daemon._is_running() is False
+            assert calls == [(daemon._pidfile(), module_name)]
+        else:
+            assert daemon._is_running(process_config, runtime=runtime) is False
+            assert calls == [(daemon._pidfile(process_config, runtime=runtime), module_name)]
 
 
 def test_acquire_writes_own_pid(tmp_path: Any) -> None:

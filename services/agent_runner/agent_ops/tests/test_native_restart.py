@@ -89,9 +89,9 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
     injected = False
 
     async def lose_response(*args: Any, local_machine: MachineIdentity, **kwargs: Any) -> Any:
-        del local_machine
+        assert local_machine is machine_identity
         nonlocal result, injected
-        status, result = await actual(*args, **kwargs)
+        status, result = await actual(*args, local_machine=local_machine, **kwargs)
         assert status is OpStatus.COMPLETED
         if not injected:
             injected = True

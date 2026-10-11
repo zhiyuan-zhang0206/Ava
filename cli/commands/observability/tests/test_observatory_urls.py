@@ -157,8 +157,8 @@ def test_webhook_uses_local_bind_or_reachable_gateway(
     command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(settings.observability, "observability_url", observatory)
-    command_runtime.config.set_field("gateway_url", gateway_url)
-    command_runtime.config.set_field("gateway_port", port)
+    monkeypatch.setattr(settings.gateway, "gateway_url", gateway_url)
+    monkeypatch.setattr(settings.gateway, "gateway_port", port)
     command_runtime.machine.set(host="10.0.0.10")
     assert observatory_urls._alerts_webhook_url(machine=command_runtime.machine) == expected
 
@@ -170,7 +170,9 @@ def test_webhook_rejects_url_credentials_without_reporting_them(
     command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(settings.observability, "observability_url", "http://observatory.test")
-    command_runtime.config.set_field("gateway_url", "https://user:synthetic-secret@gateway.test")
+    monkeypatch.setattr(
+        settings.gateway, "gateway_url", "https://user:synthetic-secret@gateway.test"
+    )
     with pytest.raises(ValueError, match="credential-free") as error:
         observatory_urls._alerts_webhook_url(machine=command_runtime.machine)
     captured = capsys.readouterr()
@@ -190,7 +192,7 @@ def test_real_grafana_launcher_preserves_webhook_url_literal(
     """The actual launcher sources runtime.env without expanding URL path code."""
     base = f"https://gateway.test:20016/tenant/{path}"
     monkeypatch.setattr(settings.observability, "observability_url", "http://observatory.test")
-    command_runtime.config.set_field("gateway_url", base)
+    monkeypatch.setattr(settings.gateway, "gateway_url", base)
     native = tmp_path / "lgtm/native"
     lgtm_native._render_configs(
         Path(__file__).resolve().parents[4],
@@ -251,8 +253,8 @@ def test_rendered_endpoints_reach_private_postgres_and_http_listener(
         try:
             port = server.server_port
             monkeypatch.setattr(settings.observability, "observability_url", observatory)
-            command_runtime.config.set_field("gateway_port", port)
-            command_runtime.config.set_field("gateway_url", f"http://127.0.0.1:{port}")
+            monkeypatch.setattr(settings.gateway, "gateway_port", port)
+            monkeypatch.setattr(settings.gateway, "gateway_url", f"http://127.0.0.1:{port}")
             rendered = _render(
                 tmp_path,
                 operator_database=operator_database,

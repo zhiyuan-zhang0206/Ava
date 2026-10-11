@@ -16,6 +16,7 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
@@ -184,7 +185,10 @@ def test_summarize_splits_attribution_and_meters_minutes() -> None:
 
 
 def test_fire_reconciles_the_claimed_slot_window_and_emits(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    machine_identity: MachineIdentity,
 ) -> None:
     """_fire derives its window from the CLAIMED slot (the fire_slot_once
     callback argument), not from the wall clock — the layer QA's simulation flagged."""
@@ -209,7 +213,12 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
         database,
         slot,
         None,
-        fire=partial(module._fire, producer=lambda: None, image=LoadedCommit(REPO_ROOT, None)),
+        fire=partial(
+            module._fire,
+            producer=lambda: None,
+            image=LoadedCommit(REPO_ROOT, None),
+            machine_reader=machine_identity.name,
+        ),
     )
 
     assert accounting.windows == [("2026-09-05T21:00:00Z", "2026-09-06T21:00:00Z")]
@@ -224,7 +233,10 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
 
 
 def test_catch_up_boot_with_two_missed_slots_reconciles_each_own_window(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    machine_identity: MachineIdentity,
 ) -> None:
     """QA regression (2026-09-07): a boot that missed two 05:00 slots must
     reconcile each slot's own day — gapless windows, one event per day."""
@@ -247,7 +259,12 @@ def test_catch_up_boot_with_two_missed_slots_reconciles_each_own_window(
         database,
         [(module.CRON, None)],
         timezone="UTC",
-        fire=partial(module._fire, producer=lambda: None, image=LoadedCommit(REPO_ROOT, None)),
+        fire=partial(
+            module._fire,
+            producer=lambda: None,
+            image=LoadedCommit(REPO_ROOT, None),
+            machine_reader=machine_identity.name,
+        ),
         now=datetime(2026, 9, 8, 10, 30, tzinfo=UTC),
     )
 
@@ -267,7 +284,10 @@ def test_catch_up_boot_with_two_missed_slots_reconciles_each_own_window(
 
 
 def test_fire_reports_failure_without_raising(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    machine_identity: MachineIdentity,
 ) -> None:
     module = _load_schedule_module()
     accounting = _FakeAccounting(module)
@@ -288,7 +308,12 @@ def test_fire_reports_failure_without_raising(
         database,
         slot,
         None,
-        fire=partial(module._fire, producer=lambda: None, image=LoadedCommit(REPO_ROOT, None)),
+        fire=partial(
+            module._fire,
+            producer=lambda: None,
+            image=LoadedCommit(REPO_ROOT, None),
+            machine_reader=machine_identity.name,
+        ),
     )
 
     assert len(failures) == 1

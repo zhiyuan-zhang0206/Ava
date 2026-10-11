@@ -114,7 +114,14 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
         encoding="utf-8",
     )
     try:
-        with patch.dict(os.environ, {"AVA_HOME": str(tmp_path), "AVA_CONFIG_FETCH": "skip"}):
+        with patch.dict(
+            os.environ,
+            {
+                "AVA_HOME": str(tmp_path),
+                "AVA_CONFIG_FETCH": "skip",
+                "AVA_MACHINE_NAME": attached_runtime[0]["machine"],
+            },
+        ):
             writers_before = {
                 thread for thread in threading.enumerate() if thread.name == "event-emitter"
             }
@@ -216,6 +223,13 @@ assert dict(os.environ) == before
     assert result.returncode == 0, result.stderr
 
 
+def _assert_competing_attachment_is_refused() -> None:
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(external.attach, "lease")
+        with pytest.raises(RuntimeError, match="already has an external attachment"):
+            future.result(timeout=5)
+
+
 @pytest.mark.parametrize("contended", [False, True], ids=["sequential", "contended"])
 def test_independent_attachment_does_not_redeliver_environment(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
@@ -223,34 +237,32 @@ def test_independent_attachment_does_not_redeliver_environment(
     tmp_path: Path,
     contended: bool,
 ) -> None:
-    (tmp_path / ".env").write_text(
-        "AVA_MACHINE_SERVE_GATEWAY=true\nAVA_TIMEZONE=Asia/Tokyo\n"
-        "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/other-home\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:1/1\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    before = dict(os.environ)
-    delivered = ConfigBoot()
-    delivered.read_process_environment()
-    prior = ava.unbind_context()
-    try:
-        with external.attach("lease"):
-            assert dict(os.environ) == before
-            assert ava.context.require_clock().timezone == delivered.view.general.timezone
-            if contended:
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(external.attach, "lease")
-                    with pytest.raises(RuntimeError, match="already has an external attachment"):
-                        future.result(timeout=5)
-            assert dict(os.environ) == before
-        if not contended:
+    with patch.dict(os.environ, {"AVA_MACHINE_NAME": attached_runtime[0]["machine"]}):
+        (tmp_path / ".env").write_text(
+            "AVA_MACHINE_SERVE_GATEWAY=true\nAVA_TIMEZONE=Asia/Tokyo\n"
+            "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/other-home\n"
+            "AVA_REDIS_URL=redis://127.0.0.1:1/1\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        before = dict(os.environ)
+        delivered = ConfigBoot()
+        delivered.read_process_environment()
+        prior = ava.unbind_context()
+        try:
             with external.attach("lease"):
                 assert dict(os.environ) == before
-        assert dict(os.environ) == before
-    finally:
-        if prior is not None:
-            ava.bind_context(prior)
+                assert ava.context.require_clock().timezone == delivered.view.general.timezone
+                if contended:
+                    _assert_competing_attachment_is_refused()
+                assert dict(os.environ) == before
+            if not contended:
+                with external.attach("lease"):
+                    assert dict(os.environ) == before
+            assert dict(os.environ) == before
+        finally:
+            if prior is not None:
+                ava.bind_context(prior)
 
 
 @pytest.mark.parametrize("failure_at", ["lease", "plugins", "snapshot"])
@@ -296,7 +308,14 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
         encoding="utf-8",
     )
     try:
-        with patch.dict(os.environ, {"AVA_HOME": str(tmp_path), "AVA_CONFIG_FETCH": "skip"}):
+        with patch.dict(
+            os.environ,
+            {
+                "AVA_HOME": str(tmp_path),
+                "AVA_CONFIG_FETCH": "skip",
+                "AVA_MACHINE_NAME": attached_runtime[0]["machine"],
+            },
+        ):
             with monkeypatch.context() as failed:
                 failed.setattr(*target, fail)
                 with pytest.raises(RuntimeError) as raised:
@@ -340,7 +359,14 @@ def test_independent_attachment_seal_wait_reads_its_live_configuration_owner(
     (tmp_path / ".env").write_text("AVA_MACHINE_SERVE_AGENT_RUNNER=true\n", encoding="utf-8")
     prior = ava.unbind_context()
     try:
-        with patch.dict(os.environ, {"AVA_HOME": str(tmp_path), "AVA_CONFIG_FETCH": "skip"}):
+        with patch.dict(
+            os.environ,
+            {
+                "AVA_HOME": str(tmp_path),
+                "AVA_CONFIG_FETCH": "skip",
+                "AVA_MACHINE_NAME": attached_runtime[0]["machine"],
+            },
+        ):
             attachment = external.attach("lease")
             assert len(owners) == 1
             owners[0].set_field("impersonation_event_seal_wait_seconds", 37)

@@ -217,18 +217,37 @@ def test_an_empty_secret_homes_earlier_artifacts_need_the_legacy_option(
 ) -> None:
     """sha256("") is public, so such a home carries a minted passphrase; the
     artifacts written before decrypt only through the explicit legacy option,
-    which is never tried on its own, and never opens a current artifact."""
+    which is never tried on its own, and never recovers a current archive.
+    CBC padding alone does not guarantee rejection at the decrypt stage."""
     old = _written_before_the_pin(backups, monkeypatch, "")
     passphrase.ensure_minted(open_home)
     pinned = passphrase.pinned(open_home)
     assert pinned is not None and pinned != passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE
-    with pytest.raises(RuntimeError, match="--legacy-empty-secret-passphrase"):
-        _restored(old)
+    try:
+        wrong_pin_output = _restored(old)
+    except RuntimeError as exc:
+        if not str(exc).startswith("backup decrypt exited "):
+            raise
+        assert "--legacy-empty-secret-passphrase" in str(exc)
+    else:
+        assert wrong_pin_output != b"PGDMP fake dump"
     assert _restored(old, legacy_empty_secret=True) == b"PGDMP fake dump"
     current = backups()
     assert _restored(current) == b"PGDMP fake dump"
+    # CBC padding can accept wrong-key output; it must never recover the archive.
+    try:
+        wrong_key_output = _restored(current, legacy_empty_secret=True)
+    except RuntimeError as exc:
+        if not str(exc).startswith("backup decrypt exited "):
+            raise
+    else:
+        assert wrong_key_output != b"PGDMP fake dump"
+
+    # A truncated ciphertext deterministically exercises decrypt's exit failure.
+    truncated = current.with_name("truncated.dump.enc")
+    truncated.write_bytes(current.read_bytes()[:-1])
     with pytest.raises(RuntimeError, match="backup decrypt exited"):
-        _restored(current, legacy_empty_secret=True)
+        _restored(truncated, legacy_empty_secret=True)
 
 
 def _crash_after_pin(home: Path, monkeypatch: pytest.MonkeyPatch) -> rotate.Rotation:

@@ -98,11 +98,12 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     assert not model_calls
     if cause == "relay_death":
         detail = await stop_takeover_with_lost_relay(
-            monkeypatch, database, event_bus, owner, ctx.relays
+            monkeypatch, database, event_bus, owner, ctx.relays, machine_identity=machine_identity
         )
     elif cause == "ack_exhaustion":
         detail = stop_takeover_with_exhausted_ack(db_conn, requested, owner)
@@ -112,7 +113,13 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
         monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["dead"]))
         session = leases.native_status(database, event_bus, owner.agent_id, owner)
         await impersonation.supervise_relay(
-            database, event_bus, session, owner.agent_id, ctx.relays, incarnation=owner
+            database,
+            event_bus,
+            session,
+            owner.agent_id,
+            ctx.relays,
+            incarnation=owner,
+            read_local_machine=machine_identity.name,
         )
     died = leases.get(
         database,
@@ -197,6 +204,7 @@ async def test_unreadable_executor_preserves_authority_across_native_wakes(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     pending = deliver_peers_and_ack_first(
         db_conn, database, event_bus, requested, owner.agent_id, machine_identity=machine_identity
@@ -310,6 +318,7 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     pending = deliver_peers_and_ack_first(
         db_conn, database, event_bus, requested, owner.agent_id, machine_identity=machine_identity
@@ -374,6 +383,7 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
         incarnation=successor,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     resumed = await graph.ainvoke(
         reset,
@@ -431,6 +441,7 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     pending = deliver_peers_and_ack_first(
         db_conn, database, event_bus, requested, owner.agent_id, machine_identity=machine_identity
@@ -573,6 +584,7 @@ async def test_end_note_resumes_an_empty_queue(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     leases.release(
         database,
@@ -591,6 +603,7 @@ async def test_end_note_resumes_an_empty_queue(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     assert not model_calls
     assert wakes == [(owner.agent_id, "impersonation")]
@@ -660,6 +673,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     inbound_id = insert_inbound_message(
         db_conn,
@@ -707,6 +721,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     await graph.ainvoke(
         reset,

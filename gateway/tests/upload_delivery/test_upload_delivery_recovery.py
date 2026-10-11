@@ -16,6 +16,7 @@ from base.agents.upload_delivery import source, storage
 from base.agents.upload_delivery.models import (
     CopyProof,
     ReceiveRequest,
+    UnitIdentity,
     UploadDeliveryConflictError,
     current_unit,
 )
@@ -233,7 +234,12 @@ def test_receiver_same_physical_root_different_home_counts_once_and_verifies_rea
     )
     unit = request.target.model_copy(update={"home": request.target.home + "-other"})
     request = request.model_copy(update={"target": unit})
-    monkeypatch.setattr(receiver, "current_unit", lambda: unit)
+
+    def actual_unit(*, local_machine: str) -> UnitIdentity:
+        assert local_machine == machine_identity.name()
+        return unit
+
+    monkeypatch.setattr(receiver, "current_unit", actual_unit)
     monkeypatch.setattr(receiver, "MAX_AGENT_UPLOAD_BYTES", 5)
     proof = receiver.receive(app.state.db_pool, request, local_machine=machine_identity.name())
     assert proof.target == unit
@@ -258,9 +264,12 @@ def test_receiver_wrong_actual_unit_and_legacy_writer_cannot_overwrite_nested_fi
     request = request_for(
         app.state.db_pool, first["batch_id"], local_machine=machine_identity.name()
     )
-    monkeypatch.setattr(
-        receiver, "current_unit", lambda: request.target.model_copy(update={"home": "/wrong"})
-    )
+
+    def wrong_unit(*, local_machine: str) -> UnitIdentity:
+        assert local_machine == machine_identity.name()
+        return request.target.model_copy(update={"home": "/wrong"})
+
+    monkeypatch.setattr(receiver, "current_unit", wrong_unit)
     with pytest.raises(UploadDeliveryConflictError):
         receiver.receive(app.state.db_pool, request, local_machine=machine_identity.name())
     from base.agents.upload_delivery.paths import sanitize_upload_name

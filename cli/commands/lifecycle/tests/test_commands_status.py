@@ -305,11 +305,12 @@ def test_status_shows_the_end_to_end_redis_bridge_row(
     import cli.commands.lifecycle.status as status_mod
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr(
-        status_mod,
-        "print_redis_bridge_status",
-        lambda: sys.stdout.write("  ✗ 10.64.0.7:6380 Redis PING: connection refused\n"),
-    )
+
+    def print_bridge(*, machine: MachineIdentity) -> None:
+        assert machine is command_runtime.machine
+        sys.stdout.write("  ✗ 10.64.0.7:6380 Redis PING: connection refused\n")
+
+    monkeypatch.setattr(status_mod, "print_redis_bridge_status", print_bridge)
 
     assert (
         _status_commands.cmd_status(

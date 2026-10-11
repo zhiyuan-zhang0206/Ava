@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_work_models import NativeWorkTarget
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -19,9 +20,10 @@ from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (
-    _blocked_host,
+    blocked_host,
 )
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _headers(patch: pytest.MonkeyPatch) -> dict[str, str]:
@@ -158,7 +160,9 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
+    machine_identity.set(name="claim-test")
     incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     _insert(db_conn, initial.agent_id)
 
@@ -167,8 +171,12 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
     async def unexpected(_state: object) -> None:
         raise original_error
 
-    _graph, saver, host, context = await _blocked_host(
-        aops_pool, unexpected, model_catalog=model_catalog, database_gate=database_gate
+    _graph, saver, host, context = await blocked_host(
+        aops_pool,
+        unexpected,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     async with hosted_scope(expected_error=RuntimeError) as resources:
         context = replace(context, original_incarnation=incarnation, hosted_resources=resources)
@@ -187,6 +195,7 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
             wake_enabled=configured_policy().recovery_wake_enabled,
             prompt_reap_enabled=configured_policy().recrash_reap_enabled,
             reconcile_inputs=configured_policy().reconcile_inputs,
+            machine=machine_identity,
         )
         assert resources.require_service().failures == [(resources, original_error)]
     row = db_conn.execute(

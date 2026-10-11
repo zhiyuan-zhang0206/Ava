@@ -13,7 +13,7 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
-from agent import impersonation
+from agent import impersonation, impersonation_process
 from base.agents.observation.relay_supervision import relay_exited
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -110,7 +110,7 @@ def test_spawn_never_releases_private_token_before_birth_registration(
         children.append(child)
         return child
 
-    monkeypatch.setattr(impersonation.subprocess, "Popen", spawn)
+    monkeypatch.setattr(impersonation_process.subprocess, "Popen", spawn)
     identities: list[OwnedProcess] = []
 
     def register(child: subprocess.Popen[bytes]) -> None:
@@ -121,12 +121,12 @@ def test_spawn_never_releases_private_token_before_birth_registration(
 
     if registration_fails:
         with pytest.raises(RuntimeError, match="DB disconnected"):
-            impersonation._spawn_codex_relay(
+            impersonation_process.spawn_codex_relay(
                 1, "lease", "private-test-token", "thread", None, register=register
             )
         assert not marker.exists()
     else:
-        child = impersonation._spawn_codex_relay(
+        child = impersonation_process.spawn_codex_relay(
             1, "lease", "private-test-token", "thread", None, register=register
         )
         child.wait(timeout=5)
@@ -266,7 +266,13 @@ async def test_confirmed_child_death_recovers_same_lease_after_db_disconnect(
     )
     with pytest.raises(psycopg.errors.ConnectionTimeout):
         await impersonation.supervise_relay(
-            database, event_bus, current, owner.agent_id, relays, incarnation=owner
+            database,
+            event_bus,
+            current,
+            owner.agent_id,
+            relays,
+            incarnation=owner,
+            read_local_machine=machine_identity.name,
         )
     assert (
         leases.get(
@@ -281,12 +287,18 @@ async def test_confirmed_child_death_recovers_same_lease_after_db_disconnect(
         == "active"
     )
     monkeypatch.setattr(leases, "provision_relay", original)
-    spawn = Mock(wraps=impersonation._spawn_codex_relay)
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    spawn = Mock(wraps=impersonation_process.spawn_codex_relay)
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     await asyncio.gather(
         *(
             impersonation.supervise_relay(
-                database, event_bus, current, owner.agent_id, relays, incarnation=owner
+                database,
+                event_bus,
+                current,
+                owner.agent_id,
+                relays,
+                incarnation=owner,
+                read_local_machine=machine_identity.name,
             )
             for _ in range(2)
         )

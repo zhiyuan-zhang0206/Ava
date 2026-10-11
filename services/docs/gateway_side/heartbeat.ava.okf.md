@@ -10,7 +10,7 @@ tags: []
 ## What is it
 Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` (default 5 minutes) scans idle agents that have been parked longer than `AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS` (default 5 minutes) and whose heartbeat is not paused, inserting a `heartbeat` inbound message for each agent to trigger wake-up. Cluster-wide (cross-machine), not limited to local.
 
-**Role affiliation**: gateway side (pure agent-runner does not run) — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`; roster derived by `services_for_capabilities` intersecting with local `machine_role()`.
+**Role affiliation**: gateway side (pure agent-runner does not run) — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`; `services_for_capabilities` receives explicit roles and the root's retained `MachineIdentity`, whose `role()` supplies the local capability set.
 
 ## Core Responsibilities
 - **Idle detection**: Select eligible `idling` identities whose real `last_active_at` and last heartbeat are old enough. No per-agent PID or live-process lease is required. The insert atomically stamps `last_heartbeat_at`, preventing repeated reminders when a wake performs no model work. Maintenance and circuit-breaker policy remain separate gates; operational status changes do not reset the real activity clock.
@@ -58,3 +58,14 @@ image and retain their own `CodeVersion` / `ProcessDbGate`. Work and telemetry
 factories share the entry's gate. Heartbeat health reports the same captured
 image; the station probe passes its factory into `resolve_target(database=...)`
 and keeps the configured-target no-op and fail-open lookup/probe boundaries.
+The heartbeat root also retains one lazy `MachineIdentity` and supplies it to
+its work loops and telemetry; its database factory borrows the same owner's
+`host` reader without resolving it before a direct-host operation needs it.
+
+The service entry retains its prepared `ConfigBoot` and resolved unit runtime
+path. Endpoint and pidfile operations borrow those inputs through
+`ServiceEndpoints.from_boot`; each original lookup reads the same live view.
+The work and logging database factory calls `db_config_from_boot` at each
+handle creation and retains the entry's gate and lazy machine host reader.
+Schema checks, health-before-pool ordering and shutdown stay at their original
+boundaries. Business-specific configuration slices keep their existing readers.
