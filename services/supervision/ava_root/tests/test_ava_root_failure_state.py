@@ -17,7 +17,6 @@ from services.supervision.ava_root import health as health_mod
 from services.supervision.ava_root.failure_state import (
     FailureKind,
     UnitFailureFacts,
-    UnitFailureView,
     derive_kind,
     describe,
 )
@@ -55,45 +54,26 @@ def _failure(stage: RestartStage = RestartStage.UP, detail: str = "boom") -> Res
     return RestartFailure(stage=stage, since=12.0, detail=detail)
 
 
-def _view(
-    *,
-    intent_running: bool = True,
-    restart_failed: RestartFailure | None = None,
-    breaker_open: bool = False,
-    detail: str = "",
-) -> UnitFailureView:
-    return UnitFailureView(
-        unit="svc",
-        facts=UnitFailureFacts(
-            intent_running=intent_running,
-            restart_failed=restart_failed,
-        ),
-        breaker_open=breaker_open,
-        detail=detail,
-    )
-
-
 def test_derive_kind_priority_and_the_intent_gate() -> None:
-    failure = _failure()
-    assert derive_kind(_view()) is None
-    assert derive_kind(_view(breaker_open=True)) is FailureKind.BREAKER_OPEN
-    assert derive_kind(_view(restart_failed=failure)) is FailureKind.RESTART_FAILED
-    # The recorded replacement failure wins over the breaker, which follows it.
-    both = _view(restart_failed=failure, breaker_open=True)
-    assert derive_kind(both) is FailureKind.RESTART_FAILED
-    assert derive_kind(_view(breaker_open=True)) is FailureKind.BREAKER_OPEN
-    # A stop holds every failure state and still never reports.
-    stopped = _view(intent_running=False, restart_failed=failure, breaker_open=True)
-    assert derive_kind(stopped) is None
+    facts = UnitFailureFacts(intent_running=True, restart_failed=None)
+    assert derive_kind(facts, restart_limit_reached=False) is None
+    assert derive_kind(facts, restart_limit_reached=True) is FailureKind.RESTARTS_EXHAUSTED
+    failed = UnitFailureFacts(intent_running=True, restart_failed=_failure())
+    assert derive_kind(failed, restart_limit_reached=True) is FailureKind.RESTART_FAILED
+    stopped = UnitFailureFacts(intent_running=False, restart_failed=_failure())
+    assert derive_kind(stopped, restart_limit_reached=True) is None
 
 
 def test_describe_carries_the_kind_evidence() -> None:
-    assert describe(
-        _view(restart_failed=_failure(RestartStage.DOWN, "stop refused")),
-        FailureKind.RESTART_FAILED,
-    ) == ("replacement failed at its down half: stop refused")
-    assert describe(_view(detail="no probe"), FailureKind.BREAKER_OPEN) == "no probe"
-    assert describe(_view(), FailureKind.BREAKER_OPEN) == "restart breaker open"
+    failed = UnitFailureFacts(
+        intent_running=True, restart_failed=_failure(RestartStage.DOWN, "stop refused")
+    )
+    assert describe(failed, FailureKind.RESTART_FAILED) == (
+        "replacement failed at its down half: stop refused"
+    )
+    facts = UnitFailureFacts(intent_running=True, restart_failed=None)
+    assert describe(facts, FailureKind.RESTARTS_EXHAUSTED, "no probe") == "no probe"
+    assert describe(facts, FailureKind.RESTARTS_EXHAUSTED) == "automatic restart attempts exhausted"
 
 
 class _Supervisor:
@@ -146,34 +126,28 @@ def _monitor(supervisor: _Supervisor, probe: Callable[[], DaemonProbe]) -> Healt
     values: dict[str, Any] = {
         "interval_s": 0.01,
         "startup_grace_s": 0.0,
-        "verify_deadline_s": 0.05,
-        "verify_interval_s": 0.001,
-        "failures_before_restart": 1,
-        "backoff_base_s": 600.0,
-        "backoff_cap_s": 600.0,
-        "breaker_rounds": 3,
+        "max_restart_attempts": 3,
     }
     return HealthMonitor(supervisor, registry, config=HealthConfig(**values))
 
 
-async def test_breaker_state_is_emitted_every_round_it_holds_then_stops(
+async def test_exhausted_attempts_are_reported_every_round_then_clear_on_alive(
     clock: _Clock, recorder: _Recorder
 ) -> None:
     probe = _Cell(DaemonProbe.down("no"))
     monitor = _monitor(_Supervisor(), probe)
-    await monitor.run_round()  # 1: restart attempt, not verified
-    await monitor.run_round()  # 2: backing off
+    await monitor.run_round()  # 1: first restart attempt
+    await monitor.run_round()  # 2: second restart attempt
     assert recorder.events("root_unit_failure_state") == []
-    await monitor.run_round()  # 3: the breaker opens
+    await monitor.run_round()  # 3: the final attempt exhausts the budget
     await monitor.run_round()  # 4: held
     states = recorder.events("root_unit_failure_state")
     assert [(s["unit"], s["kind"], s["level"]) for s in states] == [
-        ("svc", "breaker_open", "warning"),
-        ("svc", "breaker_open", "warning"),
+        ("svc", "restarts_exhausted", "warning"),
+        ("svc", "restarts_exhausted", "warning"),
     ]
-    assert len(recorder.events("root_restart_breaker_open")) == 1  # the edge stays one
     probe.verdict = DaemonProbe.up("ok")
-    await monitor.run_round()  # alive: the breaker closes and the signal stops
+    await monitor.run_round()  # alive: the budget resets and the signal stops
     assert len(recorder.events("root_unit_failure_state")) == 2
 
 

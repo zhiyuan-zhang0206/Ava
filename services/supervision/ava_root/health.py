@@ -1,4 +1,4 @@
-"""Root-owned service health, with bounded observation and verified recovery.
+"""Root-owned service health, with bounded observation and finite process restarts.
 
 Only observed DOWN results can request replacement through the supervisor.
 Unknown identity, inspection errors, timeouts, and foreign listeners are terminal
@@ -20,12 +20,7 @@ from typing import Protocol
 
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
-from services.supervision.ava_root.failure_state import (
-    UnitFailureFacts,
-    UnitFailureView,
-    derive_kind,
-    describe,
-)
+from services.supervision.ava_root.failure_state import UnitFailureFacts, derive_kind, describe
 from services.supervision.ava_root.manifest import UnknownUnitError
 from services.supervision.ava_root.probes import Probe, ProbeError, ProbeRegistry
 
@@ -33,7 +28,7 @@ _log = logging.getLogger(__name__)
 
 
 def _monotonic() -> float:
-    """Wall-independent backoff clock, replaceable in tests."""
+    """Wall-independent startup clock, replaceable in tests."""
     return time.monotonic()
 
 
@@ -78,23 +73,8 @@ class HealthConfig:
     startup_grace_s: float = 20.0
     """Generic generation startup budget; deployment supplies per-unit readiness tiers."""
 
-    verify_deadline_s: float = 20.0
-    """How long a restart's confirmation poll may run, probe-inclusive."""
-
-    verify_interval_s: float = 0.5
-    """Spacing between confirmation polls inside that window."""
-
-    failures_before_restart: int = 1
-    """Consecutive non-alive rounds required before the restart action."""
-
-    backoff_base_s: float = 60.0
-    """First delay armed after a restart that failed to verify; doubles per try."""
-
-    backoff_cap_s: float = 1800.0
-    """Ceiling for that delay."""
-
-    breaker_rounds: int = 5
-    """Consecutive non-alive rounds that open the hold-forever breaker."""
+    max_restart_attempts: int = 3
+    """Actual restarts allowed during one continuous outage, per root process."""
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.startup_grace_s) or self.startup_grace_s < 0:
@@ -103,21 +83,8 @@ class HealthConfig:
             raise ValueError("probe_timeout_s must be positive")
         if self.interval_s <= 0:
             raise ValueError("interval_s must be positive")
-        if self.verify_interval_s <= 0:
-            raise ValueError("verify_interval_s must be positive")
-        if self.verify_deadline_s <= 0:
-            raise ValueError("verify_deadline_s must be positive")
-        if self.backoff_base_s <= 0:
-            raise ValueError("backoff_base_s must be positive")
-        if self.backoff_cap_s < self.backoff_base_s:
-            raise ValueError("backoff_cap_s must be at least backoff_base_s")
-        if self.failures_before_restart < 1:
-            raise ValueError("failures_before_restart must be at least 1")
-        if self.breaker_rounds <= self.failures_before_restart:
-            # The breaker check runs before the threshold branch: an equal value
-            # would open the breaker on the very round the threshold is met and
-            # hold without a single restart attempt (same rule as run_keepalive).
-            raise ValueError("breaker_rounds must be greater than failures_before_restart")
+        if self.max_restart_attempts < 1:
+            raise ValueError("max_restart_attempts must be at least 1")
 
 
 @dataclass(slots=True)
@@ -130,17 +97,8 @@ class UnitHealth:
     generation_ready: bool = False
     """Whether this generation has produced a fresh ALIVE observation."""
 
-    consecutive_failures: int = 0
-    """Counted non-alive rounds since the last reset; expected stops do not count."""
-
-    respawn_attempts: int = 0
-    """Restart attempts since the last reset — the backoff exponent."""
-
-    next_respawn_at: float | None = None
-    """Monotonic deadline before the next restart is due (armed per attempt)."""
-
-    breaker_since: float | None = None
-    """Monotonic time the breaker opened; None while it is closed."""
+    restart_attempts: int = 0
+    """Actual automatic restart calls since ALIVE or an observed operator stop."""
 
     last_verdict: str | None = None
     """Value of the last probe verdict (`alive` / `down` / `port-taken` / `unavailable`)."""
@@ -149,20 +107,9 @@ class UnitHealth:
     """Detail string of the last probe verdict."""
 
 
-# The supervisor's deferral reason for a unit whose explicit intent is stopped
-# (`intent != RUNNING`, set by the operator or the service selection). That
-# state is EXPECTED, never a failure: it is the one reason a down verdict
-# neither counts toward the breaker nor reports a failure. Every other reason (an
-# in-flight retry, a `never` policy) suppresses the action only.
+# Explicit stop is expected; every other deferral remains visible as a warning.
 _HELD_DOWN = "held down"
-
-# The reason held for a unit that is not in this tree at all (the static probe
-# path — a deployment-registered observer outside the supervisor's registry,
-# task #3393): the runner reports it but has no restart verb to reach for.
 _NO_REVIVAL_VERB = "no revival verb (not a tree unit)"
-
-# What a confirmation poll reports when the verification window closes before the probe answers.
-_WINDOW_CLOSED = "replacement did not answer within the verification window"
 
 
 class _ProbeObservation:
@@ -243,10 +190,8 @@ class ProbeRunner:
         if not future.cancelled():
             future.exception()
 
-    async def observe(
-        self, probe: Probe, timeout_s: float, *, overdue: DaemonProbe | None = None
-    ) -> DaemonProbe:
-        """One verdict; a probe still running at the deadline is `overdue`, else UNAVAILABLE."""
+    async def observe(self, probe: Probe, timeout_s: float) -> DaemonProbe:
+        """One verdict; an observation still running at its deadline is UNAVAILABLE."""
         if self._closed:
             raise RuntimeError("probe runner admission closed")
         if self._observation is not None and not self._observation.future.done():
@@ -260,8 +205,6 @@ class ProbeRunner:
         try:
             result = await asyncio.wait_for(asyncio.shield(pending), timeout_s)
         except TimeoutError:
-            if overdue is not None:
-                return overdue
             return DaemonProbe.unavailable(f"observation exceeded {timeout_s:g}s deadline")
         return result
 
@@ -320,13 +263,11 @@ class HealthMonitor:
             except UnknownUnitError:
                 continue
             state = self._units.get(unit_id)
-            view = UnitFailureView(
-                unit=unit_id,
-                facts=facts,
-                breaker_open=state is not None and state.breaker_since is not None,
-                detail=state.last_detail if state is not None else "",
+            kind = derive_kind(
+                facts,
+                restart_limit_reached=state is not None
+                and state.restart_attempts >= self._config.max_restart_attempts,
             )
-            kind = derive_kind(view)
             if kind is None:
                 continue
             from base.log import logger
@@ -336,7 +277,7 @@ class HealthMonitor:
                 event="root_unit_failure_state",
                 unit=unit_id,
                 kind=kind.value,
-                detail=describe(view, kind),
+                detail=describe(facts, kind, state.last_detail if state is not None else ""),
             )
 
     async def start(self) -> None:
@@ -384,40 +325,19 @@ class HealthMonitor:
 
     def health_snapshot(self) -> dict[str, object]:
         """A plain-dict view for `Supervisor.status()` (the B7 health surface)."""
-        now = _monotonic()
         units: dict[str, object] = {}
         for unit_id, state in self._units.items():
             units[unit_id] = {
                 "startup_remaining_s": self._startup_remaining(unit_id, state),
                 "generation_ready": state.generation_ready,
-                "consecutive_failures": state.consecutive_failures,
-                "respawn_attempts": state.respawn_attempts,
-                "breaker_open": state.breaker_since is not None,
-                "breaker_for_s": (
-                    None if state.breaker_since is None else max(0.0, now - state.breaker_since)
-                ),
-                "next_restart_in_s": (
-                    None if state.next_respawn_at is None else self._backoff_remaining(state)
+                "restart_attempts": state.restart_attempts,
+                "restart_limit_reached": (
+                    state.restart_attempts >= self._config.max_restart_attempts
                 ),
                 "last_verdict": state.last_verdict,
                 "last_detail": state.last_detail,
             }
         return units
-
-    @staticmethod
-    def _emit_breaker_open(unit_id: str, rounds: int, attempts: int, detail: str) -> None:
-        """One registered event when a unit's restart breaker opens."""
-        from base.log import logger
-
-        logger.warning(
-            "[health] unit {unit}: restart breaker OPEN after {rounds} rounds without a "
-            "live probe ({detail}) — holding restarts; manual intervention needed",
-            event="root_restart_breaker_open",
-            unit=unit_id,
-            rounds=rounds,
-            respawn_attempts=attempts,
-            detail=detail,
-        )
 
     async def _loop(self) -> None:
         # quiesce-exempt: probes service health endpoints and process state; no database
@@ -427,12 +347,10 @@ class HealthMonitor:
 
     # ── one unit ─────────────────────────────────────────────────────────────
 
-    def _resolvable_probe(
-        self, unit_id: str, state: UnitHealth
-    ) -> tuple[Callable[[], DaemonProbe] | None]:
+    def _resolvable_probe(self, unit_id: str, state: UnitHealth) -> Probe | None:
         """Resolve the unit's probe, or report the no-verdict case and answer None."""
         try:
-            return (self._registry.resolve(unit_id),)
+            return self._registry.resolve(unit_id)
         except ProbeError as exc:
             state.last_verdict = "unavailable"
             state.last_detail = str(exc)
@@ -441,11 +359,11 @@ class HealthMonitor:
                 unit_id,
                 exc,
             )
-            return (None,)
+            return None
 
     async def _check_unit(self, unit_id: str) -> None:
         state = self._unit_state(unit_id)
-        (probe,) = self._resolvable_probe(unit_id, state)
+        probe = self._resolvable_probe(unit_id, state)
         if probe is None:
             return
         result = await self._probe(unit_id, probe)
@@ -473,7 +391,7 @@ class HealthMonitor:
             return
 
         if result.terminal:
-            self._report_terminal(unit_id, state, result.detail)
+            self._report_terminal(unit_id, result.detail)
             return
 
         startup_remaining = self._startup_remaining(unit_id, state)
@@ -487,15 +405,9 @@ class HealthMonitor:
             )
             return
 
-        deferred_note = "" if deferral is None else f" — restart deferred: {deferral}"
-
         if self._gate is not None:
             allowed, why = self._gate()
             if not allowed:
-                # A declined round is "not yet allowed", never "a restart cannot
-                # cure it": state resets so the first open round can act
-                # (issue #2101).
-                self._reset(state)
                 _log.info(
                     "[health] unit %s: down (%s) but %s — not restarting this round",
                     unit_id,
@@ -503,163 +415,49 @@ class HealthMonitor:
                     why,
                 )
                 return
-
-        if not self._count_and_gate(unit_id, state, result.detail, deferred_note):
-            return
-        if deferral == _NO_REVIVAL_VERB:
-            _log.info(
-                "[health] unit %s: down (%s) — outside this tree (no revival verb); "
-                "reporting only, not restarting",
-                unit_id,
-                result.detail,
-            )
-            return
         if deferral is not None:
-            _log.info(
-                "[health] unit %s: down (%s) — restart deferred (%s); not restarting this round",
-                unit_id,
-                result.detail,
-                deferral,
-            )
+            self._report_terminal(unit_id, f"{result.detail}; restart deferred: {deferral}")
             return
-        _log.info("[health] unit %s: down (%s), restarting...", unit_id, result.detail)
-        state.respawn_attempts += 1
-        after, delay_s = await self._restart_and_verify(unit_id, state, probe)
-        state.last_verdict = after.verdict.value
-        state.last_detail = after.detail
-        if after.alive:
-            self._reset(state)
-            _log.info("[health] unit %s: restarted, verified alive (%s)", unit_id, after.detail)
-            return
-        if after.terminal:
-            self._reset(state)
-            _log.error(
-                "[health] unit %s: restart cannot win (%s) — not retrying; resolve the "
-                "reported ownership or inspection failure before retrying",
-                unit_id,
-                after.detail,
-            )
-            return
-        self._report_unready_restart(unit_id, state, after.detail, delay_s)
+        if state.restart_attempts >= self._config.max_restart_attempts:
+            return  # The per-round failure-state signal reports exhausted attempts.
+        state.restart_attempts += 1
+        _log.warning(
+            "[health] unit %s: down (%s), restarting (%d/%d)",
+            unit_id,
+            result.detail,
+            state.restart_attempts,
+            self._config.max_restart_attempts,
+        )
+        await self._supervisor.restart(unit_id)
+        # Spawn acceptance is not readiness. The next ordinary round observes it.
 
-    def _report_terminal(self, unit_id: str, state: UnitHealth, detail: str) -> None:
-        """Report one terminal verdict, once per round it is observed.
-
-        One flaky inspection round (a psutil race mapping to UNAVAILABLE, or a
-        replacement's ownership gap) is alive again next round, so the source
-        level is WARNING; whether a persisting condition pages is the
-        observability rule's pending period. The restart machinery resets either
-        way — terminal never restarts.
-        """
-        self._reset(state)
+    @staticmethod
+    def _report_terminal(unit_id: str, detail: str) -> None:
+        """Report a non-restartable observation without replenishing the budget."""
         from base.log import logger
 
         logger.warning(
             "[health] unit {unit}: NOT REVIVABLE by this unit ({detail}) — not restarting; "
-            "resolve the reported ownership or inspection failure before retrying",
+            "resolve the reported failure before retrying",
             event="root_unit_not_revivable",
             unit=unit_id,
             detail=detail,
         )
 
-    def _report_unready_restart(
-        self, unit_id: str, state: UnitHealth, detail: str, delay_s: float
-    ) -> None:
-        startup_remaining = self._startup_remaining(unit_id, state)
-        if startup_remaining > 0:
-            _log.info(
-                "[health] unit %s: replacement is initializing (%s); startup has %.1fs remaining",
-                unit_id,
-                detail,
-                startup_remaining,
-            )
-            return
-        _log.warning(
-            "[health] unit %s: restart FAILED (%s) — next attempt in %ds",
-            unit_id,
-            detail,
-            int(delay_s),
-        )
-
-    def _count_and_gate(
-        self, unit_id: str, state: UnitHealth, detail: str, deferred_note: str
-    ) -> bool:
-        """Count the round, run the breaker, and answer whether to restart now.
-
-        Same order and log lines as the original inline block: breaker check
-        first, then the consecutive-failure threshold, then the post-restart
-        backoff; the restart itself stays with the caller.
-        """
-        failures = state.consecutive_failures + 1
-        state.consecutive_failures = failures
-        if failures >= self._config.breaker_rounds and state.breaker_since is None:
-            state.breaker_since = _monotonic()
-            # One registered event when the hold opens; the per-round
-            # hold line below carries the continuing state.
-            self._emit_breaker_open(unit_id, failures, state.respawn_attempts, detail)
-        if state.breaker_since is not None:
-            _log.warning(
-                "[health] unit %s: down, restart held for %.0fs (%s) — not restarting%s",
-                unit_id,
-                _monotonic() - state.breaker_since,
-                detail,
-                deferred_note,
-            )
-            return False
-        if failures < self._config.failures_before_restart:
-            _log.warning(
-                "[health] unit %s: probe failed (%d/%d) — not restarting yet",
-                unit_id,
-                failures,
-                self._config.failures_before_restart,
-            )
-            return False
-        backoff = self._backoff_remaining(state)
-        if backoff > 0:
-            _log.warning(
-                "[health] unit %s: down (%s) — backing off after a failed restart; "
-                "next attempt in %ds",
-                unit_id,
-                detail,
-                int(backoff),
-            )
-            return False
-        return True
-
     def _deferral(self, unit_id: str) -> str | None:
-        """Why a would-be reviver must not act — with out-of-tree units folded in.
-
-        A unit registered by probe only (the static path — a
-        deployment-registered observer outside this registry, task #3393) is
-        absent from the supervisor's registry, and `revival_deferral` raises
-        `UnknownUnitError` for it. Nothing in this tree can revive it, so it
-        holds under `_NO_REVIVAL_VERB` like any other suppressed action —
-        counted toward the breaker, surfaced, never restarted.
-        """
+        """Probe-only units are observation targets, with no restart authority."""
         try:
             return self._supervisor.revival_deferral(unit_id)
         except UnknownUnitError:
             return _NO_REVIVAL_VERB
 
-    async def _probe(
-        self, unit_id: str, probe: Probe, *, timeout_s: float | None = None
-    ) -> DaemonProbe:
+    async def _probe(self, unit_id: str, probe: Probe) -> DaemonProbe:
         """Inspection failures are unavailable evidence, never permission to restart."""
         if self._closed:
             raise RuntimeError("root health admission closed")
         runner = self._runners.setdefault(unit_id, ProbeRunner())
-        budget = self._config.probe_timeout_s
-        # A budget cut short by the caller's verification window is not the
-        # probe's own deadline: the window closing says the replacement is still
-        # unconfirmed (DOWN), nothing about whether inspection works.
-        window_bound = timeout_s is not None and timeout_s < budget
-        if timeout_s is not None:
-            budget = min(budget, timeout_s)
-        if budget <= 0:
-            return DaemonProbe.down(_WINDOW_CLOSED)
         before = self._generation(unit_id)
-        overdue = DaemonProbe.down(_WINDOW_CLOSED) if window_bound else None
-        result = await runner.observe(probe, budget, overdue=overdue)
+        result = await runner.observe(probe, self._config.probe_timeout_s)
         after = self._generation(unit_id)
         state = self._unit_state(unit_id)
         if state.generation != after:
@@ -683,35 +481,6 @@ class HealthMonitor:
         grace = self._startup_graces.get(unit_id, self._config.startup_grace_s)
         return max(0.0, state.generation[1] + grace - _monotonic())
 
-    async def _restart_and_verify(
-        self, unit_id: str, state: UnitHealth, probe: Probe
-    ) -> tuple[DaemonProbe, float]:
-        """Subtree-replace the unit, then poll the probe until it confirms.
-
-        Returns the last verdict and the backoff delay armed for the next
-        attempt. A terminal verdict ends the poll immediately (the occupant will
-        not yield); the deadline bounds
-        the rest.
-        """
-        delay_s = min(
-            self._config.backoff_base_s * (2 ** (state.respawn_attempts - 1)),
-            self._config.backoff_cap_s,
-        )
-        state.next_respawn_at = _monotonic() + delay_s
-        await self._supervisor.restart(unit_id)
-        # The verb's return says "replacement accepted", never "serving" — only
-        # the probe decides what happened (the readiness contract).
-        deadline = _monotonic() + self._config.verify_deadline_s
-        result = await self._probe(unit_id, probe, timeout_s=deadline - _monotonic())
-        while not result.alive and not result.terminal and _monotonic() < deadline:
-            await asyncio.sleep(
-                min(self._config.verify_interval_s, max(0, deadline - _monotonic()))
-            )
-            if _monotonic() >= deadline:
-                break
-            result = await self._probe(unit_id, probe, timeout_s=deadline - _monotonic())
-        return result, delay_s
-
     def _unit_state(self, unit_id: str) -> UnitHealth:
         state = self._units.get(unit_id)
         if state is None:
@@ -721,15 +490,5 @@ class HealthMonitor:
 
     @staticmethod
     def _reset(state: UnitHealth) -> None:
-        """Full reset: failure count, backoff exponent + deadline, breaker."""
-        state.consecutive_failures = 0
-        state.respawn_attempts = 0
-        state.next_respawn_at = None
-        state.breaker_since = None
-
-    @staticmethod
-    def _backoff_remaining(state: UnitHealth) -> float:
-        """Seconds until the next restart is due (0 when none is armed or it is due)."""
-        if state.next_respawn_at is None:
-            return 0.0
-        return max(0.0, state.next_respawn_at - _monotonic())
+        """A healthy observation or expected stop ends the continuous outage."""
+        state.restart_attempts = 0
