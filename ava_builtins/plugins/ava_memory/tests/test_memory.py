@@ -1,4 +1,4 @@
-"""`ava.memory.PATH` + `search` + `IndexerUnavailable` unit tests.
+"""`ava.memory.PATH` + `PERSONAL_PATH` + `search` + `IndexerUnavailable` unit tests.
 
 After PR-1 (`feat: route ava.memory.search through gateway`), the SDK calls the
 local gateway over HTTP, **no longer** importing the embedder or a vector store directly.
@@ -54,6 +54,47 @@ def test_path_under_unit_home() -> None:
 def test_path_is_path_object() -> None:
     """PATH is pathlib.Path, not str — agent can directly .iterdir() / .glob() / join /."""
     assert isinstance(ava.memory.PATH, Path)
+
+
+# ── PERSONAL_PATH constant ───────────────────────────────────────────────
+
+
+def test_personal_path_is_the_memory_folder_of_the_agent_workspace() -> None:
+    from base.paths import workspace_dir
+    from tests.fixtures.pin_agent import pin_agent
+
+    pin_agent(17)
+    assert workspace_dir(17) / "memory" == ava.memory.PERSONAL_PATH
+    assert isinstance(ava.memory.PERSONAL_PATH, Path)
+    assert "PERSONAL_PATH" in ava.memory.__all_for_ava__
+
+
+def test_personal_path_needs_an_agent_identity() -> None:
+    from tests.fixtures.pin_agent import pin_no_identity
+
+    pin_no_identity()
+    with pytest.raises(AttributeError, match="needs an established agent identity"):
+        _ = ava.memory.PERSONAL_PATH
+    assert not hasattr(ava.memory, "PERSONAL_PATH")
+
+
+def test_there_is_no_memory_writer() -> None:
+    """Notes are written with `ava.files`; `ava.memory` has no `write`."""
+    assert "write" not in ava.memory.__all_for_ava__
+    assert not hasattr(ava.memory, "write")
+
+
+@pytest.mark.parametrize("name", ["PATH", "PERSONAL_PATH"])
+def test_path_docs_carry_the_note_format(name: str) -> None:
+    """`help()` on either path shows the frontmatter fields and the one-type-tag rule."""
+    from tests.fixtures.pin_agent import pin_agent
+
+    pin_agent(17)
+    doc = getattr(ava.memory, name).__doc__
+    for required in ("type: Memory", "ava_agent:", "ava_machine:", "timestamp:", "title:"):
+        assert required in doc
+    assert "description:" in doc and "tags: [type/<kind>]" in doc
+    assert "ava.files.write" in doc
 
 
 # ── search SDK layer (HTTP wire) ─────────────────────────────────────────

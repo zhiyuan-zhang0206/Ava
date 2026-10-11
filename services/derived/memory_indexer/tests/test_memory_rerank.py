@@ -67,14 +67,16 @@ class _FakeJudge:
         self.rule = dict(rule or {})
         self.default = default
         self.calls: list[tuple[str, str, YesNo]] = []
+        self.usage_kinds: list[str] = []
         self.in_flight = 0
         self.max_in_flight = 0
 
     async def __call__(
-        self, model: str, state: str, question: YesNo, *, catalog: ModelCatalog
+        self, model: str, state: str, question: YesNo, *, catalog: ModelCatalog, usage_kind: str
     ) -> float:
         del catalog
         self.calls.append((model, state, question))
+        self.usage_kinds.append(usage_kind)
         self.in_flight += 1
         self.max_in_flight = max(self.max_in_flight, self.in_flight)
         try:
@@ -217,19 +219,40 @@ async def test_purpose_selects_the_state_lead_in_and_the_question(
 ) -> None:
     _write(tmp_path, "a.md", "---\ntype: Memory\n---\n\nbody a")
     seen: dict[str, tuple[str, YesNo]] = {}
-    for purpose in ("recall", "search"):
+    for purpose in ("recall", "search", "dedup"):
         judge = _FakeJudge()
         _install(monkeypatch, judge)
         await _rank(tmp_path, catalog, [_hit(tmp_path, "a.md")], query="Q!", purpose=purpose)
         _, state, question = judge.calls[0]
         seen[purpose] = (state, question)
 
-    (recall_state, recall_q), (search_state, search_q) = seen["recall"], seen["search"]
-    assert recall_state.splitlines()[0] != search_state.splitlines()[0]
-    assert "Q!" in recall_state and "Q!" in search_state
-    assert recall_q != search_q
-    for question in (recall_q, search_q):
+    leads = {state.splitlines()[0] for state, _ in seen.values()}
+    questions = {question for _, question in seen.values()}
+    assert len(leads) == len(questions) == 3
+    for state, question in seen.values():
+        assert "Q!" in state
         assert question.question and question.true_if and question.false_if
+    # The recall and search state keeps its calibrated shape; only dedup labels the candidate.
+    assert "\n\nCandidate memory note:\n" in seen["recall"][0]
+    assert "\n\nCandidate memory note:\n" in seen["search"][0]
+    assert "\n\nExisting memory note:\n" in seen["dedup"][0]
+
+
+async def test_duplicate_check_is_billed_apart_from_search(
+    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, "a.md", "---\ntype: Memory\n---\n\nbody a")
+    kinds: dict[str, list[str]] = {}
+    for purpose in ("recall", "search", "dedup"):
+        judge = _FakeJudge()
+        _install(monkeypatch, judge)
+        await _rank(tmp_path, catalog, [_hit(tmp_path, "a.md")], purpose=purpose)
+        kinds[purpose] = judge.usage_kinds
+    assert kinds == {
+        "recall": ["memory_rerank"],
+        "search": ["memory_rerank"],
+        "dedup": ["memory_write_dedup"],
+    }
 
 
 async def test_stale_hits_are_skipped(
@@ -347,16 +370,27 @@ async def test_ask_relevance_reads_the_true_probability_and_clamps(
 
     monkeypatch.setattr(rerank, "decide", fake_decide)
     question = YesNo("q?", "yes", "no")
-    assert await rerank.ask_relevance("m", "the state", question, catalog=catalog) == 1.0
-    assert await rerank.ask_relevance("m", "the state", question, catalog=catalog) == 0.3
+    kind = "memory_write_dedup"
+    assert (
+        await rerank.ask_relevance("m", "the state", question, catalog=catalog, usage_kind=kind)
+        == 1.0
+    )
+    assert (
+        await rerank.ask_relevance("m", "the state", question, catalog=catalog, usage_kind=kind)
+        == 0.3
+    )
     assert seen["model"] == "m"
     assert seen["state"] == "the state"
-    assert seen["usage_kind"] == rerank.USAGE_KIND
+    assert seen["usage_kind"] == kind
     assert len(seen["ids"]) == 1  # pyright: ignore[reportArgumentType]
 
 
 async def test_unknown_decision_model_is_a_clear_error(catalog: ModelCatalog) -> None:
     with pytest.raises(IndexerUnavailable, match=r"memory rerank failed.*not-a-decision-model"):
         await rerank.ask_relevance(
-            "not-a-decision-model", "state", YesNo("q?", "yes", "no"), catalog=catalog
+            "not-a-decision-model",
+            "state",
+            YesNo("q?", "yes", "no"),
+            catalog=catalog,
+            usage_kind="memory_rerank",
         )

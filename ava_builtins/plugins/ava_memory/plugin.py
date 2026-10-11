@@ -1,12 +1,13 @@
-"""ava_memory plugin — shared memory pool: the full `ava.memory` surface + passive recall hook + daily consolidation skill.
+"""ava_memory plugin — shared memory pool: the full `ava.memory` surface + passive recall hook + write check + daily consolidation skill.
 
-Three capabilities live under one plugin because they share the same domain (the
+Four capabilities live under one plugin because they share the same domain (the
 shared memory pool at ava.memory.PATH):
 
-1. **ava.memory namespace** (PATH + search + write) — the agent-facing SDK surface.
+1. **ava.memory namespace** (PATH + PERSONAL_PATH + search) — the agent-facing SDK surface.
    This plugin OWNS the `ava.memory` top-level namespace. Disabling it removes
-   `ava.memory` entirely — PATH, search(), write(), IndexerUnavailable — not just
-   passive recall.
+   `ava.memory` entirely — PATH, PERSONAL_PATH, search(), IndexerUnavailable — not just
+   passive recall. There is no writer: an agent writes a note with `ava.files.write` under
+   PATH or PERSONAL_PATH.
 
 2. **Passive memory recall** (before_llm hook) — on a turn woken by fresh user
    inbound, searches the pool semantically on the recent conversation and
@@ -24,7 +25,22 @@ shared memory pool at ava.memory.PATH):
    consolidation procedure is the ava.skills.ava_memory.consolidation
    sub-skill.
 
-Disabling this plugin removes the entire ava.memory surface, passive recall,
+4. **Memory write check** — wraps `ava.files.write` / `append` / `edit` to record which memory
+   notes (.md files under PATH or PERSONAL_PATH) an exec call wrote, and an after_exec hook
+   (`agent_runtime.py`, logic in `write_checks.py`) that checks them in the agent process: the
+   pool's own single-note rules (`template/validate.py`) for every note, and for shared notes a
+   duplicate search whose probabilities a decision model produces. The outcome only ever adds a
+   reminder note: the write is never blocked, rewritten or made to raise, and a check that fails or
+   runs out of time is logged and dropped. The wraps are the only part inside the exec subprocess
+   (`written_notes.py`): no network request and no httpx or decision-model import.
+
+   Wrap order: plugins stack in name order and the later one is outermost, so `ava_memory` sits
+   outside `ava_code`'s cwd-tracking wraps of the same two targets. It calls the layer below
+   exactly once, hands back its result (or lets its exception propagate), and only then records
+   the path; because it sees the caller's raw path it resolves a relative one against the
+   tracked `ava.cwd` itself.
+
+Disabling this plugin removes the entire ava.memory surface, passive recall, the write check,
 and the bundled memory skills.
 
 Passive recall in detail:
@@ -68,28 +84,63 @@ retries on the next turn.
 
 from __future__ import annotations
 
-__description__ = "Shared memory pool: ava.memory SDK surface (PATH + search + write) + passive recall hook (auto-surfaces relevant notes) + daily consolidation skill (commit, push, re-index)"
+__description__ = "Shared memory pool: ava.memory SDK surface (PATH + PERSONAL_PATH + search) + passive recall hook (auto-surfaces relevant notes) + write check (rule and duplicate reminders for notes written with ava.files) + daily consolidation skill (commit, push, re-index)"
 
 # This module is the plugin's SDK **surface** — the only face an agent-launched
 # child loads (task #3633). Its agent-runtime registrations (the two context-note
 # indexes, the memory-discipline prompt section, the passive-recall before_llm
-# hook) live in `agent_runtime.py`, imported only on the full path (see
-# `agent/extensions/__init__.py`).
+# hook, the write-check hook) live in `agent_runtime.py`, imported only on the full path (see
+# `agent/extensions/__init__.py`). The two `files.*` wraps below run in the exec
+# subprocess and keep to the surface-only imports.
 
 
-from base.packages.plugins.extensions import PluginContributions, SdkNamespace
+from collections.abc import Callable
+from pathlib import Path
+
+from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
 
 from . import sdk as _memory_sdk
+from .written_notes import record_written_note
 
 # ── ava.memory namespace declaration ──────────────────────────────────
-# The SDK surface (PATH / search / write) lives in `sdk.py` — a real module
+# The SDK surface (PATH / PERSONAL_PATH / search) lives in `sdk.py` — a real module
 # that IS the `ava.memory` namespace. the SDK install puts the same object
 # on the package (attribute access) and in sys.modules under `ava.memory`
 # (`import ava.memory`), so both spellings resolve identically.
+
+
+# ── wrap ava.files.write / append / edit ─────────────────────────────
+# Transparent: `inner` is called exactly once with the caller's arguments, its result is returned
+# and its exception propagates untouched; the note is recorded only after a write that succeeded.
+# Recording never raises (`record_written_note`). None of the wraps carries a docstring, so the rendered
+# SDK keeps the original `files.*` contracts.
+def _wrapped_write(inner: Callable[..., None], path: str | Path, content: str) -> None:
+    result = inner(path, content)
+    record_written_note(path)
+    return result
+
+
+def _wrapped_append(inner: Callable[..., None], path: str | Path, content: str) -> None:
+    result = inner(path, content)
+    record_written_note(path)
+    return result
+
+
+def _wrapped_edit(
+    inner: Callable[..., None], path: str | Path, old: str, new: str, *, replace_all: bool = False
+) -> None:
+    result = inner(path, old, new, replace_all=replace_all)
+    record_written_note(path)
+    return result
 
 
 def contribute() -> PluginContributions:
     """What this plugin declares for the SDK surface."""
     return PluginContributions(
         sdk_namespaces=(SdkNamespace("memory", _memory_sdk, expand=False),),
+        sdk_wraps=(
+            SdkWrap("files.write", _wrapped_write),
+            SdkWrap("files.append", _wrapped_append),
+            SdkWrap("files.edit", _wrapped_edit),
+        ),
     )

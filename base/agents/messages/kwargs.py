@@ -94,6 +94,7 @@ class NoteTag(StrEnum):
     HISTORY_DUMP = "history_dump"
     SILENT_IDLE_CONTINUE = "silent_idle_continue"
     MEMORY = "memory"
+    MEMORY_WRITE_CHECK = "memory_write_check"
     LIFECYCLE_TERMINATE = "lifecycle_terminate"
     LIFECYCLE_RESTART = "lifecycle_restart"
     LIFECYCLE_RESURRECT = "lifecycle_resurrect"

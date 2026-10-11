@@ -1,7 +1,7 @@
 ---
 type: doc
 title: ava_memory — Memory Pool Plugin
-description: '`ava_memory` provides shared memory pool capability: passive memory recall (auto semantic search on new user message arrival and inject relevant note references) and the `ava.memory.*` SDK surface.'
+description: '`ava_memory` provides shared memory pool capability: passive memory recall (auto semantic search on new user message arrival and inject relevant note references), the `ava.memory.*` SDK surface, and the write check on notes written with `ava.files`.'
 tags:
 - extensions
 - plugin
@@ -12,9 +12,13 @@ tags:
 
 ## What it is
 
-`ava_memory` provides shared memory pool capability: passive memory recall (`AVA_PASSIVE_MEMORY_RECALL`), the `ava.memory.*` SDK surface, and the standing memory context notes — the shared pool index, the per-agent index, and the chain-inherited `inheritable` blocks (`inherit.py`). Whether recall runs, and the knobs that shape it, are [[ava_builtins/plugins/ava_memory/docs/memory-recall.ava.okf.md]]'s to state.
+`ava_memory` provides shared memory pool capability: passive memory recall (`AVA_PASSIVE_MEMORY_RECALL`), the `ava.memory.*` SDK surface, the write check, and the standing memory context notes — the shared pool index, the per-agent index, and the chain-inherited `inheritable` blocks (`inherit.py`). Whether recall runs, and the knobs that shape it, are [[ava_builtins/plugins/ava_memory/docs/memory-recall.ava.okf.md]]'s to state.
 
 ## Registered hooks
+
+### Memory write check (after_exec hook)
+
+`_MemoryWriteCheckHook` checks the notes the `files.write` / `append` / `edit` wraps recorded and adds at most one `memory_write_check` reminder; it never blocks, rewrites or raises. Details: [[ava_builtins/plugins/ava_memory/docs/memory-write-check.ava.okf.md]].
 
 ### Passive memory recall (before_llm hook)
 
@@ -54,9 +58,9 @@ This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and
 - `ava.memory.PATH` — memory pool root path (`$AVA_HOME/memory`, computed by `ava_home()` each time it is read), shared by all agents
 - `ava.memory.search(query, k=5)` — semantic search, returns `list[MemoryMatch]` (`path`, `description`, `tags`, `score`, `chunk`), most relevant first
   (description empty string when absent; tags include the note's `type/<x>` tag so a caller can weigh a hit by its kind)
-- `ava.memory.write(slug, content, *, title=None, description=None, tags=None, store="personal")` — canonical entry writer for personal and shared stores; resolves the target from the agent/store rather than cwd, writes the note's frontmatter (a caller-supplied block stays the note's only one, is completed with the fields it is missing, and has its bare values quoted where YAML would misread them), closes the composed note with a terminal newline when it lacks one, and upserts the relevant index pointer — the store's `MEMORY.md`, or the shared topic directory's own `index.md` (created when missing) for a subdirectory entry
+- `ava.memory.PERSONAL_PATH` — the agent's own memory folder (`<workspace>/memory`), resolved from the SDK identity when read
 
-`write()` is the preferred way to author memory because it preserves store ownership and the index invariant. `IndexerUnavailable` remains reachable but deliberately excluded from `help(ava.memory)`.
+There is no writer: an agent writes notes with `ava.files.write` (see the write check above). `IndexerUnavailable` remains reachable but deliberately excluded from `help(ava.memory)`.
 
 ## Key dependencies
 
@@ -76,6 +80,7 @@ This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and
   uses defaults for an absent image without writing; invalid existing data reports
   a plugin load failure and skips the service. The image is sealed at service birth.
 - Memory pool path = `$AVA_HOME/memory` (computed by `ava/memory.py` at process load using `ava_home()`; no `AVA_MEMORY_POOL` variable)
+- `memory_write_check_deadline_seconds` (5.0) / `memory_write_dedup_threshold` (0.80, uncalibrated): the write check's budget and duplicate threshold
 - `settings.passive_memory_recall_enabled`: passive recall feature toggle (default in [[ava_builtins/plugins/ava_memory/docs/memory-recall.ava.okf.md]])
 - `settings.agent.memory_inherit_depth`: ancestor hops a descendant inherits `inheritable` blocks from (per-agent, default 1; 0 disables). Size guardrails: `memory_inherit_max_block_chars` / `memory_inherit_max_total_chars` (0 disables one)
 - Memory note format: YAML frontmatter (`type: Memory`, `ava_agent`, etc.) + markdown body

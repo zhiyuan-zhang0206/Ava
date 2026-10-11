@@ -210,3 +210,47 @@ class AgentMemorySettings(EnvSettings):
             "lifecycle": "live",
         },
     )
+
+    memory_write_check_deadline_seconds: float = Field(
+        default=5.0,
+        alias="AVA_MEMORY_WRITE_CHECK_DEADLINE_SECONDS",
+        description=(
+            "Wall-clock budget (seconds) for checking the memory notes one execute_code "
+            "call wrote: the rule check of every written note plus the duplicate search for "
+            "the shared ones. The check runs after the call and only ever adds a reminder, "
+            "so when the budget expires it is abandoned with a log line and the agent "
+            "hears nothing about that call's notes."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    memory_write_dedup_threshold: float = Field(
+        # Not calibrated: 0.8 is borrowed from memory_recall_inject_threshold. Every duplicate
+        # probability is logged by the check, so the threshold can be calibrated against them.
+        default=0.80,
+        ge=0,
+        le=1,
+        alias="AVA_MEMORY_WRITE_DEDUP_THRESHOLD",
+        description=(
+            "Minimum probability (0..1, the decision model's answer to \"does an existing "
+            'shared note record essentially the same knowledge as this new one") for the '
+            "write check to point the agent at that note as a likely duplicate. Not "
+            "calibrated by a benchmark: the value is a starting point, and every probability "
+            "is logged so it can be calibrated later."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )

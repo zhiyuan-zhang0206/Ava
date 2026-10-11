@@ -1,4 +1,4 @@
-"""An external attachment's memory writes use the borrowed identity and recheck the lease before any filesystem effect."""
+"""An external attachment's personal memory folder uses the borrowed identity, and the personal index rechecks the lease before any filesystem effect."""
 
 from collections.abc import Iterator
 from contextlib import closing
@@ -104,13 +104,11 @@ def native_checkpoint(
         yield owner, handle
 
 
-@pytest.mark.parametrize("store", ["personal", "shared"])
 @pytest.mark.parametrize("stale_process_identity", [False, True])
-def test_external_memory_write_uses_borrowed_identity(
+def test_external_personal_path_uses_borrowed_identity(
     native_checkpoint: tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    store: str,
     stale_process_identity: bool,
     database: Database,
     event_bus: EventBus,
@@ -127,7 +125,6 @@ def test_external_memory_write_uses_borrowed_identity(
     pin_agent(stale_id if stale_process_identity else None, owns_loop=False)
     monkeypatch.setitem(vars(ava), "memory", memory_sdk)
     monkeypatch.setattr(paths, "workspace_dir", workspace)
-    monkeypatch.setattr(paths, "memory_dir", lambda: tmp_path / "shared")
     lease = leases.request(
         database,
         event_bus,
@@ -143,22 +140,13 @@ def test_external_memory_write_uses_borrowed_identity(
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
 
     with external.attach(lease["id"]):
-        entry = ava.memory.write("working-rule", "Verify current state.\n", store=store)
+        personal = ava.memory.PERSONAL_PATH
 
-    root = tmp_path / "shared" if store == "shared" else tmp_path / str(owner.agent_id) / "memory"
-    assert entry == root / "working-rule.md"
-    assert entry.read_text().endswith("Verify current state.\n")
-    assert (root / "MEMORY.md").read_text() == "- [working-rule](working-rule.md) — working-rule\n"
+    assert personal == tmp_path / str(owner.agent_id) / "memory"
     assert not (tmp_path / str(stale_id)).exists()
-    if store == "shared":
-        assert f"ava_agent: {owner.agent_id}\n" in entry.read_text()
-    # Memory files are immediate SDK effects, separate from checkpoint deltas.
-    assert (
-        leases.get(database, event_bus, lease["id"], attested_caller(lease))["delta_version"] == 0
-    )
 
 
-@pytest.mark.parametrize("operation", ["write", "note"])
+@pytest.mark.parametrize("operation", ["personal_path", "note"])
 def test_external_memory_rechecks_lease_before_filesystem_effects(
     native_checkpoint: tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]],
     db_conn: psycopg.Connection,
@@ -202,8 +190,8 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
         )
         db_conn.commit()
         with pytest.raises(leases.ImpersonationError, match="expired"):
-            if operation == "write":
-                sdk.write("expired-note", "Must not be written.")
+            if operation == "personal_path":
+                _ = sdk.PERSONAL_PATH  # pyright: ignore[reportAttributeAccessIssue]  # module __getattr__
             else:
                 context = replace(
                     ava.context,

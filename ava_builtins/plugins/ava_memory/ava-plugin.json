@@ -7,10 +7,16 @@
   },
   "contributions": {
     "hooks": [
-      "before_llm"
+      "before_llm",
+      "after_exec"
     ],
     "sdkNamespaces": [
       "memory"
+    ],
+    "sdkWraps": [
+      "files.write",
+      "files.append",
+      "files.edit"
     ],
     "systemPromptSections": [
       "memory_discipline_section"

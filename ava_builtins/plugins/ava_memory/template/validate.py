@@ -8,6 +8,9 @@ Template seed copy: kept in sync with the live pool validator so a fresh pool
 never passes locally while the pool's pre-commit hook would block. Last sync:
 2026-09-10 (live copy: the pool checkout's validate.py). Re-sync this seed
 whenever the pool validator gains rules.
+
+The plugin's write check imports `validate_note`, `is_note_name` and `note_parts` from this seed
+copy (it is the one place the single-note rules live); they only read, and `main()` is untouched.
 """
 
 from __future__ import annotations
@@ -80,7 +83,7 @@ def _check_tags(fm: dict[str, Any], errors: list[str]) -> None:
     for i, tag in enumerate(tags):
         if not isinstance(tag, str):
             errors.append(f"Tag at index {i} must be a string")
-    type_tags = [t for t in tags if t.startswith("type/")]
+    type_tags = [t for t in tags if isinstance(t, str) and t.startswith("type/")]
     if not type_tags:
         errors.append(
             "Missing type tag — add exactly one of "
@@ -176,6 +179,64 @@ def validate_file(file_path: Path) -> list[str]:
 
     _check_timestamp(fm, fname, errors)
     _check_generated(fm, errors)
+    return errors
+
+
+# --- One note on its own ---
+# The rules above that look at a single note, as one call: what a writer can check on the note it
+# just wrote without the rest of the pool. Directory shape, indexes and pointers need the pool and
+# are not part of it.
+
+
+def note_char_cap() -> int:
+    """The commit hook's per-note character cap: same variable, same default."""
+    return int(os.environ.get("AVA_MEMORY_NOTE_CAP", "8000"))
+
+
+def _single_note_tag_errors(fname: str, fm: dict[str, Any]) -> list[str]:
+    """Tag-discipline findings that `validate_file` does not report for the note itself."""
+    if "tags" not in fm:
+        found = _type_tag_errors(fname, [])
+    else:
+        tags = fm["tags"] if isinstance(fm["tags"], list) else []
+        found = [
+            e
+            for e in _type_tag_errors(fname, [str(t) for t in tags])
+            if "invalid type tag" in e or "junk tag" in e
+        ]
+    return [e.removeprefix(f"{fname}: ") for e in found]
+
+
+def is_note_name(fname: str) -> bool:
+    """Whether a file name is a note: a .md file that is not an index or another reserved file."""
+    return fname.endswith(".md") and fname not in _RESERVED
+
+
+def note_parts(content: str) -> tuple[dict[str, Any], str] | None:
+    """`(frontmatter, body)` of a note's text; None when its frontmatter is missing or invalid."""
+    fm, _fm_raw, problem = _frontmatter_problem(content)
+    if problem is not None or fm is None:
+        return None
+    return fm, content.split("---\n", 2)[2]
+
+
+def validate_note(file_path: Path) -> list[str]:
+    """Every finding that concerns one note by itself: `validate_file`, the tag discipline
+    (valid `type/<x>`, no junk tags, a tags field at all) and the character cap.
+    Returns [] for a reserved file name."""
+    errors = validate_file(file_path)
+    if file_path.name in _RESERVED:
+        return errors
+    try:
+        content = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):  # already reported by validate_file
+        return errors
+    cap = note_char_cap()
+    if len(content) > cap:
+        errors.append(f"Note is {len(content)} characters, over the {cap} cap")
+    fm, _fm_raw, problem = _frontmatter_problem(content)
+    if problem is None and fm is not None:
+        errors.extend(_single_note_tag_errors(file_path.name, fm))
     return errors
 
 

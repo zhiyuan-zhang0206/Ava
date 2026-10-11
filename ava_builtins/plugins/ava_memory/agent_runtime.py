@@ -1,19 +1,22 @@
-"""Agent-runtime face of the ava_memory plugin — context notes, prompt section, recall hook.
+"""Agent-runtime face of the ava_memory plugin — context notes, prompt section, recall hook, write check.
 
 Loaded only in the agent process: `agent.extensions` imports this module after
 `plugin.py` on the full path (host boot / graph build). The plugin's SDK
-**surface** — the `ava.memory` namespace (PATH / search / write) — lives in
-`plugin.py` and loads in agent-launched children too (task #3633): exec code
-uses `ava.memory` heavily, but never the context-note registry or the recall
-hook.
+**surface** — the `ava.memory` namespace (PATH / PERSONAL_PATH / search) and the
+two `files.*` wraps that record written notes — lives in `plugin.py` and loads
+in agent-launched children too (task #3633): exec code uses `ava.memory`
+heavily, but never the context-note registry, the recall hook or the check.
 """
 
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
+from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
+from langgraph.types import Overwrite
 
 from agent.graph.prompt.context_notes import (
     RANK_CLUSTER_MEMORY,
@@ -23,16 +26,25 @@ from agent.graph.prompt.context_notes import (
 from agent.graph.recall.memory_recall import passive_memory_recall
 from agent.hooks import Hook
 from agent.hooks.compact import auto_compact_will_fire
-from agent.messages import tail_has_recallable_inbound
-from agent.state import AgentState, MemoryState
+from agent.messages import NoteTag, system_note_message, tail_has_recallable_inbound
+from agent.state import AgentState, MemoryState, PluginStateHandle
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, PluginContributions
+from base.paths import memory_dir, workspace_dir
 
+from ._state import MemoryWriteState
 from .inherit import inherited_memory_note
 from .notes import memory_index_note, per_agent_memory_note
+from .write_checks import check_written_notes, render_reminder
+
+
+def state_handle() -> PluginStateHandle[MemoryWriteState]:
+    """The typed handle over this plugin's state — a view over the turn's state slot, built per use."""
+    return PluginStateHandle(MemoryWriteState, "ava_memory")
+
 
 # The two memory indexes are declared in `contribute()` below, so `init_context` lays them down
 # with the framework's notes whenever a window is established. The ranks pin them into the
@@ -260,11 +272,85 @@ class _PassiveMemoryRecallHook(Hook):
 passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
 
 
+# ── Memory write check (after_exec hook) ────────────────────────────────
+
+
+class _MemoryWriteCheckHook(Hook):
+    """After an exec call that wrote memory notes with `ava.files`, check them and add one
+    reminder note when something needs the agent's attention.
+
+    The wraps in `plugin.py` recorded the notes inside the exec subprocess; this hook reads the
+    record, always clears it, and runs `check_written_notes` under
+    `memory_write_check_deadline_seconds`. It never blocks, rewrites or rejects a write, and it
+    never fails the turn: a check that runs out of time or hits an unexpected error is logged and
+    dropped (the agent simply hears nothing about those notes). No-op, with no service call, when
+    nothing was recorded.
+    """
+
+    async def __call__(
+        self,
+        state: AgentState,
+        runtime: Runtime[AvaContext],
+        _config: RunnableConfig,
+        /,
+    ) -> dict[str, Any] | None:
+        handle = state_handle()
+        recorded = handle.view(state)
+        if not recorded.shared_notes and not recorded.personal_notes:
+            return None
+        cleared = handle.delta(
+            {"shared_notes": Overwrite(set()), "personal_notes": Overwrite(set())}
+        )
+        agent = runtime.context.require_agent()
+        if agent.sandbox.eval_isolation:
+            return cleared
+        identity = runtime.context.identity
+        agent_id = None if identity is None else identity.agent_id
+        if agent_id is None:
+            return cleared
+        deadline = agent.memory.memory_write_check_deadline_seconds
+        try:
+            reports = await asyncio.wait_for(
+                check_written_notes(
+                    recorded.shared_notes,
+                    recorded.personal_notes,
+                    pool=memory_dir(),
+                    personal_root=workspace_dir(agent_id) / "memory",
+                    agent=agent,
+                    context=runtime.context,
+                ),
+                timeout=deadline,
+            )
+        except TimeoutError:
+            logger.info(
+                "[memory-write-check] skip: the check exceeded its {:g}s deadline", deadline
+            )
+            return cleared
+        except Exception:
+            # A reminder must never cost the agent its turn: this hook runs inside the agent
+            # process, where an escaping exception would end it.
+            logger.opt(exception=True).error("[memory-write-check] check failed; no reminder")
+            return cleared
+        if not reports:
+            return cleared
+        note = system_note_message(
+            content=render_reminder(reports),
+            tag=NoteTag.MEMORY_WRITE_CHECK,
+            created_at=datetime.now(UTC),
+        )
+        return {**cleared, "messages": [note]}
+
+
+memory_write_check_after_exec = _MemoryWriteCheckHook()
+
+
 def contribute() -> PluginContributions:
     """What this plugin declares for the agent runtime."""
     return PluginContributions(
         system_prompt_sections=(memory_discipline_section,),
         before_llm=(passive_memory_recall_before_llm,),
+        after_exec=(memory_write_check_after_exec,),
+        state=(MemoryWriteState,),
         context_notes=(
             ContextNote(memory_index_note, rank=RANK_CLUSTER_MEMORY),
             ContextNote(per_agent_memory_note, on_fork=True, rank=RANK_PER_AGENT_MEMORY),
