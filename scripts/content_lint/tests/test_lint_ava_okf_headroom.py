@@ -13,20 +13,16 @@ a bump to either one moves the test with it.
 
 from __future__ import annotations
 
-import importlib
 import sys
-from pathlib import Path
 
 import pytest
+
+from scripts.content_lint import lint_ava_okf as _lint
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
 # pyright: reportUnknownArgumentType = warning
 
-# The linter imports build_okf_data as a top-level module — running it by path
-# puts scripts/ on sys.path[0], so importing it here has to do the same.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "scripts"))
-_lint = importlib.import_module("scripts.content_lint.lint_ava_okf")
 
 MAX_CHARS: int = _lint.MAX_CHARS
 WARN_MARGIN: int = _lint.WARN_MARGIN
