@@ -288,12 +288,11 @@ def _assert_loki_renders_native_paths_and_loopback(
 ) -> None:
     assert loki_config["common"]["path_prefix"] == f"{home}/lgtm/native/data/loki"
     assert loki_config["frontend"]["address"] == "127.0.0.1"
-    assert (
-        loki_config["distributor"]
-        == yaml.safe_load((_repo() / "deploy/lgtm/config/loki.yaml").read_text(encoding="utf-8"))[
-            "distributor"
-        ]
-    )
+    index_labels = loki_config["distributor"]["otlp_config"][
+        "default_resource_attributes_as_index_labels"
+    ]
+    assert {"agent_id", "event_name"} <= set(index_labels)
+    assert "service.instance.id" not in index_labels  # per-PID churn stays structured metadata
     assert "http_listen_address: 127.0.0.1" in loki
     assert "grpc_listen_address: 127.0.0.1" in loki
     assert "instance_addr: 127.0.0.1" in loki
@@ -353,10 +352,11 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     _assert_prometheus_scrapes_loopback_backends(yaml.safe_load(prometheus))
 
 
-def test_lgtm_prometheus_copies_keep_the_late_sample_window() -> None:
-    for relative in ("native/config/prometheus.yml", "config/prometheus.yml"):
-        config = yaml.safe_load((_repo() / "deploy/lgtm" / relative).read_text(encoding="utf-8"))
-        assert config["storage"]["tsdb"]["out_of_order_time_window"] == "6h"
+def test_lgtm_prometheus_template_keeps_the_late_sample_window() -> None:
+    config = yaml.safe_load(
+        (_repo() / "deploy/lgtm/native/config/prometheus.yml").read_text(encoding="utf-8")
+    )
+    assert config["storage"]["tsdb"]["out_of_order_time_window"] == "6h"
 
 
 def test_prometheus_too_old_samples_rule_uses_window_delta_in_fast_group() -> None:

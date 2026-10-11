@@ -14,10 +14,9 @@ the combined entries and permits no additional targets or counts.
 The guard still checks each key and count when that version changes; a rule upgrade
 or a newly introduced lint cannot add exemptions.
 
-Historical absence is accepted only after Git resolves a valid revision: no
-baseline directory means it predates the shard migration, and no `rules.json`
-means rule version 1. Unknown revisions, failed Git reads, and incomplete blobs
-fail the gate instead of disabling the comparison.
+The comparison revision must carry this directory: a revision without it fails
+the gate instead of disabling the comparison. A missing `rules.json` means rule
+version 1. Git read failures and incomplete blobs fail the gate as well.
 
 This directory is temporary while the existing exemptions are removed. Keep its
 README while the shrink-only gate still reads it. After the final exemption is
@@ -28,6 +27,5 @@ File, directory, complexity and nesting budgets have no baseline sections.
 These sections are retired and cannot be added again, even as empty objects.
 
 Patch-target exemptions are also retired. Every foreign-private patch fails
-directly; current shards reject `patch_targets`, including an empty field.
-Historical comparison revisions may retain that field, but it is discarded and
-never grants an exemption. Only ambient-state site maps remain.
+directly; shards reject `patch_targets`, including an empty field, in the working
+tree and in the comparison revision. Only ambient-state site maps remain.
