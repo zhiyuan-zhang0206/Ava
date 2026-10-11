@@ -101,7 +101,7 @@ def _seed_conversation(born: Born) -> int:
 def _assert_owner_dial(conninfo: str) -> None:
     """The home's administrator over its owner-only socket, acting as the owner."""
     target = conninfo_to_dict(conninfo)
-    assert target["host"] == str(ci._pg_socket_dir())
+    assert target["host"] == str(ci.pg_socket_dir())
     assert target["user"] == getpass.getuser()
     assert target["dbname"] == "ava"
     assert target["options"] == "-c role=ava"

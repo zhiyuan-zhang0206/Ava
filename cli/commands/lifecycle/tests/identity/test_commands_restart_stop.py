@@ -431,7 +431,7 @@ def test_stop_proceeds_on_yes(
         "cli.commands.lifecycle.stop.force_close_terminals", lambda: events.append("terminals")
     )
     monkeypatch.setattr(
-        "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
+        "cli.commands.data_plane.bringup.stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
     assert (
@@ -466,7 +466,7 @@ def test_stop_revokes_serving_before_stopping_root(
         lambda **_kw: observed.append(start_serving.is_serving()),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(
-        "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
+        "cli.commands.data_plane.bringup.stop_cluster_instance",
         _ignoring_retention(lambda: 0),
     )
     assert (
@@ -495,7 +495,7 @@ def test_do_stop_keep_infra_skips_infra_teardown(
         lambda **_kw: events.append("root"),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(
-        "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
+        "cli.commands.data_plane.bringup.stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
     assert (
@@ -527,7 +527,7 @@ def test_do_stop_keeps_browser_by_default(
     )
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: reaps.append(1))
     monkeypatch.setattr(
-        "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
+        "cli.commands.data_plane.bringup.stop_cluster_instance",
         _ignoring_retention(lambda: 0),
     )
     assert (
@@ -567,7 +567,7 @@ def test_force_stop_keeping_the_pty_sessions_service_closes_no_terminals(
 
     monkeypatch.setattr("cli.commands.lifecycle.stop.force_close_terminals", closed)
     monkeypatch.setattr(
-        "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
+        "cli.commands.data_plane.bringup.stop_cluster_instance",
         _ignoring_retention(lambda: 0),
     )
     assert (
@@ -599,7 +599,7 @@ def test_do_stop_stop_browser_kills_it(
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", stop_root)
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: events.append("browser"))
     monkeypatch.setattr(
-        "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
+        "cli.commands.data_plane.bringup.stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
     assert (
@@ -685,7 +685,7 @@ def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", roles)
     monkeypatch.setattr("cli.commands.lifecycle.stop._repo_root", lambda: Path("/repo"))
     monkeypatch.setattr(
-        "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
+        "cli.commands.data_plane.bringup.stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
 

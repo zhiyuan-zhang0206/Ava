@@ -534,7 +534,7 @@ def _launch_incident_shape_pooler(
     monkeypatch.setattr(base_pooler, "ava_home", lambda: home)
     command_machine.set(host=addr)
     command_machine.set(host=addr)
-    monkeypatch.setattr(pb, "_pg_socket_dir", lambda: home / "pg-socket")  # pyright: ignore[reportUnknownArgumentType] — private fixture home
+    monkeypatch.setattr(pb, "pg_socket_dir", lambda: home / "pg-socket")  # pyright: ignore[reportUnknownArgumentType] — private fixture home
 
     port = _free_port()
     role = pb.POOLER_ADMIN

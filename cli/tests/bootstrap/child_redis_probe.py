@@ -13,7 +13,7 @@ from cli.commands.data_plane import cluster_instance as instance
 
 if __name__ == "__main__":
     instance.is_macos = lambda: False
-    tools = [instance._redis_server_bin(), instance._redis_cli_bin()]
+    tools = [instance._redis_server_bin(), instance.redis_cli_bin()]
     sys.stdout.write(
         json.dumps(
             {

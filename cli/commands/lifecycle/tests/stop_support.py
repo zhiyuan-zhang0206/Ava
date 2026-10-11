@@ -257,7 +257,7 @@ def stop_env(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     def announce(*, machine: MachineIdentity) -> None:
         del machine
 
-    monkeypatch.setattr("cli.commands.lifecycle.stop._announce_stopping", announce)
+    monkeypatch.setattr("cli.commands.lifecycle._temporary_stop.announce_stopping", announce)
 
 
 def busy_session(
