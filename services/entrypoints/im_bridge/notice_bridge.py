@@ -12,7 +12,7 @@ carry inline buttons:
 - [OK] / [Close] resolve an FYI as read or dismiss a response-required notice.
 
 A ``/notice filter`` command restricts what gets pushed (minimum priority
-and/or a single agent). Filters and a diagnostic cursor persist under ``$AVA_HOME/state/im_bridge/``;
+and/or a single agent). Filters persist under ``$AVA_HOME/state/im_bridge/``;
 normal-poll source receipts and the immutable cutover live in Postgres.
 """
 
@@ -37,7 +37,6 @@ from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.notice_poll_store import NoticePollStore
 from services.entrypoints.im_bridge.outbound.types import (
-    NoticePollImportReason,
     OutboundIntent,
     OutboundSource,
     OutboundSourceKind,
@@ -114,9 +113,6 @@ class NoticeBridge:
         self.core = core
         self.db_pool = db_pool
         self.poll_store = NoticePollStore(core.outbound_store)
-        self._cursor = 0
-        self._legacy_cursor: int | None = None
-        self._cutover_warned = False
         self._reply_modes: dict[str, dict[str, Any]] = {}  # chat_id -> mode
         self._filters: dict[str, Any] = {"min_priority": None, "agent": None}
         self._load_state()
@@ -126,11 +122,6 @@ class NoticeBridge:
     def _load_state(self) -> None:
         d = _state_dir()
         d.mkdir(parents=True, exist_ok=True)
-        with suppress(OSError, UnicodeDecodeError, json.JSONDecodeError):
-            # This retired cursor is a one-time historical import, not current config.
-            value = json.loads((d / "notice_cursor.json").read_text())
-            if type(value) is int and value >= 0:
-                self._legacy_cursor = self._cursor = value
         with suppress(FileNotFoundError):
             self._filters = json.loads((d / "notice_filters.json").read_text())
         if not isinstance(self._filters, dict):
@@ -164,19 +155,13 @@ class NoticeBridge:
 
     def initialize_poll(self) -> None:
         """Establish native cutover before daemon readiness and first poll."""
-        _, diagnostic, reason = self.poll_store.initialize_notice_poll(self._legacy_cursor)
-        self._cursor = max(self._cursor, diagnostic)
-        if reason == NoticePollImportReason.LEGACY_HISTORY_UNKNOWN and not self._cutover_warned:
-            self._cutover_warned = True
-            _log.warning(
-                "normal notice poll retains unknown legacy history; explicit listing remains available"
-            )
+        self.poll_store.initialize_notice_poll()
 
     async def poll_once(self) -> None:
         """Accept normal notice decisions; the shared worker owns provider calls."""
         try:
             await asyncio.to_thread(self.initialize_poll)
-            notices = await asyncio.to_thread(self._notices_after, 0)
+            notices = await asyncio.to_thread(self._unaccepted_notices)
         except (ConnectionDoesNotExist, ConnectionFailure, PoolTimeout) as exc:
             _log.warning("notice acceptance read held class=%s", type(exc).__name__)
             return
@@ -184,8 +169,6 @@ class NoticeBridge:
             if not await self._accept_normal_notice(notice):
                 self._warn_push_held(notice)
                 break
-            self._cursor = max(self._cursor, int(notice["id"]))
-            self._save("notice_cursor.json", self._cursor)
 
     async def _accept_normal_notice(self, notice: dict[str, Any]) -> bool:
         filtered = not self._passes_filter(notice)
@@ -239,11 +222,10 @@ class NoticeBridge:
             return False
         return True
 
-    def _notices_after(self, after: int, limit: int | None = None) -> list[dict[str, Any]]:
+    def _unaccepted_notices(self, limit: int | None = None) -> list[dict[str, Any]]:
         """Unaccepted open notices above the immutable cutover, regardless of high ID."""
         from base.db import NOTICE_FYI_TTL_DAYS
 
-        del after  # Diagnostic compatibility argument, never an eligibility watermark.
         if limit is None:
             limit = self._config.notices_open_default_limit
         with self.db_pool.connection() as conn, conn.cursor() as cur:

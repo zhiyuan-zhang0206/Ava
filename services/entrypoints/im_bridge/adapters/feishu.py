@@ -392,14 +392,7 @@ class FeishuAdapter(IMAdapter):
         if self._rest_client is None:
             self._rest_client = await asyncio.to_thread(self._build_rest_client)
         replay = chat_id in self._poll_replay
-        items = await cursors.list_chat(
-            self._rest_client,
-            chat_id,
-            deep=replay,
-            replay_window_s=self._replay_window_s,
-            cursor_id=self._poll_cursor.get(chat_id),
-            cursor_ms=self._poll_cursor_ms.get(chat_id),
-        )
+        items = await cursors.list_chat(self._rest_client, chat_id)
         if chat_id not in self._poll_seeded:
             self._poll_seeded.add(chat_id)
             self._restore_owner_open_id(items)

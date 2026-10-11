@@ -35,19 +35,17 @@ proceed. Acceptance is not proof of delivery.
 ## Cutover and late commits
 
 `im_bridge_notice_poll_state` owns one immutable legacy floor and a strict
-import reason. A valid existing `notice_cursor.json` must be a non-boolean
-integer >= 0: it is imported once, preserving that historical skip range.
-Missing/corrupt state with existing committed history records
+import reason. The first initialization with existing committed history records
 `legacy_history_unknown` and fixes the floor at the committed maximum. That
-unknown old range is retained for manual inspection through explicit `/notice`;
+old range is retained for manual inspection through explicit `/notice`;
 it is never automatically replayed. Empty history records `no_history` at floor
 zero during daemon startup before readiness, so a fresh install can accept its
-first later notice even before the initial periodic poll.
-Initialization does not fabricate receipts for old rows.
+first later notice even before the initial periodic poll. Later initializations
+keep the stored row. Initialization does not fabricate receipts for old rows.
 
 After cutover, eligibility is `id > legacy_floor` plus an anti-join against
-normal-poll receipts. The maximum accepted ID and the JSON cursor are only
-diagnostics/cache, never eligibility. A low ID reserved after cutover can commit
+normal-poll receipts. The maximum accepted ID is only a diagnostic, never
+eligibility. A low ID reserved after cutover can commit
 after a higher notice was accepted and still be found. IDs do not establish
 transaction commit order. Old in-flight IDs below the initial cutover floor
 remain part of the unknown legacy boundary; this is not a promise to recover
@@ -55,8 +53,8 @@ all historical gaps.
 
 ## Generation compatibility and remaining producers
 
-The legacy daemon sends directly and only writes JSON cursor state. It cannot
-read or obey these database source receipts. The new schema cannot fence an
+The legacy daemon sends directly and only writes JSON cursor state, which the
+new generation never reads. It cannot read or obey these database source receipts. The new schema cannot fence an
 old provider call: **mixed legacy and new IM generations
 are not safe for either normal notices or the timeline Outbox cutover**.
 Before enabling the new generation, the authorized operator must stop all old
