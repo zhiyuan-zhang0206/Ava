@@ -227,6 +227,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events | — |
 | `llm_provider_error` | LLM provider failure | anomaly | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | events | ✓ |
 | `thinking_block_sanitized` | thinking block sanitized | noise | — | — | events | — |
+| `web_fetch_injection_check_failed` | the decision-model injection check of a fetched page failed (request error, bad response or missing key) — the page is returned without a verdict. Carries model and error_type | anomaly | — | — | events | — |
 | `llm_cancelled` | LLM call cancelled | anomaly | — | — | events | — |
 | `compaction_completed` | applied context compaction size reduction and completed count | noise | compact_kind, compactions, history_chars, summary_chars, summary_history_ratio | — | events | — |
 | `compact_request` | compact requested | noise | — | — | events | — |

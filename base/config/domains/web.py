@@ -108,6 +108,44 @@ class WebSettings(EnvSettings):
         },
     )
 
+    web_fetch_injection_check_enabled: bool = Field(
+        default=True,
+        alias="AVA_WEB_FETCH_INJECTION_CHECK_ENABLED",
+        description="Check the page text `ava.web.fetch` reads for instructions aimed at an AI reader, using a decision model, and attach a SECURITY note to the turn when the page looks like prompt injection. The page and its summary are never altered. The check only adds a warning: if the decision model is unavailable the fetch still succeeds. Needs `security_scan_enabled` and the decision model's API key.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    web_fetch_injection_model: str = Field(
+        default="jev-1.13.0",
+        alias="AVA_WEB_FETCH_INJECTION_MODEL",
+        description="Decision model (an id from the decision-model catalog, not a chat model) that judges fetched page text for `web_fetch_injection_check_enabled`. An id the catalog does not list makes `ava.web.fetch` fail instead of silently skipping the check.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    web_fetch_injection_threshold: float = Field(
+        default=0.5,
+        gt=0.0,
+        lt=1.0,
+        alias="AVA_WEB_FETCH_INJECTION_THRESHOLD",
+        description="Probability (exclusive 0..1) at or above which a fetched page is reported as likely prompt injection. The page is judged in chunks; the highest chunk probability is compared. Lower values warn more often.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     jina_api_key: SecretStr | None = Field(
         default=None,
         alias="JINA_API_KEY",
