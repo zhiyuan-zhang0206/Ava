@@ -23,9 +23,9 @@ def test_machine_spec_tuple_with_description() -> None:
 def test_machine_spec_tuple_empty_when_no_description() -> None:
     from base.cluster.machine import reset_identity, set_identity
 
-    set_identity(name="wsl", description=None)
+    set_identity(name="runner-a", description=None)
     try:
-        assert ava_self_machine_spec() == ("wsl", "")
+        assert ava_self_machine_spec() == ("runner-a", "")
     finally:
         reset_identity()
 

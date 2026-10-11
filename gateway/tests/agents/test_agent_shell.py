@@ -83,7 +83,7 @@ def test_shell_capture_success(
     """Live shell on the agent's machine → 200, response carries the runner's
     session_name + lines; the op is dispatched to the agent's machine with the
     default ?lines=200."""
-    aid = _insert_agent(db_conn, machine="wsl")
+    aid = _insert_agent(db_conn, machine="runner-a")
     db_conn.commit()
 
     seen: dict[str, object] = {}
@@ -115,7 +115,7 @@ def test_shell_capture_success(
     }
     # Uniform path: dispatched to the agent's machine (a remote runner here),
     # never probed locally.
-    assert seen["machine"] == "wsl"
+    assert seen["machine"] == "runner-a"
     assert seen["kind"] == "shell_capture"
     assert seen["payload"] == {"agent_id": aid, "session_id": 3, "lines": 200}
 
@@ -179,7 +179,7 @@ def test_shell_capture_carries_created_at_and_ttl_deadline(
     without a row keeps expires_at=None."""
     from datetime import UTC, datetime, timedelta
 
-    aid = _insert_agent(db_conn, machine="wsl")
+    aid = _insert_agent(db_conn, machine="runner-a")
     launched = datetime.now(tz=UTC) - timedelta(minutes=30)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -219,7 +219,7 @@ def test_shell_capture_without_row_has_no_deadline(
     not manufacture a deadline (task #4086, DP1)."""
     from datetime import UTC, datetime, timedelta
 
-    aid = _insert_agent(db_conn, machine="wsl")
+    aid = _insert_agent(db_conn, machine="runner-a")
     launched = datetime.now(tz=UTC) - timedelta(hours=3)
     db_conn.commit()
 
@@ -247,7 +247,7 @@ def test_shell_capture_without_row_and_epoch_keeps_no_deadline(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Missing launch metadata does not affect the absent TTL facts."""
-    aid = _insert_agent(db_conn, machine="wsl")
+    aid = _insert_agent(db_conn, machine="runner-a")
     db_conn.commit()
 
     async def _meta_dispatch(
@@ -273,7 +273,7 @@ def test_shell_capture_returns_recorded_deadline(
     """The capture returns the exact recorded deadline, independent of uptime."""
     from datetime import UTC, datetime, timedelta
 
-    aid = _insert_agent(db_conn, machine="wsl")
+    aid = _insert_agent(db_conn, machine="runner-a")
     launched = datetime.now(tz=UTC) - timedelta(minutes=5)
     deadline = datetime.now(tz=UTC) + timedelta(minutes=30)
     with db_conn.cursor() as cur:
@@ -305,7 +305,7 @@ def test_shell_machine_unreachable_503(
 ) -> None:
     """The agent's machine's ops server is unreachable → 503 (the shell may
     still exist; the gateway just cannot reach it right now)."""
-    aid = _insert_agent(db_conn, machine="wsl")
+    aid = _insert_agent(db_conn, machine="runner-a")
     db_conn.commit()
 
     async def _unreachable_dispatch(
@@ -329,7 +329,7 @@ def test_shell_capture_carries_renewal_facts(
     on the next poll — never silent (user ruling 2026-09-08)."""
     from datetime import UTC, datetime, timedelta
 
-    aid = _insert_agent(db_conn, machine="wsl")
+    aid = _insert_agent(db_conn, machine="runner-a")
     renewed = datetime.now(tz=UTC) - timedelta(minutes=5)
     with db_conn.cursor() as cur:
         cur.execute(
