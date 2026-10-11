@@ -166,6 +166,7 @@ def _sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     if not wanted:
         return ""
     import ava
+    from ava.sdk_surface.help import render as render_help
 
     pieces: list[str] = []
     seen_targets: set[int] = set()
@@ -206,7 +207,7 @@ def _sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         seen_targets.add(id(target))
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            ava.help(target, compact_classes=True, hidden_members=hidden)
+            render_help(target, compact_classes=True, hidden_members=hidden)
         pieces.append(buf.getvalue().rstrip())
 
     if not pieces:

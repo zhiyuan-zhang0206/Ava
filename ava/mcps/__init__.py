@@ -663,17 +663,4 @@ def __getattr__(name: str) -> Any:
 
 def __dir__() -> list[str]:
     """List every configured server name plus the module's public helpers."""
-    return [*servers(), "servers", "description", "help"]
-
-
-def help() -> None:
-    """Print a one-line summary of every configured MCP server."""
-    names = servers()
-    if not names:
-        print("(no MCP servers configured)")
-        return
-    for name in names:
-        cfg = _load_config()[name]
-        cmd = cfg.get("command", "?")
-        args_str = " ".join(cfg.get("args", []))
-        print(f"  {name}/  # {cmd} {args_str}".rstrip())
+    return [*servers(), "servers", "description"]

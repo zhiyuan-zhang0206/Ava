@@ -112,7 +112,6 @@ def test_module_dir_lists_servers(fake_config: Path) -> None:
     assert "github" in listing
     assert "servers" in listing
     assert "description" in listing
-    assert "help" in listing
 
 
 # ─── tools / call / call_raw via ServerProxy ─────────────────────────────

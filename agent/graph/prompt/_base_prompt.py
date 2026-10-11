@@ -8,7 +8,7 @@ from __future__ import annotations
 import contextlib
 import io
 
-# The SDK itself is introspected (`ava.help(ava)`), not called.
+# The SDK itself is introspected (`ava.sdk_surface.help.render(ava)`), not called.
 import ava
 
 
@@ -37,6 +37,8 @@ def _capture_ava_overview() -> str:
     function stubs *without* repeating the docstring (help(ava.X) drops a
     submodule target's own docstring — see ava._format_module_stub).
     """
+    from ava.sdk_surface.help import render as render_help
+
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         # Pass the render parameters explicitly: this is an index of the surface,
@@ -44,7 +46,7 @@ def _capture_ava_overview() -> str:
         # themselves is applied by the expand section (`system_prompt.py`), which
         # knows the agent's model. Keeps the overview byte-stable across models
         # and processes.
-        ava.help(ava, hidden_members=frozenset())
+        render_help(ava, hidden_members=frozenset())
     return buf.getvalue()
 
 
