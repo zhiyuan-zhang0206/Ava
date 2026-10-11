@@ -16,7 +16,6 @@ per-agent filtering, stat vs series payloads, macro translation).
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import uuid
@@ -29,6 +28,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+import ava_builtins.plugins as shipped_plugins
 from base.db import Database
 from base.packages.plugins import enable_config
 from base.telemetry.metrics.plugin_metrics import MetricSpec
@@ -569,7 +569,7 @@ def fixture_plugins_dir(
         return enable_config.PluginsConfig(plugins={**config.plugins, **fixtures})
 
     monkeypatch.setattr(enable_config, "load_for_runtime", _with_fixture_plugins)
-    shipped_path = importlib.import_module("ava_builtins.plugins").__path__
+    shipped_path = shipped_plugins.__path__
     monkeypatch.setattr("ava_builtins.plugins.__path__", [*shipped_path, str(tmp_path)])
 
     def _forget_fixture_modules() -> None:

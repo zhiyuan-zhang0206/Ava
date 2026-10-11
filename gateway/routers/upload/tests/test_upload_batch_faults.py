@@ -21,35 +21,7 @@ from gateway.routers.upload.batches import UploadItem
 from gateway.schemas.uploads import UploadedBatch
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
-_CHILD = """
-import json, os, sys
-from pathlib import Path
-from psycopg_pool import ConnectionPool
-config = json.load(sys.stdin)
-os.environ["AVA_HOME"] = config["home"]
-os.environ["AVA_CONFIG_FETCH"] = "skip"
-from gateway.routers.upload import batches as owner
-directory = Path(config["directory"])
-original_publish = owner.publish_files
-original_link = os.link
-def link(source, target):
-    original_link(source, target)
-    if Path(target).parent == directory and config["phase"] == "first-file":
-        os._exit(41)
-def publish(directory, manifest, batch):
-    if config["phase"] == "receiving":
-        os._exit(41)
-    original_publish(directory, manifest, batch)
-    if config["phase"] == "published":
-        os._exit(41)
-os.link = link
-owner.publish_files = publish
-with ConnectionPool(config["dsn"], min_size=1, max_size=1) as pool:
-    owner.save_keyed_batch(pool, config.get("key", "crash"), 123, directory,
-        [("a.png", b"aaa", "image/png"), ("b.png", b"bbb", "image/png")],
-        ["a.png", "b.png"], max_bytes=6, max_files=2, local_machine=config["machine"])
-os._exit(41)
-"""
+_CHILD = Path(__file__).with_name("child_batch_writer.py")
 
 
 def _save(pool: ConnectionPool, directory: Path, *, local_machine: str) -> UploadedBatch:
@@ -84,7 +56,7 @@ def test_hard_death_recovers_fixed_objects(
     machine_identity: MachineIdentity,
 ) -> None:
     child = subprocess.run(  # noqa: S603 -- fixed Python program against isolated test DB
-        [sys.executable, "-c", _CHILD],
+        [sys.executable, str(_CHILD)],
         input=json.dumps(
             {
                 "dsn": db_conn.info.dsn,
@@ -170,7 +142,7 @@ def test_independent_processes_share_quota(
     try:
         for key in ("one", "two"):
             child = subprocess.Popen(  # noqa: S603 -- fixed program against isolated test DB
-                [sys.executable, "-c", _CHILD],
+                [sys.executable, str(_CHILD)],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

@@ -17,7 +17,6 @@ fail-soft skip of a broken inspector.py.
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 from collections.abc import Iterator
@@ -29,6 +28,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import ava_builtins.plugins as shipped_plugins
 from base.db import Database
 from base.packages.plugins.data_registry import DeclaredFace, build_data_registry
 from base.packages.plugins.extensions import PluginContributions
@@ -306,7 +306,7 @@ def _fixture_plugins_importable(
 ) -> None:
     """Let the loader (which imports by dotted name) find fixture plugins written under `tmp_path`,
     and forget their modules afterwards."""
-    shipped_path = importlib.import_module("ava_builtins.plugins").__path__
+    shipped_path = shipped_plugins.__path__
     monkeypatch.setattr("ava_builtins.plugins.__path__", [*shipped_path, str(tmp_path)])
 
     def _forget() -> None:
