@@ -12,12 +12,12 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from base.log import logger
-from services.agent_runner.agent_host.runtime import _StoredConfig
+from services.agent_runner.agent_host.runtime import StoredConfig
 
-__all__ = ["_is_runnable", "read_stored_config"]
+__all__ = ["is_runnable", "read_stored_config"]
 
 
-def _is_runnable(machine: str, agent_id: int, stored: _StoredConfig) -> bool:
+def is_runnable(machine: str, agent_id: int, stored: StoredConfig) -> bool:
     """Whether the host at `machine` should hand `agent_id` a turn right now.
 
     Two rejections, deliberately quiet rather than WARNING: a foreign
@@ -45,7 +45,7 @@ def _is_runnable(machine: str, agent_id: int, stored: _StoredConfig) -> bool:
 
 async def read_stored_config(
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection], agent_id: int
-) -> _StoredConfig | None:
+) -> StoredConfig | None:
     """This agent's machine, status and two config maps in one round trip.
 
     None = the row is gone, which is a real anomaly (a wake was published for
@@ -66,4 +66,4 @@ async def read_stored_config(
             agent_id=agent_id,
         )
         return None
-    return _StoredConfig(machine=row[0], status=row[1], config_overlay=row[2], birth_config=row[3])
+    return StoredConfig(machine=row[0], status=row[1], config_overlay=row[2], birth_config=row[3])

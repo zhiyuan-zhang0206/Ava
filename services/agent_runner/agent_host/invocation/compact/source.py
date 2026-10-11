@@ -24,7 +24,7 @@ from base.log import logger
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.invocation.compact.lifecycle import settle_original_restart
-from services.agent_runner.agent_host.wake_screening import read_stored_config
+from services.agent_runner.agent_host.scheduling.wake_screening import read_stored_config
 
 
 async def produce_source(

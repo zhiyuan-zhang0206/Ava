@@ -96,6 +96,7 @@ from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from .dispatcher import InboundWakeDispatcher, TurnScheduler
 from .exec_memory_guard import run_memory_guard_forever
 from .force_termination import kill_terminating_agent_shells
+from .health_routes import cancel_turn_route, stats_route
 from .host import AgentHost
 from .lifecycle.configuration import (
     boot_process,
@@ -108,7 +109,6 @@ from .lifecycle.configuration import (
 from .pooled_checkpoint import PooledPostgresSaver
 from .pools import build_control_pool, build_shared_pool
 from .pools import close_host_pools as _close_host_pools
-from .scheduling.health_routes import cancel_turn_route, stats_route
 from .stdout_log import _rotate_stdout_log_forever
 
 _log = logging.getLogger("services.agent_runner.agent_host.daemon")

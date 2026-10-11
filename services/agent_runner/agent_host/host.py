@@ -69,7 +69,6 @@ from base.native_process.turn_identity import HostedServiceResources, HostedTurn
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.telemetry.tracing import turn_span
-from services.agent_runner.agent_host.dispatcher import PendingInboundWake
 from services.agent_runner.agent_host.force_termination import (
     force_termination_outcome,
     force_termination_stop,
@@ -103,7 +102,14 @@ from services.agent_runner.agent_host.runtime import (
     refresh_cached_runtime,
 )
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
-from services.agent_runner.agent_host.scheduling.pending_wakes import scan_candidates
+from services.agent_runner.agent_host.scheduling.pending_wakes import (
+    PendingInboundWake,
+    scan_candidates,
+)
+from services.agent_runner.agent_host.scheduling.wake_screening import (
+    is_runnable,
+    read_stored_config,
+)
 from services.agent_runner.agent_host.settlement import (
     close_hosted_turn,
     wait_retained_resources,
@@ -113,7 +119,6 @@ from services.agent_runner.agent_host.stall_guard import (
     HostRestartRequiredError,
     run_invocation_with_stall_guard,
 )
-from services.agent_runner.agent_host.wake_screening import _is_runnable, read_stored_config
 
 _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
 
@@ -289,7 +294,7 @@ class AgentHost:
         # dispatcher's stall scan must not cancel this turn using its predecessor's clock.
         self.turn_progress.reset(agent_id)
         stored = await read_stored_config(self._control_pool, agent_id)
-        if stored is None or not _is_runnable(self._machine, agent_id, stored):
+        if stored is None or not is_runnable(self._machine, agent_id, stored):
             self.stats.wakes_skipped += 1
             return
         self.turn_fingerprints[agent_id] = stored.fingerprint

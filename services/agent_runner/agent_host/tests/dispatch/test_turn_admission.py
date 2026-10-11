@@ -25,12 +25,9 @@ from contextlib import suppress
 from typing import cast
 
 from base.events.live.bus import EventBus
-from services.agent_runner.agent_host.dispatcher import (
-    InboundWakeDispatcher,
-    PendingInboundWake,
-    TurnScheduler,
-)
+from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
+from services.agent_runner.agent_host.scheduling.pending_wakes import PendingInboundWake
 
 
 async def _until(predicate: Callable[[], bool], timeout: float = 2.0) -> None:
