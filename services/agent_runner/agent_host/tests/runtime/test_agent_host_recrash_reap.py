@@ -73,9 +73,7 @@ async def _close_captured(
     ) -> None:
         order.append("reconcile")
 
-    async def reap(
-        _pool: object, _incarnation: object, *, bus: object, wake_enabled: object
-    ) -> list[int]:
+    async def reap(_pool: object, _incarnation: object, *, bus: object) -> list[int]:
         order.append("reap")
         return reap_result if reap_result is not None else []
 
@@ -85,13 +83,11 @@ async def _close_captured(
     await settlement_mod.close_hosted_turn(
         cast(AsyncConnectionPool[Any], object()),
         cast(AsyncConnectionPool[Any], object()),
-        Database.from_settings(),
         EventBus.from_settings(),
         cast(AsyncPostgresSaver, object()),
         RuntimeIncarnation(42, uuid4(), uuid4()),
         outcome,
         resources=None,
-        wake_enabled=configured_policy().recovery_wake_enabled,
         prompt_reap_enabled=configured_policy().recrash_reap_enabled,
         reconcile_inputs=configured_policy().reconcile_inputs,
     )
@@ -252,12 +248,8 @@ def _capture_reap_effects(monkeypatch: pytest.MonkeyPatch) -> _ReapEffects:
     async def _publish(_bus: object, agent_id: int) -> None:
         effects.published.append(agent_id)
 
-    async def _recover(_db: object, _bus: object, reaped: list[ReapedCorpse]) -> None:
-        effects.attempts.append(list(reaped))
-
     monkeypatch.setattr("agent.ownership.corpse_reap.record_audit_async", _event)
     monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
-    monkeypatch.setattr(settlement_mod, "recover_reaped_corpses", _recover)
     return effects
 
 
@@ -277,13 +269,11 @@ async def _crash_a_fresh_admission(
     await settlement_mod.close_hosted_turn(
         pool,
         pool,
-        Database.from_settings(),
         event_bus,
         cast(AsyncPostgresSaver, object()),
         incarnation,
         TurnOutcome(exited=False, crashed=True),
         resources=None,
-        wake_enabled=configured_policy().recovery_wake_enabled,
         prompt_reap_enabled=configured_policy().recrash_reap_enabled,
         reconcile_inputs=configured_policy().reconcile_inputs,
     )
@@ -292,14 +282,13 @@ async def _crash_a_fresh_admission(
 def _assert_prompt_reap_recovery_wake(
     db_conn: psycopg.Connection[Any], effects: _ReapEffects, agent_id: int
 ) -> None:
-    """The prompt reap's committed wake is consumed on the spot: one attempt
-    carrying the wake id, and the chat row the return value named (#4039)."""
-    assert [corpse.agent_id for corpse in effects.attempts[0]] == [agent_id]
-    wake_id = effects.attempts[0][0].recovery_wake_id
-    assert wake_id is not None
+    """A prompt reap reports death without adding a recovery chat."""
+    assert effects.published == [agent_id]
+    assert effects.attempts == []
     assert db_conn.execute(
-        "SELECT kind, source, payload FROM inbound_messages WHERE id = %s", (wake_id,)
-    ).fetchone() == ("chat", "system", {"hosted_turn_recovery": True})
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND source='system' AND kind='chat'",
+        (agent_id,),
+    ).fetchone() == (0,)
 
 
 async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
@@ -329,16 +318,7 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     assert row == ("idling", True)
     # The first death is not harvested: it keeps the whole grace window even
     # under an enabled switch.
-    assert (
-        await reap_crash_corpses(
-            aops_pool,
-            "host-test",
-            owner,
-            bus=event_bus,
-            wake_enabled=configured_policy().recovery_wake_enabled,
-        )
-        == []
-    )
+    assert await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus) == []
     assert effects.events == [] and effects.published == []
 
     # The retry: a wake admits the zombie again, and this turn dies too.

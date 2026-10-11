@@ -45,9 +45,13 @@ The wire contract — `OpEnvelope`/`OpResponse` envelopes, the `OpKind` literal,
 and the per-kind payload/result models the daemon validates before dispatch —
 is specified in [[services/docs/agent_runner_side/agent_ops/agent-ops/wire-layer.ava.okf.md]].
 
-## Resident Loops
+## Message delivery
 
-The ops server and the **delivery-outbox redelivery loop** (`services/agent_runner/agent_ops/outbox_flusher.py`) run under one `TaskGroup` in `_main`: a loop that raises cancels the server and ends the process, and the supervisor restarts the unit. The loop re-commits this machine's `$AVA_HOME/state/delivery-outbox/` records (chat sends that exhausted their retries) through the canonical chat-inbound path, one round per `AVA_DELIVERY_OUTBOX_FLUSH_INTERVAL_SECONDS`, skipping rounds while the unit is quiesced. Record state (attempts, backoff position, abandonment) lives in the record file, so a restart resumes every cooldown. The loop reports progress per record to `/healthz` (`loops.delivery-outbox`); a pass that handles no record for four flush intervals plus a minute reads as wedged.
+SDK and CLI message sends retry transient transport failures with the same
+idempotency key for a finite number of attempts. The final failure is returned
+to the caller. Agent-ops serves HTTP without a resident delivery-outbox flusher.
+Existing `$AVA_HOME/state/delivery-outbox/` JSON records are retained on disk for
+inspection; upgrading neither replays nor deletes them.
 
 ## Key Dependencies
 - [[gateway-cli.ava.okf.md]] — Gateway issues ops commands to agent-runner via this service
@@ -61,10 +65,3 @@ The ops server and the **delivery-outbox redelivery loop** (`services/agent_runn
 ## Notes
 - Unlike Gateway's `/api/*` endpoints — agent-ops is the inbound ops port on the agent-runner side.
 - Binding and auth are consistent per host, no single-vs-multi-host branching; LAN reachable but without secret it won't work.
-
-### Deferred delivery journal state
-
-`base/agents/messages/delivery_outbox.py:DeliveryOutboxState` owns the durable
-`pending` / `abandoned` disposition. Reads restore enum members; writes retain
-plain JSON strings. A corrupt or unknown state remains unreadable and retained
-for inspection without preventing healthy entries from being flushed.

@@ -28,7 +28,7 @@ class UsageSummary(SummaryModel):
         return response
 
 
-@pytest.mark.parametrize("fault", ["after_result", "after_ack"])
+@pytest.mark.parametrize("fault", ["none", "after_result", "after_ack"])
 async def test_saved_original_closing_usage_stamps_source_before_replacement(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -45,9 +45,12 @@ async def test_saved_original_closing_usage_stamps_source_before_replacement(
     )
     accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
     install(monkeypatch, fault)
-    await accepted.host.run_turn(accepted.agent)
+    if fault == "none":
+        await accepted.host.run_turn(accepted.agent)
+    else:
+        with pytest.raises(psycopg.OperationalError):
+            await accepted.host.run_turn(accepted.agent)
     status = accepted.status(client)
-    assert status["outcome"] == "applied" and status["continuation_released"]
     original = db_conn.execute(
         "SELECT result->'closing' FROM native_compact_commands WHERE id=%s",
         (accepted.acceptance["command_id"],),
@@ -56,6 +59,13 @@ async def test_saved_original_closing_usage_stamps_source_before_replacement(
     closing = ClosingRequest.from_metadata(original[0])
     assert closing is not None and closing.input_tokens == 4000
     assert closing.model == "original-provider-model" and closing.extra_tokens > 0
+    assert model.calls == 1
+    if fault != "none":
+        assert not status["continuation_released"]
+        await accepted.host.run_turn(accepted.agent)
+        assert accepted.status(client) == status and model.calls == 1
+        return
+    assert status["outcome"] == "applied" and status["continuation_released"]
     source = db_conn.execute(
         "SELECT metadata FROM checkpoints WHERE thread_id=%s AND checkpoint_ns='' "
         "AND checkpoint_id=%s",

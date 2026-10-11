@@ -1,20 +1,4 @@
-"""Close out one hosted turn: settle its row, then dispose its claimed inbounds.
-
-The settlement boundary runs from `AgentHost._run_turn`'s finally for every
-turn — the corpse marker + idling settle — and, for a settled abort,
-additionally reconciles the inbounds that turn claimed. That reconcile is the
-same pass a cold admission would run, moved to the point where the abort
-became durable, so the rows are not left for a cold admission or boot that may
-never come (task #3615). A finished, non-crashed turn runs the same pass at
-its own settlement too — its flushed checkpoint is the earliest point that
-can confirm which rows committed (#3999), so chat rows no longer sit
-`claimed` until a next boot or abort. A turn that dies again under its own
-corpse mark is
-prompt-reaped here too — the same termination the beat reaper performs, moved
-up to the retry's failure (task #3616) — and the reaped corpse's committed
-recovery wake gets its guarded resurrect attempt on the spot (task #4039).
-Split into its own module to keep `host.py` inside the file-size ceiling.
-"""
+"""Settle an ended hosted turn and consume its claimed inputs without redelivery. Crash reaping marks termination and publishes diagnostics; it never queues a recovery wake."""
 
 from __future__ import annotations
 
@@ -30,7 +14,7 @@ from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
 from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.config import settings
-from base.db import Database
+from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -39,8 +23,8 @@ from base.native_process.turn_identity import (
     hosted_resources_settled,
 )
 from services.agent_runner.agent_host.db_recovery import database_phase
-from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
 from services.agent_runner.agent_host.runtime import TurnOutcome
+from services.agent_runner.agent_host.stall_guard import HostRestartRequiredError
 
 __all__ = [
     "close_hosted_turn",
@@ -53,14 +37,12 @@ __all__ = [
 async def close_hosted_turn(
     pool: AsyncConnectionPool,
     control_pool: AsyncConnectionPool,
-    db: Database,
     bus: EventBus,
     checkpointer: AsyncPostgresSaver,
     incarnation: RuntimeIncarnation,
     outcome: TurnOutcome,
     *,
     resources: HostedTurnResources | None,
-    wake_enabled: Callable[[], bool],
     prompt_reap_enabled: Callable[[], bool],
     reconcile_inputs: ReconcileReadInputs,
 ) -> None:
@@ -92,24 +74,16 @@ async def close_hosted_turn(
         )
     if outcome.crashed:
         await prompt_reap_after_recrash(
-            control_pool,
-            db,
-            bus,
-            incarnation,
-            settlement,
-            wake_enabled=wake_enabled,
-            enabled=prompt_reap_enabled,
+            control_pool, bus, incarnation, settlement, enabled=prompt_reap_enabled
         )
 
 
 async def prompt_reap_after_recrash(
     pool: AsyncConnectionPool,
-    db: Database,
     bus: EventBus,
     incarnation: RuntimeIncarnation,
     settlement: TurnSettlement,
     *,
-    wake_enabled: Callable[[], bool],
     enabled: Callable[[], bool],
 ) -> None:
     """Terminate a corpse whose second crash settled right now (task #3616).
@@ -151,7 +125,7 @@ async def prompt_reap_after_recrash(
             reason="settle_incomplete",
         )
         return
-    reaped = await reap_recrashed_corpse(pool, incarnation, bus=bus, wake_enabled=wake_enabled)
+    reaped = await reap_recrashed_corpse(pool, incarnation, bus=bus)
     if not reaped:
         logger.info(
             "recrash prompt reap skipped: the row moved on since the crash",
@@ -160,7 +134,6 @@ async def prompt_reap_after_recrash(
             reason="row_moved_on",
         )
         return
-    await recover_reaped_corpses(db, bus, reaped)
 
 
 async def reconcile_inbounds_after_abort(
@@ -171,25 +144,12 @@ async def reconcile_inbounds_after_abort(
     resources: HostedTurnResources | None,
     inputs: ReconcileReadInputs,
 ) -> None:
-    """Dispose the aborted turn's claimed inbounds at its settlement point.
+    """Consume an aborted turn's claims under its original owner lock.
 
-    A fatal abort settles the turn (corpse marker stamped, row back to idling)
-    but keeps the cached runtime, so nothing forces the cold admission and its
-    startup reconcile — the rows claimed by the abort would wait for a boot
-    that may never come (task #3615; the #3602 window). The same inbound
-    reconcile the startup path uses runs here instead: rows whose message
-    reached the flushed checkpoint go `done`, uncommitted rows carry no durable
-    commitment and return to `pending` for the next claim (at-least-once
-    delivery still permits a re-delivery), and rows past the stale threshold
-    are dead-lettered.
-
-    Fail-closed: any gap skips the pass and leaves the rows to the next cold
-    admission. The pass needs the abort's own checkpoint settlement (written by
-    `settle_turn_failure` before `aborted` was returned), a fully discharged
-    turn (`hosted_resources_settled`), and a live lease for this exact
-    incarnation — the inbound owner lock fences on it, so a replacement already
-    in place makes the pass a no-op. The settle boundary retains the same
-    explicit original incarnation and resource scope through the call.
+    Rows confirmed in history are committed; other claimed chats are consumed as
+    interrupted with unknown results. Neither group is returned to pending. A
+    missing lease, unresolved resources or read/write failure leaves the claims
+    for a later admission to consume, without executing the old work.
     """
     agent_id = incarnation.agent_id
     if not settings.daemon.host_abort_reconcile_enabled:
@@ -240,25 +200,10 @@ async def reconcile_inbounds_after_turn(
 ) -> None:
     """Dispose the finished turn's claimed inbounds at its settlement point.
 
-    A finished turn's chat rows otherwise stay `'claimed'` until the next
-    cold admission or abort; the turn's own settlement is the earliest
-    durable point that can confirm them (#3999). The pass runs the same
-    inbound reconcile a cold admission would: rows whose message reached the
-    checkpoint go `done`, uncommitted rows return to `pending` for the next
-    claim, and rows past the stale threshold are dead-lettered.
-
-    The pass must stay behind the turn's flush of the throttled nstep tail
-    (`host.py` `_invoke_until_done` flushes before its return): reading a
-    checkpoint with a skipped tail would misread a committed message as
-    missing and reset its row to `pending` (duplicate delivery). Cancelled
-    turns land here too — their outcome is neither crashed nor aborted and
-    they carry no finished-turn flush: the pass then reads the last flushed
-    checkpoint, and a claim the interrupted turn cannot confirm returns to
-    `pending` for re-delivery, the same at-least-once call a cold admission
-    would make. Fail-closed: any gap skips the pass and leaves the rows to
-    the next cold admission, which retries the reconcile. The settle boundary
-    passes the same original incarnation to the reconcile (the inbound owner
-    lock fences on that lease).
+    A confirmed claim is consumed normally. An unconfirmed interrupted claim
+    is also consumed, with an unknown result, so it cannot automatically replay
+    execution. Pending new inputs stay available. The original incarnation and
+    settled resource fence serialize this pass against another claim.
     """
     agent_id = incarnation.agent_id
     if not settings.daemon.host_turn_reconcile_enabled:
@@ -306,23 +251,36 @@ async def reconcile_inbounds_after_turn(
 
 
 async def wait_shielded_task[T](task: asyncio.Task[T]) -> bool:
-    """Retain task custody through repeated caller cancellation; inspect its result at the root."""
+    """Observe one cleanup task within a fixed bound, including repeated cancellation."""
     cancelled = False
+    deadline = asyncio.get_running_loop().time() + CANCEL_UNWIND_TIMEOUT_S
     while not task.done():
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise HostRestartRequiredError("hosted cleanup exceeded its finite deadline")
         try:
-            await asyncio.shield(task)
+            await asyncio.wait({task}, timeout=remaining)
         except asyncio.CancelledError:
             cancelled = True
     return cancelled
 
 
 async def wait_retained_resources(resources: HostedTurnResources) -> bool:
-    """Keep exact unresolved domains until their existing completion owners discharge them."""
+    """Wait finitely for known resources; uncertainty never authorizes a new turn."""
     cancelled = False
+    deadline = asyncio.get_running_loop().time() + CANCEL_UNWIND_TIMEOUT_S
     while resources.unresolved:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise HostRestartRequiredError("hosted resources did not close before the deadline")
         resources.changed.clear()
         try:
-            await resources.changed.wait()
+            async with asyncio.timeout(remaining):
+                await resources.changed.wait()
         except asyncio.CancelledError:
             cancelled = True
+        except TimeoutError as exc:
+            raise HostRestartRequiredError(
+                "hosted resources did not close before the deadline"
+            ) from exc
     return cancelled

@@ -24,7 +24,6 @@ hanging without ever completing a step — does not.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
@@ -43,8 +42,7 @@ class HostRestartRequiredError(RuntimeError):
     """A hosted turn refused its bounded cancellation and owns the task slot.
 
     Rescheduling beside it would violate one-turn-per-agent. Letting the daemon
-    exit hands recovery to its supervisor, which restarts from the durable
-    checkpoint instead.
+    exit hands recovery to its supervisor, which restarts the host. A later fresh input may start new work.
     """
 
 
@@ -54,7 +52,7 @@ class TurnStallTimeoutError(RuntimeError):
     Its ``graph.ainvoke`` made no progress for
     ``AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` and was cancelled; the turn
     task ends (the task DID unwind — that is the whole point of the bounded
-    abort) and the next wake resumes from the checkpoint. Distinct from
+    abort) and a later fresh input starts a new work. Distinct from
     ``HostRestartRequiredError``, which is raised when the cancel refuses to
     unwind: the daemon there must exit, here it must not.
     """
@@ -72,7 +70,7 @@ async def run_invocation_with_stall_guard(
     On stall: the invocation task is cancelled inside the host's bounded unwind
     window (`CANCEL_UNWIND_TIMEOUT_S`). Unwound → `TurnStallTimeoutError` (the
     turn task ends; ``run_turn`` drops the runtime, so the next wake re-runs
-    the startup reconcile and resumes from the checkpoint). Refused →
+    startup reconciliation and waits for new input). Refused →
     `HostRestartRequiredError` (the daemon must exit; the supervisor restarts
     it — rescheduling beside a task that still owns the slot would violate
     one-turn-per-agent).
@@ -112,14 +110,11 @@ async def run_invocation_with_stall_guard(
     except asyncio.CancelledError:
         if not invoke_task.done():
             invoke_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                try:
-                    await invoke_task
-                except Exception:
-                    logger.opt(exception=True).warning(
-                        "hosted turn for agent {agent_id} raised while unwinding its cancel",
-                        agent_id=agent_id,
-                    )
+            done, _ = await asyncio.wait({invoke_task}, timeout=CANCEL_UNWIND_TIMEOUT_S)
+            if invoke_task not in done:
+                raise HostRestartRequiredError("graph did not unwind after cancellation") from None
+            if not invoke_task.cancelled():
+                invoke_task.result()
         raise
 
 
@@ -139,7 +134,7 @@ async def _abort_stalled_invocation(
     logger.error(
         "hosted turn for agent {agent_id} made no progress for "
         "{no_progress_s:.0f}s — aborting the invocation; the next wake "
-        "resumes from the checkpoint",
+        "waits for fresh input",
         event="host_turn_stall_timeout",
         agent_id=agent_id,
         no_progress_s=age_s,
@@ -151,7 +146,7 @@ async def _abort_stalled_invocation(
         ctx,
         agent_id,
         f"The turn was aborted after {age_s:.0f}s with no progress. "
-        "The agent will resume on its next wake.",
+        "Send a new message to start new work.",
     )
     invoke_task.cancel()
     # `asyncio.wait`, NOT `asyncio.wait_for(asyncio.shield(...))`: a shield

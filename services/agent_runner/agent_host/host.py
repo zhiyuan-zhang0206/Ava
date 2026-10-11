@@ -1,7 +1,7 @@
 """Run local agents through a shared graph and explicit per-turn context.
 
 The dispatcher owns single-flight; the daemon owns pools and checkpointer.
-Cold admission and database recovery repair the original task before model work.
+Cold admission consumes interrupted inputs; persistence failure never replays work.
 Lifecycle requests retain original command and resource settlement fences.
 Unknown failures propagate; expected failures settle their checkpoint.
 """
@@ -21,7 +21,7 @@ import psycopg
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
-from psycopg_pool import AsyncConnectionPool, PoolTimeout
+from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
@@ -71,7 +71,6 @@ from base.native_process.turn_identity import HostedServiceResources, HostedTurn
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.telemetry.tracing import turn_span
-from services.agent_runner.agent_host.db_recovery import recover_database
 from services.agent_runner.agent_host.dispatcher import PendingInboundWake
 from services.agent_runner.agent_host.force_termination import (
     force_termination_outcome,
@@ -82,7 +81,6 @@ from services.agent_runner.agent_host.invocation import (
     PendingWorkResult,
     finish_completed_invocation,
     finish_pending_failure,
-    recover_completed_work,
 )
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.invocation.driver import drive_context
@@ -94,7 +92,6 @@ from services.agent_runner.agent_host.invocation.native_work import (
 )
 from services.agent_runner.agent_host.lifecycle import maintenance as maintenance_receipts
 from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
-from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
 from services.agent_runner.agent_host.runtime import (
     HostPolicy,
     HostStats,
@@ -114,7 +111,10 @@ from services.agent_runner.agent_host.settlement import (
     wait_retained_resources,
     wait_shielded_task,
 )
-from services.agent_runner.agent_host.stall_guard import run_invocation_with_stall_guard
+from services.agent_runner.agent_host.stall_guard import (
+    HostRestartRequiredError,
+    run_invocation_with_stall_guard,
+)
 from services.agent_runner.agent_host.wake_screening import _is_runnable, read_stored_config
 
 _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
@@ -199,11 +199,12 @@ class AgentHost:
             cancelled = False
             primary: BaseException | None = None
             try:
-                while not work.done():
-                    try:
-                        await asyncio.shield(work)
-                    except asyncio.CancelledError:
-                        cancelled = True
+                try:
+                    await asyncio.shield(work)
+                except asyncio.CancelledError:
+                    cancelled = True
+                    work.cancel()
+                    await wait_shielded_task(work)
                 work.result()
             except BaseException as exc:
                 primary = exc
@@ -215,6 +216,8 @@ class AgentHost:
                     exc.add_note(f"hosted failure receipt failed: {receipt_error!r}")
                 raise
             finally:
+                if not work.done():
+                    raise HostRestartRequiredError("hosted work remains live after cancellation")
                 try:
                     from base.agents.incarnation.hosted_force import original_host_force
 
@@ -249,25 +252,22 @@ class AgentHost:
                             ),
                             self._control_pool,
                             self._checkpointer,
-                            self._graph,
                             agent_id,
                             self._owner,
                             resources,
                             self._bus,
                             self.drop_agent,
-                            self.database_waits,
-                            self._peek_lock,
-                            work=None,
                             catalog=self._catalog,
                             llm_override=self._policy.llm_override(),
                             default_reader=self._policy.default_reader,
-                            reconcile_inputs=self._policy.reconcile_inputs,
                         )
                     )
                     self._resource_service.retain_task(resources, settlement)
                     cancelled = await wait_shielded_task(settlement) or cancelled
                     settlement.result()
                 except BaseException as cleanup_error:
+                    if isinstance(cleanup_error, HostRestartRequiredError):
+                        raise
                     if primary is None:
                         raise
                     primary.add_note(f"hosted turn cleanup failed: {cleanup_error!r}")
@@ -377,11 +377,7 @@ class AgentHost:
 
                     compact_continuation = await resumable_compact(self._control_pool, incarnation)
                     if compact_continuation is not None or await recover_native_cancel(
-                        self._control_pool,
-                        checkpoints.saver,
-                        checkpoints.graph,
-                        incarnation,
-                        resources=resources,
+                        self._control_pool, incarnation
                     ):
                         runtime = await self._runtime_for(
                             agent_id,
@@ -420,13 +416,11 @@ class AgentHost:
                 await close_hosted_turn(
                     self._pool,
                     self._control_pool,
-                    self._db,
                     self._bus,
                     self._checkpointer,
                     incarnation,
                     outcome,
                     resources=resources,
-                    wake_enabled=self._policy.recovery_wake_enabled,
                     prompt_reap_enabled=self._policy.recrash_reap_enabled,
                     reconcile_inputs=self._policy.reconcile_inputs,
                 )
@@ -604,12 +598,8 @@ class AgentHost:
             checkpoints.graph,
             agent_id,
             ctx,
-            self.database_waits,
-            self._peek_lock,
             partial(self._invoke_until_done, checkpoints=checkpoints),
             self.drop_agent,
-            reconstruction=checkpoints.reconstruction,
-            reconcile_inputs=self._policy.reconcile_inputs,
         )
 
     async def _invoke_native_graph(
@@ -631,135 +621,80 @@ class AgentHost:
     async def _invoke_until_done(
         self, agent_id: int, ctx: AvaContext, *, checkpoints: TurnCheckpoints | None = None
     ) -> TurnOutcome:
-        """Run to idle or lifecycle completion, settling each returned invocation."""
+        """Invoke each work once; persistence failure never re-enters the graph."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
-        tags = ["ava", f"agent-{agent_id}", "hosted"]
-        metadata: dict[str, object] = {"agent_id": agent_id, "hosted": True}
-        config: RunnableConfig = graph_config(
-            agent_id, tags, metadata, ctx.require_agent().kernel.checkpoint_interval
+        config = graph_config(
+            agent_id,
+            ["ava", f"agent-{agent_id}", "hosted"],
+            {"agent_id": agent_id, "hosted": True},
+            ctx.require_agent().kernel.checkpoint_interval,
         )
         turn = 0
-        pending_failure: PendingTurnFailure | None = None
-        failure_recovered = False
         while True:
             turn += 1
-            pending: PendingWorkResult | None = None
-            work = NativeWorkContinuation(uuid4())
+            work = NativeWorkContinuation(uuid4(), require_fresh_input=turn == 1)
             with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
-                # Retain the result and trace; recovery cannot claim the next work.
-                while True:
-                    try:
-                        if pending_failure is not None:
-                            return await finish_pending_failure(
-                                checkpoints.graph,
-                                checkpoints.saver,
-                                agent_id,
-                                ctx,
-                                config,
-                                pending_failure,
-                                notes=self._policy.handoff_notes,
-                                recovering=failure_recovered,
-                                native_work=work.target,
-                            )
-                        prepared = (
-                            pending.result
-                            if pending is not None
-                            else await invoke_prepared_graph(
-                                self._control_pool,
-                                checkpoints.saver,
-                                checkpoints.graph,
-                                agent_id,
-                                ctx,
-                                config,
-                                work,
-                                db=self._db,
-                                bus=self._bus,
-                                relays=self.relays,
-                                notes=self._policy.handoff_notes,
-                                invoke=partial(
-                                    self._invoke_native_graph,
-                                    agent_id,
-                                    config,
-                                    graph=checkpoints.graph,
-                                ),
-                            )
-                        )
-                        if isinstance(prepared, PendingTurnFailure):
-                            pending_failure = prepared
-                            continue
-                        if pending is None:
-                            pending = PendingWorkResult(prepared, native_work=work.target)
-                        outcome = await finish_completed_invocation(
-                            self._control_pool,
-                            checkpoints,
+                try:
+                    prepared = await invoke_prepared_graph(
+                        self._control_pool,
+                        checkpoints.graph,
+                        agent_id,
+                        ctx,
+                        work,
+                        db=self._db,
+                        bus=self._bus,
+                        relays=self.relays,
+                        notes=self._policy.handoff_notes,
+                        invoke=partial(
+                            self._invoke_native_graph, agent_id, config, graph=checkpoints.graph
+                        ),
+                    )
+                    if isinstance(prepared, PendingTurnFailure):
+                        return await finish_pending_failure(
+                            checkpoints.graph,
+                            checkpoints.saver,
                             agent_id,
                             ctx,
-                            pending,
-                            self.drop_agent,
-                            kill_terminating_agent_shells,
-                            db=self._db,
-                            bus=self._bus,
-                            relays=self.relays,
-                            notes=self._policy.handoff_notes,
+                            config,
+                            prepared,
+                            native_work=work.target,
                         )
-                        if outcome is not None:
-                            return outcome
-                        break
-                    except (psycopg.OperationalError, PoolTimeout):
-                        incarnation = ctx.require_original_incarnation(agent_id)
-                        kind = await self._recover_completed_work(
-                            incarnation, pending, work.target, checkpoints=checkpoints
-                        )
-                        failure_recovered = pending_failure is not None
-                        if kind is not None:
-                            return TurnOutcome(exited=kind == "terminate", crashed=False)
-                    except NativeWorkUncertainError:
-                        await hold_native_cancel(self._control_pool, work.target)
+                    pending = PendingWorkResult(prepared, native_work=work.target)
+                    outcome = await finish_completed_invocation(
+                        self._control_pool,
+                        checkpoints,
+                        agent_id,
+                        ctx,
+                        pending,
+                        self.drop_agent,
+                        kill_terminating_agent_shells,
+                        db=self._db,
+                        bus=self._bus,
+                        relays=self.relays,
+                        notes=self._policy.handoff_notes,
+                    )
+                    if outcome is not None:
+                        return outcome
+                except NativeWorkUncertainError:
+                    await hold_native_cancel(self._control_pool, work.target)
+                    self.drop_agent(agent_id)
+                    return TurnOutcome(exited=False, crashed=False, native_held=True)
+                except Exception as exc:
+                    ended = await force_termination_outcome(
+                        exc, self._control_pool, agent_id, incarnation=ctx.original_incarnation
+                    )
+                    if ended is not None:
                         self.drop_agent(agent_id)
-                        return TurnOutcome(exited=False, crashed=False, native_held=True)
-                    except Exception as exc:
-                        ended = await force_termination_outcome(
-                            exc, self._control_pool, agent_id, incarnation=ctx.original_incarnation
-                        )
-                        if ended is not None:
-                            self.drop_agent(agent_id)
-                            return ended
-                        emit_error_event(
-                            ctx,
-                            agent_id,
-                            f"{type(exc).__name__}: {exc}",
-                            error_class=type(exc).__name__,
-                        )
-                        raise
-                    finally:
-                        flush_node_exit_aggregate(agent_id)
-
-    async def _recover_completed_work(
-        self,
-        incarnation: RuntimeIncarnation,
-        pending: PendingWorkResult | None,
-        native_work: NativeWorkTarget | None = None,
-        *,
-        checkpoints: TurnCheckpoints | None = None,
-    ) -> str | None:
-        checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
-        return await recover_completed_work(
-            lambda: recover_database(
-                pool=self._control_pool,
-                checkpointer=checkpoints.saver,
-                graph=checkpoints.graph,
-                incarnation=incarnation,
-                database_waits=self.database_waits,
-                peek_lock=self._peek_lock,
-                work=native_work,
-                reconstruction_parent=checkpoints.reconstruction,
-                reconcile_inputs=self._policy.reconcile_inputs,
-            ),
-            self._control_pool,
-            incarnation,
-            pending,
-            native_work,
-        )
+                        return ended
+                    emit_error_event(
+                        ctx,
+                        agent_id,
+                        f"{type(exc).__name__}: {exc}",
+                        error_class=type(exc).__name__,
+                    )
+                    raise
+                finally:
+                    flush_node_exit_aggregate(agent_id)
 
     @property
     def resources_joined(self) -> bool:
@@ -782,17 +717,15 @@ class AgentHost:
         )
 
     async def renew_ownership(self) -> None:
-        """Renew healthy leases before reaping corpses and retrying committed wakes."""
+        """Renew healthy leases before reporting and reaping crash corpses."""
         await renew_hosted_owner(self._control_pool, self._machine, self._owner)
         try:
-            reaped = await reap_crash_corpses(
+            await reap_crash_corpses(
                 self._control_pool,
                 self._machine,
                 self._owner,
                 bus=self._bus,
-                wake_enabled=self._policy.recovery_wake_enabled,
             )
-            await recover_reaped_corpses(self._db, self._bus, reaped)
         except Exception:
             logger.exception(
                 "corpse reap failed — retrying next beat",

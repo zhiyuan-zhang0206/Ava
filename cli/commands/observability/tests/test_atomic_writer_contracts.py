@@ -12,7 +12,6 @@ from threading import Barrier
 
 import pytest
 
-from base.agents.messages import delivery_outbox
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
 from base.deploy.maintenance import pause_owner
 from base.deploy.release import editable_install
@@ -141,45 +140,6 @@ def test_cli_writer_commits_utf8_without_directory_sync(
     writer(path, "café")
     assert path.read_bytes() == "café".encode()
     assert len(replaced) == 1
-    assert sorted(tmp_path.iterdir()) == [path]
-
-
-def test_journal_directory_sync_failure_raises_after_visible_commit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "record.json"
-    original_fsync = os.fsync
-
-    def fail_directory_sync(fd: int) -> None:
-        if stat.S_ISDIR(os.fstat(fd).st_mode):
-            raise OSError("directory sync failure")
-        original_fsync(fd)
-
-    monkeypatch.setattr(os, "fsync", fail_directory_sync)
-    entry = delivery_outbox.OutboxEntry(
-        schema_version=1,
-        agent_id=1,
-        source="test",
-        content="message",
-        client_message_id="key",
-        created_at="2026-09-24T00:00:00+00:00",
-        last_attempt_at="2026-09-24T00:00:00+00:00",
-        attempts=1,
-        origin_agent_id=None,
-        origin_pid=None,
-        flush_attempts=0,
-        last_flush_at=None,
-        state=delivery_outbox.DeliveryOutboxState.PENDING,
-        abandon_reason=None,
-        abandon_detail=None,
-        abandoned_at=None,
-    )
-
-    expected = entry.as_dict()
-
-    with pytest.raises(OSError, match="directory sync failure"):
-        delivery_outbox._write_atomic(path, entry)
-    assert path.read_bytes() == json.dumps(expected, separators=(",", ":"), sort_keys=True).encode()
     assert sorted(tmp_path.iterdir()) == [path]
 
 

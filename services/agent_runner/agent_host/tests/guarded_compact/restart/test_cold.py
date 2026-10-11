@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.tests.claim.test_inbound_ownership import _insert
+from base.agents.compaction.models import CompactHeldError
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
@@ -18,7 +19,7 @@ from base.config import settings
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel, make_host
-from services.agent_runner.agent_host.tests.guarded_compact.test_dead_host import (
+from services.agent_runner.agent_host.tests.guarded_compact.restart.child_fixture import (
     prepare_agent,
     read_child,
     start_child,
@@ -100,6 +101,14 @@ async def test_released_sigkill_original_restart_is_no_effect_not_successor_rest
                 seed_history=False,
                 catalog=model_catalog,
             )
+            if fence == "target_replaced":
+                with pytest.raises(CompactHeldError, match="requires inspection"):
+                    await host.run_turn(agent)
+                assert model.calls == 0 and ordinary == []
+                assert db_conn.execute(
+                    "SELECT status FROM inbound_messages WHERE id=%s", (chat,)
+                ).fetchone() == ("pending",)
+                return
             await host.run_turn(agent)
             progress = await asyncio.to_thread(
                 native_restart_progress, pool, agent, restart.command_id

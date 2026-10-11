@@ -87,20 +87,20 @@ async def test_original_compact_restart_without_second_ordinary_work(
                 )
             queued = _insert(db_conn, accepted.agent)
             release.set()
-            await asyncio.wait_for(running, 10)
-            progress = await asyncio.to_thread(
-                native_restart_progress, pool, accepted.agent, restart.command_id
+            await assert_return_outcome(
+                running,
+                mode,
+                lost,
+                accepted,
+                db_conn,
+                pool,
+                restart.command_id,
+                target,
+                queued,
+                calls,
+                injected,
+                cancelled,
             )
-        assert injected == ([] if lost == "none" else [lost])
-        assert progress is not None and progress.outcome == (
-            "observed" if lost == "after_observe_cleanup" else "applied"
-        )
-        assert progress.acceptance.target == target and progress.applied_at is not None
-        assert len(accepted.ordinary) == 1 and calls == ["original"]
-        assert_original_closed(db_conn, queued, target.work_id, cancelled)
-        if lost != "after_observe_cleanup":
-            await accepted.host.run_turn(accepted.agent)
-            assert len(accepted.ordinary) == 2 and calls == ["original"]
     finally:
         release.set()
         if not running.done():
@@ -156,3 +156,56 @@ def install_apply_loss(
 
     monkeypatch.setattr(lifecycle, "apply_hosted_lifecycle", apply)
     return injected
+
+
+async def assert_return_outcome(
+    running: asyncio.Task[None],
+    mode: str,
+    lost: str,
+    accepted: Any,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    command_id: int,
+    target: Any,
+    queued: int,
+    calls: list[str],
+    injected: list[str],
+    cancelled: Any,
+) -> None:
+    if mode == "failure" or (lost != "none" and mode == "success"):
+        with pytest.raises(psycopg.OperationalError):
+            await asyncio.wait_for(running, 10)
+        assert calls == ["original"] and len(accepted.ordinary) == 1
+        assert db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE id=%s", (queued,)
+        ).fetchone() == ("pending",)
+        return
+    await asyncio.wait_for(running, 10)
+    if mode in ("cancel_first", "restart_first"):
+        await assert_held_return(pool, accepted, command_id, calls, injected)
+        return
+    progress = await asyncio.to_thread(native_restart_progress, pool, accepted.agent, command_id)
+    assert injected == ([] if lost == "none" else [lost])
+    assert progress is not None and progress.outcome == (
+        "observed" if lost == "after_observe_cleanup" else "applied"
+    )
+    assert progress.acceptance.target == target and progress.applied_at is not None
+    assert len(accepted.ordinary) == 1 and calls == ["original"]
+    assert_original_closed(db_conn, queued, target.work_id, cancelled)
+    if lost != "after_observe_cleanup":
+        await accepted.host.run_turn(accepted.agent)
+        assert len(accepted.ordinary) == 2 and calls == ["original"]
+
+
+async def assert_held_return(
+    pool: ConnectionPool,
+    accepted: Any,
+    command_id: int,
+    calls: list[str],
+    injected: list[str],
+) -> None:
+    assert injected == [] and calls == ["original"]
+    assert len(accepted.ordinary) == 1
+    progress = await asyncio.to_thread(native_restart_progress, pool, accepted.agent, command_id)
+    assert progress is not None and progress.outcome == "accepted"
+    assert progress.applied_at is None

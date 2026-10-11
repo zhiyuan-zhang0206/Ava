@@ -11,11 +11,10 @@ import psutil
 import psycopg
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.ownership.hosted import settle_stale_running_rows
 from agent.state import AgentState
 from base.agents.incarnation import resources as resource_codec
 from base.cluster.machine import machine_name
@@ -27,9 +26,9 @@ from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit, _graph
+from services.agent_runner.agent_host.recovery.tests.helpers import admit as _admit
+from services.agent_runner.agent_host.recovery.tests.helpers import checkpoint_graph as _graph
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from services.agent_runner.agent_host.tests.test_turn_dispatcher import _FixedClock, _ScanScheduler
 from tests.components.base.poll_until import poll_until_async
 
 
@@ -73,12 +72,12 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
     )
 
     wakes = await host.pending_inbound_wakes(60)
-    assert [(wake.agent_id, wake.recovery) for wake in wakes] == [(agent, True)]
+    assert [wake.agent_id for wake in wakes] == [agent]
 
     ordinary = insert_inbound(db_conn, agent, "Need a reply", "user")
     db_conn.commit()
     wakes = await host.pending_inbound_wakes(60)
-    assert [(wake.agent_id, wake.recovery) for wake in wakes] == [(agent, False)]
+    assert [wake.agent_id for wake in wakes] == [agent]
 
     db_conn.execute(
         "UPDATE inbound_messages SET status='done' WHERE id IN (%s,%s)", (lifecycle, ordinary)
@@ -91,7 +90,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
     )
     db_conn.commit()
     wakes = await host.pending_inbound_wakes(60)
-    assert [(wake.agent_id, wake.recovery) for wake in wakes] == [(agent, False)]
+    assert [wake.agent_id for wake in wakes] == [agent]
 
 
 @pytest.mark.parametrize("known_progress", [True, False])
@@ -151,7 +150,7 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
         assert [(w.agent_id, w.stale) for w in await host.pending_inbound_wakes(60)] == [
             (agent, True)
         ]
-        assert (await host.pending_inbound_wakes(60))[0].recovery is False
+        assert (await host.pending_inbound_wakes(60))[0].agent_id == agent
         if not known_progress:
             host.turn_progress._marks.pop(agent)
         await dispatcher.scan_once()
@@ -165,107 +164,6 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
         await host.aclose()
     state = await graph.aget_state({"configurable": {"thread_id": str(agent)}})
     assert state.values["messages"][-1].content == "Completed"
-
-
-async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_messages(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    insert_inbound: Callable[..., int],
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
-    incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
-    )
-    agent = incarnation.agent_id
-    inbound = insert_inbound(db_conn, agent, "Claimed before host exit", "user")
-    db_conn.execute("UPDATE inbound_messages SET status='claimed' WHERE id=%s", (inbound,))
-    db_conn.commit()
-    with subprocess.Popen(
-        [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE
-    ) as predecessor:
-        assert predecessor.stdin is not None
-        dead = resource_codec.ResourceProcess.capture(psutil.Process(predecessor.pid))
-        predecessor.stdin.close()
-        predecessor.wait(timeout=3)
-    row = db_conn.execute(
-        "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent,)
-    ).fetchone()
-    assert row is not None
-    resources = resource_codec.decode_resources(row[0])
-    assert isinstance(resources, resource_codec.IncarnationResources)
-    db_conn.execute(
-        "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
-        (Jsonb(resources.model_copy(update={"host_process": dead}).model_dump(mode="json")), agent),
-    )
-    db_conn.commit()
-    calls: list[int] = []
-
-    async def work(_state: AgentState) -> dict[str, object]:
-        calls.append(agent)
-        return {"turn_idle": True, "halted": True, "messages": [AIMessage(content="Recovered")]}
-
-    graph, saver = await _graph(aops_pool, agent, work)
-    await graph.aupdate_state(
-        {"configurable": {"thread_id": str(agent)}},
-        {
-            "messages": [
-                HumanMessage(content="Claimed work", additional_kwargs={"ava_inbound_id": inbound})
-            ]
-        },
-        as_node="work",
-    )
-    host = AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        checkpointer=saver,
-        graph=graph,
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(),
-        catalog=model_catalog,
-    )
-    # A host boot while the dead predecessor still has a fresh lease cannot settle it.
-    assert await settle_stale_running_rows(aops_pool, machine_name()) == []
-    assert await host.pending_inbound_wakes(60) == []
-    db_conn.execute(
-        "UPDATE agents_meta SET lease_expires_at=now()-interval '1s' WHERE id=%s", (agent,)
-    )
-    db_conn.commit()
-    before = db_conn.execute("SELECT * FROM inbound_messages WHERE id=%s", (inbound,)).fetchone()
-    assert [(w.agent_id, w.recovery) for w in await host.pending_inbound_wakes(60)] == [
-        (agent, True)
-    ]
-    assert (
-        db_conn.execute("SELECT * FROM inbound_messages WHERE id=%s", (inbound,)).fetchone()
-        == before
-    )
-    scheduler = TurnScheduler(host.run_turn)
-    dispatcher = InboundWakeDispatcher(
-        EventBus.from_settings(),
-        scheduler,
-        pending_scan=host.pending_inbound_wakes,
-        stale_after_s=60,
-    )
-    try:
-        await dispatcher.scan_once()
-        await poll_until_async(lambda: not scheduler.active_agents, timeout=3)
-        assert calls == [agent]
-        assert db_conn.execute(
-            "SELECT status,runtime_owner,runtime_generation<>%s FROM agents_meta WHERE id=%s",
-            (incarnation.generation, agent),
-        ).fetchone() == ("idling", host._owner, True)
-        assert db_conn.execute(
-            "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
-        ).fetchone() == (1,), "recovery must not invent an inbound message"
-        state = await graph.aget_state({"configurable": {"thread_id": str(agent)}})
-        assert state.values["messages"][-2].content == "Claimed work"
-        assert state.values["messages"][-1].content == "Recovered"
-        assert db_conn.execute(
-            "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
-        ).fetchone() == ("done",), "startup must reconcile the already checkpointed claim"
-    finally:
-        await scheduler.aclose()
-        await host.aclose()
 
 
 @pytest.mark.parametrize("status", ["running", "idling"])
@@ -368,7 +266,7 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
                 "lease_expires_at FROM agents_meta WHERE id=%s",
                 (agent,),
             ).fetchone()
-            assert [w.agent_id for w in await host.pending_inbound_wakes(60)] == [agent]
+            assert await host.pending_inbound_wakes(60) == []
             await host.run_turn(agent)
             assert host.stats.cache_misses == 0
             assert (
@@ -389,412 +287,3 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
         finally:
             predecessor.stdin.close()
             predecessor.wait(timeout=3)
-
-
-class TestHostedWakePacing:
-    async def test_active_cancel_direct_successor_does_not_hold_recovery_slot(self) -> None:
-        release = asyncio.Event()
-        entered: list[int] = []
-
-        async def run_turn(agent_id: int) -> None:
-            entered.append(agent_id)
-            if agent_id == 1 and entered.count(1) == 1:
-                try:
-                    await asyncio.Event().wait()
-                except asyncio.CancelledError:
-                    asyncio.get_running_loop().call_soon(scheduler.wake, 1)
-                    raise
-            await release.wait()
-
-        pending = [dispatcher.PendingInboundWake(1, False, True)]
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return pending
-
-        scheduler = TurnScheduler(run_turn)
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
-            scheduler,
-            pending_scan=_pending,
-            stale_after_s=180.0,
-            recovery_wake_inflight=1,
-        )
-        try:
-            await disp.scan_once()
-            original = disp._recovery_in_flight[1]
-            await poll_until_async(lambda: entered == [1], timeout=3)
-            assert await scheduler.cancel_agent(1)
-            await poll_until_async(lambda: entered == [1, 1], timeout=3)
-            direct = scheduler.task_for(1)
-            assert original.done() and direct is not None and not direct.done()
-            assert disp._recovery_in_flight == {} and scheduler.reaped_successor(1) is None
-            pending[:] = [dispatcher.PendingInboundWake(2, False, True)]
-            await disp.scan_once()
-            await poll_until_async(lambda: entered == [1, 1, 2], timeout=3)
-            assert set(disp._recovery_in_flight) == {2} and not direct.done()
-            release.set()
-            await poll_until_async(lambda: disp._recovery_in_flight == {}, timeout=3)
-        finally:
-            release.set()
-            await scheduler.aclose()
-
-    async def test_active_cancel_releases_slot_without_claiming_direct_wake(self) -> None:
-        entered = asyncio.Event()
-        release = asyncio.Event()
-
-        async def run_turn(agent_id: int) -> None:
-            if agent_id == 1:
-                entered.set()
-            await release.wait()
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [dispatcher.PendingInboundWake(1, False, True)]
-
-        scheduler = TurnScheduler(run_turn)
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
-        )
-        try:
-            direct = scheduler.wake(3)
-            assert direct is not None and disp._recovery_in_flight == {}
-            await disp.scan_once()
-            first = disp._recovery_in_flight[1]
-            await asyncio.wait_for(entered.wait(), 3)
-            assert await scheduler.cancel_agent(1) is True
-            assert first.done() and disp._recovery_in_flight == {}
-            assert 1 not in scheduler.active_agents
-            await disp.scan_once()
-            second = disp._recovery_in_flight[1]
-            assert second is not first
-            disp._release_recovery_slot(1, first)  # A late callback cannot remove a newer slot.
-            assert disp._recovery_in_flight[1] is second
-            release.set()
-            await poll_until_async(lambda: disp._recovery_in_flight == {}, timeout=3)
-        finally:
-            release.set()
-            await scheduler.aclose()
-
-    async def test_prestart_reap_transfers_recovery_slot_until_replacement_finishes(self) -> None:
-        entered: list[int] = []
-        release = asyncio.Event()
-
-        async def run_turn(agent_id: int) -> None:
-            entered.append(agent_id)
-            await release.wait()
-
-        pending = [dispatcher.PendingInboundWake(1, False, True)]
-        observed: list[bool] = []
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            if pending[0].agent_id == 2 and scheduler.task_for(1) is original:
-                observed.append(original.done() and scheduler.reaped_successor(1) is None)
-                assert set(disp._recovery_in_flight) == {1}
-            return pending
-
-        scheduler = TurnScheduler(run_turn)
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
-            scheduler,
-            pending_scan=_pending,
-            stale_after_s=180.0,
-            recovery_wake_inflight=1,
-        )
-        try:
-            await disp.scan_once()
-            original = disp._recovery_in_flight[1]
-            pending[:] = [dispatcher.PendingInboundWake(2, False, True)]
-            racing_scan = asyncio.create_task(disp.scan_once())
-            assert await scheduler.cancel_agent(1) is True
-            await racing_scan
-            assert observed == [True] and scheduler.task_for(2) is None
-            successor = scheduler.task_for(1)
-            assert successor is scheduler.reaped_successor(1) is disp._recovery_in_flight[1]
-            await disp.scan_once()
-            await poll_until_async(lambda: entered == [1], timeout=3)
-            assert scheduler.task_for(2) is None and disp._recovery_in_flight == {1: successor}
-            release.set()
-            await poll_until_async(lambda: disp._recovery_in_flight == {}, timeout=3)
-            await disp.scan_once()
-            assert set(disp._recovery_in_flight) == {2}
-            await poll_until_async(lambda: entered == [1, 2], timeout=3)
-            await poll_until_async(lambda: disp._recovery_in_flight == {}, timeout=3)
-        finally:
-            release.set()
-            await scheduler.aclose()
-
-    async def test_recovery_slot_released_before_ordinary_work_successor_finishes(self) -> None:
-        first_started = asyncio.Event()
-        successor_started = asyncio.Event()
-        second_started = asyncio.Event()
-        finish_first = asyncio.Event()
-        finish_successor = asyncio.Event()
-        finish_second = asyncio.Event()
-        calls: list[int] = []
-
-        async def run_turn(agent_id: int) -> None:
-            calls.append(agent_id)
-            if agent_id == 1 and calls.count(1) == 1:
-                first_started.set()
-                await finish_first.wait()
-            elif agent_id == 1:
-                successor_started.set()
-                await finish_successor.wait()
-            else:
-                second_started.set()
-                await finish_second.wait()
-
-        scheduler = TurnScheduler(run_turn)
-        pending = [dispatcher.PendingInboundWake(1, False, True)]
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return pending
-
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
-            scheduler,
-            pending_scan=_pending,
-            stale_after_s=180.0,
-            recovery_wake_batch=2,
-            recovery_wake_inflight=1,
-        )
-        try:
-            await disp.scan_once()
-            await asyncio.wait_for(first_started.wait(), 3)
-            scheduler.wake(1)  # Ordinary work queues behind the recovery turn.
-            finish_first.set()
-            await asyncio.wait_for(successor_started.wait(), 3)
-            assert disp._recovery_in_flight == {}
-            pending[:] = [dispatcher.PendingInboundWake(2, False, True)]
-            await disp.scan_once()
-            await asyncio.wait_for(second_started.wait(), 3)
-            assert calls == [1, 1, 2]
-            assert scheduler.active_agents == {1, 2}
-            assert set(disp._recovery_in_flight) == {2}
-        finally:
-            finish_successor.set()
-            finish_second.set()
-            await scheduler.aclose()
-
-    async def test_recovery_inflight_cap_releases_completed_turns_and_preserves_work(self) -> None:
-        entered: set[int] = set()
-        release = {agent_id: asyncio.Event() for agent_id in (1, 2, 3, 4, 99)}
-
-        async def run_turn(agent_id: int) -> None:
-            entered.add(agent_id)
-            await release[agent_id].wait()
-
-        scheduler = TurnScheduler(run_turn)
-        remaining = {1, 2, 3, 4}
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [
-                dispatcher.PendingInboundWake(agent_id=agent_id, stale=False, recovery=True)
-                for agent_id in sorted(remaining)
-            ] + [dispatcher.PendingInboundWake(agent_id=99, stale=False)]
-
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
-            scheduler,
-            pending_scan=_pending,
-            stale_after_s=180.0,
-            recovery_wake_batch=3,
-            recovery_wake_inflight=2,
-        )
-        try:
-            await disp.scan_once()
-            assert scheduler.active_agents == {1, 2, 99}
-            await disp.scan_once()
-            assert scheduler.active_agents == {1, 2, 99}
-            release[1].set()
-            await poll_until_async(lambda: 1 not in scheduler.active_agents, timeout=3)
-            remaining.remove(1)
-            await disp.scan_once()
-            assert scheduler.active_agents == {2, 3, 99}
-            release[2].set()
-            release[3].set()
-            await poll_until_async(lambda: not ({2, 3} & scheduler.active_agents), timeout=3)
-            remaining.difference_update({2, 3})
-            await disp.scan_once()
-            assert scheduler.active_agents == {4, 99}
-            await poll_until_async(lambda: entered >= {1, 2, 3, 4, 99}, timeout=3)
-        finally:
-            for event in release.values():
-                event.set()
-            await scheduler.aclose()
-
-    async def test_unstarted_recovery_wake_does_not_take_slot(self) -> None:
-        scheduler = _ScanScheduler()
-        pending = [dispatcher.PendingInboundWake(agent_id=1, stale=False, recovery=True)]
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return pending
-
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
-            scheduler,
-            pending_scan=_pending,
-            stale_after_s=180.0,
-            recovery_wake_batch=2,
-            recovery_wake_inflight=1,
-        )
-        await disp.scan_once()
-        assert scheduler.woken == [1]
-        assert disp._recovery_in_flight == {}
-        pending[:] = [dispatcher.PendingInboundWake(agent_id=2, stale=False, recovery=True)]
-        await disp.scan_once()
-        assert scheduler.woken == [1, 2]
-        assert disp._recovery_in_flight == {}
-
-    async def test_closed_scheduler_scans_start_no_recovery_turns(self) -> None:
-        calls: list[int] = []
-
-        async def run_turn(agent_id: int) -> None:
-            calls.append(agent_id)
-
-        scheduler = TurnScheduler(run_turn)
-        await scheduler.aclose()
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [dispatcher.PendingInboundWake(1, False, True)]
-
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
-        )
-        await disp.scan_once()
-        await disp.scan_once()
-        assert calls == []
-        assert scheduler.active_agents == set()
-        assert disp._recovery_in_flight == {}
-
-    async def test_failed_recovery_turn_releases_slot_on_next_scan(self) -> None:
-        attempted: list[int] = []
-        failures: list[RuntimeError] = []
-
-        async def run_turn(agent_id: int) -> None:
-            attempted.append(agent_id)
-            failure = RuntimeError("failed before admission")
-            failures.append(failure)
-            raise failure
-
-        scheduler = TurnScheduler(run_turn)
-        pending = [dispatcher.PendingInboundWake(agent_id=1, stale=False, recovery=True)]
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return pending
-
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
-            scheduler,
-            pending_scan=_pending,
-            stale_after_s=180.0,
-            recovery_wake_batch=2,
-            recovery_wake_inflight=1,
-        )
-        try:
-            await disp.scan_once()
-            await poll_until_async(
-                lambda: attempted == [1] and not scheduler.active_agents, timeout=3
-            )
-            pending[:] = [dispatcher.PendingInboundWake(agent_id=2, stale=False, recovery=True)]
-            await disp.scan_once()
-            await poll_until_async(lambda: attempted == [1, 2], timeout=3)
-        finally:
-            with pytest.raises(ExceptionGroup) as joined:
-                await scheduler.aclose()
-            assert joined.value.exceptions == tuple(failures)
-
-    async def test_recovery_cap_drains_across_scans_without_delaying_work(self) -> None:
-        scheduler = _ScanScheduler()
-        remaining = set(range(1, 7))
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [
-                dispatcher.PendingInboundWake(agent_id=agent_id, stale=False, recovery=True)
-                for agent_id in sorted(remaining)
-            ] + [dispatcher.PendingInboundWake(agent_id=99, stale=False)]
-
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
-            scheduler,
-            pending_scan=_pending,
-            stale_after_s=180.0,
-            recovery_wake_batch=2,
-        )
-        await disp.scan_once()
-        assert scheduler.woken == [1, 2, 99]
-        remaining.difference_update(scheduler.woken)
-
-        await disp.scan_once()
-        assert scheduler.woken == [1, 2, 99, 3, 4, 99]
-        remaining.difference_update(scheduler.woken)
-
-        await disp.scan_once()
-        assert scheduler.woken == [1, 2, 99, 3, 4, 99, 5, 6, 99]
-        remaining.difference_update(scheduler.woken)
-        assert remaining == set()
-        assert [agent_id for agent_id in scheduler.woken if agent_id != 99] == list(range(1, 7))
-        await disp.scan_once()
-        assert scheduler.woken[-1] == 99
-
-    async def test_recovery_wakes_for_active_agents_do_not_spend_new_turn_budget(self) -> None:
-        scheduler = _ScanScheduler({1})
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [
-                dispatcher.PendingInboundWake(agent_id=1, stale=False, recovery=True),
-                dispatcher.PendingInboundWake(agent_id=2, stale=False, recovery=True),
-                dispatcher.PendingInboundWake(agent_id=3, stale=False, recovery=True),
-            ]
-
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
-            scheduler,
-            pending_scan=_pending,
-            stale_after_s=180.0,
-            recovery_wake_batch=1,
-        )
-        await disp.scan_once()
-        assert scheduler.woken == [1, 2]
-
-    async def test_recovery_cap_does_not_skip_stale_cancellation(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        scheduler = _ScanScheduler({3})
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [
-                dispatcher.PendingInboundWake(agent_id=1, stale=False, recovery=True),
-                dispatcher.PendingInboundWake(agent_id=2, stale=False, recovery=True),
-                dispatcher.PendingInboundWake(agent_id=3, stale=True, recovery=True),
-            ]
-
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
-            scheduler,
-            pending_scan=_pending,
-            stale_after_s=180.0,
-            recovery_wake_batch=1,
-            turn_progress=_FixedClock(3600.0),
-        )
-        await disp.scan_once()
-        assert scheduler.cancelled == [3]
-        assert scheduler.woken == [1]
-
-    async def test_small_recovery_cohort_is_all_woken_in_first_scan(self) -> None:
-        scheduler = _ScanScheduler()
-
-        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
-            return [
-                dispatcher.PendingInboundWake(agent_id=agent_id, stale=False, recovery=True)
-                for agent_id in (1, 2)
-            ]
-
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
-            scheduler,
-            pending_scan=_pending,
-            stale_after_s=180.0,
-            recovery_wake_batch=2,
-        )
-        await disp.scan_once()
-        assert scheduler.woken == [1, 2]

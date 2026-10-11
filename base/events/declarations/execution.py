@@ -113,15 +113,6 @@ EVENTS: dict[str, EventSpec] = {
         "stale exec request evidence preserved under the explicit quarantine",
         payload=ExecRequestQuarantine,
     ),
-    "exec_request_bounded_quarantine": telemetry_event(
-        "exec_request_bounded_quarantine",
-        "an unreadable exec request envelope past the bounded-disposition bound "
-        "(twice the exec node timeout, no live process reference, no live host "
-        "process) was quarantined without review — the bytes are preserved with "
-        "a receipt and the recovery path no longer defers on it; off via "
-        "AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED restores unbounded retention",
-        tier="anomaly",
-    ),
     "exec_cancelled": telemetry_event(
         "exec_cancelled", "execute_code cancelled", tier="anomaly", persist=True
     ),

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -449,14 +447,6 @@ class TestMachinePauseResume:
         assert status == "terminated"
         assert source == "user"
         assert old_chat_id < fence_id == terminate_id
-
-        from psycopg_pool import ConnectionPool
-
-        from base.config import settings
-        from services.wake.delivery_watchdog.daemon import select_terminated_owners_with_pending
-
-        with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool:
-            assert select_terminated_owners_with_pending(cast(ConnectionPool, pool), 86400.0) == []
 
     def test_pause_unknown_machine_404(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
         set_machine_identity(role="gateway", name="test-host")

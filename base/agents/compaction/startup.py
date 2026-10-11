@@ -1,4 +1,4 @@
-"""A typed retained compact continuation precedes native cancellation recovery."""
+"""Read retained compact evidence before admitting another invocation."""
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -12,10 +12,10 @@ async def resumable_compact(
     pool: AsyncConnectionPool,
     incarnation: RuntimeIncarnation,
 ) -> CompactCommand | None:
-    """Never authorize provider work or ordinary claim from a status/lease shortcut.
+    """Read a retained original compact command for admission checks.
 
-    PREPARED still requires the original application authorization (including
-    cancellation ordering). APPLYING resumes only its durable original result.
+    Receiver authorization and cancellation ordering still apply. The host refuses
+    to execute or apply a command whose original attempt already started.
     """
     async with async_write_transaction(pool) as conn:
         await conn.execute(

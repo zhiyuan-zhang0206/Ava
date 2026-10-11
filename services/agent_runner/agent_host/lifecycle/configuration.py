@@ -41,7 +41,6 @@ def host_policy(config: ConfigBoot) -> HostPolicy:
             clock_factory=lambda: Clock(clock_config_from_boot(config)),
             timestamps_enabled=lambda: config.view.general.message_timestamps,
         ),
-        recovery_wake_enabled=lambda: config.view.daemon.hosted_crash_recovery_wake_enabled,
         recrash_reap_enabled=lambda: config.view.daemon.hosted_recrash_prompt_reap_enabled,
         reconcile_inputs=ReconcileReadInputs(
             stale_claimed_seconds=lambda: (

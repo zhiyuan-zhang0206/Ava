@@ -283,10 +283,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/resurrect"): RouteContract(
         Idempotency.NON_IDEMPOTENT, note="resurrection is not bound to the observed incarnation"
     ),
-    ("POST", "/api/agents/resurrect-billing"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="billing resurrection has no durable operation receipt; preview alone is read-only",
-    ),
     ("POST", "/api/agents/{agent_id}/restart"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         note="a repeat dispatches another restart; HTTP intent has no durable receipt",

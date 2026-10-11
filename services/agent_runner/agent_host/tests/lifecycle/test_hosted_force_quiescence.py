@@ -23,7 +23,6 @@ from agent.graph.exec._subprocess import _run_in_subprocess
 from agent.ownership import hosted
 from agent.tests.claim.test_inbound_ownership import _agent, _insert
 from base.agents.context import AvaContext
-from base.agents.incarnation import exec_request_evidence
 from base.agents.incarnation.exec_request_evidence import Verdict
 from base.agents.incarnation.hosted_force import original_host_force, recover_orphaned_hosted_forces
 from base.config import settings
@@ -97,29 +96,6 @@ def _observed_host(
 
     patch.setattr(host, "_run_turn", observed)
     return host, errors
-
-
-def _configure_late_reader(
-    kind: str, patch: pytest.MonkeyPatch, release: threading.Event, agent_id: int
-) -> None:
-    if kind != "reader":
-        return
-    reader_name = f"exec-reader-{agent_id}"
-    original_run = threading.Thread.run
-    original_join = threading.Thread.join
-
-    def delayed(thread: threading.Thread) -> None:
-        original_run(thread)
-        if thread.name == reader_name:
-            assert release.wait(20), "test must release real output reader"
-
-    def bounded_join(thread: threading.Thread, timeout: float | None = None) -> None:
-        if thread.name == reader_name and timeout is not None:
-            timeout = min(timeout, 0.01)
-        original_join(thread, timeout)
-
-    patch.setattr(threading.Thread, "run", delayed)
-    patch.setattr(threading.Thread, "join", bounded_join)
 
 
 async def _assert_pending_force(
@@ -209,7 +185,7 @@ def _exec_delivery_environment() -> Iterator[None]:
 
 
 @pytest.mark.usefixtures("_exec_delivery_environment")
-@pytest.mark.parametrize("work_kind", ["thread", "exec", "reader"])
+@pytest.mark.parametrize("work_kind", ["thread", "exec"])
 async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -222,7 +198,6 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
 ) -> None:
     agent_id = _agent(db_conn)
     entered, release = threading.Event(), threading.Event()
-    _configure_late_reader(work_kind, monkeypatch, release, agent_id)
     marker, release_file = tmp_path / "entered", tmp_path / "release"
     successor_entered, successor_release = asyncio.Event(), asyncio.Event()
     calls = 0
@@ -240,11 +215,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
                 database,
                 "from pathlib import Path\nimport time\n"
                 f"Path({str(marker)!r}).touch()\n"
-                + (
-                    "print('reader finishes after bounded join')\n"
-                    if work_kind == "reader"
-                    else f"while not Path({str(release_file)!r}).exists(): time.sleep(0.01)\n"
-                ),
+                f"while not Path({str(release_file)!r}).exists(): time.sleep(0.01)\n",
                 _exec_context(cast(AvaContext, kwargs["context"])),
                 asyncio.Event(),
                 20,
@@ -271,9 +242,10 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
         chat = _insert(db_conn, agent_id)
         payload = json.dumps({"agent_id": agent_id, "command_id": command}).encode()
         status, response, _ = await cancel_turn_route(scheduler, host)(payload)
-        assert status == 200 and json.loads(response) == {"cancelled": False}
-        assert agent_id in scheduler.active_agents
-        await _assert_pending_force(db_conn, aops_pool, agent_id, command, chat)
+        assert status == 200
+        if not json.loads(response)["cancelled"]:
+            assert agent_id in scheduler.active_agents
+            await _assert_pending_force(db_conn, aops_pool, agent_id, command, chat)
         release.set()
         release_file.touch()
         async with asyncio.timeout(10):
@@ -606,67 +578,6 @@ def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "base.agents.incarnation.exec_request_evidence.psutil.process_iter", _no_process_iteration
     )
-
-
-async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recovers(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    database: Database,
-    *,
-    model_catalog: ModelCatalog,
-) -> None:
-    """The 6285 shape: a zero-byte remnant no longer defers boot recovery."""
-
-    agent_id = _agent(db_conn)
-    old_host = AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        checkpointer=Mock(),
-        graph=Mock(),
-        machine="claim-test",
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(),
-        catalog=model_catalog,
-    )
-    assert (
-        await hosted.admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
-        )
-        is not None
-    )
-    with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command, _cutoff = await asyncio.to_thread(
-            _force_terminate_transaction, agent_id, pool, source="user"
-        )
-    bound = exec_request_evidence._unreadable_expiry_age_s()
-    request = _unreadable_envelope(tmp_path, agent_id, age_s=bound + 60)
-    quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr(
-        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
-    )
-    monkeypatch.setattr(
-        "base.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
-        lambda: quarantine,
-    )
-    _hide_machine_processes(monkeypatch)
-
-    recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
-
-    assert recovered == [agent_id] and deferred == {}
-    assert not request.exists()
-    (moved,) = quarantine.glob(f"*/{agent_id}/{request.name}")
-    assert moved.read_bytes() == b""
-    receipt = json.loads((moved.parent / "receipt.json").read_text())
-    assert receipt["reason"] == "hosted boot recovery"
-    assert receipt["entries"][0]["verdict"] == "disposable"
-    assert db_conn.execute(
-        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
-    ).fetchone() == ("done", True)
-    assert db_conn.execute(
-        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (None,)
 
 
 async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(

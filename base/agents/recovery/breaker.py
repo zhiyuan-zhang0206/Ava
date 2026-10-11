@@ -1,30 +1,4 @@
-"""Durable recovery circuit breaker for permanent provider rejections.
-
-Invariant (task #3617, design #3610 section 12): two CONSECUTIVE permanent-class
-provider rejections with no successful turn between them halt every automatic
-recovery path for that agent — event-path resurrect, the delivery watchdog's
-wake re-dispatch and terminated-owner retry, the stalled crash-marked harvest
-op, and the relaxed reaper-marked trigger — until a turn succeeds. A manual
-resurrect (`resurrect-explicit`, no pending-work trigger) stays exempt: it is
-the explicit human override.
-
-`agents_meta.permanent_reject_streak` is the durable count and the single
-source of truth for "halted": incremented when a turn ends with a
-permanent-class ``FatalProviderError`` (``agent/turn/runloop.py``), reset to 0 by
-the completed-turn UPDATE that clears ``last_turn_fatal_at``
-(``agent/graph/llm/node.py::_persist_last_active``). The latest rejection's
-reason class lives beside the count in ``agents_meta.last_permanent_reject_reason``
-(written with the increment, cleared with the streak). Gates read the streak
-(``RECOVERY_BREAKER_CLEAR``), never the wake-suppression window alone: a claim
-(e.g. a heartbeat note) clears ``wake_suppressed_until`` by design, so the
-suppression column cannot carry an until-human halt.
-
-Tripping additionally writes ``wake_suppressed_until`` with
-``SUPPRESS_REASON_PERMANENT_REJECT`` — the operator-visible reason, and the
-input to the suppression gates the automatic paths already consult — while the
-caller (``agent/turn/runloop.py``) reuses the metadata-only ancestor report plus a
-blocked Error event for the honest UX.
-"""
+"""One permanent provider rejection stops background wakes. Fresh chat or explicit operator resurrection may try again after a fix; successful model progress clears the durable rejection. No billing batch recovery is provided."""
 
 from __future__ import annotations
 
@@ -34,7 +8,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.db.transaction import async_write_transaction
 
-HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS = 2
+HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS = 1
 
 SUPPRESS_REASON_PERMANENT_REJECT = "permanent_provider_reject"
 
@@ -43,11 +17,7 @@ SUPPRESS_REASON_PERMANENT_REJECT = "permanent_provider_reject"
 # representable everywhere (no `infinity` datetime edge cases).
 HALT_SUPPRESSION_WINDOW_S = 3650 * 24 * 3600.0
 
-# The durable reject reason for an HTTP 402 billing rejection — the value
-# `agent.turn.runloop._circuit_reason` maps 402 to (CIRCUIT_REASON_BILLING). The
-# billing batch-recovery whitelist (task #3919) filters on exactly this
-# value; keep it in sync with CIRCUIT_REASON_BILLING (asserted by
-# tests/components/base/test_recovery_breaker.py, same pattern as RECOVERY_BREAKER_CLEAR).
+# Stored reason for an HTTP 402 billing rejection, shared with the classifier.
 PERMANENT_REJECT_REASON_BILLING: Final = "billing"
 
 # Correlated against the unaliased agents_meta row (same shape as
@@ -55,7 +25,7 @@ PERMANENT_REJECT_REASON_BILLING: Final = "billing"
 # SQL half of the breaker the automatic-recovery gates embed; keep the literal
 # in sync with HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS (asserted by
 # tests/components/base/test_recovery_breaker.py).
-RECOVERY_BREAKER_CLEAR: LiteralString = "permanent_reject_streak < 2"
+RECOVERY_BREAKER_CLEAR: LiteralString = "permanent_reject_streak < 1"
 
 
 async def record_permanent_reject_turn(
@@ -65,8 +35,7 @@ async def record_permanent_reject_turn(
 
     `reason` is the ``_circuit_reason`` class of THIS rejection; it is
     recorded beside the streak (``last_permanent_reject_reason``) so durable
-    readers — the billing batch-recovery whitelist (task #3919) — can tell
-    why the streak stands, not just how tall it is. Callers keep this
+    diagnostics can identify the cause of the halt. Callers keep this
     best-effort (log-and-continue on failure): the breaker must never mask
     the original provider rejection.
     """
@@ -111,3 +80,36 @@ async def halt_automatic_recovery(pool: AsyncConnectionPool, agent_id: int) -> b
             ),
         )
         return cur.rowcount == 1
+
+
+async def admit_pending_wake(pool: AsyncConnectionPool, agent_id: int) -> bool:
+    """Keep background inputs halted; an explicit fresh peer/user chat can retry."""
+    async with async_write_transaction(pool) as conn:
+        row = await (
+            await conn.execute(
+                "SELECT permanent_reject_streak,lifecycle_command_id FROM agents_meta "
+                "WHERE id=%s FOR UPDATE",
+                (agent_id,),
+            )
+        ).fetchone()
+        if row is None:
+            return False
+        if row[0] < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS or row[1] is not None:
+            return True
+        fresh = await (
+            await conn.execute(
+                "SELECT 1 FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id "
+                "WHERE i.agent_id=%s AND i.status='pending' AND i.kind='chat' "
+                "AND i.source<>'system' AND i.source NOT LIKE 'system:%%' "
+                "AND i.created_at>COALESCE(m.last_turn_fatal_at,m.status_changed_at) LIMIT 1",
+                (agent_id,),
+            )
+        ).fetchone()
+        if fresh is None:
+            return False
+        await conn.execute(
+            "UPDATE agents_meta SET permanent_reject_streak=0,last_permanent_reject_reason=NULL,"
+            "wake_suppressed_until=NULL,wake_suppress_reason=NULL WHERE id=%s",
+            (agent_id,),
+        )
+        return True

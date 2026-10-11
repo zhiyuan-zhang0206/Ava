@@ -26,61 +26,6 @@ from pydantic_settings import NoDecode
 class DeliveryWatchdogFields:
     """The delivery-watchdog fields, in their former `daemon.py` order."""
 
-    delivery_watchdog_max_resurrect_per_tick: int = Field(
-        default=3,
-        alias="AVA_DELIVERY_WATCHDOG_MAX_RESURRECT_PER_TICK",
-        description="Ceiling on how many terminated-owner resurrect retries the delivery watchdog starts per round (Task #689 G4). A pile of dead letters drains over rounds; the cap plus the 60s per-agent cooldown and 2-way concurrency semaphore prevent an LLM wake storm when many terminated agents hold pending chats.",
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    delivery_watchdog_resurrect_fail_before_suppress: int = Field(
-        default=5,
-        ge=1,
-        alias="AVA_DELIVERY_WATCHDOG_RESURRECT_FAIL_BEFORE_SUPPRESS",
-        description="Consecutive failed terminated-owner auto-resurrect attempts before the delivery watchdog suppresses that agent's automatic wakes.",
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    delivery_watchdog_suppress_base_seconds: float = Field(
-        default=1800.0,
-        gt=0,
-        alias="AVA_DELIVERY_WATCHDOG_SUPPRESS_BASE_SECONDS",
-        description="Initial automatic-wake suppression window after repeated terminated-owner resurrection failures; each later suppression for that agent doubles this duration.",
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    delivery_watchdog_suppress_max_seconds: float = Field(
-        default=86400.0,
-        gt=0,
-        alias="AVA_DELIVERY_WATCHDOG_SUPPRESS_MAX_SECONDS",
-        description="Maximum automatic-wake suppression window after repeated terminated-owner resurrection failures.",
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     delivery_watchdog_enabled: bool = Field(
         default=True,
         alias="AVA_DELIVERY_WATCHDOG_ENABLED",
@@ -160,18 +105,6 @@ class DeliveryWatchdogFields:
         default=30.0,
         alias="AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS",
         description="Delivery watchdog stall alert threshold (seconds): a chat inbound still pending longer than this whose owner is in a waiting/terminal state (idling/terminated) is reported as a stalled delivery.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    delivery_stalled_recovery_enabled: bool = Field(
-        default=True,
-        alias="AVA_DELIVERY_STALLED_RECOVERY_ENABLED",
-        description="Stalled crash-marked recovery (task #3618): when on, the delivery watchdog asks the owner's home runner for a harvest decision (`recover-crash-marked`) once a chat inbound has been pending past the stall threshold while its owner is a crash-marked idling corpse. Off leaves alerting only — the stalled backlog is reported but never harvested automatically.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,

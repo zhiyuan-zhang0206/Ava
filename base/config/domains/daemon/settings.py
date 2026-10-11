@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import json
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator
 
 from base.config.base import EnvSettings
-from base.config.domains.daemon.billing_recovery_fields import BillingRecoveryFields
-from base.config.domains.daemon.delivery_outbox_fields import DeliveryOutboxFields
 from base.config.domains.daemon.delivery_watchdog_fields import (
     DeliveryWatchdogFields,
     InboundReconcileFields,
@@ -20,8 +18,6 @@ from base.config.domains.daemon.delivery_watchdog_fields import (
 
 
 class DaemonSettings(
-    BillingRecoveryFields,
-    DeliveryOutboxFields,
     DeliveryWatchdogFields,
     InboundReconcileFields,
     EnvSettings,
@@ -34,76 +30,6 @@ class DaemonSettings(
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    host_recovery_wake_batch: int = Field(
-        default=4,
-        ge=1,
-        alias="AVA_HOST_RECOVERY_WAKE_BATCH",
-        description="Hosted agent-runner: maximum new recovery-class turn starts per host per pending-scan cycle. This paces the post-wave boot recovery herd (task #4652), which can flip the fleet to running simultaneously and contend on database and runtime builds. Lower values give a gentler but longer drain; higher values approach the old herd. Ordinary message delivery is never delayed by this cap.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    host_recovery_wake_inflight: int = Field(
-        default=4,
-        ge=1,
-        alias="AVA_HOST_RECOVERY_WAKE_INFLIGHT",
-        description="Hosted agent-runner: maximum recovery-class turns started by the pending scan that may remain in flight on this host. AVA_HOST_RECOVERY_WAKE_BATCH limits new recovery starts per scan cycle; both limits apply together. Ordinary work and held maintenance wakes are exempt from both gates. Lower this value on slower hosts when recovery turns contend for database or runtime capacity.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    host_db_recovery_prolonged_attempts: int = Field(
-        default=6,
-        ge=1,
-        alias="AVA_HOST_DB_RECOVERY_PROLONGED_ATTEMPTS",
-        description="Hosted agent-runner: warn once per database-recovery ladder when this attempt count or AVA_HOST_DB_RECOVERY_PROLONGED_SECONDS is reached when a retry fails. The observed normal band is at most 5 attempts over a couple of minutes; 6 attempts is clearly beyond a transient flap while far below the recovery budget. This warning does not interrupt recovery.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    host_db_recovery_prolonged_seconds: float = Field(
-        default=300.0,
-        gt=0,
-        alias="AVA_HOST_DB_RECOVERY_PROLONGED_SECONDS",
-        description="Hosted agent-runner: warn once per database-recovery ladder when this total elapsed time or AVA_HOST_DB_RECOVERY_PROLONGED_ATTEMPTS is reached when a retry fails. The observed normal band is at most 5 attempts over a couple of minutes; 300 seconds (5 minutes) is clearly beyond a transient flap while far below the recovery budget. This warning does not interrupt recovery. This threshold must stay below AVA_HOST_DB_RECOVERY_BUDGET_SECONDS.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    host_db_recovery_budget_seconds: float = Field(
-        default=3600.0,
-        ge=600,
-        alias="AVA_HOST_DB_RECOVERY_BUDGET_SECONDS",
-        description="Hosted agent-runner: total database-recovery ladder budget, checked before each attempt. Exhaustion emits an error and exits through the existing turn crash path so the next wake can retry. This safety fuse provides a final, alertable convergence channel for a live host with a half-dead database for hours. The default 3600 seconds is approximately 4 times the observed maximum of 853 seconds, deliberately far above any normal flap so it never acts as a throttle. There is no middle tier.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "agent",
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
@@ -236,20 +162,6 @@ class DaemonSettings(
         default=False,
         alias="AVA_HOSTED_RECRASH_PROMPT_REAP_ENABLED",
         description="Hosted agent-runner: terminate a crash-marked corpse immediately when a second turn crash settles under the same mark (task #3616) — the first grace window is kept whole; a retry that died again has spent its chance, and only a zombie spending the rest claiming and re-dying is left otherwise. Off keeps today's grace-only semantics; gray release off->on, flipped per host after observing the first enable.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
-    hosted_crash_recovery_wake_enabled: bool = Field(
-        default=True,
-        alias="AVA_HOSTED_CRASH_RECOVERY_WAKE_ENABLED",
-        description="Hosted agent-runner: when the corpse reaper terminates a crash-marked agent (grace-window or recrash reap), commit one durable system-source recovery chat in the same transaction and let the service layer attempt the guarded auto-resurrect right after — a crash death with no arriving work otherwise has no wake left (reminder-class wakes are ignored for terminated owners), and the 2026-09-15 stall wave left one crashed agent silent for ~11 hours (task #4039). The resurrection gates (closed / wake suppression / recovery breaker) are unchanged and consulted at attempt time; the delivery watchdog's terminated-owner retry owns any deferred attempt until the chat's 24h age gate. Off restores the bare reap: only arriving work resumes the owner.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",
@@ -423,20 +335,6 @@ class DaemonSettings(
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
-        },
-    )
-
-    exec_request_bounded_quarantine_enabled: bool = Field(
-        default=True,
-        alias="AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED",
-        description="Hosted boot recovery and cold prepare: quarantine an unreadable exec request envelope without human review once it is older than twice the exec node timeout with no live process reference and no live host process (task #3619 D-2). The bytes are preserved with a receipt and the recovery path no longer defers on them; off restores unbounded retention, which needs the manual --force quarantine.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
         },
     )
 
@@ -614,15 +512,6 @@ class DaemonSettings(
         },
     )
 
-    @model_validator(mode="after")
-    def _validate_db_recovery_prolonged_below_budget(self) -> DaemonSettings:
-        """The prolonged warning must precede the final recovery fuse."""
-        if self.host_db_recovery_prolonged_seconds >= self.host_db_recovery_budget_seconds:
-            raise ValueError(
-                "host_db_recovery_prolonged_seconds must be below host_db_recovery_budget_seconds"
-            )
-        return self
-
     @field_validator("delivery_watchdog_dispatch_backoff_steps_s", mode="before")
     @classmethod
     def _parse_delivery_watchdog_dispatch_backoff_steps(cls, value: object) -> object:
@@ -641,24 +530,4 @@ class DaemonSettings(
             raise ValueError("delivery watchdog dispatch backoff steps must not be empty")
         if any(step <= 0 for step in value):
             raise ValueError("delivery watchdog dispatch backoff steps must all be positive")
-        return value
-
-    @field_validator("delivery_outbox_retry_backoff_steps_s", mode="before")
-    @classmethod
-    def _parse_delivery_outbox_retry_backoff_steps(cls, value: object) -> object:
-        """Accept either a JSON array or a comma-separated environment value."""
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                return [float(step.strip()) for step in value.split(",") if step.strip()]
-        return value
-
-    @field_validator("delivery_outbox_retry_backoff_steps_s")
-    @classmethod
-    def _validate_delivery_outbox_retry_backoff_steps(cls, value: list[float]) -> list[float]:
-        if not value:
-            raise ValueError("delivery outbox retry backoff steps must not be empty")
-        if any(step <= 0 for step in value):
-            raise ValueError("delivery outbox retry backoff steps must all be positive")
         return value

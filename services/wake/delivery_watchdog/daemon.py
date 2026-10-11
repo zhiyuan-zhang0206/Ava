@@ -1,86 +1,4 @@
-"""Delivery watchdog daemon — gateway-owned wake dispatcher + recovery scanner.
-
-Six jobs on four resident loops under one `TaskGroup` (`_run_loops`): jobs 1, 2
-and 4 share the fast scan loop (user-confirmed design, 2026-08-02 — see
-`delivery-dispatcher-design-2026-08-02.md`); jobs 3, 5 and 6 each run as their own
-sequential loop, so an agent is never in two attempts at once and a slow RPC
-holds up only its own loop. Their per-agent cooldowns and failure counts live in
-`delivery_watchdog_attempts`, so a restart resumes them. A loop that raises ends
-the process and the supervisor restarts it.
-
-1. **Wake dispatch** — every `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS` (default
-   0.5s), re-publish the Redis wake for every `pending` inbound whose owner is
-   `idling` and whose row is older than `AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS`
-   (default 1s). Per-row dispatch counts apply a configurable backoff ladder;
-   after the cap, the row is poisoned and no longer re-published by the
-   watchdog; poisoned rows stay pending and claimable. A publish that was lost
-   (pub/sub is fire-and-forget) is retried without letting a permanently
-   failing inbound create an unbounded wake storm; the per-agent 30s recheck
-   stays the double-fault safety net, its degraded-WARNING a dispatcher-health signal.
-   Re-dispatch and poisoning apply only while the owner's host verdict is fresh
-   (`machine_probe` younger than `AVA_DELIVERY_WATCHDOG_HOST_STALENESS_SECONDS`,
-   machine graded online by the two-consecutive-failure rule, agent host
-   alive — the host check is excused inside the one-failure grace window,
-   when the failed probe itself nulls the host verdict); a missing, stale,
-   graded-offline or (outside that window) host-less verdict freezes the row
-   (no counter burn, no poison) and it resumes once the verdict is fresh
-   again (task #4872 route D).
-
-2. **Stall alerting** — alert each chat inbound still `pending` past
-   `AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS` (default 30s) whose owner is in a
-   waiting/terminal state (idling / terminated), once per row while it stays
-   pending: the alert is the unified `delivery_stalled` event (an INFO log line
-   is the local trace), the alerted-id set is pruned to pending rows each scan
-   (a row that flips pending -> claimed -> pending alerts again) and persisted
-   (Task #945), so a daemon restart re-seeds from `delivery_watchdog_alerted`
-   instead of re-reporting every still-stalled inbound (the 5,184-event burst,
-   2026-08-06 audit). The event is the whole signal: Grafana Alerting decides
-   whether and when it notifies.
-
-`running` owners are never dispatched or alerted: a chat queued behind a long
-in-flight turn is normal — the claim's turn-end SELECT picks it up.
-
-3. **Terminated-owner resurrect retry** (`resurrect_retry`) — every round, for each DISTINCT
-   terminated agent that still holds a `pending` chat created after its latest
-   termination (the delivery-path auto-resurrect failed) and younger than the
-   stale-claimed threshold, re-run `resurrect_if_terminated`. Older pending
-   chats are dead letters: the reaper closes them and they never resurrect
-   their owner again (issue #2049).
-   This extends the delivery check from live owners to ALL agents (Task #689
-   G4, user ruling 2026-08-03): a chat to a dead agent must wake it, and a
-   missed auto-resurrect must be retried, not just alerted. Per-agent cooldown
-   (60s, persisted) + per-round cap + concurrency semaphore keep a pile of dead letters
-   from spawning an LLM wake storm; repeated failures suppress automatic wakes
-   for a bounded exponentially increasing window, and normal delivery resumes after expiry.
-4. **Stale-inbound dead-letter sweep** — every 30s, flip `claimed` chat
-   inbounds of TERMINATED owners older than
-   `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h), or
-   IDLING owners older than
-   `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_IDLING_THRESHOLD_SECONDS` (default 2h),
-   to `done` (age from `claimed_at`). Hosted
-   idling agents may never boot again to reconcile their completed claims;
-   running owners remain untouched. The same cadence completes the
-   stale pending `terminate` / `system_note` / `restart_completed` rows of
-   terminated owners (no consumer), and the reconcile-side cutoff
-   (`agent/db/__init__.py::reconcile_claimed_inbounds`) still closes the resurrect race at boot.
-5. **Hosted-turn liveness recovery** (`turn_liveness`) — every round, select hosted
-   running rows whose DB activity is older than the 2400s wedged-agent budget,
-   then confirm them against the agent-host's 15s Redis progress heartbeat
-   (60s TTL). Missing host heartbeats or stale per-turn marks trigger a
-   terminate-then-resurrect recovery with a persisted 10-minute per-agent cooldown; the
-   recovery wake commits in the same transaction as the force terminate.
-
-6. **Stalled crash-marked harvest request** (`stall_recovery`) — escalate a chat still `pending`
-   past the stall threshold whose owner is a crash-marked idling corpse over
-   the internal `recover-crash-marked` path (one request per owner, persisted 60s
-   cooldown, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; Task #3618).
-
-Runs on the gateway, one per cluster. Kept alive by the root supervisor's health
-monitor through the roster's `/healthz` identity probe (`ops/roster/healthz.py`).
-
-Usage:
-    .venv/bin/python -m services.wake.delivery_watchdog.daemon
-"""
+"""Observe stalled deliveries and re-publish pending wakes. No terminated-owner or wedged-turn recovery loops."""
 
 import asyncio
 import logging
@@ -110,10 +28,6 @@ from base.log import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.wake.delivery_watchdog import (
     dispatch_guard,
-    resurrect_retry,
-    rounds,
-    stall_recovery,
-    turn_liveness,
 )
 from services.wake.delivery_watchdog.dead_letter import (
     dead_letter_stale_claimed as dead_letter_stale_claimed,
@@ -178,9 +92,6 @@ def select_stale_pending(
 
 select_pending_for_dispatch = dispatch_guard.select_pending_for_dispatch
 dispatch_wakes = dispatch_guard.dispatch_wakes
-
-
-select_terminated_owners_with_pending = resurrect_retry.select_terminated_owners_with_pending
 
 
 def select_pending_ids(pool: ConnectionPool) -> set[int]:
@@ -513,51 +424,10 @@ async def _run_loops(
     *,
     authority: ConfigAuthority,
 ) -> None:
-    """Own the four resident loops: the scan loop and the three recovery loops
-    (resurrect retry, stalled crash-marked harvest, hosted-turn recovery).
-
-    One `TaskGroup` holds them, so a loop that raises cancels its siblings and
-    the exception leaves `run`: the process exits and the supervisor restarts
-    it. Each loop reports its own progress, so a wedged loop reads as a
-    failing `/healthz` even while its siblings stay busy."""
-    interval = settings.daemon.delivery_watchdog_interval_seconds
+    """Dispatch already-pending work and alert; never resurrect failed owners."""
+    del authority
     scan = liveness.register("scan", _SCAN_LIVENESS_TIMEOUT_S)
-    resurrect = liveness.register("resurrect", rounds.loop_liveness_timeout_s())
-    harvest = liveness.register("harvest", rounds.loop_liveness_timeout_s())
-    hosted_turn = liveness.register("hosted_turn", rounds.loop_liveness_timeout_s())
-    async with asyncio.TaskGroup() as loops:
-        loops.create_task(_scan_loop(pool, db, bus, scan))
-        loops.create_task(
-            resurrect_retry.resurrect_loop(
-                pool,
-                db,
-                bus,
-                resurrect,
-                interval,
-                settings.daemon.delivery_watchdog_max_resurrect_per_tick,
-                settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds,
-            )
-        )
-        loops.create_task(
-            stall_recovery.stall_recovery_loop(
-                pool,
-                db,
-                bus,
-                harvest,
-                interval,
-                settings.daemon.delivery_watchdog_threshold_seconds,
-            )
-        )
-        loops.create_task(
-            turn_liveness.hosted_turn_recovery_loop(
-                pool,
-                db,
-                bus,
-                hosted_turn,
-                interval,
-                turn_liveness.hosted_turn_threshold_seconds(authority),
-            )
-        )
+    await _scan_loop(pool, db, bus, scan)
 
 
 async def run() -> None:

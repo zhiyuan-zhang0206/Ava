@@ -1,26 +1,29 @@
 ---
 type: doc
 title: Delivery Watchdog — wake dispatcher + stale-pending alerter
-description: "Gateway-owned wake dispatcher (re-publishes the Redis wake for stale pending inbounds every 0.5s) + stale-pending alerter + terminated-owner resurrect retry + stale-claimed dead-letter sweep + stalled crash-marked harvest request + hosted-turn liveness recovery — the cluster-wide delivery tripwire (Task #689 G4, user ruling 2026-08-03; Task #654; Task #3618)."
+description: "Gateway wake dispatch, stale-pending alerts and stale-inbound dead-letter sweeps. No automatic resurrection or stalled-turn recovery."
 tags: []
 ---
 
 # Delivery Watchdog — wake dispatcher + stale-pending alerter
 
 ## What it is
-A gateway daemon with six jobs on four resident loops under one `TaskGroup` (user-confirmed design 2026-08-02, `delivery-dispatcher-design-2026-08-02.md`): it is the cluster-wide tripwire that a `pending` inbound actually reaches its owner. Config-gated by `AVA_DELIVERY_WATCHDOG_ENABLED`. The six job families — wake dispatch, stall alerting, terminated-owner resurrect retry, stale-inbound dead-letter sweeps, stalled crash-marked recovery request, and hosted-turn liveness recovery — are specified in [[services/docs/gateway_side/delivery_watchdog/jobs/jobs.ava.okf.md]].
+A gateway daemon with one resident scan loop. It re-publishes missed pending
+wakes, reports delivery stalls, and performs the retained stale-inbound sweeps.
+It does not force-terminate or resurrect agents, recover crash-marked owners, or
+replay graph work. Config-gated by `AVA_DELIVERY_WATCHDOG_ENABLED`. The jobs
+are specified in [[services/docs/gateway_side/delivery_watchdog/jobs/jobs.ava.okf.md]].
 
 **Role affiliation**: gateway side — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`, `requires_db=True` (polls `inbound_messages`). Kept alive by the root supervisor's health monitor through the roster's `/healthz` identity probe.
 
 ## Key Dependencies
 - [[agent/db/docs/db.ava.okf.md]] — polls `inbound_messages` + reads `agents_meta` owner status
 - [[agent/graph/docs/graph.ava.okf.md]] — the claim loop whose lost-wake window this closes
-- [[process-lifecycle.ava.okf.md]] — resurrect semantics the retry re-runs
+- [[process-lifecycle.ava.okf.md]] — ordinary lifecycle semantics
 
 ## Entry Points
 - `services/wake/delivery_watchdog/daemon.py` — `.venv/bin/python -m services.wake.delivery_watchdog.daemon`
-- `services/wake/delivery_watchdog/resurrect_retry.py`, `stall_recovery.py`, `turn_liveness.py` — jobs 3, 6 and 5 as sequential loops; `rounds.py` — the shared round runner and bounded fan-out; `attempts.py` — durable per-agent cooldown clocks (`delivery_watchdog_attempts`)
-- `services/wake/delivery_watchdog/dead_letter.py` — job 4's stale-inbound dead-letter sweeps (split out at the line budget; re-exported by `daemon.py`)
+- `services/wake/delivery_watchdog/dead_letter.py` — stale-inbound dead-letter sweeps (split out at the line budget; re-exported by `daemon.py`)
 - Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`ops/roster/healthz.py`)
 
 ## Notes

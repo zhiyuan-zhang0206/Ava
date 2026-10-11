@@ -49,8 +49,13 @@ async def test_commit_response_lost_before_provider_call_is_unknown_without_retr
         return command, fresh
 
     monkeypatch.setattr(compact_execute, "claim_attempt", claim)
-    await accepted.host.run_turn(accepted.agent)
+    with pytest.raises(psycopg.OperationalError):
+        await accepted.host.run_turn(accepted.agent)
     status = accepted.status(client)
-    assert status["outcome"] == "uncertain" and status["attempt_id"] == claimed[0]
-    assert status["recovery_checkpoint_id"] and status["checkpoint_id"] is None
+    assert status["outcome"] == "accepted" and status["attempt_id"] == claimed[0]
+    assert status["recovery_checkpoint_id"] is None and status["checkpoint_id"] is None
     assert not status["result_available"] and models and all(model.calls == 0 for model in models)
+
+    await accepted.host.run_turn(accepted.agent)
+    assert all(model.calls == 0 for model in models)
+    assert accepted.status(client) == status

@@ -225,7 +225,6 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
 def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAuthority) -> None:
     from agent.extensions import load_extensions
     from ava.sdk_surface import install, settings
-    from base.agents.messages.delivery_outbox import logical_key
     from base.agents.sdk import call_policy
     from base.lm.catalog import CatalogBuilder
 
@@ -239,17 +238,13 @@ def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAu
         assert installation.registry is loaded.registry
         assert settings.model_catalog() is catalog
         assert settings.config_authority() is config_authority
-        sender = installation.delivery_sender
-        assert sender is not None
         sampling = installation.sampling
         sampling.reader = call_policy.SamplingPolicy
         sampling.value = sampling.read()
         refresh = sampling.worker
-        key = logical_key(sender=sender, agent_id=7, source="watcher:7", content="notice")
         load_extensions(catalog=catalog, authority=config_authority)
         replacement = install.installed()
-        assert replacement is not None and replacement.delivery_sender is sender
+        assert replacement is not None
         assert replacement.sampling is sampling and sampling.worker is refresh
-        assert logical_key(sender=sender, agent_id=7, source="watcher:7", content="notice") == key
     finally:
         install.uninstall()

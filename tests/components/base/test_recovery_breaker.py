@@ -97,26 +97,3 @@ def test_billing_reason_literal_matches_the_circuit_reason() -> None:
     from agent.state_channels import CIRCUIT_REASON_BILLING
 
     assert CIRCUIT_REASON_BILLING == PERMANENT_REJECT_REASON_BILLING
-
-
-async def test_recorded_reason_is_the_billing_whitelist_value(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
-    """End-to-end anti-drift (task #3919): the reason the breaker WRITES is the
-    value the billing batch-recovery whitelist PICKS UP."""
-    from ops.lifecycle.billing_recovery import enumerate_candidates
-
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
-    assert await record_permanent_reject_turn(aops_pool, aid, PERMANENT_REJECT_REASON_BILLING) == 1
-    assert await record_permanent_reject_turn(aops_pool, aid, PERMANENT_REJECT_REASON_BILLING) == 2
-    db_conn.execute(
-        "UPDATE agents_meta SET status='terminated', termination_source='reaper' WHERE id=%s",
-        (aid,),
-    )
-    db_conn.commit()
-
-    assert aid in [c.agent_id for c in enumerate_candidates(db_conn)]

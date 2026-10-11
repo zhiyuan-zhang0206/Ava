@@ -105,22 +105,6 @@ def _exec_node_ceiling_s() -> float:
     return float(FIELD_INFOS["exec_node_timeout_seconds"].get_default())
 
 
-def _unreadable_expiry_age_s() -> float:
-    """The bounded-disposition age for unreadable envelopes (task #3619 D-2).
-
-    A readable envelope declares the timeout that bounds its child's lifetime;
-    an unreadable one does not, so the protocol's ceiling stands in for it:
-    the inner exec timeout is validated strictly below the outer node timeout
-    (base/config/domains/sandbox.py) and the child hard-exits at
-    timeout + kill grace + watchdog margin, so no in-flight request's child
-    outlives twice the node timeout. An unreadable envelope past this age —
-    with no live process reference and no live host process (see
-    classify_request) — cannot belong to an in-flight request and is
-    disposable.
-    """
-    return 2.0 * _exec_node_ceiling_s()
-
-
 class Verdict(StrEnum):
     """What the evidence proves about one request envelope."""
 
@@ -318,8 +302,6 @@ def classify_request(
         )
     refusal = attribution.refusal
     if refusal is not None:
-        if attribution.content_unreadable and _bounded_disposition_enabled():
-            return _bounded_unreadable(agent_id, path, mtime, refusal, host)
         return RequestEvidence(agent_id, path, Verdict.UNKNOWN, None, mtime, (), refusal)
     incarnation = attribution.incarnation
     assert incarnation is not None  # noqa: S101 — refusal covers every unattributed envelope
@@ -334,59 +316,6 @@ def classify_request(
         mtime,
         (),
         f"attributed to {reached} ({incarnation.owner}); {host.detail}; no live process reference",
-    )
-
-
-def _bounded_disposition_enabled() -> bool:
-    """The soft switch for bounded disposition of unreadable envelopes (D-2).
-
-    Default on; off restores unbounded retention (the pre-#3619 behaviour).
-    Read lazily so the module keeps no import-time dependency on the settings
-    aggregate.
-    """
-    from base.config import settings
-
-    return settings.daemon.exec_request_bounded_quarantine_enabled
-
-
-def _bounded_unreadable(
-    agent_id: int, path: Path, mtime: float, refusal: str, host: HostEvidence
-) -> RequestEvidence:
-    """Judge an unreadable envelope by the legs that need no content.
-
-    Its bytes carry nothing to attribute, so only what needs no content may
-    decide: it must be older than the bounded-disposition age (past it no
-    in-flight request can still own the file), no live process may reference
-    it (the caller already checked), and the row's stored host process must
-    not be alive. Anything else keeps deferring recovery with the unmet leg
-    named.
-    """
-    age_s = time.time() - mtime
-    bound_s = _unreadable_expiry_age_s()
-    if age_s < bound_s:
-        return RequestEvidence(
-            agent_id,
-            path,
-            Verdict.UNKNOWN,
-            None,
-            mtime,
-            (),
-            f"{refusal}; not yet past the bounded-disposition bound "
-            f"({age_s:.0f}s of {bound_s:.0f}s)",
-        )
-    if host.state in {HostState.ALIVE, HostState.UNREADABLE}:
-        return RequestEvidence(
-            agent_id, path, Verdict.UNKNOWN, None, mtime, (), f"{refusal}; {host.detail}"
-        )
-    return RequestEvidence(
-        agent_id,
-        path,
-        Verdict.DISPOSABLE,
-        None,
-        mtime,
-        (),
-        f"{refusal}; no live process reference; {age_s:.0f}s old, past the "
-        f"{bound_s:.0f}s bounded-disposition bound; {host.detail}",
     )
 
 
@@ -418,8 +347,7 @@ def quarantine_stale(
     while any other move failure keeps that entry retained so the caller still
     refuses. This never deletes evidence, never signals a process and never
     touches the database: the lifecycle transition stays with the caller.
-    An unreadable envelope is disposed without a human review, so that case
-    also raises the counted ``exec_request_bounded_quarantine`` alert.
+    Unreadable envelopes remain unknown; age alone never disposes them.
     """
     host = stored_host(resources)
     entries = tuple(
@@ -431,31 +359,8 @@ def quarantine_stale(
     if not disposable:
         return QuarantineReport(agent_id, None, (), retained)
     committed = _commit(agent_id, disposable, reason=reason)
-    _alert_bounded_disposition(agent_id, reason, committed)
     return QuarantineReport(
         agent_id, committed.event_dir, committed.quarantined, retained + committed.retained
-    )
-
-
-def _alert_bounded_disposition(agent_id: int, reason: str, committed: QuarantineReport) -> None:
-    """Count and alert when unreadable evidence was quarantined without review."""
-    disposed = tuple(
-        item.entry for item in committed.quarantined if item.entry.verdict is Verdict.DISPOSABLE
-    )
-    if not disposed:
-        return
-    logger.warning(
-        "bounded-disposition quarantine: {preserved} unreadable exec request envelope(s) "
-        "for agent {agent_id} moved aside without review ({reason}) — older than "
-        "{bound_s:.0f}s, no live process reference, host process not alive; preserved "
-        "with a receipt",
-        event="exec_request_bounded_quarantine",
-        agent_id=agent_id,
-        reason=reason,
-        bound_s=round(_unreadable_expiry_age_s(), 1),
-        preserved=len(disposed),
-        sources=[str(entry.path) for entry in disposed],
-        event_dir=None if committed.event_dir is None else str(committed.event_dir),
     )
 
 

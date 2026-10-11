@@ -1,4 +1,4 @@
-"""Original native work settlement and cold cancel recovery; no graph replay."""
+"""Original native work settlement; interrupted cancellation stays unknown."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -14,7 +14,6 @@ from agent.impersonation import flush_checkpoint, settle_checkpoint
 from agent.ownership.native_cancel import halt_for_native_cancel
 from agent.state import BaseAgentState
 from base.agents.context import AvaContext
-from base.agents.history.checkpoint import CheckpointReadError
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.incarnation.native_work import load_work, prepare_work
 from base.agents.incarnation.native_work_models import (
@@ -39,11 +38,12 @@ _Graph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgen
 
 @dataclass
 class NativeWorkContinuation:
-    """One UUID survives preparation, graph return and every DB recovery retry."""
+    """One admitted work identity; fresh wakes abandon old graph continuation."""
 
     work_id: UUID
     target: NativeWorkTarget | None = None
     begun: bool = False
+    require_fresh_input: bool = True
 
 
 async def prepare_native_invocation(
@@ -215,81 +215,12 @@ async def _mark_uncertain(pool: AsyncConnectionPool, marker: NativeCancelMarker)
             )
 
 
-async def _pause_certified_successor(
-    pool: AsyncConnectionPool,
-    saver: AsyncPostgresSaver,
-    graph: _Graph,
-    incarnation: RuntimeIncarnation,
-    marker: NativeCancelMarker,
-) -> str:
-    """Pause the receiver's old conversation; never fabricate original execution.
-
-    A certified replacement cannot overlap this continuation: same-host force
-    observation is produced only after the serialized pump drains it; exact
-    predecessor process exit prevents that predecessor from writing again.
-    """
-    async with async_write_transaction(pool) as conn:
-        await conn.execute(
-            "SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (incarnation.agent_id,)
-        )
-        work = await load_work(conn, marker.target.work_id, lock=True)
-        if work is None or work.target != marker.target or not work.transfers:
-            raise NativeWorkUncertainError("native recovery lacks certified predecessor stop")
-        await require_cancel_receiver(conn, work, incarnation)
-    config: RunnableConfig = {"configurable": {"thread_id": str(incarnation.agent_id)}}
-    await graph.aupdate_state(
-        config,
-        {
-            "halted": True,
-            "turn_active": False,
-            "turn_idle": True,
-            "native_work": marker.target,
-            "native_cancel": None,
-        },
-        as_node="claim",
-    )
-    await flush_checkpoint(saver, incarnation.agent_id)
-    reader = AsyncPostgresSaver(saver.conn, serde=saver.serde)
-    tuple_ = await reader.aget_tuple(config)
-    if tuple_ is None:
-        raise NativeWorkUncertainError("native recovery pause checkpoint is missing")
-    values = tuple_.checkpoint["channel_values"]
-    if (
-        values.get("halted") is not True
-        or values.get("turn_idle") is not True
-        or values.get("turn_active") is not False
-        or values.get("native_cancel") is not None
-        or NativeWorkTarget.model_validate(values.get("native_work")) != marker.target
-    ):
-        raise NativeWorkUncertainError(
-            "native recovery pause checkpoint does not match original work"
-        )
-    return tuple_.checkpoint["id"]
-
-
-def _require_settled_continuation(*, resources: HostedTurnResources | None) -> None:
-    if not hosted_resources_settled(resources):
-        raise NativeWorkUncertainError(
-            "native recovery continuation has unresolved owned resources"
-        )
-
-
 async def recover_native_cancel(
     pool: AsyncConnectionPool,
-    saver: AsyncPostgresSaver,
-    graph: _Graph,
     incarnation: RuntimeIncarnation,
-    *,
-    resources: HostedTurnResources | None,
 ) -> bool:
-    """Before startup writes: ACK exact marker or certify only predecessor stop."""
+    """Keep interrupted cancellation unknown; never reconstruct its completion."""
     async with pool.connection() as conn:
-        row = await (
-            await conn.execute(
-                "SELECT native_work_id FROM agents_meta WHERE id=%s",
-                (incarnation.agent_id,),
-            )
-        ).fetchone()
         command = await (
             await conn.execute(
                 "SELECT acceptance FROM native_cancel_commands WHERE agent_id=%s "
@@ -301,85 +232,14 @@ async def recover_native_cancel(
         return True
     accepted = NativeCancelAcceptance.model_validate(command[0])
     marker = NativeCancelMarker(command_id=accepted.command_id, target=accepted.target)
-    if row is None or row[0] != marker.target.work_id:
-        await _mark_uncertain(pool, marker)
-        return False
-
-    try:
-        _require_settled_continuation(resources=resources)
-        checkpoint_id = await cold_cancel_checkpoint(saver, marker)
-        outcome = (
-            NativeCancelOutcome.APPLIED
-            if checkpoint_id is not None
-            else NativeCancelOutcome.RECOVERED_STOPPED
-        )
-        recovery_id = (
-            await _pause_certified_successor(pool, saver, graph, incarnation, marker)
-            if checkpoint_id is None
-            else None
-        )
-        _require_settled_continuation(resources=resources)
-        async with async_write_transaction(pool) as conn:
-            await finish_native_cancel(
-                conn,
-                incarnation,
-                marker,
-                outcome=outcome,
-                checkpoint_id=checkpoint_id,
-                recovery_checkpoint_id=recovery_id,
-            )
-    except (NativeWorkUncertainError, CheckpointReadError, ValidationError):
-        await _mark_uncertain(pool, marker)
-        logger.warning(
-            "native cancel proof gap holds new work",
-            event="native_cancel_uncertain",
-            agent_id=incarnation.agent_id,
-            work_id=str(marker.target.work_id),
-        )
-        return False
-    return True
-
-
-async def completed_native_cancel(
-    pool: AsyncConnectionPool, target: NativeWorkTarget | None
-) -> bool:
-    if target is None:
-        return False
-    original = await command_for_work(pool, target)
-    return original is not None and original[1] in (
-        NativeCancelOutcome.APPLIED,
-        NativeCancelOutcome.RECOVERED_STOPPED,
+    await _mark_uncertain(pool, marker)
+    logger.warning(
+        "interrupted native cancel requires inspection",
+        event="native_cancel_uncertain",
+        agent_id=incarnation.agent_id,
+        work_id=str(marker.target.work_id),
     )
-
-
-async def halt_before_reinvoke(
-    pool: AsyncConnectionPool,
-    saver: AsyncPostgresSaver,
-    graph: _Graph,
-    incarnation: RuntimeIncarnation,
-    target: NativeWorkTarget | None,
-    config: RunnableConfig,
-    *,
-    resources: HostedTurnResources | None,
-) -> dict[str, object] | None:
-    """Recovery resumes the original accepted halt and its lifecycle flags."""
-    if target is None or await command_for_work(pool, target) is None:
-        return None
-    await settle_native_invocation(
-        pool, saver, graph, incarnation, target, config, resources=resources
-    )
-    reader = AsyncPostgresSaver(saver.conn, serde=saver.serde)
-    tuple_ = await reader.aget_tuple({"configurable": {"thread_id": str(target.agent_id)}})
-    if tuple_ is None:
-        raise NativeWorkUncertainError("original native halt checkpoint is missing")
-    values = tuple_.checkpoint["channel_values"]
-    result: dict[str, object] = {"turn_idle": True}
-    for field in ("exit_requested", "restart_requested"):
-        value = values.get(field)
-        if type(value) is not bool:
-            raise NativeWorkUncertainError("original native lifecycle flags are missing")
-        result[field] = value
-    return result
+    return False
 
 
 async def hold_native_cancel(pool: AsyncConnectionPool, target: NativeWorkTarget | None) -> None:
@@ -392,11 +252,9 @@ async def hold_native_cancel(pool: AsyncConnectionPool, target: NativeWorkTarget
 
 async def invoke_prepared_graph[T](
     control_pool: AsyncConnectionPool,
-    checkpointer: AsyncPostgresSaver,
     graph: _Graph,
     agent_id: int,
     ctx: AvaContext,
-    config: RunnableConfig,
     work: NativeWorkContinuation,
     *,
     db: Database,
@@ -408,17 +266,6 @@ async def invoke_prepared_graph[T](
     """Execute the prepared original work within its retained resource scope."""
     incarnation = ctx.require_original_incarnation(agent_id)
     async with database_phase():
-        halted = await halt_before_reinvoke(
-            control_pool,
-            checkpointer,
-            graph,
-            incarnation,
-            work.target,
-            config,
-            resources=ctx.hosted_resources,
-        )
-        if halted is not None:
-            return halted
         await settle_checkpoint(
             graph,
             db,
@@ -434,6 +281,7 @@ async def invoke_prepared_graph[T](
     return await invoke(
         replace(ctx, native_work=work.target),
         {
+            **({"halted": True} if work.require_fresh_input else {}),
             "turn_active": False,
             "exit_requested": False,
             "turn_idle": False,

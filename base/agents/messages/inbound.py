@@ -51,7 +51,9 @@ class InboundKind(StrEnum):
 
 
 # Only these pending-work kinds can trigger automatic resurrection.
-WakeTriggerKind = Literal[InboundKind.CHAT, InboundKind.COMPACT_REQUEST, InboundKind.SYSTEM_NOTE]
+WakeTriggerKind = Literal[
+    InboundKind.CHAT, InboundKind.COMPACT_REQUEST, InboundKind.SYSTEM_NOTE, InboundKind.HEARTBEAT
+]
 
 
 def validate_wake_trigger_kind(value: str) -> WakeTriggerKind:

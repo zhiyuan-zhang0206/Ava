@@ -35,9 +35,7 @@ def _held() -> None:
         (psycopg.OperationalError("connection refused"), "OperationalError"),
     ],
 )
-def test_database_outage_failures_are_recorded_undelivered(
-    exc: BaseException, category: str
-) -> None:
+def test_database_outage_failures_are_blocking(exc: BaseException, category: str) -> None:
     """The DB-channel-break family latches an audit receipt, not a blocking one.
 
     No fence is left behind, so the wake scan re-drives the held-control path
@@ -46,11 +44,11 @@ def test_database_outage_failures_are_recorded_undelivered(
     _held()
     fences: receipts.FailureFences = {}
     asyncio.run(receipts.record_failure(7, exc, fences))
-    assert fences == {}
     current = admission.require_operation("grade", WHEN)
     assert current.maintenance is not None
-    assert current.maintenance.failures == {}
-    assert current.maintenance.undelivered == {7: category}
+    assert fences == {7: (current.holder, current.acquired_at)}
+    assert current.maintenance.failures == {7: category}
+    assert current.maintenance.undelivered == {}
     assert current.maintenance.drained == ()
 
 
@@ -91,15 +89,15 @@ def test_failure_outside_a_hold_leaves_no_fence_and_no_receipt() -> None:
     assert admission.snapshot() is None
 
 
-def test_undelivered_record_is_idempotent_and_preserves_other_receipts() -> None:
+def test_failure_record_is_idempotent_and_preserves_other_receipts() -> None:
     _held()
     asyncio.run(receipts.record_failure(7, PoolTimeout("again"), {}))
     asyncio.run(receipts.record_failure(7, PoolTimeout("again"), {}))
     asyncio.run(receipts.record_failure(8, psycopg.OperationalError("refused"), {}))
     current = admission.require_operation("grade", WHEN)
     assert current.maintenance is not None
-    assert current.maintenance.undelivered == {7: "PoolTimeout", 8: "OperationalError"}
-    assert current.maintenance.failures == {}
+    assert current.maintenance.failures == {7: "PoolTimeout", 8: "OperationalError"}
+    assert current.maintenance.undelivered == {}
 
 
 def _hold_with(

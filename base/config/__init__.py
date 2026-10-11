@@ -382,7 +382,7 @@ def __getattr__(name: str) -> Any:
     the same surfaces. Gating them on the process-global build flag turned a
     concurrent `from base.config import _FIELDS` into a spurious ImportError
     whenever any other thread's ~1s build was in flight (task #4964: the
-    delivery_outbox keyed send lost its idempotency key). First access is
+    a keyed message send lost its idempotency key). First access is
     not free: it imports the registry stack (~220 modules including
     `pydantic_settings`), while the boot state stays lite and the upgrade
     counter does not move."""

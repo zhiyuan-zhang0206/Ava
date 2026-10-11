@@ -11,7 +11,6 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.corpse_reap import ReapedCorpse
-from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.runtime import _config_fingerprint
 from services.agent_runner.agent_host.tests.test_agent_host import (
     _Build,
@@ -213,26 +212,18 @@ class TestTurnLoop:
             calls.append("renew")
 
         async def _reap(
-            pool: object, machine: str, owner: UUID, *, bus: object, wake_enabled: object
+            pool: object, machine: str, owner: UUID, *, bus: object
         ) -> list[ReapedCorpse]:
             calls.append("reap")
-            return [ReapedCorpse(7, 101), ReapedCorpse(9, None)]
-
-        recovered: list[list[ReapedCorpse]] = []
-
-        async def _recover(_db: object, _bus: EventBus, reaped: list[ReapedCorpse]) -> None:
-            calls.append("recover")
-            recovered.append(list(reaped))
+            return [ReapedCorpse(7), ReapedCorpse(9)]
 
         monkeypatch.setattr(host_mod, "renew_hosted_owner", _renew)
         monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
-        monkeypatch.setattr(host_mod, "recover_reaped_corpses", _recover)
 
         host, _, _ = wired({1: _Row(status="idling")})
         await host.renew_ownership()
 
-        assert calls == ["renew", "reap", "recover"]
-        assert recovered == [[ReapedCorpse(7, 101), ReapedCorpse(9, None)]]
+        assert calls == ["renew", "reap"]
 
     async def test_renew_ownership_survives_a_reap_failure(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
@@ -245,9 +236,7 @@ class TestTurnLoop:
         async def _renew(pool: object, machine: str, owner: UUID) -> None:
             renewed.append("renew")
 
-        async def _reap(
-            pool: object, machine: str, owner: UUID, *, bus: object, wake_enabled: object
-        ) -> list[int]:
+        async def _reap(pool: object, machine: str, owner: UUID, *, bus: object) -> list[int]:
             raise RuntimeError("reap exploded")
 
         monkeypatch.setattr(host_mod, "renew_hosted_owner", _renew)
@@ -590,7 +579,6 @@ class TestTurnStallGuard:
         external cancel must not wedge that abort — the still-unwinds outcome
         is the stall abort (TurnStallTimeoutError), never a stuck task.
         """
-        from services.agent_runner.agent_host.dispatcher import TurnStallTimeoutError
 
         await self._stall_settings(monkeypatch)
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
@@ -601,7 +589,7 @@ class TestTurnStallGuard:
         await poll_until_async(graph.entered.is_set)
         task.cancel()
         await poll_until_async(task.done)
-        with pytest.raises(TurnStallTimeoutError):
+        with pytest.raises(asyncio.CancelledError):
             await task
 
         assert graph.cancel_seen

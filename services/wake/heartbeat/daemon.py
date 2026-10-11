@@ -203,6 +203,7 @@ def _select_idle_agents_needing_heartbeat(
         "AND active.expires_at > now() "
         "WHERE (agents_meta.status = 'idling' "
         "OR (agents_meta.status = 'running' AND active.id IS NOT NULL)) "
+        "AND agents_meta.permanent_reject_streak = 0 "
         "AND now() >= GREATEST("
         "  heartbeat_paused_until, "
         "  COALESCE(active.activated_at, active.created_at, last_active_at) "

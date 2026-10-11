@@ -20,7 +20,6 @@ from base.agents.incarnation.lifecycle_acceptance import (
     RECORD_APPLIED,
     terminate_kills_shell_sessions,
 )
-from base.agents.incarnation.native_work import certify_transfer
 from base.agents.incarnation.resource_admission import admit_resources_async
 from base.agents.incarnation.resources import (
     IncarnationResources,
@@ -488,7 +487,10 @@ async def admit_hosted_runtime(
     Admission reads and locks no deployment-wide state.
     """
     from base.agents.incarnation.exec_owner_recovery import recover_local_resources
+    from base.agents.recovery.breaker import admit_pending_wake
 
+    if not await admit_pending_wake(pool, agent_id):
+        return None
     attempt_at = await _admission_attempt_at(pool)
     if admission.held() and not await _held_owner_matches(pool, agent_id, owner):
         await _record_admission_refusal(
@@ -517,7 +519,7 @@ async def admit_hosted_runtime(
                 legacy_adoption=legacy_adoption,
             )
 
-            resource_transfer = await admit_resources_async(
+            await admit_resources_async(
                 conn,
                 RuntimeIncarnation(agent_id, generation, owner),
                 host_identity,
@@ -539,14 +541,6 @@ async def admit_hosted_runtime(
             if row is None:
                 # Resource transfer and ordinary admission are one transaction.
                 _refuse_hosted_admission()
-            await certify_transfer(
-                conn,
-                resource_transfer,
-                work_id=previous[6],
-                source_machine=previous[3],
-                target_machine=machine,
-                incarnation=RuntimeIncarnation(agent_id, row[0], owner),
-            )
             if legacy_adoption_used and legacy_adoption is not None:
                 recorded.append(await _record_legacy_adoption(conn, agent_id, legacy_adoption))
             from agent.ownership.lifecycle_intent import observe_hosted_admission

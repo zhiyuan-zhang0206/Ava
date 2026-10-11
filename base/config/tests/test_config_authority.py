@@ -54,16 +54,16 @@ def test_fresh_reads_preserve_boot_snapshot_and_path(
 ) -> None:
     path = tmp_path / ".env"
     authority = _authority(path)
-    initial = authority.flat_dump()["delivery_outbox_enabled"]
-    path.write_text(f"{field_alias('delivery_outbox_enabled')}={'false' if initial else 'true'}\n")
+    initial = authority.flat_dump()["trace_enabled"]
+    path.write_text(f"{field_alias('trace_enabled')}={'false' if initial else 'true'}\n")
     monkeypatch.setenv("AVA_HOME", str(tmp_path / "another-home"))
 
-    assert authority.current_field_values()["delivery_outbox_enabled"] is not initial
-    assert authority.flat_dump()["delivery_outbox_enabled"] is initial
-    assert authority.runtime.daemon.delivery_outbox_enabled is initial
+    assert authority.current_field_values()["trace_enabled"] is not initial
+    assert authority.flat_dump()["trace_enabled"] is initial
+    assert authority.runtime.observability.trace_enabled is initial
 
-    path.write_text(f"{field_alias('delivery_outbox_enabled')}={'true' if initial else 'false'}\n")
-    assert authority.current_field_values()["delivery_outbox_enabled"] is initial
+    path.write_text(f"{field_alias('trace_enabled')}={'true' if initial else 'false'}\n")
+    assert authority.current_field_values()["trace_enabled"] is initial
 
 
 def test_service_reads_are_complete_and_runtime_profile_remains_restricted(tmp_path: Path) -> None:
