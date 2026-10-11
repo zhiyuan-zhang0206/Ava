@@ -47,8 +47,8 @@ Context]] for the registry itself.
   strips it and regrafts the new agent's own.
 
 Malformed fences (unclosed / stray close / nested open) drop the block with a
-warning; only a file's body counts, split by the writer's own frontmatter rule
-(`sdk._frontmatter_parts`), so a marker inside frontmatter never opens a block.
+warning; only a file's body counts, split by the pool validator's frontmatter rule
+(`inherit._frontmatter_parts`), so a marker inside frontmatter never opens a block.
 
 ## Write discipline
 

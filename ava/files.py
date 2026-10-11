@@ -17,9 +17,9 @@ from pathlib import Path
 
 from ava.sdk_surface import agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
-from ava.security import is_flagged, scan_content
+from ava.security import scan_content
 from base.log import logger
-from base.paths import ava_home, workspace_dir
+from base.paths import workspace_dir
 
 
 def _home() -> Path:
@@ -141,40 +141,11 @@ def read(
     return scan_content("".join(selected), source=source)
 
 
-def _is_memory_note(p: Path) -> bool:
-    """True when `p` resolves to a path under the shared memory pool root.
-
-    A note there is durable and auto-recalled into future sessions, so
-    injection carried into it is the persistent-injection vector — worth
-    flagging at write time (see `_flag_frontmatter`)."""
-    try:
-        p.resolve().relative_to((ava_home() / "memory").resolve())
-    except ValueError:
-        return False
-    return True
-
-
-def _flag_frontmatter(text: str) -> str:
-    """Ensure the note's YAML frontmatter carries `injection-risk: flagged`,
-    adding a frontmatter block when the note has none. A note that already
-    declares the field (any value) is left untouched."""
-    if text.startswith("---\n"):
-        end = text.find("\n---", 4)
-        if end != -1:
-            block = text[4:end]
-            if "injection-risk:" in block:
-                return text
-            return f"---\n{block}\ninjection-risk: flagged\n---{text[end + 4 :]}"
-    return f"---\ninjection-risk: flagged\n---\n{text}"
-
-
 def write(path: str | Path, content: str) -> None:
     """Write, creating parent directories if needed."""
     path = coerce_str(path, "path", allow_types=(os.PathLike,))
     content = coerce_str(content, "content")
     p = resolve(path)
-    if _is_memory_note(p) and is_flagged(content):
-        content = _flag_frontmatter(content)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
 
@@ -185,13 +156,6 @@ def append(path: str | Path, content: str) -> None:
     content = coerce_str(content, "content")
     p = resolve(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    # Appending injection-flagged content to a memory note taints the whole
-    # note; rewrite it so the note's frontmatter carries the flag (a pure
-    # append could not touch the frontmatter, which sits at the top).
-    if _is_memory_note(p) and is_flagged(content):
-        prior = p.read_text(encoding="utf-8") if p.exists() else ""
-        p.write_text(_flag_frontmatter(prior + content), encoding="utf-8")
-        return
     with p.open("a", encoding="utf-8") as f:
         f.write(content)
 

@@ -40,6 +40,7 @@ def test_note_tag_value_set() -> None:
         "history_dump",
         "silent_idle_continue",
         "memory",
+        "memory_write_check",
         "lifecycle_terminate",
         "lifecycle_restart",
         "lifecycle_resurrect",

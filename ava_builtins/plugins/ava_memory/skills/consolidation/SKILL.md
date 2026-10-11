@@ -13,8 +13,9 @@ procedure.
 All git / gh / refresh operations are wrapped in self-contained scripts under
 `../scripts/` — the agent calls one script per step instead of hand-typing
 shell pipelines:
-- `python ../scripts/consolidate.py -m "..."` — remote-backed single-box: stage, commit, push, refresh
-- `python ../scripts/steward.py -m "..."` — per-machine: stage, commit, push, create PR
+- `python ../scripts/consolidate.py -m "..."` — remote-backed single-box: rebuild indexes, stage, commit, push, refresh
+- `python ../scripts/steward.py -m "..."` — per-machine: rebuild indexes, stage, commit, push, create PR
+- `python ../scripts/gen_indexes.py` — rebuild every directory `index.md` (the two scripts above run it first)
 - `python ../scripts/arbiter_merge.py` — merge all open PRs + refresh (exit 1 = alert)
 - `ava memory refresh` — the one remaining memory CLI (gateway index rebuild)
 

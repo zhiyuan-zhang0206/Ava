@@ -366,7 +366,7 @@ def test_install_member_conflict_with_existing(installer: _Installer):
 def test_import_statement_resolves_installed_namespace(installer: _Installer):
     """`import ava.code` succeeds once the namespace is installed — the LLM
     habit the import fix targets (agent bug: `import ava.memory` raised
-    ModuleNotFoundError while `ava.memory.write` attribute access worked)."""
+    ModuleNotFoundError while `ava.memory.search` attribute access worked)."""
     installer.namespace("code", _make_module("code"))
 
     namespace: dict[str, Any] = {}

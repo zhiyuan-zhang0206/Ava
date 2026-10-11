@@ -1,4 +1,4 @@
-"""Single-box consolidation: stage, commit, push, refresh index.
+"""Single-box consolidation: rebuild the directory indexes, stage, commit, push, refresh index.
 
 Usage: python consolidate.py -m "memory: <machine> <date> daily sync"
 
@@ -11,7 +11,13 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ava_builtins.plugins.ava_memory.pool_ops import pool_dir, refresh_index, run, stage_and_commit
+from ava_builtins.plugins.ava_memory.pool_ops import (
+    pool_dir,
+    refresh_index,
+    regenerate_indexes,
+    run,
+    stage_and_commit,
+)
 
 
 def main() -> int:
@@ -22,6 +28,7 @@ def main() -> int:
     pool = pool_dir()
     print(f"memory pool: {pool}")
 
+    regenerate_indexes()
     committed = stage_and_commit(args.message, pool)
     run(["git", "-C", str(pool), "push"])
     if committed:

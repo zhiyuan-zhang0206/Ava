@@ -177,7 +177,14 @@ describe("messageCardConfig", () => {
   });
 
   it("system_marker note → Note", () => {
-    for (const src of ["sdk_hint", "agent_id", "context", "heartbeat", "security"]) {
+    for (const src of [
+      "sdk_hint",
+      "memory_write_check",
+      "agent_id",
+      "context",
+      "heartbeat",
+      "security",
+    ]) {
       const cfg = messageCardConfig(item("system_marker", { source: src }));
       expect(cfg!.title).toBe("Note");
     }

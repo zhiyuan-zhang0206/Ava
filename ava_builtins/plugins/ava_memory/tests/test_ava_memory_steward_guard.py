@@ -95,3 +95,54 @@ def test_proceeds_on_machine_branch(tmp_path: Path) -> None:
     heads = _git(pool, "ls-remote", "--heads", "origin")
     assert "refs/heads/machine-testbox" in heads
     assert "refs/heads/main" not in heads
+
+
+_NOTE = (
+    "---\ntype: Memory\nava_agent: 7\ntitle: Retry rule\ndescription: Retries above three hurt\n"
+    "tags: [type/feedback]\n---\nBody.\n"
+)
+
+
+def test_directory_indexes_are_rebuilt_before_the_commit(tmp_path: Path) -> None:
+    """Notes arrive written with `ava.files`, with no index entry; the steward's commit carries
+    the rebuilt indexes so the pool validator's pointer checks have something to check."""
+    pool = _make_pool(tmp_path)
+    _git(pool, "checkout", "-qb", "machine-testbox")
+    (pool / "topics").mkdir()
+    (pool / "topics" / "retry.md").write_text(_NOTE)
+    remote = tmp_path / "remote.git"
+    subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
+        ["git", "init", "--bare", "-q", str(remote)], check=True
+    )
+    _git(pool, "remote", "add", "origin", str(remote))
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    gh = bindir / "gh"
+    gh.write_text('#!/bin/sh\necho "https://example.invalid/pr/1"\n')
+    gh.chmod(0o755)
+
+    res = _run_steward(pool, path_extra=str(bindir))
+
+    assert res.returncode == 0, res.stderr
+    assert "* [Retry rule](retry.md) - Retries above three hurt" in _git(
+        pool, "show", "HEAD:topics/index.md"
+    )
+    assert "* [topics/](topics/) - 1 notes" in _git(pool, "show", "HEAD:index.md")
+    assert _git(pool, "status", "--porcelain").strip() == ""
+
+
+def test_regenerate_indexes_writes_every_directory_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ava_builtins.plugins.ava_memory import pool_ops
+
+    pool = tmp_path / "memory"
+    (pool / "a" / "b").mkdir(parents=True)
+    (pool / "a" / "b" / "deep.md").write_text(_NOTE)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+
+    pool_ops.regenerate_indexes()
+
+    assert "* [Retry rule](deep.md)" in (pool / "a" / "b" / "index.md").read_text()
+    assert "* [b/](b/) - 1 notes" in (pool / "a" / "index.md").read_text()
+    assert (pool / "index.md").is_file()

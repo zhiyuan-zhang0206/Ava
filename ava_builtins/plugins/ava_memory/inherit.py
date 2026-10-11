@@ -37,8 +37,7 @@ from base.agents.context import AvaContext
 from base.log import logger
 from base.paths import workspace_dir_readonly
 
-from .sdk import _frontmatter_parts
-
+_FRONTMATTER_OPEN = "---\n"
 _MEMORY_INDEX_FILE = "MEMORY.md"
 _PER_AGENT_MEMORY_DIRNAME = "memory"
 
@@ -74,13 +73,23 @@ class _InheritedBlock:
     text: str
 
 
+def _frontmatter_parts(content: str) -> tuple[str, str] | None:
+    """Split a leading frontmatter block into (block, rest); None when the
+    content carries none. Mirrors the split the pool's validator reads with."""
+    if not content.startswith(_FRONTMATTER_OPEN):
+        return None
+    parts = content.split(_FRONTMATTER_OPEN, 2)
+    if len(parts) < 3:
+        return None
+    return parts[1], parts[2]
+
+
 def parse_inheritable_blocks(text: str) -> list[str]:
     """The `inheritable` blocks inside one personal-memory entry file's text.
 
     Only the body counts: a leading frontmatter block is skipped via the
-    writer's own split (`sdk._frontmatter_parts`), so the two features agree on
-    where the body starts and a marker inside frontmatter never opens a block
-    (#2128: `write()` keeps a caller's frontmatter as the note's only block).
+    pool validator's own split (`_frontmatter_parts`), so a marker inside
+    frontmatter never opens a block.
 
     Malformed fences fail soft — a warning and no block, never a silent
     over-share: an unclosed open fence drops its region (content after it is
@@ -88,7 +97,7 @@ def parse_inheritable_blocks(text: str) -> list[str]:
     ignored. An empty (or blank) block declares nothing and is skipped.
     """
     # CRLF files (an entry written in text mode elsewhere) must split
-    # like LF ones: the writer's frontmatter split keys on "---\n", and the
+    # like LF ones: the frontmatter split keys on "---\n", and the
     # fence match on a bare line.
     text = text.replace("\r\n", "\n")
     parts = _frontmatter_parts(text)

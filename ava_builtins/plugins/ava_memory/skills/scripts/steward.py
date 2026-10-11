@@ -1,4 +1,4 @@
-"""Per-machine steward: stage, commit, push, create PR.
+"""Per-machine steward: rebuild the directory indexes, stage, commit, push, create PR.
 
 Usage: python steward.py -m "memory: <machine> <date> local sync"
 
@@ -19,6 +19,7 @@ from ava_builtins.plugins.ava_memory.pool_ops import (
     branch_name,
     current_branch,
     pool_dir,
+    regenerate_indexes,
     repo_slug,
     run,
     stage_and_commit,
@@ -45,6 +46,7 @@ def main() -> int:
         )
         return 2
 
+    regenerate_indexes()
     stage_and_commit(args.message, pool)
     run(["git", "-C", str(pool), "push", "origin", "HEAD"])
 

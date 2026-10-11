@@ -15,6 +15,12 @@ arbiter or steward role. Follow the role and scope supplied by the current task.
   `score` and the `chunk` that matched, so weigh a weak score before opening the
   note, then read the matching note and inspect its ownership. Another agent's role is context,
   not your identity. Do not start maintenance merely to answer a query.
+- To write or update a note, search first, then write it with `ava.files.write`
+  under `ava.memory.PATH` (shared) or `ava.memory.PERSONAL_PATH` (your own),
+  following the frontmatter shown by `help(ava.memory.PATH)`. After the call a
+  reminder may name a rule the note breaks or an existing note that looks like a
+  duplicate; fix the former and merge into the latter. There is no writer
+  function, and the index files are rebuilt at consolidation, not by you.
 - When recording user preferences or corrections, read
   [user-dimension maintenance](reference/user-dimension.md). Search first,
   update the existing standing note, and keep durable shared facts in the pool.

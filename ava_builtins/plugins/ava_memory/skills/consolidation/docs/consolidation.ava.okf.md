@@ -38,7 +38,7 @@ commit — when in doubt, trigger.
   wrapper unconditionally pushes and has no `AVA_MEMORY_KEEP_LOCAL` switch.
   A daily schedule is created only for authorized ongoing maintenance.
 - **Arbiter / arbiter** (multi-host, one resident machine — the Memory Arbiter agent): holds the schedule; each round spawns a per-machine Steward for each machine (or the machines run resident stewards), waits for PR readiness, `skills/scripts/arbiter_merge.py` squash-merges each one, `ava memory refresh` rebuilds the index, notifies stewards to rebase, re-curates `MEMORY.md` (16000 character cap ≈ 200 lines index (Claude Code auto-memory scale), enforced by pre-commit hook).
-- **per-machine Steward** (multi-host, one per machine): `skills/scripts/steward.py` one-step commit + push + create PR, reports to the Arbiter then idles (or stays resident as a scheduler with the 1–5 min trigger watch), upon receiving "rebase now" rebases and terminates.
+- **per-machine Steward** (multi-host, one per machine): `skills/scripts/steward.py` one-step rebuild of the directory indexes (`gen_indexes.py`; agents write notes with `ava.files`, so no writer maintains them) + commit + push + create PR, reports to the Arbiter then idles (or stays resident as a scheduler with the 1–5 min trigger watch), upon receiving "rebase now" rebases and terminates.
 
 ## Content Discipline
 

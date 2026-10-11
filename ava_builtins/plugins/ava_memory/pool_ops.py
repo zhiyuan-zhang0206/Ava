@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -88,6 +89,16 @@ def run(
     if check and r.returncode != 0:
         raise SystemExit(f"✗ {' '.join(cmd)} failed: {r.stderr.strip()}")
     return r
+
+
+def regenerate_indexes() -> None:
+    """Rebuild every directory `index.md` of the pool (`skills/scripts/gen_indexes.py`).
+
+    Agents write notes with `ava.files` and nothing maintains the directory indexes as they do,
+    so the consolidation scripts rebuild them before staging: the pool validator's index checks
+    (every note pointed at once, titles matching) pass on what gets committed."""
+    script = Path(__file__).parent / "skills" / "scripts" / "gen_indexes.py"
+    run([sys.executable, str(script)])
 
 
 def stage_and_commit(message: str, pool: Path) -> bool:
