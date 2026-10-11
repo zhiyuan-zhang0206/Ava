@@ -151,11 +151,11 @@ def backups(
     return take
 
 
-def _restored(artifact: Path, *, legacy_empty_secret: bool = False) -> bytes:
+def _restored(artifact: Path) -> bytes:
     """The restore path's decryption (`decrypt_artifact`, shared by the snapshot
     verification and the restore drill); a fresh output file per call."""
     out = artifact.parent / f"restored-{next(_RESTORES)}.dump"
-    backup.decrypt_artifact(artifact, out, legacy_empty_secret=legacy_empty_secret)
+    backup.decrypt_artifact(artifact, out)
     return out.read_bytes()
 
 
@@ -169,15 +169,6 @@ def _decrypts_with(artifact: Path, key: str) -> bool:
         [*argv, "-in", str(artifact), "-out", str(out)], capture_output=True, check=False
     )
     return proc.returncode == 0 and out.read_bytes() == b"PGDMP fake dump"
-
-
-def _written_before_the_pin(
-    backups: Callable[[], Path], monkeypatch: pytest.MonkeyPatch, secret: str
-) -> Path:
-    """An artifact as a home born earlier wrote it: under `sha256(secret)`."""
-    with monkeypatch.context() as scoped:
-        scoped.setattr(passphrase, "logical_backup_passphrase", lambda: passphrase.derive(secret))
-        return backups()
 
 
 def test_rotating_the_secret_never_changes_the_backup_key(
@@ -208,27 +199,8 @@ def test_an_empty_secret_home_encrypts_for_real(
     passphrase.ensure_minted(open_home)
     artifact = backups()
     assert _restored(artifact) == b"PGDMP fake dump"
-    assert not _decrypts_with(artifact, passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE)
+    assert not _decrypts_with(artifact, passphrase.derive(""))
     assert _decrypts_with(artifact, passphrase.resolve(open_home))
-
-
-def test_an_empty_secret_homes_earlier_artifacts_need_the_legacy_option(
-    open_home: Path, backups: Callable[[], Path], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """sha256("") is public, so such a home carries a minted passphrase; the
-    artifacts written before decrypt only through the explicit legacy option,
-    which is never tried on its own, and never opens a current artifact."""
-    old = _written_before_the_pin(backups, monkeypatch, "")
-    passphrase.ensure_minted(open_home)
-    pinned = passphrase.pinned(open_home)
-    assert pinned is not None and pinned != passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE
-    with pytest.raises(RuntimeError, match="--legacy-empty-secret-passphrase"):
-        _restored(old)
-    assert _restored(old, legacy_empty_secret=True) == b"PGDMP fake dump"
-    current = backups()
-    assert _restored(current) == b"PGDMP fake dump"
-    with pytest.raises(RuntimeError, match="backup decrypt exited"):
-        _restored(current, legacy_empty_secret=True)
 
 
 def _crash_after_pin(home: Path, monkeypatch: pytest.MonkeyPatch) -> rotate.Rotation:
