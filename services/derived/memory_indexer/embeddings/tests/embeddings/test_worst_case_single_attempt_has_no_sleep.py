@@ -239,7 +239,24 @@ def test_embed_framing_drip_deadline(
         backoff=ExponentialBackoff(base=0.001, factor=1, cap=0.001),
         jitter_span=0,
     )
-    with _embedding_server(framing=framing) as (endpoint, requests):
+    started_attempts: list[float] = []
+    post_attempt_once = gemini._post_attempt_once
+
+    async def observe_attempt(
+        client: httpx.AsyncClient,
+        timeout_s: float,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        started_attempts.append(time.monotonic())
+        return await post_attempt_once(client, timeout_s, headers, payload)
+
+    monkeypatch.setattr(gemini, "_post_attempt_once", observe_attempt)
+    framing_started = threading.Event()
+    with _embedding_server(framing=framing, framing_started=framing_started) as (
+        endpoint,
+        _requests,
+    ):
         monkeypatch.setattr(gemini, "_ENDPOINT", endpoint)
         started = time.monotonic()
         with pytest.raises(EmbeddingAPIError, match="exceeded the deadline") as error:
@@ -265,7 +282,8 @@ def test_embed_framing_drip_deadline(
                 )
         elapsed = time.monotonic() - started
         assert isinstance(error.value.__cause__, httpx.ReadTimeout)
-        assert len(requests) == attempts
+        assert len(started_attempts) == attempts
+        assert framing_started.is_set()
         assert attempts * timeout <= elapsed < attempts * (timeout + 0.2)
         assert elapsed < 2  # Cancel all attempts before one framing drip completes.
 

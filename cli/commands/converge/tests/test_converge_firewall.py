@@ -429,11 +429,12 @@ def test_firewall_status_renders_manifest_details(
         fake_audit_this_host,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(fw, "allowlisted_paths", lambda: {"/bin/listener": True})
-    monkeypatch.setattr(
-        fw,
-        "render_manifest_status",
-        lambda rules: f"  rendered manifest with {len(rules)} rule",  # pyright: ignore[reportUnknownArgumentType]
-    )
+
+    def render_manifest_status(rules: dict[str, bool], *, machine: MachineIdentity) -> str:
+        assert machine is command_runtime.machine
+        return f"  rendered manifest with {len(rules)} rule"
+
+    monkeypatch.setattr(fw, "render_manifest_status", render_manifest_status)
     monkeypatch.setattr(fw, "stale_manifest_rules", lambda _rules: ())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(fw, "sudo_grant_installed", lambda: False)
     assert firewall_cmd.cmd_firewall_status(machine=command_runtime.machine) == 0

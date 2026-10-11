@@ -194,6 +194,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
 def test_accept_stops_exec_and_uses_captured_incarnation(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
+    machine_identity: MachineIdentity,
 ) -> None:
     from ava.impersonation import accept
 
@@ -203,7 +204,13 @@ def test_accept_stops_exec_and_uses_captured_incarnation(
     with pytest.raises(AgentImpersonation):
         accept("lease-1", "Hand the task to the external session.")
     accepted.assert_called_once_with(
-        ANY, ANY, "lease-1", 42, incarnation, "Hand the task to the external session."
+        ANY,
+        ANY,
+        "lease-1",
+        42,
+        incarnation,
+        "Hand the task to the external session.",
+        local_machine=machine_identity.name(),
     )
     assert isinstance(lifecycle_exception_from_name("AgentImpersonation"), AgentImpersonation)
 
