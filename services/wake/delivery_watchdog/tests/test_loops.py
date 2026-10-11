@@ -62,6 +62,7 @@ def _patch_loops(
     *,
     crashing: str | None,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
     cancelled: list[str],
     registered: list[str] | None = None,
 ) -> None:
@@ -79,7 +80,14 @@ def _patch_loops(
                 cancelled.append(name)
                 raise
 
-        return loop
+        if name == "scan":
+            return loop
+
+        async def machine_loop(*args: object, machine: MachineIdentity) -> None:
+            assert machine is machine_identity
+            await loop(*args)
+
+        return machine_loop
 
     monkeypatch.setattr(daemon, "_scan_loop", stand_in("scan"))
     monkeypatch.setattr(daemon.resurrect_retry, "resurrect_loop", stand_in("resurrect"))
@@ -101,10 +109,15 @@ async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     cancelled: list[str] = []
     _patch_loops(
-        monkeypatch, crashing=crashing, cancelled=cancelled, config_authority=config_authority
+        monkeypatch,
+        crashing=crashing,
+        cancelled=cancelled,
+        config_authority=config_authority,
+        machine_identity=machine_identity,
     )
 
     with pytest.raises(ExceptionGroup) as raised:
@@ -114,6 +127,7 @@ async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
             EventBus.from_settings(),
             LivenessGroup(),
             authority=config_authority,
+            machine=machine_identity,
         )
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} loop crashed"]
@@ -126,9 +140,16 @@ async def test_each_loop_reports_its_own_progress(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     liveness = LivenessGroup()
-    _patch_loops(monkeypatch, crashing="scan", cancelled=[], config_authority=config_authority)
+    _patch_loops(
+        monkeypatch,
+        crashing="scan",
+        cancelled=[],
+        config_authority=config_authority,
+        machine_identity=machine_identity,
+    )
 
     with pytest.raises(ExceptionGroup):
         await daemon._run_loops(
@@ -137,6 +158,7 @@ async def test_each_loop_reports_its_own_progress(
             EventBus.from_settings(),
             liveness,
             authority=config_authority,
+            machine=machine_identity,
         )
 
     assert set(liveness.snapshot()) == {"scan", "resurrect", "harvest", "hosted_turn"}
@@ -264,7 +286,7 @@ def test_the_job_deadline_is_derived_from_the_cluster_rpc_budget(
 
 
 async def test_run_reports_the_captured_image_and_releases_resources_on_failure(
-    monkeypatch: pytest.MonkeyPatch, database: Database
+    monkeypatch: pytest.MonkeyPatch, database: Database, *, machine_identity: MachineIdentity
 ) -> None:
     image = LoadedCommit(Path(), "captured-before-checkout-moved")
     failure = RuntimeError("original watchdog failure")
@@ -288,7 +310,7 @@ async def test_run_reports_the_captured_image_and_releases_resources_on_failure(
     monkeypatch.setattr(daemon, "_run_loops", loops)
 
     with pytest.raises(RuntimeError) as caught:
-        await daemon.run(database=lambda: database, image=image)
+        await daemon.run(database=lambda: database, image=image, machine=machine_identity)
 
     assert caught.value is failure
     assert start.call_args.args[0] == "delivery_watchdog"

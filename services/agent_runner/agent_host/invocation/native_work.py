@@ -429,6 +429,7 @@ async def invoke_prepared_graph[T](
             incarnation=ctx.original_incarnation,
             resources=ctx.hosted_resources,
             notes=notes,
+            read_local_machine=lambda: ctx.require_machine().name(),
         )
         await prepare_native_invocation(control_pool, work, incarnation)
     return await invoke(

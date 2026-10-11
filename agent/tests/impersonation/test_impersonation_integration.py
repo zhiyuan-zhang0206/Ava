@@ -1,5 +1,6 @@
 """Real PostgreSQL + compiled graph + exec child cooperative handoff."""
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -74,7 +75,7 @@ async def test_consent_exec_inbox_release_and_resume(
     # recorded controller tree is synthetic (its pids are not live processes),
     # so pin the supervisor's liveness view (task #3998).
 
-    def relay_ready(*_args: object) -> bool:
+    def relay_ready(*_args: object, read_local_machine: Callable[[], str]) -> bool:
         return True
 
     monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
@@ -108,6 +109,7 @@ async def test_consent_exec_inbox_release_and_resume(
         incarnation=owner,
         resources=scope,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     assert (
         leases.require_active(
@@ -164,6 +166,7 @@ async def test_consent_exec_inbox_release_and_resume(
         incarnation=owner,
         resources=scope,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     scope = await scope.require_service().turn()
     resumed = await graph.ainvoke(
@@ -185,6 +188,7 @@ async def test_consent_exec_inbox_release_and_resume(
         incarnation=owner,
         resources=scope,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     assert (await graph.aget_state(config)).values["handoff__total"] == 7
 
@@ -248,6 +252,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     inbound_id = insert_inbound_message(
         db_conn,
@@ -281,6 +286,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     snapshot = await graph.aget_state(config)
     assert_end_note_and_handoff_document(snapshot.values["messages"][-1], tmp_path)
@@ -297,6 +303,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     await graph.ainvoke(
         reset,
@@ -349,6 +356,7 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     assert not calls
     durable = await saver.aget_tuple(config)
@@ -420,6 +428,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     leases.release(
         database,
@@ -510,6 +519,7 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
         incarnation=owner,
         resources=None,
         notes=handoff_notes(),
+        read_local_machine=machine_identity.name,
     )
     leases.release(
         database,

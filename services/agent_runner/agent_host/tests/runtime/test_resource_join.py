@@ -119,9 +119,11 @@ def _exercise_unfinished_main() -> None:
         config: ConfigBoot,
         database: Callable[[], Database],
         machine: MachineIdentity,
+        home: Path,
         clients: ClientSet,
         on_clients_owned: Callable[[], None],
     ) -> None:
+        assert home == Path(os.environ["AVA_HOME"])
         on_clients_owned()
         host = AgentHost(
             policy=configured_policy(),

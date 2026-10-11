@@ -16,12 +16,14 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.db import create_agent
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.sessions.pty.paths import close_notices_path
 from ops import pty_close_notices
 from services.agent_runner.pty_sessions import crash_notices
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
@@ -67,7 +69,7 @@ def _inbound_sessions(db_conn: psycopg.Connection, agent_id: int) -> list[int]:
 
 
 async def test_send_stages_and_delivers_a_hundred_session_sweep(
-    db_conn: psycopg.Connection, staged: Path
+    db_conn: psycopg.Connection, staged: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """End to end through the real child: a sweep of 100 busy sessions (past the
     incident's ~38 truncation point) lands every notice and leaves no staged file."""
@@ -82,7 +84,7 @@ async def test_send_stages_and_delivers_a_hundred_session_sweep(
         *[_busy(dead, 3000 + n) for n in range(5)],
     )
 
-    await crash_notices.send(swept)
+    await crash_notices.send(swept, machine=machine_identity)
 
     assert _inbound_sessions(db_conn, live) == [1000 + n for n in range(50)]
     assert len(_inbound_sessions(db_conn, second)) == 45
@@ -95,6 +97,8 @@ async def test_a_child_cut_by_the_time_limit_is_loud_and_the_next_start_delivers
     staged: Path,
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The incident's shape: the child is killed at `NOTICE_LIMIT_S` before it writes
     anything. The batch stays staged — nothing is lost — and the next start re-sends
@@ -104,7 +108,9 @@ async def test_a_child_cut_by_the_time_limit_is_loud_and_the_next_start_delivers
     monkeypatch.setattr(crash_notices, "NOTICE_LIMIT_S", 0.3)
 
     await crash_notices.send(
-        swept, child_command=(sys.executable, "-c", "import time; time.sleep(30)")
+        swept,
+        child_command=(sys.executable, "-c", "import time; time.sleep(30)"),
+        machine=machine_identity,
     )
 
     assert len(pty_close_notices.read_pending(staged)) == 100, "the cut batch stays staged"
@@ -117,7 +123,7 @@ async def test_a_child_cut_by_the_time_limit_is_loud_and_the_next_start_delivers
     )
 
     monkeypatch.setattr(crash_notices, "NOTICE_LIMIT_S", 60.0)
-    await crash_notices.send(swept)
+    await crash_notices.send(swept, machine=machine_identity)
 
     assert _inbound_sessions(db_conn, live) == [1000 + n for n in range(100)]
     assert not staged.exists()
@@ -127,13 +133,17 @@ async def test_a_failing_child_reports_the_leftover_batch_and_keeps_it_staged(
     db_conn: psycopg.Connection,
     staged: Path,
     loguru_records: list[dict[str, Any]],
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A child that exits non-zero (a database that answers nothing) is reported at
     ERROR with the count, and its batch waits for the next start."""
     live = _agent(db_conn, "running")
     swept = _sweep(*[_busy(live, 1000 + n) for n in range(3)])
 
-    await crash_notices.send(swept, child_command=(sys.executable, "-c", "raise SystemExit(1)"))
+    await crash_notices.send(
+        swept, child_command=(sys.executable, "-c", "raise SystemExit(1)"), machine=machine_identity
+    )
 
     assert len(pty_close_notices.read_pending(staged)) == 3
     assert any(
@@ -145,12 +155,14 @@ async def test_a_failing_child_reports_the_leftover_batch_and_keeps_it_staged(
 
 
 async def test_a_clean_start_stages_nothing_and_runs_no_child(
-    staged: Path, loguru_records: list[dict[str, Any]]
+    staged: Path, loguru_records: list[dict[str, Any]], *, machine_identity: MachineIdentity
 ) -> None:
     """No swept sessions and nothing waiting: no child runs and nothing is reported;
     a child that ran would exit non-zero and be loud."""
     await crash_notices.send(
-        closure.Outcome(), child_command=(sys.executable, "-c", "raise SystemExit(7)")
+        closure.Outcome(),
+        child_command=(sys.executable, "-c", "raise SystemExit(7)"),
+        machine=machine_identity,
     )
 
     assert not staged.exists()

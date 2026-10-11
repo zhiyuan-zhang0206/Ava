@@ -1,7 +1,7 @@
 """Real handoff graph, owned clients and transport evidence for integration tests."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Any
@@ -87,7 +87,9 @@ def handoff_notes() -> HandoffNotes:
     return HandoffNotes(Clock.from_settings, lambda: settings.general.message_timestamps)
 
 
-def relay_ready(_db: object, _bus: object, *_args: object) -> bool:
+def relay_ready(
+    _db: object, _bus: object, *_args: object, read_local_machine: Callable[[], str]
+) -> bool:
     return True
 
 
@@ -416,13 +418,21 @@ async def stop_takeover_with_lost_relay(
     event_bus: EventBus,
     owner: RuntimeIncarnation,
     relays: RelaySupervision,
+    *,
+    machine_identity: MachineIdentity,
 ) -> str:
     """Observe unknown legacy relay custody without revoking the executor lease."""
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
     session = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert session is not None
     await impersonation.supervise_relay(
-        database, event_bus, session, owner.agent_id, relays, incarnation=owner
+        database,
+        event_bus,
+        session,
+        owner.agent_id,
+        relays,
+        incarnation=owner,
+        read_local_machine=machine_identity.name,
     )
     return "the bound relay stopped heartbeating"
 
@@ -505,6 +515,7 @@ async def resume_native(
         incarnation=owner,
         resources=ctx.hosted_resources,
         notes=handoff_notes(),
+        read_local_machine=lambda: ctx.require_machine().name(),
     )
     assert wakes == [(owner.agent_id, "impersonation")]
     resumed = await graph.ainvoke(reset, config, context=ctx)

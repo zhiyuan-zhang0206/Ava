@@ -149,7 +149,13 @@ async def test_repeated_terminated_results_suppress_and_emit_once(
 
     for _ in range(5):
         await resurrect_retry.resurrect_round(
-            pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
+            pool,
+            Database.from_settings(gate=database_gate),
+            event_bus,
+            progress,
+            5,
+            _THRESHOLD_S,
+            machine=machine_identity,
         )
         _expire_cooldown(db_conn, aid)
 
@@ -175,7 +181,13 @@ async def test_repeated_terminated_results_suppress_and_emit_once(
 
     # The durable selector, not the cooldown, keeps later rounds away.
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        5,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
     assert calls == [aid] * 5
 
@@ -209,7 +221,12 @@ async def test_success_resets_failure_and_suppression_escalation_counts(
     _stub_resurrect(monkeypatch, AgentStatus.IDLING)
 
     await resurrect_retry.resurrect_one(
-        pool, Database.from_settings(gate=database_gate), event_bus, aid, trigger
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        aid,
+        trigger,
+        machine=machine_identity,
     )
 
     assert _state(db_conn, aid) == (0, 0)
@@ -241,7 +258,13 @@ async def test_expired_suppression_escalates_again_with_bounded_backoff(
     monkeypatch.setattr(settings.daemon, "delivery_watchdog_suppress_max_seconds", 15.0)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        5,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
     db_conn.execute(
         "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' WHERE id = %s",
@@ -254,7 +277,13 @@ async def test_expired_suppression_escalates_again_with_bounded_backoff(
     ]
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        5,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
 
     row = db_conn.execute(
@@ -301,17 +330,35 @@ async def test_failed_resurrect_enters_a_cooldown_that_lives_in_the_database(
     monkeypatch.setattr(ol, "resurrect_if_terminated", fail)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        5,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        5,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
 
     assert calls == [aid]
     assert _state(db_conn, aid) == (1, 0)
     _expire_cooldown(db_conn, aid)
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        5,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
     assert calls == [aid, aid]
     assert _state(db_conn, aid) == (2, 0)
@@ -348,7 +395,13 @@ async def test_cooldown_counts_from_the_attempts_end(
     monkeypatch.setattr(ol, "resurrect_if_terminated", slow_failure)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        5,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
 
     claimed, _ = attempts.claim_attempts(pool, attempts.RESURRECT, [aid], 60.0)
@@ -386,7 +439,13 @@ async def test_hung_rpc_is_cut_at_the_deadline_and_counts_as_a_failure(
     monkeypatch.setattr(rounds, "rpc_deadline_s", lambda: 0.05)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        5,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
 
     assert _state(db_conn, aid) == (1, 0)
@@ -424,7 +483,13 @@ async def test_cancelled_round_enters_cooldown_without_counting_a_failure(
     monkeypatch.setattr(ol, "resurrect_if_terminated", block)
     round_task = asyncio.create_task(
         resurrect_retry.resurrect_round(
-            pool, Database.from_settings(gate=database_gate), event_bus, progress, 5, _THRESHOLD_S
+            pool,
+            Database.from_settings(gate=database_gate),
+            event_bus,
+            progress,
+            5,
+            _THRESHOLD_S,
+            machine=machine_identity,
         )
     )
     await started.wait()
@@ -466,17 +531,35 @@ async def test_the_cap_bounds_each_round_and_the_backlog_drains_over_rounds(
     calls = _stub_resurrect(monkeypatch, AgentStatus.IDLING)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 1, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        1,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
     assert calls == [first]
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 1, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        1,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
     assert calls == [first, second]
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 1, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        1,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
     assert calls == [first, second]
 
@@ -524,6 +607,7 @@ async def test_a_slow_resurrect_is_never_attempted_twice_in_flight(
             0.01,
             5,
             _THRESHOLD_S,
+            machine=machine_identity,
         )
     )
     try:
@@ -574,7 +658,13 @@ async def test_concurrency_within_a_round_is_bounded(
     monkeypatch.setattr(ol, "resurrect_if_terminated", tracked)
 
     await resurrect_retry.resurrect_round(
-        pool, Database.from_settings(gate=database_gate), event_bus, progress, 10, _THRESHOLD_S
+        pool,
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        progress,
+        10,
+        _THRESHOLD_S,
+        machine=machine_identity,
     )
 
     assert peak == resurrect_retry._RESURRECT_MAX_CONCURRENCY

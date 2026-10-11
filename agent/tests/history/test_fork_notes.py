@@ -17,7 +17,6 @@ registrations on teardown.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -38,15 +37,16 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.paths import skills_dir
+from tests.fixtures.unit.identity import MachineIdentitySetter
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
 @pytest.fixture
-def skills_unit(unit_home: Path, set_machine_identity: Callable[..., None]) -> None:
+def skills_unit(unit_home: Path, set_machine_identity: MachineIdentitySetter) -> None:
     """A per-test unit home, so `<home>/skills` is this test's own skill load dir,
     that still names its machine: the fork tail renders a capability index."""
-    set_machine_identity("agent-runner", "test-machine")
+    set_machine_identity(role="agent-runner", name="test-machine")
 
 
 def test_strip_tag_set_is_exactly_the_source_identity_notes() -> None:

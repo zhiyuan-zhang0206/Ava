@@ -15,6 +15,7 @@ from base.deploy.maintenance import pause_owner
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster.tests.health_probe_inputs import Probe
 from cli.commands.cluster.tests.health_probe_inputs import probe as probe
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 

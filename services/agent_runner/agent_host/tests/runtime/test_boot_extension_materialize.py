@@ -17,8 +17,9 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from agent.process_boot import land_cluster_extensions
+from agent.process_boot import init_process_scope, land_cluster_extensions
 from base import db, paths
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import registry as reg
@@ -106,8 +107,34 @@ def test_the_hosted_daemon_lands_them_once_per_process() -> None:
     from services.agent_runner.agent_host.daemon import run
 
     src = inspect.getsource(run)
-    assert src.index("init_process_scope()") < src.index("land_cluster_extensions(db)")
+    assert src.index("init_process_scope(machine=machine, home=home)") < src.index(
+        "land_cluster_extensions(db)"
+    )
     assert "load_process_extensions" not in src, "the plugin load is `load_extensions` alone"
     assert src.count("land_cluster_extensions(db)") == 1, (
         "once per process — a second call would re-hash every skill tree for no gain"
     )
+
+
+def test_process_scope_passes_its_machine_and_home_without_reading_identity(
+    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+) -> None:
+    from base.telemetry import tracing
+
+    def unexpected_name() -> str:
+        pytest.fail("process scope eagerly read the machine name")
+
+    machine = MachineIdentity(
+        name=unexpected_name,
+        role=lambda: frozenset({"agent-runner"}),
+        host=lambda: "localhost",
+        description=lambda: None,
+    )
+    calls: list[tuple[MachineIdentity, Path]] = []
+
+    def initialize(*, machine: MachineIdentity, home: Path) -> None:
+        calls.append((machine, home))
+
+    monkeypatch.setattr(tracing, "initialize_tracing", initialize)
+    init_process_scope(machine=machine, home=unit_home)
+    assert calls == [(machine, unit_home)]

@@ -34,6 +34,7 @@ from typing import Any, cast
 
 import psutil
 
+from base.cluster.machine import MachineIdentity
 from base.log import logger
 from base.native_process import child_env, pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
@@ -501,7 +502,9 @@ class PtyService:
             with contextlib.suppress(OSError):
                 await writer.wait_closed()
 
-    async def serve(self, path: Path, *, hangup_wait_s: float, kill_s: float) -> None:
+    async def serve(
+        self, path: Path, *, hangup_wait_s: float, kill_s: float, machine: MachineIdentity
+    ) -> None:
         """Serve on `path` until SIGTERM or SIGINT, then close every session still alive.
 
         The caller holds the home's instance lock, so a socket file already at
@@ -526,7 +529,7 @@ class PtyService:
         async with asyncio.TaskGroup() as tasks:
             self._tasks = tasks
             tasks.create_task(self._watch_exits())
-            notices = tasks.create_task(crash_notices.send(self.swept))
+            notices = tasks.create_task(crash_notices.send(self.swept, machine=machine))
             await self._stop.wait()
             notices.cancel()
             server.close()

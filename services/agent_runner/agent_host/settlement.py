@@ -29,6 +29,7 @@ from agent.ownership.hosted import TurnSettlement, settle_and_stamp_turn
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
 from base.agents.history.inbound_sideload import ReconcileReadInputs
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -63,6 +64,7 @@ async def close_hosted_turn(
     wake_enabled: Callable[[], bool],
     prompt_reap_enabled: Callable[[], bool],
     reconcile_inputs: ReconcileReadInputs,
+    machine: MachineIdentity,
 ) -> None:
     """Settle the finished turn, dispose its claimed rows (the abort pass, or
     a finished turn's own pass), then prompt-reap a corpse that re-crashed
@@ -99,6 +101,7 @@ async def close_hosted_turn(
             settlement,
             wake_enabled=wake_enabled,
             enabled=prompt_reap_enabled,
+            machine=machine,
         )
 
 
@@ -111,6 +114,7 @@ async def prompt_reap_after_recrash(
     *,
     wake_enabled: Callable[[], bool],
     enabled: Callable[[], bool],
+    machine: MachineIdentity,
 ) -> None:
     """Terminate a corpse whose second crash settled right now (task #3616).
 
@@ -160,7 +164,7 @@ async def prompt_reap_after_recrash(
             reason="row_moved_on",
         )
         return
-    await recover_reaped_corpses(db, bus, reaped)
+    await recover_reaped_corpses(db, bus, reaped, machine=machine)
 
 
 async def reconcile_inbounds_after_abort(
