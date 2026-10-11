@@ -35,7 +35,7 @@ import enum
 from collections.abc import Callable, Iterable
 from typing import Literal
 
-from base.cluster.auth import bearer_header, delivered_token
+from base.cluster.auth import bearer_header, delivered_token, require_cluster_secret
 from base.config import settings
 from base.host.env.dotenv_boot import launcher_context
 
@@ -407,7 +407,7 @@ _TOKEN_ONLY_PROFILES = frozenset({"agent", "runner"})
 
 
 def gateway_bearer() -> str:
-    """The bearer this process presents to the gateway API; empty in the open posture.
+    """The bearer this process presents to the gateway API.
 
     The machine API token of the active write generation first: delivered by
     the launcher, or by the boot pass to an admitted operator process. Without
@@ -421,7 +421,8 @@ def gateway_bearer() -> str:
 
     Raises:
         GatewayApiTokenMissing: an agent- or runner-profile process has no
-            `AVA_API_TOKEN` while `AVA_CLUSTER_SECRET` is set.
+            `AVA_API_TOKEN`, or the process holds neither a token nor the
+            human secret (the API always authenticates).
     """
     return resolve_gateway_bearer(
         token_reader=delivered_token,
@@ -444,14 +445,20 @@ def resolve_gateway_bearer(
         return token
     secret = secret_reader()
     profile = profile_reader()
-    if secret and profile in _TOKEN_ONLY_PROFILES and not no_tokens_reader():
+    if profile in _TOKEN_ONLY_PROFILES and not no_tokens_reader():
         raise GatewayApiTokenMissing(
             f"this {profile}-profile process carries no machine API token (AVA_API_TOKEN) "
-            "while the cluster API is authenticated (AVA_CLUSTER_SECRET is set). The root "
+            "while the cluster API is authenticated. The root "
             "launcher delivers the active write generation's token to every agent host and "
             "runner service it starts, and such a process never presents the human secret "
             "instead: restart the cluster's services (`ava stop`, then `ava start`) so the "
             "launcher delivers it."
+        )
+    if not secret:
+        raise GatewayApiTokenMissing(
+            "this process holds no gateway credential: no machine API token (AVA_API_TOKEN) "
+            "and no AVA_CLUSTER_SECRET, and the cluster API always authenticates. Run it from "
+            "the gateway home, or from a unit whose database capability is installed"
         )
     return secret
 
@@ -467,18 +474,17 @@ def _plane_delivers_no_tokens() -> bool:
     return config_source_is_local() and settings.data_plane.is_remote
 
 
-def daemon_acceptance() -> frozenset[str] | None:
-    """SHA-256 digests of the bearers a gateway-side daemon's authenticated endpoint accepts,
-    or None for the open posture. The acceptor's half of `gateway_bearer()`: the daemons that
+def daemon_acceptance() -> frozenset[str]:
+    """SHA-256 digests of the bearers a gateway-side daemon's authenticated endpoint accepts.
+    The acceptor's half of `gateway_bearer()`: the daemons that
     take calls from the gateway (the ops server, im_bridge's `/send`) accept machine API tokens,
     never the human cluster secret.
 
     The gateway dials with its gateway-class token and a runner-class process of the unit with its
     runner token, so a daemon accepts exactly its write generation's two tokens. A remote unit
-    takes the gateway token digest its installed capability carries plus its own runner token's
-    (none when its cluster's API is open): it never holds the gateway token or the human secret.
-    The gateway home takes the active generation's two tokens while the cluster secret is set
-    (none while no generation is active: fail closed).
+    takes the gateway token digest its installed capability carries plus its own runner token's:
+    it never holds the gateway token or the human secret. The gateway home takes the active
+    generation's two tokens (none while no generation is active: fail closed).
 
     The one place the human secret is still accepted is a remote-managed data plane
     (`settings.data_plane.is_remote`): it keeps no write generations and issues no token, so
@@ -495,10 +501,8 @@ def daemon_acceptance() -> frozenset[str] | None:
     capability = load_unit_capability(home)
     if capability is not None:
         api = capability.api
-        return None if api is None else frozenset({api.gateway, token_digest(api.token)})
-    secret = settings.data_plane.cluster_secret
-    if not secret:
-        return None
+        return frozenset({api.gateway, token_digest(api.token)})
+    secret = require_cluster_secret(settings.data_plane.cluster_secret, where=f"home {home}")
     if settings.data_plane.is_remote:
         return frozenset({token_digest(secret)})
     return frozenset(acceptance(home).values())
@@ -510,14 +514,12 @@ def gateway_auth_headers() -> dict[str, str]:
     The Bearer paired with `gateway_api_base` for every client-side call to an
     authenticated gateway route (`/api/cluster/*`, `/api/agents/*`,
     `/api/config`, `/api/memory/*`, ...) and with the gateway's `/ops` dials:
-    `gateway_bearer()`. Empty in the open posture, where the middleware is a
-    no-op, so the same call site works either way.
+    `gateway_bearer()`.
 
     Raises:
         GatewayApiTokenMissing: see `gateway_bearer`.
     """
-    bearer = gateway_bearer()
-    return bearer_header(bearer) if bearer else {}
+    return bearer_header(gateway_bearer())
 
 
 def _parse_roles(value: str) -> MachineRoles:

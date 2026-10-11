@@ -198,8 +198,7 @@ def _deliver_lite_api_token() -> None:
         capability = consume_unit(resolve_ava_home().resolve())
     except (AuthorityRefusedError, OSError, ValueError):
         return
-    if capability.api is not None:
-        os.environ[API_TOKEN_ENV] = capability.api.token
+    os.environ[API_TOKEN_ENV] = capability.api.token
 
 
 def main(

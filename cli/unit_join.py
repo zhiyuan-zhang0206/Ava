@@ -21,7 +21,7 @@ def join_gateway(values: dict[str, str], home: Path, capability: str | None) -> 
 
     The unit never holds the human cluster secret: it authenticates with the
     machine API token of its capability — the carried bundle's at a join, the
-    installed one's afterwards (none when the cluster's API is open).
+    installed one's afterwards.
     """
     from base.cluster.authority.unit import install_bundle
     from base.host.env.bootstrap import fetch_bootstrap_config
@@ -37,7 +37,7 @@ def join_gateway(values: dict[str, str], home: Path, capability: str | None) -> 
     remote = not is_loopback_host(urlsplit(gateway).hostname or "")
     if remote and (not host or is_loopback_host(host)):
         raise ValueError("joining a remote gateway requires a reachable --machine-host")
-    bundle, token = _join_credential(home, capability, remote=remote)
+    bundle, token = _join_credential(home, capability)
     payload = fetch_bootstrap_config(gateway, bearer=token)
     if remote and any(
         is_loopback_host(urlsplit(payload[key]).hostname or "")
@@ -58,8 +58,8 @@ def join_gateway(values: dict[str, str], home: Path, capability: str | None) -> 
         values.pop(key, None)
 
 
-def _join_credential(home: Path, capability: str | None, *, remote: bool) -> tuple[Any, str]:
-    """(the opened bundle or None, the API token the join presents; "" when open).
+def _join_credential(home: Path, capability: str | None) -> tuple[Any, str]:
+    """(the opened bundle or None, the API token the join presents).
 
     A carried bundle is opened (authenticated, unexpired) before anything is
     fetched; without one the installed capability must exist.
@@ -83,9 +83,4 @@ def _join_credential(home: Path, capability: str | None, *, remote: bool) -> tup
     held = bundle.capability if bundle is not None else load_unit_capability(home)
     if held is None:
         raise ValueError(no_capability_message(home))
-    if remote and held.api is None:
-        raise ValueError(
-            "the capability carries no API token (it was issued by a gateway with an open "
-            "API), but a remote gateway authenticates; issue a new bundle on the gateway"
-        )
-    return bundle, "" if held.api is None else held.api.token
+    return bundle, held.api.token

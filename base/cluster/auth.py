@@ -48,6 +48,27 @@ def delivered_token() -> str | None:
     return os.environ.get(API_TOKEN_ENV) or None
 
 
+class ClusterSecretMissingError(RuntimeError):
+    """A gateway home has no `AVA_CLUSTER_SECRET`: the cluster API cannot start."""
+
+
+def require_cluster_secret(secret: str, *, where: str) -> str:
+    """The gateway's human secret, or `ClusterSecretMissingError`.
+
+    Every cluster authenticates its API with a human secret; there is no open
+    posture. `ava init` mints one into a new home's `.env`, so a missing one
+    means a hand-edited or pre-existing home.
+    """
+    if not secret:
+        raise ClusterSecretMissingError(
+            f"{where} has no AVA_CLUSTER_SECRET, and the cluster API always authenticates. "
+            "Set it in the gateway home's .env to a fresh URL-safe token "
+            "(python3 -c 'import secrets; print(secrets.token_urlsafe(32))'), then run `ava start`; "
+            "`ava init` mints one for every new home"
+        )
+    return secret
+
+
 def verify_bearer(authorization: str | None, secret: str) -> bool:
     """True iff `authorization` carries exactly `Bearer <secret>`, compared in
     constant time. A blank configured `secret` never verifies — an unset

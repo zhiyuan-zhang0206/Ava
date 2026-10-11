@@ -271,7 +271,7 @@ def telemetry_bearer() -> str | None:
 
     Stable per cluster (it is not part of the write generation): the
     gateway derives it from its human secret; a remote unit reads it from its
-    installed capability and never holds the secret. None = an open cluster.
+    installed capability and never holds the secret. None = the unit holds neither.
     """
     from base.cluster.authority.unit import telemetry_bearer as resolve
     from base.config import settings
@@ -298,7 +298,7 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     runner relays) and an observability station (remote gateway collectors,
     WP4, task #1946 — docs/conventions/data/reachability-and-credentials.md). Remote
     ingress exists only when the unit could actually have remote peers: no
-    telemetry token (an open cluster: the zero-config single-box posture) and a loopback
+    telemetry token (the unit holds neither the secret nor a capability) and a loopback
     reachable host (co-located posture) both mean NO remote peers, so no
     receiver is rendered — the same "legal when nothing remote dials it" rule
     as the registration loopback guard (base.cluster.machines._reject_loopback_dial_url,
@@ -334,7 +334,7 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
             "private address"
         )
     if not token or is_loopback_host(host):
-        # No telemetry token (an open cluster) or loopback host = no remote
+        # No telemetry token or loopback host = no remote
         # peers exist (single-box posture). No receiver, no error — same rule
         # the registration guard applies (a co-located unit may advertise
         # loopback).

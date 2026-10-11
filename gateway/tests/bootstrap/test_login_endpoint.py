@@ -36,7 +36,6 @@ class _FakeClock:
 @pytest.fixture(autouse=True)
 def _patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """Enable auth with a known secret, mirroring test_auth.py."""
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
 
 

@@ -86,7 +86,7 @@ def _require_ship_config() -> _ShipTarget:
             raise TraceShipError(
                 "a pure runner replays through the gateway's authenticated OTLP "
                 "receiver with its capability's telemetry token, and this unit's "
-                "capability carries none (an open cluster, or no capability installed)"
+                "unit holds no capability"
             )
         try:
             base = gateway_otel_ingress_endpoint()

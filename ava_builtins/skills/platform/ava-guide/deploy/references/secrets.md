@@ -43,11 +43,11 @@ only in the bootstrap URL; Redis `default`/`requirepass` uses
 keeps its provider URLs and `AVA_RUNNER_DB_PASSWORD` for its gateway-local
 agents; it has no write generation to issue to remote runners.
 
-The capabilities given to `ava init` determine the initial control-plane secret:
+Every gateway home gets a control-plane secret at `ava init`, and the gateway refuses to start without one. The capabilities given to `ava init` decide only how it is used:
 
 | `ava init` shape | Secret |
 |---|---|
-| `--serve-gateway --serve-agent-runner` | Empty bearer by default; unauthenticated loopback API. Postgres/PgBouncer still admit only write-generation logins (generation 0 minted at first start) and Redis gets its generated admin and runtime passwords. |
+| `--serve-gateway --serve-agent-runner` | Minted automatically; the CLI, SDK and local services present machine tokens of the write generation (generation 0, minted at first start), and the secret is the web UI login password. Listeners stay on loopback until `--machine-host` declares a private-network address. Redis gets its generated admin and runtime passwords. |
 | `--serve-gateway --no-serve-agent-runner` | Minted automatically. It stays on the gateway; runners receive capability bundles instead. |
 | `--serve-agent-runner --no-serve-gateway` | No bearer: supply the capability bundle's transport key as `AVA_DB_CAPABILITY_KEY` for `ava init` (and again for a later `install-unit`). A runner home recording `AVA_CLUSTER_SECRET` refuses. |
 

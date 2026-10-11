@@ -68,7 +68,6 @@ async def admit(
     assert len(ordinary) == 1
     secret = "guarded-compact-test-secret"  # noqa: S105 -- isolated credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     headers = {
         "Authorization": f"Bearer {secret}",
         "Idempotency-Scope": "principal-v1",

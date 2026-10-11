@@ -9,8 +9,8 @@ cluster secret, so a machine holds no human bearer:
   the gateway-class token only.
 - The root launcher delivers a service its class token in ``AVA_API_TOKEN``,
   exactly like its database login, and only while the API is authenticated
-  (a non-empty human secret on the gateway, an API-bearing unit capability on
-  a remote unit). An empty-secret single box keeps its open API.
+  (the gateway's human secret, which every gateway home holds; the unit
+  capability's API admission on a remote unit).
 - The OTLP relay ingress is telemetry, not a write path. Its bearer is derived
   from the human secret (``telemetry_token``), so remote units receive it in
   their capability without ever holding the secret itself; it changes only
@@ -52,10 +52,10 @@ def telemetry_token(cluster_secret: str) -> str:
     """The OTLP relay ingress bearer of a cluster whose human secret is `cluster_secret`.
 
     One-way (HMAC-SHA256 under the secret): a unit holding it learns nothing
-    about the secret. An empty secret has no authenticated ingress.
+    about the secret.
     """
     if not cluster_secret:
-        raise ValueError("an open cluster (empty secret) has no telemetry ingress token")
+        raise ValueError("the telemetry ingress token derives from a non-empty cluster secret")
     return hmac.new(cluster_secret.encode(), _TELEMETRY_LABEL, hashlib.sha256).hexdigest()
 
 
@@ -69,23 +69,19 @@ def telemetry_token_path(home: Path) -> Path:
 
 def publish_telemetry_token(home: Path, cluster_secret: str) -> None:
     """Derive the telemetry token from the human secret and keep it in the home's private file
-    (0600), or remove the file while the cluster's API is open (an empty secret).
+    (0600).
 
     The one place the secret becomes the token: the root that holds the secret (the gateway home's
     start) publishes it here, and the gateway-side services that need the token (the heartbeat's
     observability-station probe) read the file with `read_telemetry_token` instead of holding
     the secret. A rotated secret reaches them at the next start, which republishes.
     """
-    path = telemetry_token_path(home)
-    if not cluster_secret:
-        path.unlink(missing_ok=True)
-        return
-    write_private_bytes(path, telemetry_token(cluster_secret).encode())
+    write_private_bytes(telemetry_token_path(home), telemetry_token(cluster_secret).encode())
 
 
 def read_telemetry_token(home: Path) -> str | None:
-    """The published telemetry token, or None when none was published (an open cluster, or a
-    start that has not run yet)."""
+    """The published telemetry token, or None when none was published (a start that has
+    not run yet)."""
     try:
         body = telemetry_token_path(home).read_bytes()
     except FileNotFoundError:

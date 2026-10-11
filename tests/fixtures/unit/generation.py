@@ -9,13 +9,13 @@ import pytest
 from base.config.service_read import ConfigAuthority
 
 
-@pytest.fixture
-def seed_write_generation() -> Callable[[Path], Any]:
-    """Record an active write generation in a home's private ledger, no database.
+def seed_active_generation(home: Path) -> Any:
+    """Record an active write generation in `home`'s private ledger, no database.
 
-    For code that only READS the ledger (launch delivery, bootstrap projection,
-    operator consumption): the catalog side is proven on real PostgreSQL in
-    tests/components/lifecycle/db_authority/. Returns the generation's secret record.
+    The same ledger, pending mint and activation `ava start` performs at birth, minus
+    the catalog roles (their proof is on real PostgreSQL in
+    tests/components/lifecycle/db_authority/). Returns the generation's secret record,
+    whose `.api` carries the gateway and runner machine API tokens.
     """
     from base.cluster.authority import (
         GATEWAY_GROUP,
@@ -28,15 +28,22 @@ def seed_write_generation() -> Callable[[Path], Any]:
     )
     from base.cluster.authority.ledger import begin_mint
 
-    def seed(home: Path) -> Any:
-        home = home.resolve()
-        groups = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)
-        create_ledger(home, owner="ava", groups=groups)
-        pending = begin_mint(home, encrypt=lambda name, _pw: f"SCRAM-SHA-256$4096:c2VlZA==${name}")
-        activate(home, VerifiedGeneration(pending.number, pending.credential_digest, pending.roles))
-        return read_secret(home, pending)
+    home = home.resolve()
+    groups = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)
+    create_ledger(home, owner="ava", groups=groups)
+    pending = begin_mint(home, encrypt=lambda name, _pw: f"SCRAM-SHA-256$4096:c2VlZA==${name}")
+    activate(home, VerifiedGeneration(pending.number, pending.credential_digest, pending.roles))
+    return read_secret(home, pending)
 
-    return seed
+
+@pytest.fixture
+def seed_write_generation() -> Callable[[Path], Any]:
+    """`seed_active_generation` as a fixture.
+
+    For code that only READS the ledger (launch delivery, bootstrap projection,
+    operator consumption). Returns the generation's secret record.
+    """
+    return seed_active_generation
 
 
 @pytest.fixture

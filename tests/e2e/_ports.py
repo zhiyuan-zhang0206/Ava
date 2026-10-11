@@ -30,11 +30,13 @@ GATEWAY_SOCKET = socket.socket()
 GATEWAY_SOCKET.bind(("127.0.0.1", 0))
 atexit.register(GATEWAY_SOCKET.close)
 GATEWAY_PORT = GATEWAY_SOCKET.getsockname()[1]
-GATEWAY_URL = f"http://127.0.0.1:{GATEWAY_PORT}"
+# `localhost`, like the frontend and like a started cluster's own gateway URL: the
+# gateway authenticates the browser with a SameSite=Lax session cookie, which a page
+# on `localhost` sends to another `localhost` port (same site) and not to `127.0.0.1`.
+# The retained listener binds 127.0.0.1, which is what `localhost` resolves to for IPv4.
+GATEWAY_URL = f"http://localhost:{GATEWAY_PORT}"
 
-# Some Next.js versions are strict about cross-origin (127.0.0.1 vs localhost
-# count as two origins); Playwright navigate uses localhost to align with next dev
-# `Local:` line; backend fetch still uses 127.0.0.1. Gateway CORS covers both
-# localhost / 127.0.0.1 sets.
+# Playwright navigates on `localhost` to align with next dev's `Local:` line.
+# Gateway CORS covers both localhost / 127.0.0.1 sets.
 FRONTEND_PORT = _alloc_free_port()
 FRONTEND_URL = f"http://localhost:{FRONTEND_PORT}"

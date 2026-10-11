@@ -15,8 +15,7 @@ key, so a home without the file refuses to back up or restore
 ([decision](../../../../docs/decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md)).
 
 - **Birth**: a gateway claim mints and pins it (`ensure_minted`) before it
-  publishes `.env`, whatever the cluster secret, so an empty-secret single box
-  encrypts for real.
+  publishes `.env`, independent of the cluster secret.
 - **Homes born earlier** carry the passphrase they had encrypted under,
   `sha256(secret)`, pinned once at their conversion. An empty secret's
   derivation is a public constant, so such a home carries a minted passphrase
