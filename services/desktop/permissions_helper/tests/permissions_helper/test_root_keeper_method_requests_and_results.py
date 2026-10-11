@@ -184,7 +184,7 @@ def test_file_whitelist_boundary_reference(tmp_path: Path) -> None:
 
 def test_gui_ops_wire_requests(fake_helper) -> None:
     # Pin the wire request each GUI-driver wrapper emits (method name + args),
-    # since the WeChat skill depends on these exact shapes.
+    # so a driver script can rely on these exact shapes.
     seen: list[dict] = []
 
     def handler(req: dict) -> dict:
@@ -195,14 +195,14 @@ def test_gui_ops_wire_requests(fake_helper) -> None:
     client.key(76, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     client.key(9, cmd=True, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     client.scroll(10, 20, -50, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.window_info("WeChat", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    client.window_info("Notes", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     client.session_info(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     client.click(5, 6, double=True, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     assert seen == [
         {"method": "key", "code": 76, "cmd": False},
         {"method": "key", "code": 9, "cmd": True},
         {"method": "scroll", "x": 10, "y": 20, "dy": -50},
-        {"method": "window_info", "owner": "WeChat"},
+        {"method": "window_info", "owner": "Notes"},
         {"method": "session_info"},
         {"method": "click", "x": 5, "y": 6, "double": True},
     ]

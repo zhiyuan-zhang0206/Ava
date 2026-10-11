@@ -88,8 +88,8 @@ def test_missing_required_field_is_rejected(repo: Path) -> None:
 def test_frontmatter_name_not_folding_to_dir_rejected(repo: Path) -> None:
     _write(
         repo,
-        "ava_builtins/skills/wechat-ocr/SKILL.md",
-        "---\nname: wechat\ndescription: d\n---\n",
+        "ava_builtins/skills/page-ocr/SKILL.md",
+        "---\nname: page\ndescription: d\n---\n",
     )
     assert lint.main() == 1
 

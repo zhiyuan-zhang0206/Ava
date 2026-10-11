@@ -5,7 +5,7 @@ bounding boxes — the same coordinate space as click, so a caller clicks
 exactly where it read a word.
 
 Recognition runs in a tiny Swift binary compiled on demand from
-`ocr.swift` (the same approach as the wechat-ocr skill): Vision's
+`ocr.swift`: Vision's
 VNRecognizeTextRequest with zh-Hans + en, emitting TSV lines
 `text\tx\ty\tw\th` in physical pixels, top-left origin. The binary lives
 under $AVA_HOME/logs/computer/ocr-bin/ and is rebuilt whenever the source is
