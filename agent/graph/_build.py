@@ -51,7 +51,8 @@ from base.packages.plugins.extensions import ExtensionRegistry, GraphHook, HookP
 from ._init_context import init_context_node
 from .claim.node import claim_node
 from .exec.node import exec_node
-from .llm.node import LlmGoto, llm_node
+from .llm.goto import LlmGoto
+from .llm.node import llm_node
 
 
 def _after_exec_default_next(_state: BaseAgentState) -> NodeName:

@@ -14,7 +14,7 @@ from psycopg.pq import PipelineStatus, TransactionStatus
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from agent.impersonation import flush_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from base.config import settings
 from services.agent_runner.agent_host.daemon import _build_checkpointer
 from services.agent_runner.agent_host.pooled_checkpoint import PooledPostgresSaver

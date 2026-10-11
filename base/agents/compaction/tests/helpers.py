@@ -5,7 +5,7 @@ from typing import Any
 import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from agent.impersonation import flush_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from base.agents.compaction.commands import observe
 from base.agents.compaction.models import CompactTarget
 from base.config import settings

@@ -27,11 +27,9 @@ def _state_module() -> Any:
 
 
 def _serializer() -> JsonPlusSerializer:
-    state_module = _state_module()
+    loaded_state_classes = importlib.import_module("agent.extensions.registry").loaded_state_classes
     return JsonPlusSerializer(
-        allowed_msgpack_modules=state_module.checkpoint_msgpack_allowlist(
-            state_module.process_state_classes()
-        )
+        allowed_msgpack_modules=_state_module().checkpoint_msgpack_allowlist(loaded_state_classes())
     )
 
 
@@ -83,7 +81,7 @@ def load_snapshot(
 ) -> tuple[Any, dict[str, Any] | None, dict[str, Any] | None]:
     """Read native state and pinned config; never create or update a checkpoint."""
     # What the plugins this attachment loaded declare; the checkpoint decode's allowlist is the state
-    # classes of the faces it loaded (`process_state_classes`).
+    # classes of the faces it loaded (`loaded_state_classes`).
     registry = importlib.import_module("agent.extensions.registry").build_registry()
     state_cls = _state_module().build_agent_state(registry)
     with database.connect(autocommit=True) as conn:

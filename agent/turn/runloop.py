@@ -480,7 +480,7 @@ async def settle_turn_failure(
                 deferred=pending.errors,
             )
     await graph.aupdate_state(config, pending.prepared_update)
-    from agent.impersonation import flush_checkpoint
+    from agent.impersonation_handoff import flush_checkpoint
 
     await flush_checkpoint(checkpointer, agent_id)
 

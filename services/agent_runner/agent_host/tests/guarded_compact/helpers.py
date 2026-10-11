@@ -18,7 +18,7 @@ from pydantic import Field
 
 from agent.graph._init_context import init_context_node
 from agent.graph.claim.node import claim_node
-from agent.impersonation import flush_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import AgentState, checkpoint_msgpack_allowlist
 from base.agents.context import AvaContext

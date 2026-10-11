@@ -10,7 +10,8 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 from pydantic import ValidationError
 
-from agent.impersonation import flush_checkpoint, settle_checkpoint
+from agent.impersonation import settle_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.native_cancel import halt_for_native_cancel
 from agent.state import BaseAgentState
 from base.agents.context import AvaContext
