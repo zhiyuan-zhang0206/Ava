@@ -10,8 +10,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, cast
 
-import httpx
-
 from base.lm.catalog.decide.types import DecisionRequestError, DecisionResponseError
 from base.lm.catalog.provider_contract import DecisionBuildContext
 
@@ -22,8 +20,11 @@ async def post_json(
     ctx: DecisionBuildContext, *, url: str, api_key: str, payload: Mapping[str, object]
 ) -> dict[str, Any]:
     """POST ``payload`` as JSON with a bearer key; return the decoded JSON object."""
+    import httpx  # deferred: the provider contract loads on the exec-child boot path
+
+    transport = cast("httpx.AsyncBaseTransport | None", ctx.transport)
     try:
-        async with httpx.AsyncClient(transport=ctx.transport, timeout=ctx.timeout) as client:
+        async with httpx.AsyncClient(transport=transport, timeout=ctx.timeout) as client:
             response = await client.post(
                 url, json=payload, headers={"Authorization": f"Bearer {api_key}"}
             )

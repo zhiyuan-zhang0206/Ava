@@ -11,11 +11,10 @@ import math
 import time
 from collections.abc import Mapping
 
-import httpx
-
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import (
     SUM_TOLERANCE,
+    AsyncTransport,
     Choice,
     Decision,
     DecisionInputTooLargeError,
@@ -47,7 +46,7 @@ async def decide(
     source: str | None = None,
     for_agent_id: int | None = None,
     timeout: float | None = DEFAULT_TIMEOUT_S,
-    transport: httpx.AsyncBaseTransport | None = None,
+    transport: AsyncTransport | None = None,
 ) -> Mapping[str, Decision]:
     """Ask ``model`` every question about ``state``; return one ``Decision`` per question id.
 
