@@ -30,7 +30,6 @@ def _isolate_plugin_paths(
     user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setattr(paths, "plugins_config_path", lambda: tmp_path / "plugins.json")
     monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
 
 

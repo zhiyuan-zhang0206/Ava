@@ -128,24 +128,13 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 def test_repo_model_vendor_vocabulary_is_complete(model_catalog: ModelCatalog) -> None:
     assert {*model_catalog.models, *model_catalog.decision_models} == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
-    # what remains is the catalog-only services plus models the registry no
-    # longer carries — historical usage stays priceable from the archive.
+    # what remains is the catalog-only services plus the DeepSeek names the
+    # page-reconciliation workflow still prices.
     assert set(model_catalog.prices.archive) == {
         "gemini-embedding-2",
-        "deepseek-v4.1-flash-expires-on-0910",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
-        "mimo-v2.5-pro-ultraspeed",
-        "claude-opus-4-8",
-        "claude-opus-4-7",
-        "claude-opus-4-6",
-        "claude-sonnet-4-6",
-        "claude-haiku-4-5",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gpt-5.5",
-        "gpt-5.4-mini",
     }
     assert {
         model: pricing.model_vendor(model, prices=model_catalog.prices)
@@ -350,8 +339,6 @@ def _assert_mimo_models_registered_with_pricing_vendor(catalog: ModelCatalog) ->
     assert {model for model in catalog.models if model.startswith("mimo-")} == mimo_models
     assert set(catalog.supported_models["mimo"]) == mimo_models
     assert catalog.models["mimo-v2.5-pro"].superseded_by == "mimo-v2.6-pro"
-    assert "mimo-v2.5-pro-ultraspeed" not in catalog.prices.plugin
-    assert pricing.model_vendor("mimo-v2.5-pro-ultraspeed", prices=catalog.prices) == "xiaomi"
     assert pricing.model_vendor("mimo-v2.5-pro", prices=catalog.prices) == "xiaomi"
 
 

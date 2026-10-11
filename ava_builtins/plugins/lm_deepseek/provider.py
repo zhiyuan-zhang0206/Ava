@@ -183,21 +183,13 @@ PROVIDER = ProviderContribution(
         # deepseek-v4-flash-vision-exp cannot be selected. Their complete price
         # histories remain in base/lm/pricing/pricing_catalog_archive.json; configs
         # naming them fail validation as unknown models.
-        # deepseek-v4.1-flash-expires-on-0910 (internal beta, announced 2026-09-08,
-        # expired 2026-09-10) was removed from the registry on 2026-09-11: it is not
-        # callable anymore, no live config pinned it (cluster sweep at removal), and a
-        # tombstone would keep a zombie entry plus hand-pinned prices for a model no
-        # request can serve. Its price ledger entry stays in
-        # base/lm/pricing/pricing_catalog_archive.json; a stale config naming it now fails
-        # spawn validation (unknown model) instead of silently running something else.
     },
     pricing={
         # New id, new ledger row: a single open period carrying the flash
         # column's current rates (checked against the official page
         # 2026-09-17) — usage under this id can only begin with the rename,
         # and the pre-rename rate history stays in the retired
-        # `deepseek-v4-flash` entry it succeeds (same single-current-period
-        # shape as deepseek-v4.1-flash-expires-on-0910).
+        # `deepseek-v4-flash` entry it succeeds.
         "deepseek-flash": PriceRates(
             cache_miss=0.15,
             cache_hit=0.003,

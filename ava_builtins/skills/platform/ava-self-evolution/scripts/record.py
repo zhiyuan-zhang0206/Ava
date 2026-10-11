@@ -371,8 +371,6 @@ def build_record(
 
     stats = _event_stats(events)
     compactions = sum(1 for event_type, _ in log_events if event_type == "compact")
-    # `report_breached` is retired: only rows written before its producer was removed set this.
-    breached = any(event_type == "report_breached" for event_type, _ in log_events)
     transcript = _transcript(agent_id, database=database)
 
     plugins_activated, plugins_activated_skipped = _plugins_activated(events)
@@ -404,7 +402,6 @@ def build_record(
         "exec_failed": stats.exec_failed,
         "last_exec_failed": stats.last_exec_failed,
         "compactions": compactions,
-        "breached": breached,
         "terminated": status == "terminated",
         "duration_s": stats.duration_s,
     }

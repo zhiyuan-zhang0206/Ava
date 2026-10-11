@@ -73,8 +73,6 @@ def _why(rec: dict[str, Any]) -> list[str]:
         why.append(f"{len(rec['peer_feedback'])} corrective peer message(s)")
     if rec.get("followup_prompts"):
         why.append(f"{len(rec['followup_prompts'])} follow-up re-prompt(s)")
-    if rec.get("breached"):
-        why.append("delivery breach")
     if rec.get("exec_failed"):
         why.append(f"{rec['exec_failed']} failed exec(s)")
     if rec.get("compactions"):
@@ -94,7 +92,7 @@ def _compact_bad_line(rec: dict[str, Any]) -> str:
     """One bad run as counter tokens — the compact fallback for a bad list
     over BAD_LIST_MAX_CHARS (task text stays in the persisted full report).
     Tokens mirror _why(): rep=re-prompts, c=corrections, pf=peer feedback,
-    ef=exec failures, last=last exec failed, cp=compactions, br=breach,
+    ef=exec failures, last=last exec failed, cp=compactions,
     term=terminated without output."""
     parts: list[str] = []
     if rec.get("followup_prompts"):
@@ -109,8 +107,6 @@ def _compact_bad_line(rec: dict[str, Any]) -> str:
         parts.append("last")
     if rec.get("compactions"):
         parts.append(f"cp{rec['compactions']}")
-    if rec.get("breached"):
-        parts.append("br")
     if (
         rec.get("terminated")
         and not rec.get("final_output", "").strip()
@@ -187,7 +183,6 @@ class _Totals(NamedTuple):
     by_label: Counter[str]
     corrections: int
     peer: int
-    breached: int
     execfail: int
 
     @classmethod
@@ -196,7 +191,6 @@ class _Totals(NamedTuple):
             Counter(r["label"] for r in records),
             sum(len(r["corrections"]) for r in records),
             sum(len(r["peer_feedback"]) for r in records),
-            sum(1 for r in records if r["breached"]),
             sum(1 for r in records if r["exec_failed"]),
         )
 
@@ -234,7 +228,7 @@ def _header_lines(
     return [
         f"self-evolution daily scan — {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"window: {days} day(s) | runs: {len(records)} (ok {totals.by_label['ok']} / fumbled {totals.by_label['fumbled']} / failed {totals.by_label['failed']})"
-        f" | corrections {totals.corrections} | peer feedback {totals.peer} | breached {totals.breached} | exec-fail runs {totals.execfail}",
+        f" | corrections {totals.corrections} | peer feedback {totals.peer} | exec-fail runs {totals.execfail}",
         _builtin_help_line(records),
         _subprocess_line(records),
         f"dataset: {path}",
@@ -310,7 +304,7 @@ def render(
         lines.append(
             f"summary: {len(records)} runs (ok {totals.by_label['ok']} / "
             f"fumbled {totals.by_label['fumbled']} / failed {totals.by_label['failed']})"
-            f" | corrections {totals.corrections} | peer {totals.peer} | breached {totals.breached} "
+            f" | corrections {totals.corrections} | peer {totals.peer} "
             f"| exec-fail runs {totals.execfail}"
         )
         lines.append(f"full report: {report_path}")

@@ -31,7 +31,6 @@ __all__ = [
     "_disk_watermark_exceeded",
     "_enforce_dir_cap",
     "_gzip_old_mirror",
-    "_mirror_epoch",
     "_mirror_size",
     "_prune_old_mirror",
     "mirror_day",
@@ -46,9 +45,6 @@ __all__ = [
 #                                          backup name: `-size` / `-time`;
 #                                          `spans-2026-08-27T03-29-10.942-size.jsonl`,
 #                                          stamped in UTC)
-#   spans-<ISO-timestamp>.jsonl          — older collector-rotated backups
-#                                          (pre-0.155.0 lumberjack, no reason suffix)
-#   spans-YYYYMMDD-<pid>.jsonl           — legacy agent-side mirror (pre-#1266)
 #   spans.cut-YYYYMMDD.jsonl             — manual "cut" of the active file (ops
 #                                          one-off): the collector keeps appending
 #                                          to the renamed inode until its next size
@@ -57,13 +53,12 @@ __all__ = [
 #                                          file stops being written; consumers
 #                                          (`ava trace ship`, inspect-a-trace) read
 #                                          these transparently
-# Old and rotated names parse their day from the name; the active file has no day
+# Rotated and cut names parse their day from the name; the active file has no day
 # stamp and is therefore never a retention/prune target (the collector's own
 # rotation bounds it).
-_MIRROR_DAY_RE = re.compile(r"^spans-(\d{8})-(\d+)\.jsonl(?:\.gz)?$")
 _MIRROR_ROTATED_RE = re.compile(
     r"^spans-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})\.\d+"
-    r"(?:-(?:size|time))?\.jsonl(?:\.gz)?$"
+    r"-(?:size|time)\.jsonl(?:\.gz)?$"
 )
 _MIRROR_CUT_RE = re.compile(r"^spans\.cut-(\d{8})\.jsonl(?:\.gz)?$")
 
@@ -71,16 +66,12 @@ _MIRROR_CUT_RE = re.compile(r"^spans\.cut-(\d{8})\.jsonl(?:\.gz)?$")
 def mirror_day(path: Path) -> date | None:
     """Day stamp of a mirror file from its name; None when it carries none.
 
-    Old agent-side files stamp `spans-YYYYMMDD-<pid>.jsonl`; the collector's
-    rotated backups stamp `spans-YYYY-MM-DDTHH-MM-SS.<ms>(-size|-time)?.jsonl`
-    (timberjack 1.4.7 appends the trigger reason; optional `.gz` after the
-    agent-side gzip pass); manual cuts stamp `spans.cut-YYYYMMDD.jsonl`; the
-    ACTIVE `spans.jsonl` carries no stamp at all (never pruned, bounded by
-    the collector's own rotation).
+    The collector's rotated backups stamp
+    `spans-YYYY-MM-DDTHH-MM-SS.<ms>-(size|time).jsonl` (timberjack 1.4.7 appends
+    the trigger reason; optional `.gz` after the agent-side gzip pass); manual
+    cuts stamp `spans.cut-YYYYMMDD.jsonl`; the ACTIVE `spans.jsonl` carries no
+    stamp at all (never pruned, bounded by the collector's own rotation).
     """
-    m = _MIRROR_DAY_RE.match(path.name)
-    if m:
-        return datetime.strptime(m.group(1), "%Y%m%d").date()  # noqa: DTZ007 — date-only
     m = _MIRROR_ROTATED_RE.match(path.name)
     if m:
         return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
@@ -91,13 +82,8 @@ def mirror_day(path: Path) -> date | None:
 
 
 def _mirror_epoch(path: Path) -> int:
-    """Sub-day order key: pid for legacy files, epoch seconds for rotated
-    backups (both share the day key in `mirror_sort_key`); 0 for the active
-    file. A name that parses as neither sorts last with day +inf — an
-    unrecognized file is never the deletion target."""
-    m = _MIRROR_DAY_RE.match(path.name)
-    if m:
-        return int(m.group(2))
+    """Sub-day order key: epoch seconds for rotated backups (sharing the day
+    key in `mirror_sort_key`); 0 for the active file and manual cuts."""
     m = _MIRROR_ROTATED_RE.match(path.name)
     if m:
         y, mo, d, h, mi, s = (int(m.group(i)) for i in range(1, 7))
@@ -197,10 +183,8 @@ def _gzip_old_mirror(grace_seconds: int = 60) -> int:
 def mirror_sort_key(p: Path) -> tuple[int, int]:
     """Oldest-first key for a mirror file (day, sub-day order).
 
-    Day comes from the name (`mirror_day`); sub-day is the numeric pid for
-    legacy files (string order would prune `...-1000` before `...-999`,
-    deleting a newer file) or the epoch seconds of a rotated backup. The
-    ACTIVE `spans.jsonl` (no day stamp) sorts last — the cap prune never
+    Day comes from the name (`mirror_day`); sub-day is the epoch seconds of a
+    rotated backup. The ACTIVE `spans.jsonl` (no day stamp) sorts last — the cap prune never
     deletes the file being written unless the cap is absurdly small (same
     contract as retention: bounded disk, documented loss, never silent). No
     stat — the file may vanish mid-parse.
@@ -229,7 +213,7 @@ def _mirror_size(p: Path) -> int:
 def _enforce_dir_cap(max_mb: int) -> int:
     """Delete oldest mirror files until the traces directory fits under `max_mb`.
 
-    Iterates oldest-first by day stamp + numeric pid (`mirror_sort_key`).
+    Iterates oldest-first by day stamp + epoch order (`mirror_sort_key`).
     Never deletes the file currently being written (the newest, by key) unless
     the cap is absurdly small — same contract as retention: bounded disk,
     documented loss, never silent. Returns the number of files deleted. No-op

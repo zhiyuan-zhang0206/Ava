@@ -68,13 +68,8 @@ _METERS = {
 # 2026-09-17 rename (task #3750) four entries are priced through two columns:
 # the flash column prices the canonical deepseek-flash id, and footnote (1)
 # keeps the retired deepseek-v4-flash and deepseek-v4-flash-vision-exp names
-# accepted and billed at the Flash price.
-# deepseek-v4.1-flash-expires-on-0910 is deliberately NOT priced from the
-# page: it is an internal beta the page never listed (announced 2026-09-08,
-# same pricing as v4-flash), its rates are pinned manually in the plugin +
-# archive ledger entries, and it expired 2026-09-10 — no auto-refresh is
-# wired for a ~2-day model. An equality check below keeps the fetched page in
-# lockstep with this roster.
+# accepted and billed at the Flash price. An equality check below keeps the
+# fetched page in lockstep with this roster.
 _DEEPSEEK_COLUMNS: dict[str, tuple[str, ...]] = {
     "deepseek-flash": (
         "deepseek-flash",
