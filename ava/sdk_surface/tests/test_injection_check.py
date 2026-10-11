@@ -20,7 +20,9 @@ from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import (
     Decision,
+    DecisionError,
     DecisionInputTooLargeError,
+    DecisionKeyMissingError,
     DecisionModelSpec,
     DecisionRequestError,
     Question,
@@ -250,14 +252,14 @@ def test_the_url_cannot_add_lines_to_the_finding_source(
     [
         DecisionRequestError("HTTP 503"),
         DecisionInputTooLargeError("too big"),
-        RuntimeError("TYPESAFE_API_KEY not set"),
+        DecisionKeyMissingError("TYPESAFE_API_KEY not set"),
     ],
 )
 def test_a_decision_failure_neither_raises_nor_warns_the_agent_but_is_logged(
     monkeypatch: pytest.MonkeyPatch,
     exec_update: dict[str, Any],
     loguru_records: list[dict[str, Any]],
-    error: RuntimeError,
+    error: DecisionError,
 ) -> None:
     _install(monkeypatch, error)
 
@@ -346,3 +348,12 @@ def test_the_shipped_defaults_name_a_catalog_decision_model(model_catalog: Model
     assert settings.web.web_fetch_injection_check_enabled is True
     assert settings.web.web_fetch_injection_model in model_catalog.decision_models
     assert settings.web.web_fetch_injection_threshold == 0.5
+
+
+def test_an_error_that_is_not_a_decision_failure_is_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch, exec_update: dict[str, Any]
+) -> None:
+    _install(monkeypatch, RuntimeError("a bug, not a provider failure"))
+
+    with pytest.raises(RuntimeError, match="a bug"):
+        _check(_URL, "", "body")

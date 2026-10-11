@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.call import decide
-from base.lm.catalog.decide.types import YesNo, estimate_tokens, question_text
+from base.lm.catalog.decide.types import DecisionError, YesNo, estimate_tokens, question_text
 from base.log import logger
 
 _QUESTION_ID = "page_addresses_ai"
@@ -119,8 +119,7 @@ async def page_probability(
             return await _chunk_probability(
                 model, chunk, catalog=catalog, for_agent_id=for_agent_id
             )
-        except RuntimeError as exc:
-            # DecisionError, and the plain RuntimeError a provider raises for a missing key.
+        except DecisionError as exc:
             logger.warning(
                 "web.fetch injection check failed for {}: {}: {}; the page is returned "
                 "without a verdict",
