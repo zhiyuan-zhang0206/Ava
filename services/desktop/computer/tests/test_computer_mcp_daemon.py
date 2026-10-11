@@ -108,6 +108,10 @@ class FakeHelper:
         self.calls.append(("scroll", {"x": x, "y": y, "dy": dy}))
         return {"scrolled": dy}
 
+    def indicator_stop(self, **kw: Any) -> dict[str, Any]:
+        self.calls.append(("indicator_stop", {}))
+        return {"stopped": False}
+
     def ax_window_info(self, app: str, **kw: Any) -> dict[str, Any]:
         self.calls.append(("ax_window_info", {"app": app}))
         return {"app": app, "x": 0.0, "y": 0.0, "w": 800.0, "h": 600.0}
@@ -132,6 +136,7 @@ def fake_helper(monkeypatch: pytest.MonkeyPatch) -> FakeHelper:
     monkeypatch.setattr(daemon_mod.helper, "key", fh.key)
     monkeypatch.setattr(daemon_mod.helper, "scroll", fh.scroll)
     monkeypatch.setattr(daemon_mod.helper, "cursor_position", fh.cursor_position)
+    monkeypatch.setattr(daemon_mod.helper, "indicator_stop", fh.indicator_stop)
     monkeypatch.setattr(daemon_mod.helper, "ax_window_info", fh.ax_window_info)
     monkeypatch.setattr(daemon_mod.helper, "window_info", fh.window_info)
     monkeypatch.setattr(daemon_mod.helper, "session_info", fh.session_info)

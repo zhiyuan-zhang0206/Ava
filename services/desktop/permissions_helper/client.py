@@ -71,6 +71,9 @@ from .wire import (
     HelperShutdownResult as HelperShutdownResult,
 )
 from .wire import (
+    IndicatorStopResult as IndicatorStopResult,
+)
+from .wire import (
     KeyResult as KeyResult,
 )
 from .wire import (
@@ -398,6 +401,23 @@ def scroll(
     if args:
         _require_native_input(sock_path)
     return _call("scroll", x=x, y=y, dy=dy, sock_path=sock_path, **args)
+
+
+def _require_capture_indicator(sock_path: str | Path | None) -> None:
+    if ping(sock_path=sock_path).get("capture_indicator_v1") is not True:
+        raise PermissionsHelperError(
+            "permissions helper lacks capture_indicator_v1; update it before using the capture indicator"
+        )
+
+
+def indicator_stop(*, sock_path: str | Path | None = None) -> IndicatorStopResult:
+    """End the capture badge now; a no-op when none is showing.
+
+    The helper shows the badge itself, on the window each input lands on, and ends it after
+    ten idle seconds; this is for handing the screen over sooner.
+    """
+    _require_capture_indicator(sock_path)
+    return _call("indicator_stop", sock_path=sock_path)
 
 
 def list_apps(*, sock_path: str | Path | None = None) -> AppsResult:

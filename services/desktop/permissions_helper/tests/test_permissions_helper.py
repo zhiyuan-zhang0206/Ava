@@ -181,6 +181,31 @@ def test_method_name_mapping(fake_helper) -> None:
     assert seen == ["type", "click", "ping"]
 
 
+def test_indicator_stop_needs_the_helper_capability(fake_helper) -> None:
+    seen: list[dict] = []
+    capable = [True]
+
+    def handler(req: dict) -> dict:
+        seen.append({key: value for key, value in req.items() if key != "id"})  # pyright: ignore[reportUnknownMemberType]
+        results: dict[str, object] = {
+            "ping": {"pong": True, "capture_indicator_v1": capable[0]},
+            "indicator_stop": {"stopped": True},
+        }
+        return {"id": req["id"], "ok": True, "result": results[req["method"]]}
+
+    path = fake_helper(handler)
+    assert client.indicator_stop(sock_path=path)["stopped"] is True  # pyright: ignore[reportUnknownArgumentType]
+    assert seen == [{"method": "ping"}, {"method": "indicator_stop"}]
+    # The helper shows the badge itself; there is no client call that asks it to.
+    assert not hasattr(client, "indicator_hold")
+    # A helper built before the capability existed is refused without being sent the command.
+    capable[0] = False
+    seen.clear()
+    with pytest.raises(PermissionsHelperError, match="capture_indicator_v1"):
+        client.indicator_stop(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    assert seen == [{"method": "ping"}]
+
+
 def test_nursery_method_requests_and_results(fake_helper) -> None:
     seen: list[dict] = []
 
