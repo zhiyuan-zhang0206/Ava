@@ -19,7 +19,7 @@ from agent.messages import NoteTag, system_note_message
 from ava import external
 from ava.external.state import decode_plugin_delta, load_snapshot
 from ava.sdk_surface import agent_identity
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
 from base.agents.impersonation import history
 from base.agents.messages.caller_identity import CallerIdentity

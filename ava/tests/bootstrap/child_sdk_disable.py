@@ -124,11 +124,11 @@ def apply_dotted_cumulative() -> None:
 
 
 def applied_entries_tracked() -> None:
-    from ava.sdk_surface import install as sdk_install
+    from ava.sdk_surface.installation import installed
     from ava.sdk_surface.sdk_disable import apply_sdk_disable
 
     def disabled() -> object:
-        installation = sdk_install.installed()
+        installation = installed()
         assert installation is not None
         return installation.disabled
 
@@ -162,13 +162,13 @@ def runtime_refuses_framework_module() -> None:
 
 
 def unknown_and_already_disabled_apply() -> None:
-    from ava.sdk_surface import install as sdk_install
+    from ava.sdk_surface.installation import installed
     from ava.sdk_surface.sdk_disable import apply_sdk_disable
 
     apply_sdk_disable(["not_a_real_namespace"])
     apply_sdk_disable(["agents"])
     apply_sdk_disable(["agents.spawn"])
-    installation = sdk_install.installed()
+    installation = installed()
     assert installation is not None
     print(sorted(installation.disabled))
 

@@ -8,7 +8,8 @@ the primitives in `plugins.py` / `wraps.py` / `skill_sources.py` / `config_regis
 attribute access on the singleton `ava` module, so the module itself is the one thing that cannot be
 passed around as a value — the write to it is concentrated here, once per process.
 
-`install` produces one **`Installation`**: the admitted registry, the expansions, the wrap layers, the
+`install` produces one **`Installation`** (defined in `installation.py`, which also owns the slot and the
+`installed()` read every lower SDK module uses): the admitted registry, the expansions, the wrap layers, the
 skill providers, resolved plugin configs, the metering ledger, sampling owner, SDK-disable entries,
 the faces flag, and undos. Metadata is frozen; runtime owners retain their own synchronization.
 The holder is a single slot on the `ava`
@@ -39,9 +40,8 @@ loads once per process and a changed plugin set takes effect on the next host st
 from __future__ import annotations
 
 import atexit
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
@@ -56,99 +56,46 @@ from base.packages.plugins.extensions import ExtensionRegistry, PluginContributi
 
 from . import ava_module, wraps
 from . import plugins as _plugins
-from .wraps import WrapLayer
-
-_SkillProvider = Callable[[], list[Path]]
-
-
-@dataclass(frozen=True)
-class Installation:
-    """What the installed registry put into the process, and how to take it back.
-
-    Frozen: a change builds a new value and swaps the holder (`_SLOT`) — see the
-    module docstring. `wrap_layers` and the provider tuple are snapshots taken when
-    the installation was built; the undos still close over the builders that filled
-    them (they are only ever run once, on the way out)."""
-
-    registry: ExtensionRegistry
-    expansions: tuple[str, ...]
-    wrap_layers: Mapping[str, tuple[WrapLayer, ...]]
-    skill_providers: tuple[_SkillProvider, ...]
-    metered: tuple[tuple[Any, str], ...]
-    disabled: frozenset[str]
-    faces: bool
-    undo: tuple[Callable[[], None], ...]
-    sampling: SamplingPolicyOwner = field(default_factory=SamplingPolicyOwner)
-    configs: Mapping[str, BaseModel] = field(default_factory=dict[str, BaseModel])
-    catalog: ModelCatalog | None = None
-    authority: ConfigAuthority | None = None
-    clock_factory: Callable[[], Clock] | None = None
-    producer: Callable[[], Any] | None = None
-
-    def require_catalog(self) -> ModelCatalog:
-        """Return this installation's explicit model facts or refuse a non-model installation."""
-        if self.catalog is None:
-            raise RuntimeError("the SDK installation carries no ModelCatalog")
-        return self.catalog
-
-
-# The installation is recorded on the `ava` module object itself — the one process-wide thing it
-# describes — rather than in a module global of its own. A loading value also retains an
-# existing surface during a faces upgrade; a failed value retains the original error.
-_SLOT = "__plugin_installation__"
-
-
-@dataclass(frozen=True)
-class _Loading:
-    """An in-flight load, or its failure; neither is a successful installation."""
-
-    installation: Installation | None = None
-    failure: BaseException | None = None
-
-
-_LOADING = _Loading()
-
-
-def _slot() -> Any:
-    return getattr(ava_module(), _SLOT, None)
-
-
-def installed() -> Installation | None:
-    """The current installation, or None before `install` / after `uninstall`."""
-    value = _slot()
-    if isinstance(value, _Loading):
-        return value.installation
-    return value if isinstance(value, Installation) else None
+from .installation import (
+    LOADING,
+    SLOT,
+    Installation,
+    Loading,
+    SkillProvider,
+    WrapLayer,
+    installed,
+    slot,
+)
 
 
 def load_attempted() -> bool:
     """Whether a load is in flight or was attempted and failed in this process (no retry)."""
-    return isinstance(_slot(), _Loading)
+    return isinstance(slot(), Loading)
 
 
 def mark_load_attempt() -> None:
     """Guard a load or faces upgrade without discarding the already-installed surface."""
     if not load_attempted():
-        setattr(ava_module(), _SLOT, _Loading(installed()))
+        setattr(ava_module(), SLOT, Loading(installed()))
 
 
 def mark_load_failed(exc: BaseException) -> None:
     """Keep the original failed load in the same slot; later accesses must not retry it."""
-    setattr(ava_module(), _SLOT, _Loading(installed(), exc))
+    setattr(ava_module(), SLOT, Loading(installed(), exc))
 
 
 def raise_load_failure() -> None:
     """Propagate a prior load failure instead of answering as if the surface were ready."""
-    value = _slot()
-    if isinstance(value, _Loading) and value.failure is not None:
+    value = slot()
+    if isinstance(value, Loading) and value.failure is not None:
         raise value.failure
 
 
 def clear_load_attempt() -> None:
     """Release the slot after a deferred load (the loader module was still importing)."""
-    value = _slot()
-    if isinstance(value, _Loading):
-        setattr(ava_module(), _SLOT, value.installation)
+    value = slot()
+    if isinstance(value, Loading):
+        setattr(ava_module(), SLOT, value.installation)
 
 
 def mark_faces_loaded() -> None:
@@ -156,15 +103,7 @@ def mark_faces_loaded() -> None:
     current = installed()
     if current is None or current.faces:
         return
-    setattr(ava_module(), _SLOT, replace(current, faces=True))
-
-
-def record_disabled(disabled: frozenset[str]) -> None:
-    """Record newly applied SDK-disable entries: build a new value, swap the holder."""
-    current = installed()
-    if current is None:
-        raise RuntimeError("no SDK installation to record disable entries on")
-    setattr(ava_module(), _SLOT, replace(current, disabled=disabled))
+    setattr(ava_module(), SLOT, replace(current, faces=True))
 
 
 def expansions() -> tuple[str, ...]:
@@ -175,7 +114,7 @@ def expansions() -> tuple[str, ...]:
 
 
 def _provider_remover(
-    providers: list[_SkillProvider], provider: _SkillProvider
+    providers: list[SkillProvider], provider: SkillProvider
 ) -> Callable[[], None]:
     def undo() -> None:
         providers.remove(provider)
@@ -183,7 +122,7 @@ def _provider_remover(
     return undo
 
 
-def _provider_mount(provider: _SkillProvider) -> Installation:
+def _provider_mount(provider: SkillProvider) -> Installation:
     """The minimal installation a scoped skill root carries when nothing is installed.
 
     The ops runner scopes a project skill root around one request without running a
@@ -201,7 +140,7 @@ def _provider_mount(provider: _SkillProvider) -> Installation:
     )
 
 
-def mount_skill_provider(provider: _SkillProvider) -> Callable[[], None]:
+def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:
     """Extend this process's skill-root providers by one; returns the undo.
 
     For a framework caller that needs a request-scoped skill root (the ops runner's
@@ -209,27 +148,27 @@ def mount_skill_provider(provider: _SkillProvider) -> Callable[[], None]:
     and swap the holder; the undo removes exactly that provider and puts the holder
     back. With no installation at all, a minimal provider-only value is mounted.
     """
-    prior = _slot()
+    prior = slot()
     mounted = (
         replace(prior, skill_providers=(*prior.skill_providers, provider))
         if isinstance(prior, Installation)
         else _provider_mount(provider)
     )
-    setattr(ava_module(), _SLOT, mounted)
+    setattr(ava_module(), SLOT, mounted)
 
     def undo() -> None:
-        current = _slot()
+        current = slot()
         if current is mounted:
-            setattr(ava_module(), _SLOT, prior)
+            setattr(ava_module(), SLOT, prior)
             return
         # An interleaved mount/unmount changed the value under us: remove exactly this
         # provider from whatever is current, and clear the holder if nothing is left.
         if isinstance(current, Installation):
             remaining = tuple(p for p in current.skill_providers if p is not provider)
             if not remaining and _is_bare_provider_mount(current):
-                setattr(ava_module(), _SLOT, None)
+                setattr(ava_module(), SLOT, None)
             else:
-                setattr(ava_module(), _SLOT, replace(current, skill_providers=remaining))
+                setattr(ava_module(), SLOT, replace(current, skill_providers=remaining))
 
     return undo
 
@@ -289,7 +228,7 @@ class _Build:
 
     namespaces: dict[str, str] = field(default_factory=dict)
     layers: dict[str, list[WrapLayer]] = field(default_factory=dict)
-    providers: list[_SkillProvider] = field(default_factory=list)
+    providers: list[SkillProvider] = field(default_factory=list)
     expansions: list[str] = field(default_factory=list)
     undo: list[Callable[[], None]] = field(default_factory=list)
     configs: dict[str, BaseModel] = field(default_factory=dict[str, BaseModel])
@@ -336,9 +275,9 @@ def install(
 
     from . import metering, sdk_disable
 
-    prior = _slot()
+    prior = slot()
     sampling_owner = sampling if sampling is not None else SamplingPolicyOwner()
-    setattr(ava_module(), _SLOT, _LOADING)
+    setattr(ava_module(), SLOT, LOADING)
     build = _Build()
     admitted: list[tuple[str, PluginContributions]] = []
     disabled = sdk_disable.env_entries()
@@ -370,7 +309,7 @@ def install(
         metered = metering.install(sampling_owner, producer=producer)
     except BaseException as exc:
         _run(build.undo, exc)
-        setattr(ava_module(), _SLOT, prior)
+        setattr(ava_module(), SLOT, prior)
         raise
     installation = Installation(
         registry=ExtensionRegistry(tuple(admitted)),
@@ -390,7 +329,7 @@ def install(
         clock_factory=clock_factory,
         producer=producer,
     )
-    setattr(ava_module(), _SLOT, installation)
+    setattr(ava_module(), SLOT, installation)
     if sampling is None:
         # Bare SDK processes have no service lifespan. This is finite cleanup,
         # not a guarantee of a nonzero exit or delivery after a hard exit.
@@ -408,7 +347,7 @@ def apply_config_overlay(overlay: dict[str, object]) -> None:
     configs = config_registration.apply_config_overlay(
         overlay, configs=current.configs, scope="plugin"
     )
-    setattr(ava_module(), _SLOT, replace(current, configs=MappingProxyType(configs)))
+    setattr(ava_module(), SLOT, replace(current, configs=MappingProxyType(configs)))
 
 
 def uninstall() -> Installation | None:
@@ -419,9 +358,9 @@ def uninstall() -> Installation | None:
     # The recorder sits outermost over plugin wraps, so it comes off first.
     metering.uninstall(() if installation is None else installation.metered)
     if installation is None:
-        # A `_LOADING` marker is not an installation: leave it in place (a load may be
+        # A `LOADING` marker is not an installation: leave it in place (a load may be
         # in flight; a failed attempt stays un-retried), a fresh install overwrites it.
         return None
-    setattr(ava_module(), _SLOT, None)
+    setattr(ava_module(), SLOT, None)
     _run(list(installation.undo))
     return installation

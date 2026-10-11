@@ -19,11 +19,11 @@ from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 
+from .installation import installed
+
 
 def model_catalog() -> ModelCatalog:
     """Provider facts explicitly retained by this process's SDK installation."""
-    from ava.sdk_surface.install import installed
-
     installation = installed()
     if installation is None or installation.catalog is None:
         raise RuntimeError("the SDK installation carries no ModelCatalog")
@@ -32,8 +32,6 @@ def model_catalog() -> ModelCatalog:
 
 def config_authority() -> ConfigAuthority:
     """Fresh configuration authority retained by this process's SDK installation."""
-    from ava.sdk_surface.install import installed
-
     installation = installed()
     if installation is None or installation.authority is None:
         raise RuntimeError("the SDK installation carries no ConfigAuthority")
@@ -43,7 +41,6 @@ def config_authority() -> ConfigAuthority:
 def clock() -> Clock:
     """Build an operation's clock from its context or installed SDK root."""
     import ava
-    from ava.sdk_surface.install import installed
 
     context = getattr(ava, "context", None)
     if context is not None:
@@ -227,8 +224,6 @@ class _PluginsView:
         if name.startswith("_"):
             raise AttributeError(name)
         from pydantic import BaseModel
-
-        from ava.sdk_surface.install import installed
 
         installation = installed()
         configs: Mapping[str, BaseModel] = {} if installation is None else installation.configs

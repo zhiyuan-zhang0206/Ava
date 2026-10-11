@@ -13,7 +13,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 import ava
-from ava.sdk_surface.install import installed
+from ava.sdk_surface.installation import installed
 from base.agents.compaction.commands import observe
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.code_version import CodeVersion

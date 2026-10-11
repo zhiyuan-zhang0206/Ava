@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
 from base.cluster.machine import MachineIdentity

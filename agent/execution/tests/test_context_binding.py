@@ -170,13 +170,13 @@ assert len(values) == 24
 def test_controlled_child_plugin_faces_keep_its_context_writer(tmp_path: Path) -> None:
     code = """
 import ava
-from ava.sdk_surface import install
+from ava.sdk_surface.installation import installed
 context_writer = ava.context.clients.event_pipeline()
-surface = install.installed()
+surface = installed()
 assert surface is not None and surface.producer is not None
 assert surface.producer() is context_writer
 ava.ensure_plugins_loaded(surface=False)
-faces = install.installed()
+faces = installed()
 assert faces is not None and faces.faces and faces.producer is not None
 assert faces.producer() is context_writer
 print("owned writer preserved")

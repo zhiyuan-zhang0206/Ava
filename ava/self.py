@@ -141,7 +141,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
     agent_identity.assert_self_action("restart")
     payload_json: str | None = None
     if config_overlay:
-        from ava.sdk_surface.install import installed
+        from ava.sdk_surface.installation import installed
         from base.packages.plugins.config_registration import validate_config_overlay
 
         installation = installed()

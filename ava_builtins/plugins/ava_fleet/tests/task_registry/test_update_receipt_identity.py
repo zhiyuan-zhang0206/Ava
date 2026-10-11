@@ -8,8 +8,8 @@ import psycopg
 import pytest
 
 from ava_builtins.plugins.ava_fleet import task_registry
-from ava_builtins.plugins.ava_fleet.tests.task_registry.test_update_receipts import _setup
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_owned_task
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
@@ -22,7 +22,7 @@ from tests.fixtures.pin_agent import pin_agent
 def test_invalid_key_fails_without_receipt(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, key: object
 ) -> None:
-    _actor, _owner, tid = _setup(db_conn, root_task_id)
+    _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
     with pytest.raises((ValueError, TypeError), match="idempotency key"):
         task_registry.log(tid, "invalid", operation_key=key)  # type: ignore[arg-type]
     assert task_registry.get(tid).results is None
@@ -32,7 +32,7 @@ def test_invalid_key_fails_without_receipt(
 def test_mutation_requires_key_and_established_actor(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    _actor, _owner, tid = _setup(db_conn, root_task_id)
+    _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
     pin_agent(None)
     with pytest.raises(RuntimeError, match="no established agent identity"):
         task_registry.log(tid, "forbidden", operation_key="system")
@@ -47,7 +47,7 @@ def test_mutation_requires_key_and_established_actor(
 def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    actor, owner, tid = _setup(db_conn, root_task_id)
+    actor, owner, tid = seed_owned_task(db_conn, root_task_id)
     task_registry.log(tid, "once", operation_key="native")
     active = Event()
     active.set()
@@ -71,7 +71,7 @@ def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
 def test_lease_expiring_during_operation_lock_wait_cannot_write(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
-    actor, owner, tid = _setup(db_conn, root_task_id)
+    actor, owner, tid = seed_owned_task(db_conn, root_task_id)
     active, validated = Event(), Event()
     active.set()
 

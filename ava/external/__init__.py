@@ -237,7 +237,7 @@ class Attachment:
     def _resolve_config(
         self, overlay: Mapping[str, Any] | None, birth: Mapping[str, Any] | None
     ) -> None:
-        from ava.sdk_surface.install import installed
+        from ava.sdk_surface.installation import installed
 
         installation = installed()
         if installation is None:

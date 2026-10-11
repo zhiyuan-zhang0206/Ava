@@ -11,8 +11,8 @@ import pytest
 from psycopg import sql
 
 from ava_builtins.plugins.ava_fleet import _task_creation_receipts, _task_update, task_registry
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
 from base import telemetry
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
@@ -32,7 +32,7 @@ def _facts(db: psycopg.Connection) -> tuple[object, ...]:
 def test_concurrent_creation_returns_same_original_task(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
-    actor, owner = _seed_agent(db_conn), _seed_agent(db_conn)
+    actor, owner = seed_agent(db_conn), seed_agent(db_conn)
     barrier = Barrier(2)
     before = db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone()
 
@@ -66,7 +66,7 @@ def test_concurrent_creation_returns_same_original_task(
 def test_lost_response_returns_original_after_mutation_and_title_reuse(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pin_agent(_seed_agent(db_conn))
+    pin_agent(seed_agent(db_conn))
     real_emit = telemetry.emit_prepared
 
     def fail(*_args: object) -> None:
@@ -95,7 +95,7 @@ def test_lost_response_returns_original_after_mutation_and_title_reuse(
 def test_deleted_task_and_parent_replay_snapshot(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    pin_agent(_seed_agent(db_conn))
+    pin_agent(seed_agent(db_conn))
     parent = task_registry.create("parent", "work", parent=root_task_id, operation_key=str(uuid4()))
     original = task_registry.create("child", "work", parent=parent.id, operation_key="deleted")
     db_conn.execute("DELETE FROM agent_tasks WHERE id IN (%s,%s)", (original.id, parent.id))
@@ -110,7 +110,7 @@ def test_deleted_task_and_parent_replay_snapshot(
 def test_default_intention_replays_original_and_owner_alias(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    actor = _seed_agent(db_conn)
+    actor = seed_agent(db_conn)
     pin_agent(actor)
     original = task_registry.create(
         "default", "work", parent=root_task_id, operation_key="defaults"
@@ -143,7 +143,7 @@ def test_default_intention_replays_original_and_owner_alias(
 def test_changed_request_conflicts_before_mutable_checks(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, change: dict[str, Any]
 ) -> None:
-    pin_agent(_seed_agent(db_conn))
+    pin_agent(seed_agent(db_conn))
     kwargs: dict[str, Any] = {
         "title": "body",
         "description": "work",
@@ -164,7 +164,7 @@ def test_failure_after_effect_rolls_back_all_facts(
     from base.agents.tasks import creation
     from base.telemetry import audit_events
 
-    actor, owner = _seed_agent(db_conn), _seed_agent(db_conn)
+    actor, owner = seed_agent(db_conn), seed_agent(db_conn)
     pin_agent(actor)
     before = _facts(db_conn)
     module, name = {
@@ -190,7 +190,7 @@ def test_failure_after_effect_rolls_back_all_facts(
 def test_invalid_key_has_no_effect(
     db_conn: psycopg.Connection, root_task_id: int, key: object
 ) -> None:
-    pin_agent(_seed_agent(db_conn))
+    pin_agent(seed_agent(db_conn))
     before = _facts(db_conn)
     with pytest.raises((ValueError, TypeError)):
         task_registry.create("invalid", "work", parent=root_task_id, operation_key=key)  # type: ignore[arg-type]
@@ -200,7 +200,7 @@ def test_invalid_key_has_no_effect(
 def test_snapshot_validation_never_defaults_or_accepts_unknown_enum(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    pin_agent(_seed_agent(db_conn))
+    pin_agent(seed_agent(db_conn))
     snapshot: dict[str, object] = asdict(
         task_registry.create("snapshot", "work", parent=root_task_id, operation_key=str(uuid4()))
     )
@@ -218,7 +218,7 @@ def test_snapshot_validation_never_defaults_or_accepts_unknown_enum(
 def test_actor_scope_independent_and_new_key_keeps_title_constraint(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    first_actor, second_actor = _seed_agent(db_conn), _seed_agent(db_conn)
+    first_actor, second_actor = seed_agent(db_conn), seed_agent(db_conn)
     pin_agent(first_actor)
     original = task_registry.create("first", "work", parent=root_task_id, operation_key="same")
     with pytest.raises(ValueError, match="duplicate in_progress"):

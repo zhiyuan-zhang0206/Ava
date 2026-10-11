@@ -10,7 +10,8 @@ from collections.abc import Iterator
 import pytest
 
 import ava
-from ava.sdk_surface import install, metering
+from ava.sdk_surface import metering
+from ava.sdk_surface.installation import installed
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
@@ -65,6 +66,6 @@ def sdk_identity(sdk_environment: AvaContext) -> SdkIdentitySlot[AvaContext]:
 def sdk_metering(sdk_environment: AvaContext) -> Iterator[None]:
     """Remove only the installation's recorded outermost usage recorders."""
     yield
-    current = install.installed()
+    current = installed()
     if current is not None and current.metered:
         metering.uninstall(current.metered)

@@ -34,7 +34,7 @@ This module is the plugin's SDK **surface** — the only face an agent-launched
 child loads (task #3633). Its agent-runtime registrations (the `ava_code__cwd`
 state field, the two system-prompt sections, the after_init / after_exec
 hooks) live in `agent_runtime.py`, imported only on the full path (see
-`agent/extensions/__init__.py`); `read_state` / `update_state` below load it on first use
+`agent/extensions/__init__.py`); `read_state` / `update_state` (`_state_access.py`) load it on first use
 and raise the same `PluginStateOutsideTurnError` the real handle raises
 outside an exec turn.
 """
@@ -60,51 +60,15 @@ from base.log import logger
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
 
 from . import _code_namespace
+from ._state_access import read_state, update_state
 from ._walk import find_context_files_along_path, project_skill_roots
 
 _files_resolve = _ava_files_mod.resolve
 
 # ── ava.cwd SDK namespace — declared in `contribute()` at the bottom of this file.
-# _code_namespace's top level does not depend on the state accessors (function
-# bodies lazy-import), so importing here is cycle-free.
 # Promote cwd into the system prompt's expanded SDK reference, ahead of the
 # configured framework list — it is the top coding surface, and a framework
 # default cannot name a plugin namespace (issue #1011).
-
-
-# ── plugin state access (surface) ────────────────────────────────────────
-# The state class and the real handle live in the agent-runtime face
-# (`agent_runtime.py`), loaded when a state slot first materializes (task #3633
-# leg-2: a stateful child's slot is lazy). The surface reaches the state only
-# through `read_state` / `update_state`, which resolve the handle at each call:
-# with a live slot (`ava.in_exec_turn()`), the slot exposes `materialize()` —
-# the framework contract on the lazy slot — which loads the face, and the call
-# then runs on the real handle. Without a live slot — outside a turn (test / dev
-# REPL) — they raise exactly what the real handle raises outside an exec turn,
-# without importing the agent runtime.
-def _handle(method: str, slot: str) -> Any:
-    """The face's handle, with a live lazy state slot materialized first."""
-    if not ava.in_exec_turn():
-        raise ava.PluginStateOutsideTurnError(
-            f"PluginStateHandle[AvaCodeState].{method}() called outside exec turn—"
-            f"{slot} only valid inside execute_code (the exec turn)."
-        )
-    materialize = getattr(ava.state, "materialize", None)
-    if materialize is not None:
-        materialize()
-    from .agent_runtime import state_handle
-
-    return state_handle()
-
-
-def read_state() -> Any:
-    """The plugin's current `AvaCodeState` snapshot."""
-    return _handle("read", "ava.state").read()
-
-
-def update_state(delta: dict[str, Any]) -> None:
-    """Apply a field update to the plugin's state."""
-    _handle("update", "ava.state_update").update(delta)
 
 
 # ── project-local skill source ───────────────────────────────────────────

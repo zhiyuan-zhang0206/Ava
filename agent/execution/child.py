@@ -362,8 +362,8 @@ def _run_code(code: str, payload: Any) -> None:
         format_full_traceback,
         register_agent_source,
     )
-    from ava.sdk_surface import install as sdk_install
     from ava.sdk_surface.help import HelpRouter
+    from ava.sdk_surface.installation import installed
     from base.agents.sdk import telemetry as sdk_usage_telemetry
 
     # Register the source so `<agent_code>` frames resolve their offending
@@ -386,7 +386,7 @@ def _run_code(code: str, payload: Any) -> None:
 
     tally = sdk_usage_telemetry.SdkCallTally()
     execution_context = ava.context
-    installation = sdk_install.installed()
+    installation = installed()
     sampling = (
         contextlib.nullcontext() if installation is None else installation.sampling.execution()
     )

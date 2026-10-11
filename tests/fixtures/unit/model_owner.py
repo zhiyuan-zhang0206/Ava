@@ -2,7 +2,7 @@
 
 import pytest
 
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY

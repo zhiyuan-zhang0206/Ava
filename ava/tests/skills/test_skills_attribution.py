@@ -7,7 +7,7 @@ import psycopg
 import pytest
 
 import ava.skills as skills_mod
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests.skills._skills_helpers import _write_skill
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir

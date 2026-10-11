@@ -224,6 +224,7 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
 def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAuthority) -> None:
     from agent.extensions import load_extensions
     from ava.sdk_surface import install, settings
+    from ava.sdk_surface.installation import installed
     from base.agents.sdk import call_policy
     from base.lm.catalog import CatalogBuilder
 
@@ -232,7 +233,7 @@ def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAu
     write_local({"plugins": {"good": {"enabled": True}}})
     try:
         loaded = load_extensions(catalog=catalog, authority=config_authority)
-        installation = install.installed()
+        installation = installed()
         assert installation is not None
         assert installation.registry is loaded.registry
         assert settings.model_catalog() is catalog
@@ -242,7 +243,7 @@ def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAu
         sampling.value = sampling.read()
         refresh = sampling.worker
         load_extensions(catalog=catalog, authority=config_authority)
-        replacement = install.installed()
+        replacement = installed()
         assert replacement is not None
         assert replacement.sampling is sampling and sampling.worker is refresh
     finally:

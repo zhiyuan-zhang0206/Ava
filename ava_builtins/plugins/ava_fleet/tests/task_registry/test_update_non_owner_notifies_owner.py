@@ -11,13 +11,13 @@ import pytest
 
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.notes import record_notes
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import (
-    _fake_no_duplicate_precheck,
-    _persisted_parent,
-    _persisted_priority,
-    _seed_agent,
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import (
+    fake_no_duplicate_precheck,
+    persisted_parent,
+    persisted_priority,
+    seed_agent,
 )
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import (
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
 )
 from base.events.live import announce
@@ -29,8 +29,8 @@ def test_update_non_owner_notifies_owner(
 ) -> None:
     """A non-owner update (here: the motivating cancel case) notifies the owner
     with the task, the changed fields, and the author."""
-    actor_id = _seed_agent(db_conn)
-    owner_id = _seed_agent(db_conn)
+    actor_id = seed_agent(db_conn)
+    owner_id = seed_agent(db_conn)
     pin_agent(actor_id)
     with record_notes(db_conn):
         task = task_registry.create(
@@ -54,7 +54,7 @@ def test_update_by_owner_no_notification(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """The owner updating its own task is not notified about its own action."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     with record_notes(db_conn) as mock_send:
@@ -68,8 +68,8 @@ def test_update_non_owner_skips_terminated_owner(
     """A terminated owner is NOT notified of a non-owner write — a notification
     is not worth resurrecting the agent (user ruling 2026-08-27: notification
     messages never auto-resurrect a terminated owner)."""
-    actor_id = _seed_agent(db_conn)
-    dead_owner = _seed_agent(db_conn, status="terminated")
+    actor_id = seed_agent(db_conn)
+    dead_owner = seed_agent(db_conn, status="terminated")
     pin_agent(actor_id)
     with record_notes(db_conn):
         task = task_registry.create(
@@ -86,8 +86,8 @@ def test_update_parent_only_by_non_owner_no_notification(
     """A parent-only reparent by a non-owner is structural tree maintenance, not
     a business change: no owner notification, even when the owner is live
     (regression for the 2026-08-27 batch-reparent wake storm)."""
-    actor_id = _seed_agent(db_conn)
-    owner_id = _seed_agent(db_conn)
+    actor_id = seed_agent(db_conn)
+    owner_id = seed_agent(db_conn)
     pin_agent(actor_id)
     with record_notes(db_conn):
         parent = task_registry.create(
@@ -99,7 +99,7 @@ def test_update_parent_only_by_non_owner_no_notification(
     with record_notes(db_conn) as mock_send:
         task_registry.update(task.id, parent_id=parent.id, operation_key=str(uuid4()))
         mock_send.assert_not_called()
-    assert _persisted_parent(db_conn, task.id) == parent.id
+    assert persisted_parent(db_conn, task.id) == parent.id
 
 
 def test_update_parent_only_terminated_owner_not_resurrected(
@@ -108,8 +108,8 @@ def test_update_parent_only_terminated_owner_not_resurrected(
     """The exact incident shape: a batch reparent moves a task owned by a
     terminated agent — the owner must stay asleep (no send_system_note, so no
     auto-resurrect)."""
-    actor_id = _seed_agent(db_conn)
-    dead_owner = _seed_agent(db_conn, status="terminated")
+    actor_id = seed_agent(db_conn)
+    dead_owner = seed_agent(db_conn, status="terminated")
     pin_agent(actor_id)
     with record_notes(db_conn):
         parent = task_registry.create(
@@ -121,7 +121,7 @@ def test_update_parent_only_terminated_owner_not_resurrected(
     with record_notes(db_conn) as mock_send:
         task_registry.update(task.id, parent_id=parent.id, operation_key=str(uuid4()))
         mock_send.assert_not_called()
-    assert _persisted_parent(db_conn, task.id) == parent.id
+    assert persisted_parent(db_conn, task.id) == parent.id
 
 
 def test_update_parent_plus_business_field_still_notifies(
@@ -129,8 +129,8 @@ def test_update_parent_plus_business_field_still_notifies(
 ) -> None:
     """A reparent combined with a real business change is not parent-only: the
     owner is still notified, so a mixed update never slips through silently."""
-    actor_id = _seed_agent(db_conn)
-    owner_id = _seed_agent(db_conn)
+    actor_id = seed_agent(db_conn)
+    owner_id = seed_agent(db_conn)
     pin_agent(actor_id)
     with record_notes(db_conn):
         parent = task_registry.create(
@@ -156,9 +156,9 @@ def test_update_owner_change_appends_changes_to_new_owner(
     """A reassignment that also edits the task carries the change summary in the
     new owner's message (one message), while the old owner gets the released
     notice; the generic update notice is not sent on top."""
-    actor_id = _seed_agent(db_conn)
-    old_owner = _seed_agent(db_conn)
-    new_owner = _seed_agent(db_conn)
+    actor_id = seed_agent(db_conn)
+    old_owner = seed_agent(db_conn)
+    new_owner = seed_agent(db_conn)
     pin_agent(actor_id)
     with record_notes(db_conn):
         task = task_registry.create(
@@ -182,8 +182,8 @@ def test_log_by_non_owner_notifies_owner(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """log() by a non-owner counts as a write: the owner hears about it too."""
-    actor_id = _seed_agent(db_conn)
-    owner_id = _seed_agent(db_conn)
+    actor_id = seed_agent(db_conn)
+    owner_id = seed_agent(db_conn)
     pin_agent(actor_id)
     with record_notes(db_conn):
         task = task_registry.create(
@@ -199,27 +199,27 @@ def test_log_by_non_owner_notifies_owner(
 def test_create_defaults_priority_p2(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     assert task.priority == "P2"
-    assert _persisted_priority(db_conn, task.id) == "P2"
+    assert persisted_priority(db_conn, task.id) == "P2"
 
 
 def test_create_honours_explicit_priority(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "title", "detail", priority="P0", parent=root_task_id, operation_key=str(uuid4())
     )
     assert task.priority == "P0"
-    assert _persisted_priority(db_conn, task.id) == "P0"
+    assert persisted_priority(db_conn, task.id) == "P0"
 
 
 def test_create_rejects_bad_priority(db_conn: psycopg.Connection, root_task_id: int) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="priority must be one of"):
         task_registry.create(
@@ -230,30 +230,30 @@ def test_create_rejects_bad_priority(db_conn: psycopg.Connection, root_task_id: 
 def test_update_changes_priority(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     task_registry.update(task.id, priority="P1", operation_key=str(uuid4()))
-    assert _persisted_priority(db_conn, task.id) == "P1"
+    assert persisted_priority(db_conn, task.id) == "P1"
 
 
 def test_update_none_priority_is_noop(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """priority=None means 'no change' — the task keeps its existing rung."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "title", "detail", priority="P0", parent=root_task_id, operation_key=str(uuid4())
     )
     task_registry.update(task.id, status="in_progress", priority=None, operation_key=str(uuid4()))
-    assert _persisted_priority(db_conn, task.id) == "P0"
+    assert persisted_priority(db_conn, task.id) == "P0"
 
 
 def test_update_rejects_bad_priority(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     with pytest.raises(ValueError, match="priority must be one of"):
@@ -263,7 +263,7 @@ def test_update_rejects_bad_priority(
 def test_create_publishes_task_created(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     calls: list[tuple] = []
     monkeypatch.setattr(announce, "publish_task_created_sync", lambda *a: calls.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     pin_agent(agent_id)
@@ -274,7 +274,7 @@ def test_create_publishes_task_created(
 def test_update_publishes_task_updated(
     redis_url: str, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     calls: list[tuple] = []
@@ -313,7 +313,7 @@ def test_create_duplicate_in_progress_title_raises(redis_url: str, db_conn, root
     """Creating a task with the same title as an in_progress task raises
     ValueError — a task is born in_progress (post-2026-08-29 the 'open'
     status no longer exists), so any live task blocks its title."""
-    agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     pin_agent(agent_id)
     task_registry.create("unique title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     with pytest.raises(ValueError, match="already exists"):
@@ -324,7 +324,7 @@ def test_create_duplicate_in_progress_title_raises(redis_url: str, db_conn, root
 
 def test_create_same_title_done_allowed(redis_url: str, db_conn, root_task_id: int):
     """Creating a task with the same title as a done task is allowed."""
-    agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     pin_agent(agent_id)
     task = task_registry.create(
         "unique title 3", "detail", parent=root_task_id, operation_key=str(uuid4())
@@ -393,12 +393,12 @@ def test_create_unique_violation_race_becomes_value_error(
     """When two creates race past the app-level pre-check, the partial unique
     index rejects the second INSERT with UniqueViolation; create() translates
     that into the same ValueError agents see on the normal path."""
-    agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     pin_agent(agent_id)
     task_registry.create("raced-title", "d", parent=root_task_id, operation_key=str(uuid4()))
     real_execute = psycopg.Cursor.execute
     with (
-        patch.object(psycopg.Cursor, "execute", _fake_no_duplicate_precheck(real_execute)),  # pyright: ignore[reportUnknownArgumentType]
+        patch.object(psycopg.Cursor, "execute", fake_no_duplicate_precheck(real_execute)),  # pyright: ignore[reportUnknownArgumentType]
         pytest.raises(ValueError, match="already exists"),
     ):
         task_registry.create("raced-title", "d", parent=root_task_id, operation_key=str(uuid4()))
@@ -408,13 +408,13 @@ def test_update_rename_race_becomes_value_error(redis_url: str, db_conn, root_ta
     """Same backstop on the rename path: a concurrent rename that lands
     between update()'s pre-check and its UPDATE surfaces as ValueError, not a
     raw psycopg error."""
-    agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     pin_agent(agent_id)
     task_registry.create("taken-title", "d", parent=root_task_id, operation_key=str(uuid4()))
     task = task_registry.create("free-title", "d", parent=root_task_id, operation_key=str(uuid4()))
     real_execute = psycopg.Cursor.execute
     with (
-        patch.object(psycopg.Cursor, "execute", _fake_no_duplicate_precheck(real_execute)),  # pyright: ignore[reportUnknownArgumentType]
+        patch.object(psycopg.Cursor, "execute", fake_no_duplicate_precheck(real_execute)),  # pyright: ignore[reportUnknownArgumentType]
         pytest.raises(ValueError, match="already exists"),
     ):
         task_registry.update(task.id, title="taken-title", operation_key=str(uuid4()))
@@ -423,7 +423,7 @@ def test_update_rename_race_becomes_value_error(redis_url: str, db_conn, root_ta
 
 
 def test_update_title_renames(redis_url: str, db_conn, root_task_id: int):
-    agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     pin_agent(agent_id)
     task = task_registry.create(
         "old title", "detail", parent=root_task_id, operation_key=str(uuid4())
@@ -435,7 +435,7 @@ def test_update_title_renames(redis_url: str, db_conn, root_task_id: int):
 def test_update_title_duplicate_in_progress_raises(redis_url: str, db_conn, root_task_id: int):
     """Renaming to another in_progress task's title raises ValueError —
     the same invariant create() enforces."""
-    agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     pin_agent(agent_id)
     task_registry.create("taken title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     task = task_registry.create(
@@ -450,8 +450,8 @@ def test_update_title_reassign_notifies_with_new_title(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """A rename and a reassignment in one update() notify with the new title."""
-    agent_id = _seed_agent(db_conn)
-    other_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
+    other_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "old title", "detail", parent=root_task_id, operation_key=str(uuid4())
@@ -463,7 +463,7 @@ def test_update_title_reassign_notifies_with_new_title(
 
 def test_create_same_title_cancelled_allowed(redis_url: str, db_conn, root_task_id: int):
     """Creating a task with the same title as a cancelled task is allowed."""
-    agent_id = _seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     pin_agent(agent_id)
     task = task_registry.create(
         "unique title 4", "detail", parent=root_task_id, operation_key=str(uuid4())

@@ -8,8 +8,8 @@ import psycopg
 import pytest
 
 from ava_builtins.plugins.ava_fleet import _task_receipts, task_registry
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent, seed_owned_task
 from base import telemetry
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
@@ -17,15 +17,6 @@ from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from tests.fixtures.pin_agent import pin_agent
-
-
-def _setup(db: psycopg.Connection, root: int) -> tuple[int, int, int]:
-    actor, owner = _seed_agent(db), _seed_agent(db)
-    pin_agent(actor)
-    task = task_registry.create(
-        "receipt task", "work", parent=root, owner=owner, operation_key=str(uuid4())
-    )
-    return actor, owner, task.id
 
 
 def _facts(db: psycopg.Connection, tid: int) -> tuple[object, object, object]:
@@ -42,7 +33,7 @@ def _facts(db: psycopg.Connection, tid: int) -> tuple[object, object, object]:
 def test_concurrent_duplicate_note_has_one_business_effect(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
-    actor, _owner, tid = _setup(db_conn, root_task_id)
+    actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
     before_notes = db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone()
     barrier = Barrier(2)
 
@@ -72,7 +63,7 @@ def test_concurrent_duplicate_note_has_one_business_effect(
 def test_post_commit_failure_replay_preserves_intervening_state(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _actor, _owner, tid = _setup(db_conn, root_task_id)
+    _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
     real_emit = telemetry.emit_prepared
 
     def fail_emit(*_args: object) -> None:
@@ -82,7 +73,7 @@ def test_post_commit_failure_replay_preserves_intervening_state(
     with pytest.raises(RuntimeError, match="response lost"):
         task_registry.log(tid, "committed", operation_key="lost")
     monkeypatch.setattr(telemetry, "emit_prepared", real_emit)
-    current = _seed_agent(db_conn)
+    current = seed_agent(db_conn)
     task_registry.update(tid, owner=current, operation_key=str(uuid4()))
     db_conn.execute(
         "UPDATE agent_tasks SET reminder_count=4, escalated_at=now() WHERE id=%s", (tid,)
@@ -104,7 +95,7 @@ def test_producer_failure_rolls_back_entire_operation(
 ) -> None:
     from base.telemetry import audit_events
 
-    _actor, _owner, tid = _setup(db_conn, root_task_id)
+    _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
     before = _facts(db_conn, tid)
     module, name = {
         "notification": (task_registry, "_queue_after_update"),
@@ -127,7 +118,7 @@ def test_producer_failure_rolls_back_entire_operation(
 def test_effective_body_aliases_and_conflicts(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    _actor, _owner, tid = _setup(db_conn, root_task_id)
+    _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
     task_registry.log(tid, "", operation_key="body")
     before = _facts(db_conn, tid)
     task_registry.update(
@@ -147,7 +138,7 @@ def test_effective_body_aliases_and_conflicts(
 def test_actor_and_task_scopes_are_independent(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    actor, owner, tid = _setup(db_conn, root_task_id)
+    actor, owner, tid = seed_owned_task(db_conn, root_task_id)
     second = task_registry.create("other", "work", parent=root_task_id, operation_key=str(uuid4()))
     for who, target in ((actor, tid), (actor, second.id), (owner, tid)):
         pin_agent(who)
@@ -158,7 +149,7 @@ def test_actor_and_task_scopes_are_independent(
 def test_retained_void_receipt_survives_task_deletion(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    _actor, _owner, tid = _setup(db_conn, root_task_id)
+    _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
     task_registry.update(tid, priority="P1", operation_key="deleted")
     db_conn.execute("DELETE FROM agent_tasks WHERE id=%s", (tid,))
     db_conn.commit()
