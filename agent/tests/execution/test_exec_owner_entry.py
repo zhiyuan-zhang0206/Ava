@@ -319,15 +319,12 @@ def test_context_unknown_fields_and_symlink_refuse(tmp_path: Path) -> None:
 
 
 def test_owner_import_does_not_boot_graph_sdk_or_settings(tmp_path: Path) -> None:
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 -- fixed argv, this interpreter runs the import probe
         [
             sys.executable,
             "-I",
             "-B",
-            "-c",
-            "import sys; import agent.execution.domain_owner; "
-            "assert 'agent.graph' not in sys.modules; assert 'ava' not in sys.modules; "
-            "assert 'base.config' not in sys.modules",
+            str(Path(__file__).with_name("_owner_import_child.py")),
         ],
         cwd=tmp_path,
         env=dict(os.environ, AVA_AGENT_ID="1", AVA_PROCESS_PROFILE="agent"),
@@ -339,28 +336,7 @@ def test_owner_import_does_not_boot_graph_sdk_or_settings(tmp_path: Path) -> Non
     assert result.returncode == 0, result.stderr
 
 
-_HOST = """
-import os, subprocess, sys, time
-from pathlib import Path
-from base.agents.incarnation.exec_owner_protocol import OwnerControl, OwnerReady, read_owner_context
-path = Path(sys.argv[1])
-context = read_owner_context(path)
-owner = subprocess.Popen(
-    [sys.executable, '-I', '-B', '-X', 'utf8', '-m', 'agent.execution.domain_owner', '--context', str(path)],
-    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    close_fds=True,
-)
-while not path.with_suffix('.ready').exists():
-    if owner.poll() is not None:
-        raise RuntimeError('owner exited before handshake')
-    time.sleep(.01)
-ready = OwnerReady.model_validate_json(path.with_suffix('.ready').read_bytes())
-owner.stdin.write(OwnerControl(request=ready.allocation.request,
-    domain=ready.allocation.domain, action='permit').model_dump_json().encode()+b'\\n')
-owner.stdin.flush()
-while True:
-    time.sleep(1)
-"""
+_HOST = Path(__file__).with_name("_owner_host_child.py")
 
 
 def test_real_host_death_closes_active_managed_child(
@@ -395,7 +371,7 @@ def test_real_host_death_closes_active_managed_child(
     publish_owner_message(path, context)
     started = time.monotonic()
     host = subprocess.Popen(  # noqa: S603 -- disposable fixed host, never a service.
-        [sys.executable, "-I", "-B", "-c", _HOST, str(path)],
+        [sys.executable, "-I", "-B", str(_HOST), str(path)],
         cwd=tmp_path,
         env=dict(
             os.environ,

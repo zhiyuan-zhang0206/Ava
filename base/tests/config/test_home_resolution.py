@@ -25,6 +25,7 @@ from base.host.env import bootstrap, runtime_config
 from base.host.env.dotenv_boot import resolve_ava_home
 
 _REPO = Path(__file__).resolve().parents[3]
+_CHILD = Path(__file__).with_name("_config_child.py")
 
 
 @pytest.fixture
@@ -76,8 +77,8 @@ def test_a_fresh_interpreter_with_no_variable_resolves_to_dot_ava(tmp_path: Path
     fake_home.mkdir()
     env = {k: v for k, v in os.environ.items() if k != "AVA_HOME"}
     env["HOME"] = str(fake_home)
-    result = subprocess.run(
-        [sys.executable, "-c", "import base.paths as p; print(p.ava_home())"],
+    result = subprocess.run(  # noqa: S603 — fixed argv, sys.executable owns the child
+        [sys.executable, str(_CHILD), "ava_home"],
         cwd=_REPO,
         env=env,
         capture_output=True,
