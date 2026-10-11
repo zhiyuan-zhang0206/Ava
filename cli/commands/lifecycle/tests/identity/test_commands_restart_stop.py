@@ -67,8 +67,11 @@ def test_cmd_restart_succeeds_non_interactively(
     )
     monkeypatch.setattr(_stop_commands, "_do_stop", MagicMock(return_value=0))
 
-    def _apply_migrations(*, database_factory: DatabaseFactory) -> list[str]:
+    def _apply_migrations(
+        *, database_factory: DatabaseFactory, machine_name: Callable[[], str]
+    ) -> list[str]:
         assert database_factory is operator_database
+        assert machine_name == command_runtime.machine.name
         return []
 
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_migrations_apply", _apply_migrations)

@@ -629,8 +629,14 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
     recovered: list[int] = []
 
     async def fake_recover(
-        db_pool: object, _db: object, _bus: EventBus, wedge: watchdog._HostedTurnWedge
+        db_pool: object,
+        _db: object,
+        _bus: EventBus,
+        wedge: watchdog._HostedTurnWedge,
+        *,
+        machine: MachineIdentity,
     ) -> None:
+        assert machine is machine_identity
         recovered.append(wedge.agent_id)
 
     monkeypatch.setattr(watchdog, "_recover_hosted_turn", fake_recover)
@@ -686,7 +692,15 @@ async def test_a_hung_recovery_is_cut_at_the_deadline_and_still_enters_the_coold
     )
     _wedged_runner_redis(monkeypatch)
 
-    async def hang(db_pool: object, _db: object, _bus: EventBus, wedge: object) -> None:
+    async def hang(
+        db_pool: object,
+        _db: object,
+        _bus: EventBus,
+        wedge: object,
+        *,
+        machine: MachineIdentity,
+    ) -> None:
+        assert machine is machine_identity
         await asyncio.Event().wait()
 
     monkeypatch.setattr(watchdog, "_recover_hosted_turn", hang)
@@ -729,8 +743,14 @@ async def test_a_slow_recovery_is_never_started_twice(
     recovered: list[int] = []
 
     async def slow(
-        db_pool: object, _db: object, _bus: EventBus, wedge: watchdog._HostedTurnWedge
+        db_pool: object,
+        _db: object,
+        _bus: EventBus,
+        wedge: watchdog._HostedTurnWedge,
+        *,
+        machine: MachineIdentity,
     ) -> None:
+        assert machine is machine_identity
         recovered.append(wedge.agent_id)
         await release.wait()
 
