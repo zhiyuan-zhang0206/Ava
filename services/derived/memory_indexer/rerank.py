@@ -38,8 +38,10 @@ from services.derived.memory_indexer.chunking import chunk_text
 USAGE_KIND = "memory_rerank"
 """`llm_usage.usage_kind` of the decision calls, so rerank spend is separable from chat spend."""
 
-_MAX_CONCURRENT_DECISIONS = 25
-"""Decision requests in flight at once for one search. A full 50-candidate search is two waves."""
+_MAX_CONCURRENT_DECISIONS = 30
+"""Decision requests in flight at once for one search. At the default of 30 candidates every
+request goes out together, which kept the ranking near 2s in the calibration benchmark; the
+cap only bites when `memory_rerank_candidates` is raised."""
 
 _EXCERPT_CHARS = 1800
 """The most characters of a chunk shown to the model (the indexer's chunk size)."""
