@@ -33,7 +33,7 @@ from base.telemetry.alerts.copy import (
 
 # -- generic ---------------------------------------------------------------
 
-QUEUED_NOTICE = "⚠️ Gateway temporarily unavailable — messages queued, will retry automatically"  # emoji-ok: warning glyph the user sees in chat
+NOT_DELIVERED_NOTICE = "Your message was not delivered: the gateway is temporarily unavailable. Please resend it later."
 
 # -- /list /switch /status /commands /help ---------------------------------
 
