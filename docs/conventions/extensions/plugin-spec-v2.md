@@ -71,9 +71,12 @@ borrow/not-borrow section.
 Placed at the package root. The name is **`ava-plugin.json`** (user ruling
 2026-08-13): the Claude Code `.claude-plugin/plugin.json` has no
 version/dependency/lifecycle fields and its semantics stay ecosystem-owned;
-the adapter (`cli/commands/extensions/_claude_code_plugin.py`) translates it. A package
-without a manifest keeps working through the legacy detection path — the
-manifest is opt-in, and for now nothing ships one.
+the adapter (`cli/commands/extensions/_claude_code_plugin.py`) translates it. Every Ava
+plugin (a directory with a `plugin.py`) ships one: `load_manifest` refuses a plugin
+without it, the registry and provider loaders report that plugin as a load failure, and
+`scripts/content_lint/lint_core_content_manifests.py` requires one beside every builtin
+`plugin.py`. Packages in a format that comes from outside Ava (a bare skill, a Claude Code
+plugin, an MCP server) may ship one; `load_optional_manifest` reads it when present.
 
 Example (the shape `ava_code` would declare):
 

@@ -298,7 +298,7 @@ class PluginView:
     directory: Path
     description: str
     contributions: tuple[Contribution, ...]
-    manifest: PluginManifest | None
+    manifest: PluginManifest
 
     def surface_counts(self) -> dict[str, int]:
         """Surface id -> number of contributions, in `SURFACES` order."""
@@ -417,13 +417,10 @@ def _repo_plugins_dir() -> Path:
 def declared_vs_registered(view: PluginView) -> tuple[DiffEntry, ...]:
     """Compare a plugin's manifest declarations against what it registered.
 
-    Empty when the plugin ships no manifest — there is nothing to compare, which
-    is not the same as agreement. Only surfaces with both a manifest key and a
-    runtime registry take part; `DECLARATION_ONLY_KEYS` and the surfaces with no
-    manifest key are reported separately by the caller.
+    Only surfaces with both a manifest key and a runtime registry take part;
+    `DECLARATION_ONLY_KEYS` and the surfaces with no manifest key are reported
+    separately by the caller.
     """
-    if view.manifest is None:
-        return ()
     entries: list[DiffEntry] = []
     for surface in SURFACES:
         if surface.manifest_key is None:
