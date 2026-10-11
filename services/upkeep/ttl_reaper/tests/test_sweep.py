@@ -1,8 +1,8 @@
 """The reaper's database-only sweep against the real Postgres fixture: page rows
 are terminalized (expired_at, never closed_at), unexpired/closed rows are left
 alone, owners are notified only when running/idling, expired browser sessions
-and notices are reclaimed in bounded batches, the fire-log prune keeps the
-newest claim per schedule, and the lifecycle-pointer scans report and settle
+and notices are reclaimed in bounded batches, the fire-log prune deletes every
+claim past the window, and the lifecycle-pointer scans report and settle
 their rows."""
 
 from __future__ import annotations
@@ -274,13 +274,11 @@ def _insert_fire_log(conn: psycopg.Connection, schedule_id: int, age_hours: list
             )
 
 
-def test_prune_schedule_fire_log_respects_retention_and_keeps_newest_per_schedule(
+def test_prune_schedule_fire_log_deletes_every_row_past_the_window(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool
 ) -> None:
-    """The retention prune deletes only rows past the window, and always keeps
-    the newest claim per schedule — a sparse cron (all claims past the window)
-    must not lose its baseline, or catch-up could refire an already-claimed
-    slot."""
+    """The retention prune deletes every claim past the window, including the newest
+    claim of a schedule whose whole log is older than it; rows inside the window stay."""
     s1 = _new_schedule(db_conn, "fire-log-s1")
     _insert_fire_log(db_conn, s1, [40 * 24 + 2, 40 * 24 + 1, 40 * 24, 1])
     s2 = _new_schedule(db_conn, "fire-log-s2")
@@ -289,18 +287,13 @@ def test_prune_schedule_fire_log_respects_retention_and_keeps_newest_per_schedul
 
     pruned = sweep._prune_schedule_fire_log_blocking(reaper_pool)
 
-    assert pruned == 4
+    assert pruned == 5
     with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT schedule_id, slot_fire_at FROM schedule_fire_log "
-            "ORDER BY schedule_id, slot_fire_at"
-        )
+        cur.execute("SELECT schedule_id, slot_fire_at FROM schedule_fire_log")
         rows = cur.fetchall()
-    # s1: only its 1-hour-old claim remains; s2: only its newest (45d) claim
-    # remains — the oldest-ever claim per schedule is never pruned away.
-    assert len(rows) == 2
+    # Only s1's 1-hour-old claim is inside the window; s2 keeps nothing.
+    assert len(rows) == 1
     assert rows[0][0] == s1 and rows[0][1] > datetime.now(UTC) - timedelta(hours=2)
-    assert rows[1][0] == s2 and rows[1][1] > datetime.now(UTC) - timedelta(days=46)
 
 
 def test_prune_schedule_fire_log_is_bounded_per_pass(
@@ -309,7 +302,7 @@ def test_prune_schedule_fire_log_is_bounded_per_pass(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One pass deletes at most _FIRE_LOG_PASS_BATCH rows; the backlog drains
-    over successive passes (and the newest claim is never a candidate)."""
+    over successive passes."""
     monkeypatch.setattr(sweep, "_FIRE_LOG_PASS_BATCH", 2)
     s1 = _new_schedule(db_conn, "fire-log-bounded")
     _insert_fire_log(db_conn, s1, [50 * 24, 49 * 24, 48 * 24, 47 * 24, 46 * 24])
@@ -322,11 +315,11 @@ def test_prune_schedule_fire_log_is_bounded_per_pass(
         assert remaining is not None and remaining[0] == 3
 
     assert sweep._prune_schedule_fire_log_blocking(reaper_pool) == 2
+    assert sweep._prune_schedule_fire_log_blocking(reaper_pool) == 1
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM schedule_fire_log WHERE schedule_id = %s", (s1,))
-        # the newest claim is retained as the catch-up baseline
         remaining = cur.fetchone()
-        assert remaining is not None and remaining[0] == 1
+        assert remaining is not None and remaining[0] == 0
 
 
 def test_torn_pointer_scan_reports_torn_commands(
