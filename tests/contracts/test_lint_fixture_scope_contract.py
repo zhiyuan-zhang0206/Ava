@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import ast
-import importlib
 from pathlib import Path
 
-_lint = importlib.import_module("scripts.lint.fixture_scope")
-
+from scripts.lint import fixture_scope as _lint
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
