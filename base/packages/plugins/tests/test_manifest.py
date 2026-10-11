@@ -378,8 +378,20 @@ def test_pyproject_missing(tmp_path: Path) -> None:
 # ── load_manifest ──────────────────────────────────────────────────────
 
 
-def test_load_manifest_missing_file_is_none(tmp_path: Path) -> None:
-    assert pm.load_manifest(tmp_path) is None
+def test_load_manifest_missing_file_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match=r"ava-plugin\.json not found") as exc:
+        pm.load_manifest(tmp_path)
+    assert '"apiVersion": 2' in str(exc.value)
+
+
+def test_load_optional_manifest_missing_file_is_none(tmp_path: Path) -> None:
+    assert pm.load_optional_manifest(tmp_path) is None
+
+
+def test_load_optional_manifest_validates_a_present_manifest(tmp_path: Path) -> None:
+    (tmp_path / "ava-plugin.json").write_text('{"apiVersion": 99}', encoding="utf-8")
+    with pytest.raises(ManifestError, match="apiVersion"):
+        pm.load_optional_manifest(tmp_path)
 
 
 def test_load_manifest_invalid_json(tmp_path: Path) -> None:

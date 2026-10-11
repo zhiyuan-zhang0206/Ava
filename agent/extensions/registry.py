@@ -11,7 +11,7 @@ only when a plugin actually declares something that needs them.
 
 `build_registry()` is the load-time gate. A plugin enters the registry only when its declaration is sound:
 each `contribute()` returns a `PluginContributions`, its state classes validate against the framework's
-state schema, and — when the plugin ships an `ava-plugin.json` — what it declares there under the keys of
+state schema, and what its `ava-plugin.json` (required) declares under the keys of
 the loaded faces matches what `contribute()` actually provides, in both directions. Anything else is a
 load failure of that plugin: reported, and the plugin contributes nothing (the rest of the registry is
 unaffected, like a plugin that fails to import). Installing the SDK surface can refuse a plugin too
@@ -31,6 +31,7 @@ from base.packages.plugins import load_report
 from base.packages.plugins.config_face import CONFIG_FACE
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.packages.plugins.gate import check_manifest
+from base.packages.plugins.manifest import load_manifest
 from base.telemetry import report_sink_failure
 
 SURFACE_FACES: tuple[str, ...] = (SURFACE_MODULE, CONFIG_FACE)
@@ -66,12 +67,14 @@ def declarations(
 
     Calls `contribute()` on each loaded face of `faces`, in plugin name order, and merges a plugin's faces.
     A face with no `contribute()` declares nothing; one whose `contribute()` raises or returns something
-    else is reported and the plugin is skipped.
+    else is reported and the plugin is skipped, as is a plugin whose `ava-plugin.json` is missing or
+    invalid.
     """
     found: list[tuple[str, Path, PluginContributions]] = []
     for name, plugin_dir in _enabled_plugin_dirs(report):
         merged: PluginContributions | None = None
         try:
+            load_manifest(plugin_dir)
             for face in faces:
                 module = sys.modules.get(f"{_pkg_of(plugin_dir)}.{name}.{face}")
                 contribute = getattr(module, "contribute", None)

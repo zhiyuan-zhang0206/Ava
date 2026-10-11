@@ -369,16 +369,16 @@ repos:
         pass_filenames: false
 
       # Core-content manifest gate (content channel, tasks #2915/#3267):
-      # every `ava-plugin.json` under ava_builtins/ must validate and its
-      # declared gates (engines.ava range / requires_commit ancestry) must hold
-      # against the repo's DERIVED host version (HEAD's commit date). The
-      # non-core manifests in the tree are audited (report-only) so a legacy
-      # range the derived-version switch would refuse is visible here too.
+      # every builtin plugin must ship an `ava-plugin.json`, every one under
+      # ava_builtins/ must validate and its declared gates (engines.ava range /
+      # requires_commit ancestry) must hold against the repo's DERIVED host
+      # version (HEAD's commit date). The non-core manifests in the tree are
+      # audited (report-only).
       - id: lint-core-content-manifests
         name: lint core-content manifests (ranges + requires_commit vs derived host version)
         entry: .venv/bin/python scripts/content_lint/lint_core_content_manifests.py
         language: system
-        files: '(ava-plugin\.json$|^scripts/content_lint/lint_core_content_manifests\.py$|^base/packages/plugins/manifest\.py$|^base/deploy/git/host_version\.py$)'
+        files: '(ava-plugin\.json$|^ava_builtins/plugins/[^/]+/plugin\.py$|^scripts/content_lint/lint_core_content_manifests\.py$|^base/packages/plugins/manifest\.py$|^base/deploy/git/host_version\.py$)'
         pass_filenames: false
 
       # SKILL.md line-count ceiling to prevent progressive bloat.

@@ -56,7 +56,7 @@ extension surfaces — each one's `register_*` signature rendered from the live
 object, the contract a contributor must satisfy, and who is using it — then one
 line per installed plugin. With a name, it prints that plugin's every
 registration as a fact (surface, identifier, the class or function behind it) and
-diffs those against its `ava-plugin.json` declarations when it ships one.
+diffs those against its `ava-plugin.json` declarations.
 
 It answers two questions nothing else could: *what can a plugin extend* (for an
 agent writing one, which otherwise means reading framework source) and *what is

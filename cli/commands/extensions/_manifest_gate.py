@@ -1,10 +1,11 @@
 """Install-time manifest gate shared by the install/upgrade entries (S1-S2).
 
 Each install entry calls `manifest_install_errors` on the source tree it is
-about to land. Empty list = nothing to refuse: no manifest (legacy package,
-unchanged paths), or a manifest that validates and whose dependency mirror
-holds. Any error = the package ships a contract it breaks; the caller prints
-and refuses the install before anything is landed.
+about to land. These are bare skill, Claude Code plugin and MCP packages, whose formats
+come from outside Ava, so a manifest is optional here. Empty list = nothing to refuse: no
+manifest, or a manifest that validates and whose dependency mirror holds. Any error = the
+package ships a contract it breaks; the caller prints and refuses the install before
+anything is landed.
 
 The MCP install/upgrade entries additionally pass `mirror_pyproject=True`,
 which runs the `dependencies.pythonPackages` mirror check against the
@@ -24,7 +25,7 @@ from base.packages.plugins import manifest as manifest_module
 def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) -> list[str]:
     """Manifest checks for a package about to be landed; [] = proceed."""
     try:
-        manifest = manifest_module.load_manifest(pkg_dir)
+        manifest = manifest_module.load_optional_manifest(pkg_dir)
     except manifest_module.ManifestError as e:
         return [str(e)]
     if manifest is None:

@@ -203,14 +203,15 @@ def test_a_widget_mismatch_is_refused_in_both_directions(
     assert "is declared but the plugin does not provide it" in str(reported[1][1])
 
 
-def test_a_plugin_without_a_manifest_is_never_gated(
+def test_a_plugin_without_a_manifest_is_refused(
     tmp_path: Path, reported: list[tuple[str, BaseException]]
 ) -> None:
     plugin_dir = tmp_path / "demo"
     plugin_dir.mkdir()
 
-    assert _gated(plugin_dir, METRICS_KEY, PluginContributions(metrics=(_metric(),))) is not None
-    assert reported == []
+    assert _gated(plugin_dir, METRICS_KEY, PluginContributions(metrics=(_metric(),))) is None
+    assert len(reported) == 1
+    assert "ava-plugin.json not found" in str(reported[0][1])
 
 
 def test_a_face_is_gated_only_on_its_own_key(
