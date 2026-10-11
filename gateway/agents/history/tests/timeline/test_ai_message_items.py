@@ -260,6 +260,8 @@ class TestAiMessageItems:
         }
         hidden = {
             NoteTag.MEMORY,
+            # Ambient recall context, like the memory note beside it.
+            NoteTag.SKILL_RECALL,
             NoteTag.AGENT_ID,
             NoteTag.COMPACT_REMINDER,
             NoteTag.HISTORY_DUMP,

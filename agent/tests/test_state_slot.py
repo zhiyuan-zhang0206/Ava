@@ -499,6 +499,20 @@ async def test_exec_node_merges_plugin_state_update_into_command(fake_cancel_eve
     assert "halted" in update
 
 
+async def test_exec_node_commits_the_skill_reads_the_sdk_writes(fake_cancel_event):
+    """`skill_reads` is a core channel the SDK itself writes (the skills module notes each body it
+    hands over): no plugin declares it and it still passes the key guard into Command(update)."""
+    state = BaseAgentState(
+        messages=[_ai_message_with_code("import ava\nava.state_update['skill_reads'] = ['alpha']")],
+        halted=False,
+    )
+    runtime, config = _make_runtime_and_config(AsyncMock())
+
+    cmd = await _exec_node_impl(state, runtime, config)
+
+    assert cast(dict, cmd.update)["skill_reads"] == ["alpha"]
+
+
 async def test_exec_node_never_binds_the_slot_in_the_parent(fake_cancel_event):
     """The exec runs in a child process: the parent (host) process never has a bound slot,
     and reading `ava.state` there raises rather than returning None."""

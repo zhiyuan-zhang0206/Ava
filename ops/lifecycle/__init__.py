@@ -401,7 +401,11 @@ def _restart_blocking(
 
     if body.config_overlay:
         try:
-            validate_config_overlay(body.config_overlay, models=catalog.models)
+            validate_config_overlay(
+                body.config_overlay,
+                models=catalog.models,
+                decision_models=catalog.decision_models,
+            )
         except InvalidConfigOverlay as exc:
             raise InvalidModelConfig(str(exc)) from exc
 

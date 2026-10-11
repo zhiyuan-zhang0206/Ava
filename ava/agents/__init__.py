@@ -494,10 +494,12 @@ def spawn_impl(
             from base.packages.plugins.config_registration import validate_config_overlay
 
             installation = installed()
+            catalog = sdk_settings.model_catalog()
             validate_config_overlay(
                 overlay,
                 None if installation is None else installation.configs,
-                models=sdk_settings.model_catalog().models,
+                models=catalog.models,
+                decision_models=catalog.decision_models,
             )
     return _client.spawn(
         spawner=spawner,

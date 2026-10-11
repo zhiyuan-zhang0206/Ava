@@ -396,15 +396,18 @@ def resolve_overlay_targets(
     return out
 
 
-def _validate_model_membership(value: object, models: Mapping[str, object]) -> str | None:
+def _validate_model_membership(
+    value: object, models: Mapping[str, object], *, kind: str = "model"
+) -> str | None:
     """A model-name overlay field must be a registered id (the model catalog,
     plugin-registered models included). An unregistered id would pass
     the Pydantic str type check, persist, and crash the next boot at model
-    build (Task #1704 — the deepseek-v4-flash-vision incident)."""
+    build (Task #1704 — the deepseek-v4-flash-vision incident). `kind` names the
+    table checked ("model" or "decision model")."""
     if isinstance(value, str) and value in models:
         return None
     valid_models = ", ".join(sorted(models))
-    return f"value {value!r} is not a registered model; valid models: {valid_models}"
+    return f"value {value!r} is not a registered {kind}; valid {kind}s: {valid_models}"
 
 
 def _validate_reasoning_effort_range(value: object) -> str | None:
@@ -479,9 +482,11 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "llm_stream_ttft_timeout_seconds": _range_validator(gt=0),
     "memory_recall_filter_timeout_seconds": _range_validator(gt=0),
     "memory_recall_deadline_seconds": _range_validator(gt=0),
+    "skill_recall_deadline_seconds": _range_validator(gt=0),
     # fractions — (0, 1]
     "auto_compact_fraction": _range_validator(gt=0, le=1),
     "compact_reminder_fraction": _range_validator(gt=0, le=1),
+    "skill_recall_threshold": _range_validator(gt=0, le=1),
     # counts / budgets — non-negative and finite
     "auto_compact_ceiling_tokens": _range_validator(ge=0),
     "claude_thinking_budget_tokens": _range_validator(ge=0),
@@ -489,6 +494,7 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "memory_recall_filter_max_retries": _range_validator(ge=0),
     "memory_recall_inject_k": _range_validator(ge=0),
     "memory_recall_retrieve_k": _range_validator(ge=0),
+    "skill_recall_max": _range_validator(ge=0),
 }
 
 
@@ -562,17 +568,39 @@ def validate_config_overlay_shape(
         _validate_framework_overlay_ranges(grouped[None])
 
 
+# Overlay fields naming a decision model: checked against the catalog's decision table, which is
+# separate from the chat-model table because a decision model never appears in `models`.
+_DECISION_MODEL_FIELDS = ("skill_recall_model",)
+
+
 def validate_config_overlay(
     overlay: dict[str, object],
     configs: Mapping[str, BaseModel] | None = None,
     *,
     models: Mapping[str, object],
+    decision_models: Mapping[str, object] | None = None,
 ) -> None:
-    """Validate shape and catalog membership before an overlay is admitted or persisted."""
+    """Validate shape and catalog membership before an overlay is admitted or persisted.
+
+    `decision_models` is the catalog's decision table. It may be left out only by a caller whose
+    overlay names no decision-model field: an overlay that does fails here rather than
+    being admitted unchecked."""
     validate_config_overlay_shape(overlay, configs)
     for field in ("llm_model", "memory_recall_filter_model"):
         if field in overlay:
             error = _validate_model_membership(overlay[field], models)
+            if error is not None:
+                raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
+    for field in _DECISION_MODEL_FIELDS:
+        if field in overlay:
+            if decision_models is None:
+                raise InvalidConfigOverlay(
+                    f"overlay key {field!r} names a decision model, but the caller supplied "
+                    "no decision-model table to check it against"
+                )
+            error = _validate_model_membership(
+                overlay[field], decision_models, kind="decision model"
+            )
             if error is not None:
                 raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
 

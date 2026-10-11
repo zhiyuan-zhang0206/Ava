@@ -41,7 +41,9 @@ def _freeze_overlay(
         )
         overlay = dict(options.config_overlay) if options.config_overlay else None
         if overlay:
-            validate_config_overlay(overlay, models=catalog.models)
+            validate_config_overlay(
+                overlay, models=catalog.models, decision_models=catalog.decision_models
+            )
             normalize_overlay_llm_model(overlay, models=catalog.models)
         return overlay
     except (ValueError, InvalidConfigOverlay) as exc:
