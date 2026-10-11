@@ -4,7 +4,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import PG_KEEPALIVE_KWARGS, Database
@@ -22,12 +22,13 @@ def terminated(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         authority=config_authority,
         catalog=model_catalog,
     )
@@ -69,13 +70,14 @@ def legacy_row(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     """A row no birth epoch vouches for: only a later lifecycle release can."""
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         authority=config_authority,
         catalog=model_catalog,
     )

@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from typing import Literal
 
+from base.cluster.machine import MachineIdentity
+
 ObservabilityEndpointVariable = Literal[
     "AVA_TELEMETRY_OTLP_ENDPOINT",
     "AVA_TELEMETRY_LOKI_URL",
@@ -45,20 +47,20 @@ def _report_label_fallback(stage: str, exc: BaseException) -> None:
     report_sink_failure(f"cluster label {stage}", exc)
 
 
-def production_identity() -> bool:
+def production_identity(machine: MachineIdentity, *, home: Path) -> bool:
     """Whether this process has the registered production identity.
 
     The default implicit collector belongs only to a configured machine running
     against the production ``~/.ava`` cluster. Tests, ad-hoc processes without a
     machine identity, and other homes must opt into their own explicit endpoint.
     """
-    from base.cluster.machine import MachineNameMissing, machine_name
+    from base.cluster.machine import MachineNameMissing
 
     try:
-        machine_name()
+        machine.name()
     except MachineNameMissing:
         return False
-    return cluster_label() == ".ava"
+    return cluster_label(home) == ".ava"
 
 
 def endpoint_override_is_explicit(variable: ObservabilityEndpointVariable) -> bool:
@@ -71,23 +73,23 @@ def endpoint_override_is_explicit(variable: ObservabilityEndpointVariable) -> bo
     return variable in os.environ
 
 
-def gateway_observability_home() -> Path | None:
+def gateway_observability_home(machine: MachineIdentity, *, home: Path) -> Path | None:
     """Return this unit's home when it serves the gateway capability.
 
-    Missing or invalid role identity is deliberately treated as non-gateway so
-    bootstrap and maintenance processes retain their historical behavior.
+    Missing role identity is treated as non-gateway so
+    bootstrap and maintenance processes retain their historical behavior. Invalid
+    configured roles propagate rather than selecting another machine posture.
     """
-    from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
-    from base.paths import ava_home
+    from base.cluster.machine import MachineRoleMissing
 
     try:
-        roles = machine_role()
-    except (MachineRoleMissing, MachineRoleInvalid):
+        roles = machine.role()
+    except MachineRoleMissing:
         return None
-    return ava_home() if "gateway" in roles else None
+    return home if "gateway" in roles else None
 
 
-def home_is_observability_station(home: Path) -> bool:
+def home_is_observability_station(home: Path, *, machine: MachineIdentity, unit_home: Path) -> bool:
     """Whether this home is the observability station — the provider identity
     of the host's native LGTM backends.
 
@@ -96,8 +98,8 @@ def home_is_observability_station(home: Path) -> bool:
     unit capability. The capability form resolves through the process's own
     machine identity and only counts when the resolved home IS this ``home`` —
     a dev worktree home never inherits the prod station's capability. Role
-    resolution failure (unconfigured unit, bootstrap process) falls back to
-    marker-only so every pre-existing call site keeps historical behavior.
+    identity absence (unconfigured unit, bootstrap process) falls back to
+    marker-only. Invalid configured roles propagate.
 
     The single decision behind the converge bring-up/rendering steps, the
     backend roster gate, the producer OTLP export gate, the
@@ -106,22 +108,19 @@ def home_is_observability_station(home: Path) -> bool:
     """
     if (home / "lgtm-host").exists():
         return True
-    from base.cluster.machine import (
-        MachineRoleInvalid,
-        MachineRoleMissing,
-        is_observability_station,
-    )
-    from base.paths import ava_home
+    from base.cluster.machine import MachineRoleMissing
 
     try:
-        if not is_observability_station():
+        if "observability-station" not in machine.role():
             return False
-    except (MachineRoleMissing, MachineRoleInvalid):
+    except MachineRoleMissing:
         return False
-    return home.resolve() == ava_home().resolve()
+    return home.resolve() == unit_home.resolve()
 
 
-def collector_allowed_for_home(home: Path | None) -> bool:
+def collector_allowed_for_home(
+    home: Path | None, *, machine: MachineIdentity, unit_home: Path
+) -> bool:
     """Whether the gateway home at ``home`` may run the local otel-collector.
 
     The observability station (``lgtm-host`` marker or ``observability-station``
@@ -142,6 +141,6 @@ def collector_allowed_for_home(home: Path | None) -> bool:
     """
     if home is None:
         return True
-    return home_is_observability_station(home) or endpoint_override_is_explicit(
-        "AVA_TELEMETRY_OTLP_ENDPOINT"
-    )
+    return home_is_observability_station(
+        home, machine=machine, unit_home=unit_home
+    ) or endpoint_override_is_explicit("AVA_TELEMETRY_OTLP_ENDPOINT")

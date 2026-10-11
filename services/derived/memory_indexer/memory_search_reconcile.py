@@ -22,6 +22,8 @@ import argparse
 import builtins
 import sys
 
+from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -38,11 +40,11 @@ from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.embeddings.factory import get_provider
 
 
-def _sample_queries(limit: int) -> list[str]:
+def _sample_queries(limit: int, *, roles: MachineRoles) -> list[str]:
     """Frontmatter descriptions from the memory pool, newest-first, capped at
     `limit` — the short entity-bearing lines the index exists to find."""
     queries: list[str] = []
-    for _, note in walk_notes(gateway_memory_dir()):
+    for _, note in walk_notes(gateway_memory_dir(roles=roles)):
         if note.description and note.description.strip():
             queries.append(note.description.strip())
         if len(queries) >= limit:
@@ -94,15 +96,15 @@ def _connect_backends(
     return True
 
 
-def _reconcile_database(boot: ConfigBoot) -> Database:
+def _reconcile_database(boot: ConfigBoot, *, machine: MachineIdentity) -> Database:
     """Capture this standalone entry's gated database at its original dial boundary."""
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())
-    return Database(db_config_from_boot(boot), gate=gate)
+    return Database(db_config_from_boot(boot), gate=gate, local_host=machine.host)
 
 
-def main() -> int:
+def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--a", required=True, help="first backend name (e.g. numpy)")
     parser.add_argument("--b", required=True, help="second backend name (e.g. pgvector)")
@@ -113,18 +115,24 @@ def main() -> int:
         action="store_true",
         help="allow writable backend connects after typing exact 'yes' interactively",
     )
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = _arguments()
     readonly = not args.allow_write
     if args.allow_write and not _confirm_writable_connect():
         return 1
 
-    queries = _sample_queries(args.limit)
+    boot = ConfigBoot()
+    boot.read_process_environment()
+    machine = machine_from_boot(boot)
+    queries = _sample_queries(args.limit, roles=machine.role())
     if not queries:
         print("no query texts found in the memory pool", file=sys.stderr)
         return 1
     print(f"{len(queries)} sample queries, k={args.k}")
 
-    boot = ConfigBoot()
     boot.boot()
 
     def api_key() -> str | None:
@@ -137,7 +145,7 @@ def main() -> int:
         timeout_reader=lambda: boot.view.services.memory_embed_timeout_seconds,
         api_key_reader=api_key,
     )
-    database = _reconcile_database(boot)
+    database = _reconcile_database(boot, machine=machine)
     backend_a = get_backend_named(
         args.a,
         database=database,

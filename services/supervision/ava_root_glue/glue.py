@@ -13,8 +13,11 @@ from pathlib import Path
 from types import MappingProxyType
 
 from base.agents.context.clients import ClientSet
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.deploy.progress_timeout import (
     CRITICAL_SERVICE_SESSIONS,
     NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
@@ -55,14 +58,18 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
         raise RuntimeError("root cwd differs from its loaded runtime")
     context.supervisor.bind_runtime(identity, home=home)
     image = LoadedCommit.capture(Path(identity.code_root))
+    config = ConfigBoot()
+    config.boot()
+    machine = machine_from_boot(config)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="ava-root")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate)
+        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
 
     clients = ClientSet(
-        database=database, pipeline_factory=lambda: build_pipeline(database=database)
+        database=database,
+        pipeline_factory=lambda: build_pipeline(database=database, machine=machine, home=home),
     )
     registry = ProbeRegistry()
     requested = {unit.id for unit in context.registry.units}
@@ -83,8 +90,9 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
         registry,
         rounds_factory=lambda monitor: RootHealthRounds(
             monitor,
-            DiagnosticMonitor(build_diagnostics(requested, database=database)),
+            DiagnosticMonitor(build_diagnostics(requested, database=database, machine=machine)),
             clients=clients,
+            machine=machine,
             image=image,
             tasks=context.participant_tasks,
         ),

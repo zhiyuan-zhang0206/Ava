@@ -23,7 +23,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
@@ -32,6 +32,7 @@ from gateway.app import app
 from gateway.routers.configuration import runtime as config_router
 from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import ConfigWriteOpResult, FieldWriteResult
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_get_config_serializes_required_fields():
@@ -99,11 +100,12 @@ def test_config_fields_expose_capability() -> None:
     assert fields["timezone"]["capability"] == "common"
 
 
-def test_get_config_exposes_target_machine_capabilities() -> None:
+def test_get_config_exposes_target_machine_capabilities(
+    *, machine_identity: MachineIdentity
+) -> None:
     """GET self carries the gateway's own capability set (machine_role()) so the
     panel can pick which capability sections a remote view renders. Only valid
     capability tokens; the self view is a gateway, so it carries at least that."""
-    from base.cluster.machine import machine_role
 
     with TestClient(app) as client:
         resp = client.get("/api/config")
@@ -114,7 +116,7 @@ def test_get_config_exposes_target_machine_capabilities() -> None:
     # (WP1/WP2; a station-capable gateway projects its station token to the
     # panel — task #1945 WP3 verification).
     assert set(caps) <= {"gateway", "agent-runner", "observability-station"}  # pyright: ignore[reportUnknownArgumentType]
-    assert set(caps) == set(machine_role())  # pyright: ignore[reportUnknownArgumentType]
+    assert set(caps) == set(machine_identity.role())  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_enum_field_exposes_type_and_choices() -> None:
@@ -606,12 +608,14 @@ def test_put_self_edits_writable_host_capability_field(
 async def test_put_self_host_field_skips_empty_cluster_audit(
     monkeypatch: pytest.MonkeyPatch,
     config_authority: ConfigAuthority,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A host-only self PUT must not append an empty gateway cluster record."""
     from types import SimpleNamespace
 
     host_result = ConfigWriteOpResult(
-        machine=machine_name(),
+        machine=machine_identity.name(),
         results={"cross_machine_transfer_backend": FieldWriteResult(ok=True)},
         applied=True,
         restart_required=[],
@@ -635,7 +639,10 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
             state=SimpleNamespace(),
             app=SimpleNamespace(
                 state=SimpleNamespace(
-                    config_authority=config_authority, db=object(), db_pool=object()
+                    config_authority=config_authority,
+                    db=object(),
+                    db_pool=object(),
+                    machine=machine_identity,
                 )
             ),
         ),
@@ -674,7 +681,7 @@ def test_get_self_raw_overrides_exposes_writable_host_field_not_readonly(
 
 
 def test_put_explicit_self_edits_remote_writable_host_toggle(
-    _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
+    _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """On a dual-role box, `?machine=<self>` is a host view (remote_writable gate),
     NOT the Cluster view — so a gateway-capability host toggle that is
@@ -692,7 +699,7 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
         cluster_resp = client.put("/api/config", json={"heartbeat_enabled": False})
         # Explicit self host view: remote_writable=True -> accepted + written.
         host_resp = client.put(
-            f"/api/config?machine={machine_name()}", json={"heartbeat_enabled": False}
+            f"/api/config?machine={machine_identity.name()}", json={"heartbeat_enabled": False}
         )
     assert cluster_resp.status_code == 400
     assert "unknown or read-only" in cluster_resp.json()["detail"]
@@ -744,18 +751,24 @@ def test_fleet_cluster_write_goes_only_to_owned_image(_clean_overrides: Path) ->
 
 
 def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
-    *, config_authority: ConfigAuthority
+    *, config_authority: ConfigAuthority, machine_identity: MachineIdentity
 ) -> None:
     from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
     from ops.host_config import config_write_op
 
     rejected = config_write_op(
-        {"task_maintenance_enabled": False}, local=True, authority=config_authority
+        {"task_maintenance_enabled": False},
+        local=True,
+        authority=config_authority,
+        local_machine=machine_identity.name(),
     )
     assert rejected.applied is False
     accepted = config_write_op(
-        {"task_maintenance_enabled": False}, local=False, authority=config_authority
+        {"task_maintenance_enabled": False},
+        local=False,
+        authority=config_authority,
+        local_machine=machine_identity.name(),
     )
     assert accepted.applied is True
     assert (
@@ -763,7 +776,9 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
         is False
     )
     mixed = config_write_op(
-        {"task_maintenance_enabled": True, "heartbeat_enabled": False}, authority=config_authority
+        {"task_maintenance_enabled": True, "heartbeat_enabled": False},
+        authority=config_authority,
+        local_machine=machine_identity.name(),
     )
     assert mixed.applied is False
     assert "mixes owners" in str(mixed.results["task_maintenance_enabled"].reason)

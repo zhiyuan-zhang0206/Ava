@@ -30,11 +30,10 @@ import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from base.native_process.loaded_commit import LoadedCommit
-from base.cluster.machines import machine_name
 from schedules.catchup import cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
 from base.daemon.schedules.inputs import ScheduleInputs
-from schedules.entry import schedule_entry
+from schedules.entry import fresh_schedule_entry, schedule_entry
 from base.log.process import init_gateway_process
 
 
@@ -123,7 +122,12 @@ def summarize(
 
 
 def _fire(
-    slot_end: datetime, _payload: None, *, producer: Callable[[], Any], image: LoadedCommit
+    slot_end: datetime,
+    _payload: None,
+    *,
+    producer: Callable[[], Any],
+    image: LoadedCommit,
+    machine_reader: Callable[[], str],
 ) -> None:
     try:
         accounting = _load_accounting()
@@ -131,7 +135,7 @@ def _fire(
         entries = accounting.collect(accounting.DEFAULT_REPO, since, until)
         appended = accounting.append_ledger(accounting.DEFAULT_LEDGER, entries)
         init_gateway_process(
-            name=_PROCESS_NAME, producer=producer, machine_reader=machine_name, image=image
+            name=_PROCESS_NAME, producer=producer, machine_reader=machine_reader, image=image
         )
         from base import telemetry
 
@@ -158,7 +162,9 @@ def _fire(
 
 def _main_loop(*, inputs: ScheduleInputs) -> None:
     db = inputs.database()
-    fire = partial(_fire, producer=inputs.producer, image=inputs.image)
+    fire = partial(
+        _fire, producer=inputs.producer, image=inputs.image, machine_reader=inputs.machine.name
+    )
     run_daily_loop(db, CRON, cluster_timezone(), fire)
 
 
@@ -173,5 +179,5 @@ if __name__ == "__main__":
         from base.log import prepare_process_logging
 
         prepare_process_logging()
-    with schedule_entry(entry_inputs) as inputs:
+    with fresh_schedule_entry() if entry_inputs is None else schedule_entry(entry_inputs) as inputs:
         _main_loop(inputs=inputs)

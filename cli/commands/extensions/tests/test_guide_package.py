@@ -12,11 +12,12 @@ from typing import Any
 import pytest
 
 import ava.skills
-from base.config import ConfigBoot
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills
 from cli.commands.extensions.skills_sync import converge_skills
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -87,6 +88,8 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
     client: str,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     repo = _repo(tmp_path)
     host_home = tmp_path / "host"
@@ -111,9 +114,10 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         repo=repo,
         ava_home=ava_home,
         roles=None,
-        config=ConfigBoot(),
+        config=command_runtime.config,
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
     external_skills.converge_external_agent_skill(context, host_home=host_home)
     target = client_home / "skills" / "ava-guide"

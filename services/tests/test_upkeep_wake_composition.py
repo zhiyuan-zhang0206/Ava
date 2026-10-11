@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from collections.abc import Callable, Coroutine
+import os
+import time
+from collections.abc import Callable, Coroutine, Iterator
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -31,8 +33,15 @@ class _Runner:
 
 
 @pytest.fixture(params=_ENTRIES)
-def entry(request: pytest.FixtureRequest) -> ModuleType:
-    return importlib.import_module(request.param)
+def entry(request: pytest.FixtureRequest) -> Iterator[ModuleType]:
+    """Restore this entry test's environment delivery after its real ConfigBoot."""
+    try:
+        with patch.dict(os.environ):
+            yield importlib.import_module(request.param)
+    finally:
+        tzset = getattr(time, "tzset", None)
+        if tzset is not None:
+            tzset()
 
 
 def _prepare_entry(

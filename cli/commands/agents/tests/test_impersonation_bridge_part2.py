@@ -286,3 +286,42 @@ async def test_codex_relay_never_duplicates_host_owned_terminal_notice() -> None
         notify_terminal=False,
     )
     assert emitted == []
+
+
+@pytest.mark.parametrize("primary", [RuntimeError("host failure"), asyncio.CancelledError()])
+def test_listener_stop_failure_preserves_relay_primary(primary: BaseException) -> None:
+    inbox = Inbox(11)
+    cleanup = ValueError("listener cleanup invariant")
+
+    class FailingStop(Listener):
+        async def stop(self) -> tuple[str, ...]:
+            self.closed = True
+            raise cleanup
+
+    listener = FailingStop(inbox)
+
+    def fail(_message: str) -> None:
+        raise primary
+
+    with pytest.raises(type(primary)) as captured:
+        run(inbox, listener, fail)
+    assert captured.value is primary
+    assert any("listener cleanup invariant" in note for note in primary.__notes__)
+    assert listener.closed
+
+
+def test_listener_stop_failure_fails_otherwise_successful_relay() -> None:
+    inbox = Inbox()
+    inbox.active = False
+    cleanup = ValueError("listener cleanup invariant")
+
+    class FailingStop(Listener):
+        async def stop(self) -> tuple[str, ...]:
+            self.closed = True
+            raise cleanup
+
+    listener = FailingStop(inbox)
+    with pytest.raises(ValueError) as captured:
+        run(inbox, listener, lambda _message: None)
+    assert captured.value is cleanup
+    assert listener.closed

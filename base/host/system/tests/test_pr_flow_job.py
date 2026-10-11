@@ -8,8 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.host.system import cron
 from base.host.system import pr_flow_job as job
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture(autouse=True)
@@ -195,8 +197,18 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootout"]
 
 
+def _production_home(*, machine: MachineIdentity, home: Path) -> bool:
+    del machine, home
+    return True
+
+
+def _foreign_home(*, machine: MachineIdentity, home: Path) -> bool:
+    del machine, home
+    return False
+
+
 def _passing_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("base.telemetry.observability.production_identity", lambda: True)
+    monkeypatch.setattr("base.telemetry.observability.production_identity", _production_home)
     monkeypatch.setattr(job.shutil, "which", _which_gh)
     token = tmp_path / ".trunk" / "api-token"
     token.parent.mkdir(parents=True, exist_ok=True)
@@ -204,28 +216,41 @@ def _passing_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
 
 
 def test_credential_blocker_names_each_missing_piece(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr("base.telemetry.observability.production_identity", lambda: False)
-    assert job.credential_blocker() == "not the registered production home"
+    monkeypatch.setattr("base.telemetry.observability.production_identity", _foreign_home)
+    assert (
+        job.credential_blocker(machine=machine_identity, home=tmp_path)
+        == "not the registered production home"
+    )
 
-    monkeypatch.setattr("base.telemetry.observability.production_identity", lambda: True)
+    monkeypatch.setattr("base.telemetry.observability.production_identity", _production_home)
     monkeypatch.setattr(job.shutil, "which", _which_missing)
-    assert job.credential_blocker() == "gh CLI not on PATH"
+    assert job.credential_blocker(machine=machine_identity, home=tmp_path) == "gh CLI not on PATH"
 
     monkeypatch.setattr(job.shutil, "which", _which_gh)
-    assert job.credential_blocker() == f"no Trunk API token at {tmp_path}/.trunk/api-token"
+    assert (
+        job.credential_blocker(machine=machine_identity, home=tmp_path)
+        == f"no Trunk API token at {tmp_path}/.trunk/api-token"
+    )
 
     token = tmp_path / ".trunk" / "api-token"
     token.parent.mkdir(parents=True, exist_ok=True)
     token.write_text("   \n", encoding="utf-8")
-    assert "no Trunk API token" in (job.credential_blocker() or "")
+    assert "no Trunk API token" in (
+        job.credential_blocker(machine=machine_identity, home=tmp_path) or ""
+    )
 
     token.write_text("tok\n", encoding="utf-8")
-    assert job.credential_blocker() is None
+    assert job.credential_blocker(machine=machine_identity, home=tmp_path) is None
 
 
-def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_skips_when_os_jobs_are_disabled(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity, tmp_path: Path
+) -> None:
     skipped: list[str] = []
     monkeypatch.setattr(cron, "skip_os_job", skipped.append)
 
@@ -233,25 +258,33 @@ def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatc
         raise AssertionError("backend must not be touched with OS jobs off")
 
     monkeypatch.setattr("base.host.system.backend.get_backend", no_backend)
-    job.register_pr_flow_job(enabled_reader=lambda: False)
+    job.register_pr_flow_job(enabled_reader=lambda: False, machine=machine_identity, home=tmp_path)
     assert skipped == ["pr flow"]
 
 
 def test_register_skips_without_credentials(
-    default_home: Path, monkeypatch: pytest.MonkeyPatch
+    default_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr("base.telemetry.observability.production_identity", lambda: True)
+    monkeypatch.setattr("base.telemetry.observability.production_identity", _production_home)
     monkeypatch.setattr(job.shutil, "which", _which_missing)  # no gh
 
     def no_backend():
         raise AssertionError("backend must not be touched without credentials")
 
     monkeypatch.setattr("base.host.system.backend.get_backend", no_backend)
-    job.register_pr_flow_job(enabled_reader=lambda: True)
+    job.register_pr_flow_job(enabled_reader=lambda: True, machine=machine_identity, home=tmp_path)
 
 
 def test_register_delegates_when_credentials_pass(
-    default_home: Path, monkeypatch: pytest.MonkeyPatch
+    default_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
+    tmp_path: Path,
 ) -> None:
     _passing_credentials(monkeypatch, default_home)
     calls: list[str] = []
@@ -261,7 +294,7 @@ def test_register_delegates_when_credentials_pass(
     )
     monkeypatch.setattr("base.host.system.backend.get_backend", lambda: fake_backend)
 
-    job.register_pr_flow_job(enabled_reader=lambda: True)
+    job.register_pr_flow_job(enabled_reader=lambda: True, machine=machine_identity, home=tmp_path)
     assert calls == ["register"]
 
     job.unregister_pr_flow_job()

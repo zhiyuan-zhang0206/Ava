@@ -8,24 +8,28 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.incarnation.resources import IncarnationResources, ResourceBirth, decode_resources
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.plugin_providers import build_model_catalog
 from ops.agents.birth_transaction import insert_agent_birth
 from ops.agents.creation_identity import creation_request_hash
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_resource_birth_rolls_back_with_its_agent(
-    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+    db_conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id: int | None = None
     with pytest.raises(RuntimeError, match="refused"), db_conn.transaction():
         with db_conn.cursor() as cur:
             born = insert_agent_birth(
                 cur,
-                machine=machine_name(),
+                machine=machine_identity.name(),
                 catalog=build_model_catalog(),
                 authority=config_authority,
             )
@@ -45,8 +49,9 @@ async def test_real_first_admission_consumes_birth_and_replay_preserves_resource
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    machine = machine_name()
+    machine = machine_identity.name()
     digest = creation_request_hash({"machine": machine})
     with db_conn.transaction(), db_conn.cursor() as cur:
         born = insert_agent_birth(

@@ -41,6 +41,7 @@ from tests.components.services.daemon_shutdown_test_support import (
     KILL_SLACK_S,
     spawn_child,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _note_pidfile_removed(events: list[str], _path: object) -> None:
@@ -95,15 +96,15 @@ def _assert_boot_primary(exc: BaseException, failure: str) -> None:
         assert any("heartbeat defect" in note for note in exc.__notes__)
 
 
-def _exercise_shutdown(failure: str) -> None:
+def _exercise_shutdown(failure: str, home: Path) -> None:
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     database_gate = ProcessDbGate(version=version.get, process=process_name(), exempt=False)
-    _run_shutdown(failure, database_gate=database_gate)
+    _run_shutdown(failure, database_gate=database_gate, home=home)
 
 
-def _run_shutdown(failure: str, *, database_gate: ProcessDbGate) -> None:
+def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> None:
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
     from agent import graph, process_boot
 
@@ -208,6 +209,7 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate) -> None:
                     config=_shutdown_config(),
                     database=lambda: Database.from_settings(gate=database_gate),
                     machine=machine,
+                    home=home,
                 )
             )
         except (
@@ -234,6 +236,23 @@ def _assert_heartbeat_order(events: list[str], failure: str) -> None:
         assert events.index("beat_failed") < events.index("pools_closed")
 
 
+def _shutdown_child(failure: str, home: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 -- fixed test helper in this checkout
+        [
+            sys.executable,
+            "-c",
+            "from services.agent_runner.agent_host.tests.runtime.test_agent_host_shutdown import _exercise_shutdown; "
+            "from pathlib import Path; import sys; _exercise_shutdown(sys.argv[1], Path(sys.argv[2]))",
+            failure,
+            str(home),
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=30,
+    )
+
+
 @pytest.mark.parametrize(
     "failure,exception",
     [
@@ -244,20 +263,10 @@ def _assert_heartbeat_order(events: list[str], failure: str) -> None:
         ("heartbeat", "ExceptionGroup[RuntimeError]"),
     ],
 )
-def test_failed_background_still_drains_and_releases(failure: str, exception: str) -> None:
-    result = subprocess.run(  # noqa: S603 -- fixed test helper in this checkout
-        [
-            sys.executable,
-            "-c",
-            "from services.agent_runner.agent_host.tests.runtime.test_agent_host_shutdown import _exercise_shutdown; "
-            "import sys; _exercise_shutdown(sys.argv[1])",
-            failure,
-        ],
-        capture_output=True,
-        check=False,
-        text=True,
-        timeout=30,
-    )
+def test_failed_background_still_drains_and_releases(
+    failure: str, exception: str, unit_home: Path
+) -> None:
+    result = _shutdown_child(failure, unit_home)
     assert result.returncode == 0, result.stdout + result.stderr
     events = json.loads(result.stdout.splitlines()[-1])
     assert events.count("background_joined") == 1
@@ -325,7 +334,11 @@ class _UnreachablePool:
 
 
 async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachable(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A/B/A run 6: with the pooler gone, the stop path's ownership release waited
     out the control pool's 30 s acquire timeout, so ava-root's 10 s TERM window
@@ -333,12 +346,13 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
     from ... import host as host_mod
 
     monkeypatch.setattr(host_mod, "_RELEASE_OWNER_TIMEOUT_S", 0.05)
+    machine_identity.set(name="this-box")
     host = host_mod.AgentHost(
         policy=configured_policy(),
         pool=cast(Any, _UnreachablePool()),
         checkpointer=cast(Any, object()),
         graph=cast(Any, object()),
-        machine="this-box",
+        machine=machine_identity,
         catalog=model_catalog,
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
@@ -349,19 +363,8 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
     assert time.monotonic() - started < 1.0
 
 
-def test_failed_heartbeat_during_boot_still_closes_pools_and_pidfile() -> None:
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from services.agent_runner.agent_host.tests.runtime.test_agent_host_shutdown import _exercise_shutdown; "
-            "_exercise_shutdown('heartbeat_boot')",
-        ],
-        capture_output=True,
-        check=False,
-        text=True,
-        timeout=30,
-    )
+def test_failed_heartbeat_during_boot_still_closes_pools_and_pidfile(unit_home: Path) -> None:
+    result = _shutdown_child("heartbeat_boot", unit_home)
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.splitlines()[-1]) == [
         "beat_started",

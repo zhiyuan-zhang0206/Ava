@@ -9,6 +9,8 @@ import pytest
 
 from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -43,6 +45,8 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     module = _bridge_module()
     step = next(
@@ -70,6 +74,7 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
         steps=(step,),
         database_factory=operator_database,
         producer=operator_pipeline,
+        command=command_runtime,
     )
     assert not _target(home / ".codex").exists()
 
@@ -83,5 +88,6 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
         steps=(step,),
         database_factory=operator_database,
         producer=operator_pipeline,
+        command=command_runtime,
     )
     assert _target(home / ".codex").is_dir()

@@ -25,6 +25,7 @@ def request(
     thread_id: str | None = None,
     codex_remote: str | None = None,
     batch_window_seconds: int = 0,
+    local_machine: str,
 ) -> dict[str, Any]:
     """Request an automatic safe-boundary takeover; return credentials once.
 
@@ -49,6 +50,7 @@ def request(
         relay_thread_id=thread_id,
         relay_codex_remote=codex_remote,
         relay_batch_window_seconds=batch_window_seconds,
+        local_machine=local_machine,
     )
     if "relay_token" in result:
         return public_session(result) | {"relay_token": result["relay_token"]}
@@ -76,6 +78,19 @@ def list_sessions(
         return [public_session(row) for row in cur.fetchall()]
 
 
-def private_id(db: Database, agent_id: int, session_id: int) -> str:
+def private_id(
+    db: Database,
+    agent_id: int,
+    session_id: int,
+    *,
+    local_machine: str,
+) -> str:
     """Resolve one exact agent/session pair; no global integer lookup."""
-    return str(resolve(db, agent_id, session_id)["id"])
+    return str(
+        resolve(
+            db,
+            agent_id,
+            session_id,
+            local_machine=local_machine,
+        )["id"]
+    )

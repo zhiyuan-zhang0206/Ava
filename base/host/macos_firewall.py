@@ -80,6 +80,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from base.cluster.machine import MachineIdentity
 from base.host.proc import run_bounded
 
 SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
@@ -300,7 +301,7 @@ class ManifestEntry:
     the executables ALF must allow; every one is written as a glob because every
     Ava-managed path is version-stamped (`Cellar/pgbouncer/1.25.1/`,
     `runtime/pg/17.11.0/`, `uv/python/cpython-3.12.12-.../`). ``machine`` filters
-    the entry to one machine (``base.cluster.machine.machine_name``, e.g. "my-mac");
+    the entry to one machine (the supplied ``MachineIdentity.name`` reader, e.g. "my-mac");
     None applies to every macOS host. ``purpose`` is operator-facing context for
     why the binary accepts inbound traffic. The filter exists for user
     applications an operator decided to allow inbound on a specific machine —
@@ -413,16 +414,16 @@ FIREWALL_MANIFEST: tuple[ManifestEntry, ...] = (
 FIREWALL_LEGACY_FAMILY: tuple[str, ...] = ("~/Library/Android/sdk/platform-tools/adb",)
 
 
-def _machine_name() -> str:
+def _machine_name(identity: MachineIdentity) -> str:
     """This host's stable machine identifier; never raises.
 
-    ``base.cluster.machine.machine_name`` (``AVA_MACHINE_NAME``) is the
+    the supplied ``MachineIdentity.name`` reader (``AVA_MACHINE_NAME``) is the
     authoritative source. When it is unset the host is not yet a configured Ava
     unit, so fall back to the normalized ComputerName, then the bare hostname —
     a fresh machine can still be matched by an operator who names entries after
     either.
     """
-    from_ava = _ava_machine_name()
+    from_ava = _ava_machine_name(identity)
     if from_ava:
         return from_ava
     computer_name = _computer_name()
@@ -431,12 +432,12 @@ def _machine_name() -> str:
     return socket.gethostname().split(".")[0].lower()
 
 
-def _ava_machine_name() -> str | None:
+def _ava_machine_name(identity: MachineIdentity) -> str | None:
     """The configured Ava machine identifier, or None when unset/unreadable."""
-    from base.cluster.machine import MachineNameMissing, machine_name
+    from base.cluster.machine import MachineNameMissing
 
     with contextlib.suppress(ImportError, MachineNameMissing):
-        return machine_name()
+        return identity.name()
     return None
 
 
@@ -477,7 +478,7 @@ def _expand_glob(pattern: str) -> tuple[Path, ...]:
     return tuple(h for h in base.glob(rest) if h.exists())
 
 
-def manifest_paths() -> tuple[Path, ...]:
+def manifest_paths(*, machine: MachineIdentity) -> tuple[Path, ...]:
     """Every existing binary this host's manifest requires an allow rule for.
 
     Machine-filtered, glob-expanded, existence-checked, deduplicated and sorted.
@@ -485,9 +486,9 @@ def manifest_paths() -> tuple[Path, ...]:
     contributes nothing — an absent binary needs no rule and causes no popup.
     """
     seen: dict[str, Path] = {}
-    machine = _machine_name()
+    name = _machine_name(machine)
     for entry in FIREWALL_MANIFEST:
-        if entry.machine is not None and entry.machine != machine:
+        if entry.machine is not None and entry.machine != name:
             continue
         for pattern in entry.paths:
             for hit in _expand_glob(pattern):
@@ -507,14 +508,14 @@ def _manifest_rule_state(path: Path, rules: dict[str, bool]) -> str:
     return "Missing"
 
 
-def render_manifest_status(rules: dict[str, bool]) -> str:
+def render_manifest_status(rules: dict[str, bool], *, machine: MachineIdentity) -> str:
     """Render every applicable manifest entry, pattern, resolved path, and state."""
     lines: list[str] = []
     resolved_states: dict[str, str] = {}
     unmatched_patterns = 0
-    machine = _machine_name()
+    name = _machine_name(machine)
     entries = tuple(
-        entry for entry in FIREWALL_MANIFEST if entry.machine is None or entry.machine == machine
+        entry for entry in FIREWALL_MANIFEST if entry.machine is None or entry.machine == name
     )
     for entry in entries:
         entry_lines, entry_states, entry_unmatched = _render_manifest_entry(entry, rules)

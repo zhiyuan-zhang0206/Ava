@@ -9,9 +9,11 @@ from typing import Any
 import pytest
 
 from base import cluster
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db.tests.fakes import patch_database
 from cli.commands.data_plane import cluster_instance as _ci
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 from tests.factories.data_plane import cluster_record
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -100,11 +102,14 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
 
 
 def test_ordinary_start_regrants_and_checks_before_the_pooler(
-    plane: _Plane, operator_database: Callable[[], Any]
+    plane: _Plane,
+    operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
-    complete_gateway_data_plane(database_factory=operator_database)
+    complete_gateway_data_plane(database_factory=operator_database, machine=command_machine)
     assert plane.calls == [
         "start",
         "extension",
@@ -121,12 +126,15 @@ def test_ordinary_start_regrants_and_checks_before_the_pooler(
 
 
 def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(
-    plane: _Plane, operator_database: Callable[[], Any]
+    plane: _Plane,
+    operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
     plane.state["birth"] = True
-    complete_gateway_data_plane(database_factory=operator_database)
+    complete_gateway_data_plane(database_factory=operator_database, machine=command_machine)
     assert plane.calls == [
         "start",
         "extension",
@@ -147,11 +155,16 @@ def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(
 
 
 def test_release_readiness_performs_no_schema_or_grant_writes(
-    plane: _Plane, operator_database: Callable[[], Any]
+    plane: _Plane,
+    operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
-    complete_gateway_data_plane(refresh_schema=False, database_factory=operator_database)
+    complete_gateway_data_plane(
+        refresh_schema=False, database_factory=operator_database, machine=command_machine
+    )
     assert plane.calls == [
         "start",
         "invariant",
@@ -164,7 +177,11 @@ def test_release_readiness_performs_no_schema_or_grant_writes(
 
 
 def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
-    plane: _Plane, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+    plane: _Plane,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     from base.cluster import authority
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
@@ -174,7 +191,7 @@ def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
 
     monkeypatch.setattr(authority, "check_invariant", fail)
     with pytest.raises(authority.CatalogRefusedError, match="foreign grant"):
-        complete_gateway_data_plane(database_factory=operator_database)
+        complete_gateway_data_plane(database_factory=operator_database, machine=command_machine)
     assert plane.calls == ["start", "extension", "memory-vectors", "groups", "monitor"]
 
 
@@ -279,6 +296,8 @@ def test_storage_refuses_missing_credentials_before_effects(
     missing: str,
     reason: str,
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """Redis always authenticates, so an empty bearer does not excuse missing
     Redis credentials: a home born without them is refused before any native
@@ -298,6 +317,7 @@ def test_storage_refuses_missing_credentials_before_effects(
             redis_user="ava",
             **credentials,
             retained_children=retained_children,
+            machine=command_machine,
         )
 
 

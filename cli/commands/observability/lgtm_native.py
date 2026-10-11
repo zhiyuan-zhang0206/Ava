@@ -27,6 +27,7 @@ import yaml
 from dotenv import dotenv_values
 
 from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 from base.host.net.resilience import Policy, retry
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
@@ -339,6 +340,7 @@ def _render_configs(
     *,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
+    machine: MachineIdentity,
 ) -> None:
     """Render native templates from this checkout and host configuration."""
     from base.config import settings
@@ -389,7 +391,7 @@ def _render_configs(
         "PROMETHEUS_URL": prometheus_url,
         "PG_URL": pg_url,
         # run.sh sources runtime.env; URL paths must remain literal shell data.
-        "ALERTS_WEBHOOK_URL": shlex.quote(_alerts_webhook_url()),
+        "ALERTS_WEBHOOK_URL": shlex.quote(_alerts_webhook_url(machine=machine)),
         "REPO": str(repo),
         "lgtm_grafana_listen_host": settings.observability.lgtm_grafana_listen_host,
         "LGTM_LOKI_PORT": str(settings.observability.lgtm_loki_port),
@@ -476,6 +478,7 @@ def ensure_lgtm_native(
     services: frozenset[str],
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
+    machine: MachineIdentity,
 ) -> None:
     """Prepare selected pinned binaries and config; lifecycle belongs to ava-root."""
     if not services or services - set(BACKENDS):
@@ -505,7 +508,12 @@ def ensure_lgtm_native(
         _download_and_verify(name, asset["version"], asset, native_dir)
         print(f"  · lgtm native: installed {name} {asset['version']} ({tag})")
     _render_configs(
-        repo, native_dir, ava_home, database_factory=database_factory, producer=producer
+        repo,
+        native_dir,
+        ava_home,
+        database_factory=database_factory,
+        producer=producer,
+        machine=machine,
     )
     if "grafana" in services:
         _render_grafana_admin_password(native_dir)
@@ -550,4 +558,5 @@ def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
         services=selected,
         database_factory=ctx.database_factory,
         producer=ctx.producer,
+        machine=ctx.machine,
     )

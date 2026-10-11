@@ -21,7 +21,7 @@ from pathlib import Path
 
 from base import telemetry
 from base.clock import Clock, clock_config_from_boot
-from base.cluster.machine import validate_machine_name
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
@@ -33,6 +33,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import ava_home
 from base.telemetry.emitter import build_pipeline
 from services.backup.dump import _cluster_tz, is_due
 from services.backup.scheduler.operation.staging import OperationBusyError
@@ -247,19 +248,22 @@ def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     config = ConfigBoot()
+    config.boot()
+    machine = machine_from_boot(config)
+    process_home = ava_home().resolve()
     image = LoadedCommit.capture()
     assert_schema_current(settings.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="pg_backup")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate)
+        return Database.from_settings(gate=gate, local_host=machine.host)
 
-    pipeline = build_pipeline(database=database)
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
         name="pg_backup",
         producer=lambda: pipeline,
-        machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+        machine_reader=machine.name,
         image=image,
     )
     install_graceful_shutdown("pg_backup")

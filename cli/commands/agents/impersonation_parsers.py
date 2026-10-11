@@ -83,7 +83,7 @@ def _h_impersonate_relay(args: argparse.Namespace) -> int:
     if problem is not None:
         print(f"ava: {problem}", file=sys.stderr)
         return 2
-    return cmd_relay(args, database_factory=args.database_factory)
+    return cmd_relay(args, database_factory=args.database_factory, machine=args.runtime.machine)
 
 
 def _add_send_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

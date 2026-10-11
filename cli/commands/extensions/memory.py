@@ -17,7 +17,7 @@ from typing import TypedDict, cast
 
 import httpx
 
-from base.cluster.machine import gateway_api_base, gateway_auth_headers
+from base.cluster.machine import MachineIdentity, gateway_api_base, gateway_auth_headers
 from base.deploy.git.memory_repo import MemoryBranchMismatch
 from base.host.net.http_dial import post as dial_post
 
@@ -33,7 +33,7 @@ class _MemorySearchResult(TypedDict):
     score: float
 
 
-def cmd_memory_init() -> int:
+def cmd_memory_init(*, machine: MachineIdentity) -> int:
     """Explicitly initialize enabled plugin-owned memory resources.
 
     Memory repository branch validation belongs to this operator-requested
@@ -43,7 +43,7 @@ def cmd_memory_init() -> int:
 
     print("initializing memory resources...")
     try:
-        result = run_plugin_scaffolds()
+        result = run_plugin_scaffolds(machine=machine)
     except MemoryBranchMismatch as exc:
         print(f"  ✗ {exc}", file=sys.stderr)
         return 1

@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import psycopg
 
 from base.api_contracts.status import SchemaMismatchKind, SchemaMismatchStatus
-from base.cluster.machine import machine_name
 from base.db import Database
 from base.deploy.schema.migration_errors import MigrationLayoutError
 from base.deploy.schema.migration_layout import required_migration_set
@@ -64,9 +63,11 @@ def detect(db: Database, *, conn: psycopg.Connection | None = None) -> Mismatch 
     return classify(applied, required)
 
 
-def status(db: Database, *, conn: psycopg.Connection | None = None) -> SchemaMismatchStatus | None:
+def status(
+    db: Database, *, conn: psycopg.Connection | None = None, local_machine: str
+) -> SchemaMismatchStatus | None:
     """Current diagnosis; return None only after both migration sets were read and match."""
     mismatch = detect(db) if conn is None else detect(db, conn=conn)
     if mismatch is None:
         return None
-    return SchemaMismatchStatus(kind=mismatch.kind, machine=machine_name(), detail=mismatch.detail)
+    return SchemaMismatchStatus(kind=mismatch.kind, machine=local_machine, detail=mismatch.detail)

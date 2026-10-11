@@ -198,7 +198,10 @@ def test_failed_context_entry_detaches_and_allows_next_attachment(
 
     next_lease = {**lease, "id": "next", "status": "active", "delta_version": 0}
 
-    def require_next(_db: Database, lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+    def require_next(
+        _db: Database, lease_id: str, attesting: dict[str, Any], *, local_machine: str
+    ) -> dict[str, Any]:
+        assert local_machine == next_lease["machine"]
         assert lease_id == "next"
         assert attesting == {"pid": 777}
         return next_lease
@@ -219,11 +222,13 @@ def test_concurrent_constructor_fails_before_lease_lookup(
     first_lookup = Event()
     continue_lookup = Event()
 
-    def blocked_require(db: Database, lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+    def blocked_require(
+        db: Database, lease_id: str, attesting: dict[str, Any], *, local_machine: str
+    ) -> dict[str, Any]:
         if next(calls) == 0:
             first_lookup.set()
             assert continue_lookup.wait(5), "test did not release the first lease lookup"
-        return require(db, lease_id, attesting)
+        return require(db, lease_id, attesting, local_machine=local_machine)
 
     def attach_in_worker() -> None:
         with external.attach("lease"):
@@ -393,6 +398,8 @@ def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
 ) -> None:
     """A closing attachment waits for the OTLP worker's already-dequeued tail."""
     release, exporter = paused_otlp_record
+    # Bind the dequeued record to the client owner whose close performs delivery.
+    ava.context.clients.event_pipeline()
     attachment = external.attach("lease")
     timer = Timer(0.1, release.set)
     timer.daemon = True
@@ -422,9 +429,18 @@ def test_receipted_journal_entries_are_not_replayed(
 
 def test_attach_rejects_other_machine_without_binding_identity(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lease, _, _ = attached_runtime
     lease["machine"] = "another-runner"
+
+    def foreign_lease(
+        _db: Database, _lease_id: str, _attesting: dict[str, Any], *, local_machine: str
+    ) -> dict[str, Any]:
+        assert local_machine == "local-runner"
+        return dict(lease)
+
+    monkeypatch.setattr(external.control, "require_active", foreign_lease)
     with pytest.raises(RuntimeError, match="agent machine"):
         external.attach("lease")
     assert _borrowed_agent_id() is None

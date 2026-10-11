@@ -26,6 +26,7 @@ import psutil
 import pytest
 
 import cli.commands.lifecycle.root_driver as _root_driver_commands
+from base.cluster.machine import MachineIdentity
 from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.native_process import pid_starttime_ticks
@@ -174,11 +175,24 @@ def drained() -> None:
     )
 
 
-def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+def dependencies(monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity) -> None:
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    monkeypatch.setattr(command, "pause_agents", lambda _db, _bus, _timeout, **_kw: drained())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(command, "machine_role", lambda: frozenset({"agent-runner"}))
+
+    def pause(
+        _db: object,
+        _bus: object,
+        _timeout: float,
+        *,
+        driver: object,
+        local_machine: MachineIdentity,
+    ) -> None:
+        del _db, _bus, _timeout, driver
+        assert local_machine is machine
+        drained()
+
+    monkeypatch.setattr(command, "pause_agents", pause)
+    machine.set(role="agent-runner")
     monkeypatch.setattr(
         command,
         "build_services",
@@ -190,7 +204,11 @@ def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(command, "ops_quiescent", lambda _timeout: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("base.host.proc.hosting_supervised_session", lambda: None)
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", lambda _db, _value: None)  # pyright: ignore[reportUnknownArgumentType]
+
+    def set_posture(_db: object, _value: str, *, machine: str) -> None:
+        del _db, _value, machine
+
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", set_posture)
 
 
 def record_root_stops(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
@@ -235,7 +253,11 @@ def stop_env(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     monkeypatch.setenv("HOME", str(home))
     for hook in ("stop_permissions_helper",):
         monkeypatch.setattr(f"cli.commands.lifecycle._stop_extras.{hook}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("cli.commands.lifecycle.stop._announce_stopping", lambda: None)
+
+    def announce(*, machine: MachineIdentity) -> None:
+        del machine
+
+    monkeypatch.setattr("cli.commands.lifecycle.stop._announce_stopping", announce)
 
 
 def busy_session(

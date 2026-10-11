@@ -15,21 +15,23 @@ from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_sn
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import (
     _await_status,
-    _committed_publishes,
     _set_agent_status,
+    committed_publishes,
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from agent.tests.claim.claim_support import (
     _await_inbound_visible,
-    _config,
-    _insert_inbound_kind,
-    _make_runtime,
+    insert_inbound_kind,
+    make_runtime,
+    thread_config,
 )
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -40,19 +42,23 @@ async def test_claim_restart_completed_kind_appends_marker_and_continues(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Historical restart_completed inbound → claim appends
     lifecycle marker 'You have been restarted by {source}' + goto BEFORE_LLM.
     halted=False (mid-task before restart) → wakes up to resume interrupted work."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
+    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -74,11 +80,15 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """system_note inbound (task assign/update/reminder delivery) → claim appends
     a system note (NoteTag 'task') + goto BEFORE_LLM — never a chat peer message."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -97,8 +107,8 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -126,10 +136,14 @@ async def test_claim_co_batched_task_notes_preserve_task_links(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Co-batched task notes retain their independent timeline links."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     with db_conn.cursor() as cur:
         cur.executemany(
@@ -144,8 +158,8 @@ async def test_claim_co_batched_task_notes_preserve_task_links(
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -163,11 +177,15 @@ async def test_claim_system_note_unknown_tag_fails_loud(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """A system_note inbound carrying a non-NoteTag payload fails loud — a
     writer bug must not silently render as the wrong timeline chip."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -180,8 +198,8 @@ async def test_claim_system_note_unknown_tag_fails_loud(
     with pytest.raises(ValueError, match="not a NoteTag value"):
         await claim_node(
             AgentState(messages=[SystemMessage(content="sys")]),
-            _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-            _config(
+            make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+            thread_config(
                 tid,
             ),
         )
@@ -193,17 +211,18 @@ async def test_claim_restart_while_idle_commits_halted_true(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """external restart hits idle agent (halted=True) → committed halted=True,
     carrying 'no in-flight work before restart' across the restart boundary for the new process to read."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    _insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
+    insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -220,18 +239,19 @@ async def test_claim_restart_self_source_commits_halted_false(
     source: str,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """agent-initiated restart (ava.self.restart) → even if the exec path
     set halted to True (turn-end semantics), committed halted must be False — agent has in-flight
     intent, must wake after restart to confirm result and continue."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    _insert_inbound_kind(db_conn, tid, "", "restart", source=source)
+    insert_inbound_kind(db_conn, tid, "", "restart", source=source)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -246,6 +266,7 @@ async def test_claim_restart_system_update_after_self_update_wakes(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """update_initiated=True in state (historical checkpoint from the removed
     self:update path) + the rollout quiesce system:update restart → committed
@@ -253,12 +274,12 @@ async def test_claim_restart_system_update_after_self_update_wakes(
     silently idle."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    _insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
+    insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, update_initiated=True),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -275,17 +296,18 @@ async def test_claim_restart_preserves_chat_for_successor(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Only the accepted lifecycle command dispatches; chat remains durable pending work."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
-    _insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
+    insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -310,20 +332,21 @@ async def test_claim_second_restart_batched_with_restart_completed_exits_again(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """boot batch [restart_completed, restart] (user clicked restart again within the restart window) →
     the second restart wins over wake: after committing marker, exits again via restart, idle preserved
     (external + halted=True) → second restart remains silent."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
-    restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
+    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
+    restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -349,19 +372,23 @@ async def test_claim_restart_completed_while_idle_stays_silent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """halted=True (idle before restart, preserved from RESTART case) + batch has only
     restart_completed → after committing lifecycle marker, goto CLAIM returns to waiting,
     does **not** enter before_llm — idle agent does not burn an LLM call for 'knowing I was restarted'."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
+    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -385,21 +412,25 @@ async def test_claim_restart_completed_with_chat_cobatch_wakes(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """halted=True but batch has chat in addition to restart_completed (user message that arrived
     during agent downtime window) → wakes normally to before_llm, must not silently swallow the chat."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
+    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
     insert_inbound_message(
         db_conn, tid, "are you back?", source="user", bus=event_bus, database=database
     )
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -419,22 +450,23 @@ async def test_claim_restart_kind_does_not_publish_committed(
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """restart kind does not publish InboundCommitted (appends no message and no chat
     inbound id enters committed list)."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
+    insert_inbound_kind(db_conn, tid, "", "restart", source="user")
 
     pub = MagicMock()
     await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
-    assert _committed_publishes(pub) == []
+    assert committed_publishes(pub) == []
 
 
 async def test_claim_restart_completed_with_payload_overlay_preserves_args(
@@ -444,6 +476,7 @@ async def test_claim_restart_completed_with_payload_overlay_preserves_args(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """restart_completed inbound contains payload → claim passes both source + payload arguments
     to _render_restart_completed_marker; source determines the marker wording, payload determines
@@ -452,7 +485,10 @@ async def test_claim_restart_completed_with_payload_overlay_preserves_args(
     Lock down mutation that replaces source / payload args with None or skips them: losing source
     misses the 'restarted by' wording, losing payload misses overlay diff segment."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -465,8 +501,8 @@ async def test_claim_restart_completed_with_payload_overlay_preserves_args(
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -487,18 +523,19 @@ async def test_claim_restart_self_source_sets_update_initiated(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """self source RESTART → update_initiated stays True, writing 'this agent
     is in an update session' into Checkpoint (historical: only the removed
     self:update path set it; self.restart preserves whatever was there)."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    _insert_inbound_kind(db_conn, tid, "", "restart", source="self")
+    insert_inbound_kind(db_conn, tid, "", "restart", source="self")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -514,19 +551,23 @@ async def test_claim_restart_completed_system_update_clears_update_initiated(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """system:update RESTART_COMPLETED with current update_initiated=True → return
     update_initiated becomes False, update session ends."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     _set_agent_status(db_conn, tid, "running")
-    _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
+    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], update_initiated=True),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -542,18 +583,22 @@ async def test_claim_restart_completed_non_system_update_preserves_update_initia
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """non-system:update RESTART_COMPLETED → update_initiated unchanged, flag not cleared."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     _set_agent_status(db_conn, tid, "running")
-    _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="self")
+    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="self")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], update_initiated=True),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )

@@ -25,6 +25,7 @@ from agent.graph.claim._chat_inbound import build_chat_inbound
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.agents.messages.envelope import EnvelopeReadInputs
 from base.clock import Clock
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
@@ -33,6 +34,7 @@ from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.unit.gateway_auth import without_credentials
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _ENVELOPE_INPUTS = EnvelopeReadInputs(Clock.from_settings, lambda: False)
 _SECRET = "external-agent-source-secret"  # noqa: S105 -- isolated test credential
@@ -61,7 +63,9 @@ async def _admit(
 
 
 @contextlib.contextmanager
-def authenticated_gateway(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
+def authenticated_gateway(
+    monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity
+) -> Generator[TestClient]:
     """The CLI's `send` posts through a real gateway app with the cluster credential on."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _SECRET)
     monkeypatch.setattr(
@@ -71,7 +75,7 @@ def authenticated_gateway(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClie
         "base.cluster.machine.gateway_auth_headers",
         Mock(return_value={"Authorization": f"Bearer {_SECRET}"}),
     )
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine) as client:
 
         def post(url: str, **kwargs: Any) -> httpx2.Response:
             return client.post(url, **kwargs)
@@ -103,9 +107,11 @@ async def test_cli_send_as_user_reaches_the_agent_as_a_plain_user_message(
     aops_pool: AsyncConnectionPool,
     database: Database,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(db_conn, aops_pool, database)
-    with authenticated_gateway(monkeypatch):
+    with authenticated_gateway(monkeypatch, machine=machine_identity):
         assert cmd_agents_send(incarnation.agent_id, "run the checks", "user") == 0
     source, content, payload = await _claimed_text(aops_pool, incarnation)
     assert source == "user"
@@ -119,9 +125,11 @@ async def test_cli_send_as_external_agent_reaches_the_agent_as_that_agent(
     aops_pool: AsyncConnectionPool,
     database: Database,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(db_conn, aops_pool, database)
-    with authenticated_gateway(monkeypatch):
+    with authenticated_gateway(monkeypatch, machine=machine_identity):
         assert cmd_agents_send(incarnation.agent_id, "I finished the refactor", _EXTERNAL) == 0
     source, content, payload = await _claimed_text(aops_pool, incarnation)
     assert source == _EXTERNAL
@@ -138,10 +146,12 @@ async def test_external_agent_message_is_listed_with_its_source_for_the_timeline
     aops_pool: AsyncConnectionPool,
     database: Database,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The UI shows the sender from the inbound's `source`, so the row must carry it."""
     incarnation = await _admit(db_conn, aops_pool, database)
-    with authenticated_gateway(monkeypatch):
+    with authenticated_gateway(monkeypatch, machine=machine_identity):
         assert cmd_agents_send(incarnation.agent_id, "hello", _EXTERNAL) == 0
     row = db_conn.execute(
         "SELECT source, kind, source_verified_by, source_transport FROM inbound_messages "
@@ -162,7 +172,11 @@ async def test_external_agent_message_is_listed_with_its_source_for_the_timeline
     ],
 )
 def test_gateway_rejects_a_malformed_declaration_before_any_insert(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, source: str
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(
@@ -171,7 +185,7 @@ def test_gateway_rejects_a_malformed_declaration_before_any_insert(
         (agent_id,),
     )
     db_conn.commit()
-    with authenticated_gateway(monkeypatch) as client:
+    with authenticated_gateway(monkeypatch, machine=machine_identity) as client:
         response = client.post(
             f"/api/agents/{agent_id}/messages",
             headers={"Authorization": f"Bearer {_SECRET}"},
@@ -188,10 +202,12 @@ async def test_an_unauthenticated_external_agent_declaration_is_refused(
     aops_pool: AsyncConnectionPool,
     database: Database,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Declaring an identity is not a credential: the gateway check still applies."""
     incarnation = await _admit(db_conn, aops_pool, database)
-    with authenticated_gateway(monkeypatch) as client:
+    with authenticated_gateway(monkeypatch, machine=machine_identity) as client:
         response = without_credentials(client).post(
             f"/api/agents/{incarnation.agent_id}/messages",
             json={"content": "hello", "source": _EXTERNAL},

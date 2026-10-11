@@ -7,6 +7,7 @@ import pytest
 
 import ava
 from ava.agents import AgentNotFound
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from gateway.tests.agents.sdk_support import (
@@ -14,6 +15,7 @@ from gateway.tests.agents.sdk_support import (
 )
 from gateway.tests.agents.sdk_support import spawn_agent
 from tests.fixtures.pin_agent import pin_agent
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestSendSystemNote:
@@ -23,10 +25,17 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """send_system_note posts a kind='system_note' inbound (agent source +
         task note tag) — never a peer chat row."""
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         inbound_id = ava.agents.send_system_note(
@@ -55,8 +64,15 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute(
@@ -88,11 +104,18 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A note with resurrect=True (task assignment) reaches a terminated
         agent — auto-resurrect is the gateway delivery detail, the SDK just
         posts the note and returns its id."""
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
@@ -113,10 +136,17 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Same trailing-comma class as send_message — a one-element tuple
         unwraps to the note text instead of 422ing the gateway."""
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         # Runtime value of `("Task #1 is now " "assigned to you.",)`: implicit
@@ -136,9 +166,16 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A multi-element tuple is a coding mistake — TypeError, never joined."""
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         content: object = ("Task #1 is now ", "assigned to you.")
@@ -151,7 +188,14 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         with pytest.raises(AgentNotFound):
             ava.agents.send_system_note(9999, "ghost", idempotency_key=str(uuid4()))

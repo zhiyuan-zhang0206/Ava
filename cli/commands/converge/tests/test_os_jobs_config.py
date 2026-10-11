@@ -6,6 +6,8 @@ from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
 from base.telemetry import EventPipeline
@@ -19,6 +21,8 @@ from cli.commands.converge._os_jobs import (
     ensure_walg_job,
 )
 from cli.commands.converge.spec import ConvergeCtx, ConvergeStep
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -28,6 +32,8 @@ def test_converge_constructs_one_lazy_owner_per_operation(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     observed: list[ConvergeCtx] = []
 
@@ -45,11 +51,12 @@ def test_converge_constructs_one_lazy_owner_per_operation(
             steps=steps,
             database_factory=operator_database,
             producer=operator_pipeline,
+            command=command_runtime,
         )
     assert observed[0] is observed[1]
     assert observed[2] is observed[3]
-    assert observed[0].config is not observed[2].config
-    assert not observed[0].config.prepared and not observed[2].config.prepared
+    assert observed[0].config is observed[2].config is command_runtime.config
+    assert observed[0].machine is observed[2].machine is command_runtime.machine
 
 
 def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
@@ -74,6 +81,7 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
         config=owner,
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=machine_from_boot(owner),
     )
     readers: list[Callable[[], bool]] = []
     ticks: list[Callable[[], int]] = []
@@ -103,7 +111,14 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
     monkeypatch.setattr(cron, "register_os_cron", register)
     monkeypatch.setattr(autostart, "register_autostart", register)
     monkeypatch.setattr(logs_job, "register_logs_job", register)
-    monkeypatch.setattr(pr_flow_job, "register_pr_flow_job", register)
+
+    def register_pr_flow(
+        *, enabled_reader: Callable[[], bool], machine: MachineIdentity, home: Path
+    ) -> None:
+        assert machine is ctx.machine and home == ctx.ava_home
+        register(enabled_reader=enabled_reader)
+
+    monkeypatch.setattr(pr_flow_job, "register_pr_flow_job", register_pr_flow)
     monkeypatch.setattr(packages_job, "register_packages_job", register_packages)
     monkeypatch.setattr(walg_job, "register_walg_job", register_walg)
     monkeypatch.setattr(walg_job, "unregister_walg_job", lambda: removed.append(True))
@@ -159,6 +174,7 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
         config=owner,
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=machine_from_boot(owner),
     )
     monkeypatch.setattr(
         backend,

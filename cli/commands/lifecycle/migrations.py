@@ -8,6 +8,7 @@ their own entry points.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import psycopg
@@ -15,7 +16,9 @@ import psycopg
 from base.agents.context.clients import DatabaseFactory
 
 
-def cmd_migrations_apply(*, database_factory: DatabaseFactory) -> list[str]:
+def cmd_migrations_apply(
+    *, database_factory: DatabaseFactory, machine_name: Callable[[], str]
+) -> list[str]:
     """Apply Ava migrations and verify checkpoint schema; `ava start` step 2.5.
 
     Ava SQL files run on every host (a runner normally has nothing pending and
@@ -54,7 +57,7 @@ def cmd_migrations_apply(*, database_factory: DatabaseFactory) -> list[str]:
     if settings.data_plane.is_remote:
         # A remote-managed plane's provider URL is its only authority.
         with database_factory().connect(direct=True, unbounded=True) as conn:
-            done = _apply(conn)
+            done = _apply(conn, machine_name=machine_name)
         cluster.assert_checkpoint_schema_current(database_factory().direct_url())
     else:
         # A locally owned plane migrates as the administrator acting as the
@@ -62,7 +65,7 @@ def cmd_migrations_apply(*, database_factory: DatabaseFactory) -> list[str]:
         # the owner's own login is never used.
         authority = pg_admin.local_owner_authority()
         with authority.session() as conn:
-            done = _apply(conn)
+            done = _apply(conn, machine_name=machine_name)
         cluster.assert_checkpoint_schema_current(
             authority.conninfo, expected_data_dir=authority.data_dir
         )
@@ -70,7 +73,7 @@ def cmd_migrations_apply(*, database_factory: DatabaseFactory) -> list[str]:
     return done
 
 
-def _apply(conn: psycopg.Connection[Any]) -> list[str]:
+def _apply(conn: psycopg.Connection[Any], *, machine_name: Callable[[], str]) -> list[str]:
     from base.deploy.schema.migrations import apply_pending_migrations
 
-    return apply_pending_migrations(conn)
+    return apply_pending_migrations(conn, machine_name=machine_name)

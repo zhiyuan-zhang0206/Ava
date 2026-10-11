@@ -15,10 +15,13 @@ from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.mcp import cmd_mcp_install, cmd_mcp_upgrade
 from cli.commands.extensions.plugins import cmd_plugins_install
 from cli.commands.extensions.skill import cmd_skill_install
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 # Every test here installs a package, which records `local:<machine>` provenance
@@ -215,11 +218,18 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     (pkg / "ava-plugin.json").write_text('{"apiVersion": 99}', encoding="utf-8")
-    assert cmd_plugins_install(_git_repo(pkg), None, None, database_factory=operator_database) == 1
+    assert (
+        cmd_plugins_install(
+            _git_repo(pkg), None, None, database_factory=operator_database, machine=command_machine
+        )
+        == 1
+    )
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "apiVersion" in err
     assert "unrecognized package" not in err  # the gate runs first
@@ -231,13 +241,20 @@ def test_plugins_install_accepts_manifest_with_valid_engines(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """A valid manifest alone does not make an otherwise-unrecognized package
     installable — the legacy detection still decides the payload kind."""
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     _write_manifest(pkg, dict(GOOD_MANIFEST, name="pkg"))
-    assert cmd_plugins_install(_git_repo(pkg), None, None, database_factory=operator_database) == 1
+    assert (
+        cmd_plugins_install(
+            _git_repo(pkg), None, None, database_factory=operator_database, machine=command_machine
+        )
+        == 1
+    )
     assert "unrecognized package" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -246,18 +263,33 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     pkg = tmp_path / "skills-src"
     pkg.mkdir()
     (pkg / "ava-plugin.json").write_text('{"apiVersion": 2, "name": "x"}', encoding="utf-8")
-    assert cmd_skill_install(str(pkg), None, None, database_factory=operator_database) == 1
+    assert (
+        cmd_skill_install(
+            str(pkg),
+            None,
+            None,
+            database_factory=operator_database,
+            machine=command_machine,
+        )
+        == 1
+    )
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "engines (or requires_commit) is required" in err
     assert reg.get("x") is None
 
 
 def test_skill_install_valid_manifest_proceeds(
-    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+    unit_home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     pkg = tmp_path / "skills-src"
     pkg.mkdir()
@@ -265,5 +297,14 @@ def test_skill_install_valid_manifest_proceeds(
     (pkg / "SKILL.md").write_text(
         "---\nname: greet\ndescription: greets\n---\n\n# greet\n", encoding="utf-8"
     )
-    assert cmd_skill_install(str(pkg), None, None, database_factory=operator_database) == 0
+    assert (
+        cmd_skill_install(
+            str(pkg),
+            None,
+            None,
+            database_factory=operator_database,
+            machine=command_machine,
+        )
+        == 0
+    )
     assert reg.get("greet") is not None

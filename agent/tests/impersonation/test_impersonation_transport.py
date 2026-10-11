@@ -13,8 +13,9 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
-from agent import impersonation
+from agent import impersonation, impersonation_process
 from base.agents.observation.relay_supervision import relay_exited
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.native_process.ownership import OwnedProcess
 
@@ -109,7 +110,7 @@ def test_spawn_never_releases_private_token_before_birth_registration(
         children.append(child)
         return child
 
-    monkeypatch.setattr(impersonation.subprocess, "Popen", spawn)
+    monkeypatch.setattr(impersonation_process.subprocess, "Popen", spawn)
     identities: list[OwnedProcess] = []
 
     def register(child: subprocess.Popen[bytes]) -> None:
@@ -120,12 +121,12 @@ def test_spawn_never_releases_private_token_before_birth_registration(
 
     if registration_fails:
         with pytest.raises(RuntimeError, match="DB disconnected"):
-            impersonation._spawn_codex_relay(
+            impersonation_process.spawn_codex_relay(
                 1, "lease", "private-test-token", "thread", None, register=register
             )
         assert not marker.exists()
     else:
-        child = impersonation._spawn_codex_relay(
+        child = impersonation_process.spawn_codex_relay(
             1, "lease", "private-test-token", "thread", None, register=register
         )
         child.wait(timeout=5)
@@ -148,6 +149,7 @@ def recovery_lease(
     monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> Any:
     import tempfile
     from uuid import uuid4
@@ -155,7 +157,6 @@ def recovery_lease(
     from base.agents import impersonation as leases
     from base.agents.impersonation.tests.test_host_transport import FakeAppServer
     from base.agents.messages.caller_identity import CallerIdentity
-    from base.cluster.machine import machine_name
     from base.db import create_agent
     from base.db.test_db_guard import assert_test_db_url
     from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -168,7 +169,7 @@ def recovery_lease(
     config_authority.env_path.write_text(
         f"AVA_DB_URL={url}\n"
         f"AVA_REDIS_URL={config_authority.runtime.data_plane.redis_url}\n"
-        f"AVA_MACHINE_NAME={machine_name()}\n",
+        f"AVA_MACHINE_NAME={machine_identity.name()}\n",
         encoding="utf-8",
     )
 
@@ -185,7 +186,7 @@ def recovery_lease(
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,runtime_kind,lease_expires_at) "
         "VALUES(%s,'idling',%s,%s,%s,'process',clock_timestamp()+interval '1 hour')",
-        (aid, machine_name(), owner.generation, owner.owner),
+        (aid, machine_identity.name(), owner.generation, owner.owner),
     )
     db_conn.commit()
     with tempfile.TemporaryDirectory(prefix="cxre-", dir="/tmp") as directory:
@@ -205,8 +206,17 @@ def recovery_lease(
                 relay_codex_remote=f"unix://{socket}",
                 process_metadata=recorded_tree(),
                 authority=config_authority,
+                local_machine=machine_identity.name(),
             )
-            leases.accept(database, event_bus, session["id"], aid, owner, "Continue pending work")
+            leases.accept(
+                database,
+                event_bus,
+                session["id"],
+                aid,
+                owner,
+                "Continue pending work",
+                local_machine=machine_identity.name(),
+            )
             leases.activate(database, event_bus, session["id"], owner)
             yield session, owner
         finally:
@@ -219,6 +229,8 @@ async def test_confirmed_child_death_recovers_same_lease_after_db_disconnect(
     event_bus: Any,
     monkeypatch: pytest.MonkeyPatch,
     recovery_lease: Any,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     import asyncio
     from datetime import UTC, datetime, timedelta
@@ -254,19 +266,39 @@ async def test_confirmed_child_death_recovers_same_lease_after_db_disconnect(
     )
     with pytest.raises(psycopg.errors.ConnectionTimeout):
         await impersonation.supervise_relay(
-            database, event_bus, current, owner.agent_id, relays, incarnation=owner
+            database,
+            event_bus,
+            current,
+            owner.agent_id,
+            relays,
+            incarnation=owner,
+            read_local_machine=machine_identity.name,
         )
     assert (
-        leases.get(database, event_bus, session["id"], attested_caller(session))["status"]
+        leases.get(
+            database,
+            event_bus,
+            session["id"],
+            attested_caller(
+                session,
+            ),
+            local_machine=machine_identity.name(),
+        )["status"]
         == "active"
     )
     monkeypatch.setattr(leases, "provision_relay", original)
-    spawn = Mock(wraps=impersonation._spawn_codex_relay)
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    spawn = Mock(wraps=impersonation_process.spawn_codex_relay)
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     await asyncio.gather(
         *(
             impersonation.supervise_relay(
-                database, event_bus, current, owner.agent_id, relays, incarnation=owner
+                database,
+                event_bus,
+                current,
+                owner.agent_id,
+                relays,
+                incarnation=owner,
+                read_local_machine=machine_identity.name,
             )
             for _ in range(2)
         )
@@ -275,7 +307,15 @@ async def test_confirmed_child_death_recovers_same_lease_after_db_disconnect(
     child = relays.children[owner.agent_id]
     deadline = datetime.now(UTC) + timedelta(seconds=10)
     try:
-        live = leases.get(database, event_bus, session["id"], attested_caller(session))
+        live = leases.get(
+            database,
+            event_bus,
+            session["id"],
+            attested_caller(
+                session,
+            ),
+            local_machine=machine_identity.name(),
+        )
         while datetime.now(UTC) < deadline and live["relay_heartbeat_at"] is None:
             await asyncio.sleep(0.05)
             live = leases.native_status(database, event_bus, owner.agent_id, owner)
@@ -285,6 +325,8 @@ async def test_confirmed_child_death_recovers_same_lease_after_db_disconnect(
         assert live["relay_identity"]["pid"] == child.process.pid
         assert live["expires_at"] == expires_at
         with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
-            leases.relay_heartbeat(database, session["id"], "old-private")
+            leases.relay_heartbeat(
+                database, session["id"], "old-private", local_machine=machine_identity.name()
+            )
     finally:
         impersonation._terminate_relay(child)

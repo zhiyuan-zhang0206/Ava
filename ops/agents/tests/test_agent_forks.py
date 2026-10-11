@@ -7,6 +7,7 @@ triggers, and caller fences. Host wake publication follows committed state.
 from __future__ import annotations
 
 from collections.abc import Generator
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -15,6 +16,7 @@ import pytest
 import base.db
 from base import telemetry
 from base.agents import ForkCheckpointNotFound
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -29,14 +31,23 @@ from ops.agents.tests.test_agents_internals import (
     _insert_checkpoint,
     _spawn_agent,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
-def fork_events(database_gate: ProcessDbGate) -> Generator[telemetry.EventPipeline]:
+def fork_events(
+    database_gate: ProcessDbGate, machine_identity: MachineIdentity, unit_home: Path
+) -> Generator[telemetry.EventPipeline]:
     """Retain the actual writer only for fork event delivery contracts."""
-    pipeline = telemetry.build_pipeline(database=lambda: Database.from_settings(gate=database_gate))
+    pipeline = telemetry.build_pipeline(
+        database=lambda: Database.from_settings(gate=database_gate),
+        machine=machine_identity,
+        home=unit_home,
+    )
     try:
-        telemetry.init_telemetry(process="fork-tests", pipeline=pipeline)
+        telemetry.init_telemetry(
+            process="fork-tests", pipeline=pipeline, machine_reader=machine_identity.name
+        )
         yield pipeline
     finally:
         assert pipeline.stop(timeout=2).status is telemetry.DrainStatus.COMPLETED
@@ -51,6 +62,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """With no compaction boundary in the chain, fork copies target ckpt + all ancestors
         (recursively via parent_checkpoint_id), so the new agent sees the full history."""
@@ -58,6 +70,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         # construct chain: a (root) → b → c
         _insert_checkpoint(db_conn, source, "a-ckpt", parent_id=None)
@@ -70,6 +83,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         # new agent gets all three a/b/c
@@ -85,6 +99,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """fork at b → new agent only gets a + b, not c (checkpoints after b).
         Verify the semantic: "fork cuts the state before the fork point"."""
@@ -92,6 +107,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "a", parent_id=None)
         _insert_checkpoint(db_conn, source, "b", parent_id="a")
@@ -103,6 +119,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         assert sorted(_checkpoint_ids(db_conn, new_id)) == ["a", "b"]
@@ -115,12 +132,14 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """fork_source_agent_id + fork_source_checkpoint_id are written to the agents row."""
         source = _spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "x")
 
@@ -130,6 +149,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         with db_conn.cursor() as cur:
@@ -148,6 +168,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A blob the copied checkpoints reference through channel_versions is copied —
         the actual message data lives in blobs."""
@@ -155,6 +176,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "ck", channel_versions={"messages": "1"})
         _insert_blob(db_conn, source, "messages", "1", b"\xde\xad\xbe\xef")
@@ -165,6 +187,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         assert _blob_rows(db_conn, new_id) == [("messages", "1", b"\xde\xad\xbe\xef")]
@@ -177,6 +200,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Superseded blob versions are left behind: PostgresSaver reads blobs only through
         the copied checkpoints' channel_versions, so an unreferenced version is unreachable."""
@@ -184,6 +208,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "ck", channel_versions={"messages": "2"})
         _insert_blob(db_conn, source, "messages", "1", b"\x01stale")
@@ -195,6 +220,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         assert _blob_rows(db_conn, new_id) == [("messages", "2", b"\x02live")]
@@ -207,6 +233,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A fork above a boundary copies down to (and including) it and stops: its ancestors
         stay behind, so the copy stays bounded by the fork point's segment window."""
@@ -214,6 +241,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "a", parent_id=None)
         _insert_checkpoint(db_conn, source, "b", parent_id="a", compact_boundary=True)
@@ -225,6 +253,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         # "a" is pre-boundary history and is NOT copied.
@@ -239,6 +268,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The fork checkpoint never terminates its own walk. Forking exactly at a boundary
         continues down to the next boundary below it — with no boundary below, the window is
@@ -248,6 +278,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "a", parent_id=None)
         _insert_checkpoint(db_conn, source, "b", parent_id="a", compact_boundary=True)
@@ -258,6 +289,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         assert _checkpoint_ids(db_conn, new_id) == ["a", "b"]
@@ -270,6 +302,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """With a boundary below the fork point, the walk descends to it and stops: the copy
         spans at most two compacted segments, not the whole chain."""
@@ -277,6 +310,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "a", parent_id=None, compact_boundary=True)
         _insert_checkpoint(db_conn, source, "b", parent_id="a")
@@ -288,6 +322,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         assert sorted(_checkpoint_ids(db_conn, new_id)) == ["a", "b", "c"]
@@ -300,6 +335,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Only the newest boundary at or below the fork point terminates the walk; older
         segments are not copied."""
@@ -307,6 +343,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "a", parent_id=None, compact_boundary=True)
         _insert_checkpoint(db_conn, source, "b", parent_id="a")
@@ -319,6 +356,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         assert sorted(_checkpoint_ids(db_conn, new_id)) == ["c", "d"]
@@ -331,6 +369,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Delta-written threads keep their message content in writes, so writes must follow the
         copied checkpoints exactly — including the boundary cut."""
@@ -338,6 +377,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "a", parent_id=None)
         _insert_checkpoint(db_conn, source, "b", parent_id="a", compact_boundary=True)
@@ -358,6 +398,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         with db_conn.cursor() as cur:
@@ -375,6 +416,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """fork_checkpoint does not exist in source → raise + transaction rollback (no orphan agents /
         agents_meta rows)."""
@@ -382,6 +424,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         # intentionally do not INSERT any checkpoint
 
@@ -398,6 +441,7 @@ class TestSpawnFork:
                 config_authority=config_authority,
                 model_catalog=model_catalog,
                 database_gate=database_gate,
+                local_machine=machine_identity,
             )
 
         with db_conn.cursor() as cur:
@@ -414,6 +458,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """fork_from / fork_checkpoint must be provided as a pair."""
         with pytest.raises(ValueError, match="must be provided as a pair"):
@@ -422,6 +467,7 @@ class TestSpawnFork:
                 config_authority=config_authority,
                 model_catalog=model_catalog,
                 database_gate=database_gate,
+                local_machine=machine_identity,
             )
         with pytest.raises(ValueError, match="must be provided as a pair"):
             _spawn_agent(
@@ -429,6 +475,7 @@ class TestSpawnFork:
                 config_authority=config_authority,
                 model_catalog=model_catalog,
                 database_gate=database_gate,
+                local_machine=machine_identity,
             )
 
     def test_fork_inserts_identity_inbound(
@@ -439,6 +486,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """fork inserts a kind='fork' lifecycle inbound (source='agent:{fork_from}', content='')
         within the same transaction that copies the checkpoint, so the new process receives
@@ -447,6 +495,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "ck")
 
@@ -456,6 +505,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         assert _inbound_rows(db_conn, new_id) == [("", "fork", f"agent:{source}")]
@@ -468,12 +518,14 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Non-fork spawn does not insert any inbound (the agent starts from nothing, no 'who am I' to correct)."""
         new_id = _spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         assert _inbound_count(db_conn, new_id) == 0
 
@@ -485,6 +537,7 @@ class TestSpawnFork:
         database_gate: ProcessDbGate,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        machine_identity: MachineIdentity,
     ) -> None:
         """fork + prompt: the prompt chat inbound must be committed before _launch_agent_process
         so that it lands together with the fork marker in the forked agent's first claim batch
@@ -497,6 +550,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "ck")
 
@@ -520,6 +574,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         assert seen and all(
@@ -535,6 +590,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """prompt / prompt_source must be provided as a pair."""
         with pytest.raises(ValueError, match="prompt and prompt_source must be provided as a pair"):
@@ -543,6 +599,7 @@ class TestSpawnFork:
                 config_authority=config_authority,
                 model_catalog=model_catalog,
                 database_gate=database_gate,
+                local_machine=machine_identity,
             )
         with pytest.raises(ValueError, match="prompt and prompt_source must be provided as a pair"):
             _spawn_agent(
@@ -550,6 +607,7 @@ class TestSpawnFork:
                 config_authority=config_authority,
                 model_catalog=model_catalog,
                 database_gate=database_gate,
+                local_machine=machine_identity,
             )
 
     def test_fork_event_target_is_fork_source_not_executor(
@@ -561,6 +619,7 @@ class TestSpawnFork:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
         fork_events: telemetry.EventPipeline,
+        machine_identity: MachineIdentity,
     ) -> None:
         """User ruling 2026-08-28 (task #1879): the fork event's
         target_agent_id is the fork SOURCE (the lineage parent), never the
@@ -576,11 +635,13 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         executor = _spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_checkpoint(db_conn, source, "ck")
 
@@ -591,6 +652,7 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         assert fork_events.sync(timeout=2).status is telemetry.DrainStatus.COMPLETED
@@ -626,6 +688,7 @@ class TestSpawnFork:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
         fork_events: telemetry.EventPipeline,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A plain spawn keeps the old direction: target_agent_id = the
         spawner (its lineage parent), and the spawner column records it
@@ -639,12 +702,14 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         new_id = _spawn_agent(
             spawner=f"agent:{parent}",
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
 
         assert fork_events.sync(timeout=2).status is telemetry.DrainStatus.COMPLETED
@@ -681,6 +746,7 @@ class TestSpawnFork:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
         fork_events: telemetry.EventPipeline,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The unified inbound writer's kind='fork' mapping (currently
         reached by no caller; the fork inbound is inserted with raw SQL in
@@ -696,11 +762,13 @@ class TestSpawnFork:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         new_id = _spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         base.db.insert_inbound_message(
             db_conn,

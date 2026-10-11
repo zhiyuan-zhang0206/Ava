@@ -36,6 +36,8 @@ from cli.commands.lifecycle.tests.stop_support import (
 from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
 from cli.commands.lifecycle.tests.stop_support import written as written
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped import pty_jobs as jobs
@@ -91,10 +93,12 @@ def test_stop_records_notice_for_verified_closed_busy_session(
     written: list[pty_close_notices.ClosureNotice],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A busy session verified closed gets one notice, written by the stop
     itself (issue #2044)."""
-    dependencies(monkeypatch)
+    dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     name = "ava-agent-987-shell-2044-busy"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
@@ -106,6 +110,7 @@ def test_stop_records_notice_for_verified_closed_busy_session(
             timeout=15,
             database_factory=operator_database,
             producer=operator_pipeline,
+            machine=command_runtime.machine,
         )
         == 0
     )
@@ -136,14 +141,16 @@ def test_notices_are_written_once_in_the_terminals_phase_before_the_data_plane_s
     pty_service: PtyServiceProcess,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The write is one call inside the `terminals` phase, with the database
     still up: a gateway unit dials its own Postgres directly, a runner-only
     unit (no local data plane to stop) dials its configured URL. Nothing is
     written once the data-plane phase has begun."""
-    dependencies(monkeypatch)
+    dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
-    monkeypatch.setattr(command, "machine_role", lambda: roles)
+    command_runtime.machine.set(role=roles)
     events: list[str] = []
 
     def write(
@@ -168,6 +175,7 @@ def test_notices_are_written_once_in_the_terminals_phase_before_the_data_plane_s
             timeout=15,
             database_factory=operator_database,
             producer=operator_pipeline,
+            machine=command_runtime.machine,
         )
         == 0
     )
@@ -182,10 +190,12 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
     db_conn: psycopg.Connection,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """End to end through the real write: the owner of the closed busy session
     has one pending system inbound naming the closure when the stop returns."""
-    dependencies(monkeypatch)
+    dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     monkeypatch.setattr(pty_close_notices, "write_notices", WRITE_NOTICES)
     owner = create_agent(db_conn)
@@ -205,6 +215,7 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
             timeout=15,
             database_factory=operator_database,
             producer=operator_pipeline,
+            machine=command_runtime.machine,
         )
         == 0
     )
@@ -229,11 +240,13 @@ def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
     pty_service: PtyServiceProcess,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The database became unreachable after the stop began: the notice is not
     dropped quietly — stderr names its agent and session — and the stop, whose
     terminals are closed either way, still succeeds."""
-    dependencies(monkeypatch)
+    dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
 
     def unreachable(
@@ -253,6 +266,7 @@ def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
             timeout=15,
             database_factory=operator_database,
             producer=operator_pipeline,
+            machine=command_runtime.machine,
         )
         == 0
     )
@@ -266,11 +280,13 @@ def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it
     written: list[pty_close_notices.ClosureNotice],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """No service listens: what its ledger last saw running was lost to the service dying,
     before this stop, so the owner is told that — even when the crash had already ended
     every process of the session — and the stop's own hold is not blamed."""
-    dependencies(monkeypatch)
+    dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     child = subprocess.Popen(["true"])
     gone = OwnedProcess.capture(psutil.Process(child.pid))
@@ -287,6 +303,7 @@ def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it
             timeout=15,
             database_factory=operator_database,
             producer=operator_pipeline,
+            machine=command_runtime.machine,
         )
         == 0
     )

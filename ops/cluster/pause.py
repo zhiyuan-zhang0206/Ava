@@ -9,9 +9,11 @@ posture remains a status projection.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import cast
 
 import base.deploy.state.host_deploy_state
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.deploy.maintenance.state import MaintenancePhase
@@ -24,6 +26,8 @@ _UNSET = object()
 def is_paused(
     db: Database,
     state: base.deploy.state.host_deploy_state.HostDeployState | object | None = _UNSET,
+    *,
+    machine_name: Callable[[], str],
 ) -> bool:
     """Whether this host is paused — the `host_deploy_state.posture` row written
     by the gateway's pause fan-out (R1, Task #1021).
@@ -35,7 +39,7 @@ def is_paused(
     """
     if state is _UNSET:
         try:
-            resolved_state = base.deploy.state.host_deploy_state.read(db)
+            resolved_state = base.deploy.state.host_deploy_state.read(db, machine_name())
         except Exception:
             _log.warning(
                 "[cluster] is_paused: host_deploy_state read failed; reading as not paused",
@@ -48,7 +52,11 @@ def is_paused(
 
 
 def unpause_local_cluster(
-    db: Database, bus: EventBus, *, operation: PauseOwnerSnapshot | None = None
+    db: Database,
+    bus: EventBus,
+    *,
+    local_machine: MachineIdentity,
+    operation: PauseOwnerSnapshot | None = None,
 ) -> None:
     """Restore posture, then release this unit's existing agent pause."""
     from base.deploy.maintenance import admission
@@ -56,7 +64,7 @@ def unpause_local_cluster(
 
     current = admission.snapshot()
     if current is None:
-        _unpause_local_cluster(db, operation)
+        _unpause_local_cluster(db, operation, local_machine=local_machine)
         return
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     if (refusal := _hold_refusal(current)) is not None:
@@ -69,7 +77,7 @@ def unpause_local_cluster(
         )
     if operation is None:
         operation = admission.authorized_start(current.holder, current.acquired_at)
-    _unpause_local_cluster(db, operation)
+    _unpause_local_cluster(db, operation, local_machine=local_machine)
     resume_agents(db, bus)
 
 
@@ -93,11 +101,13 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
     return None
 
 
-def _unpause_local_cluster(db: Database, operation: PauseOwnerSnapshot | None) -> None:
+def _unpause_local_cluster(
+    db: Database, operation: PauseOwnerSnapshot | None, *, local_machine: MachineIdentity
+) -> None:
     """Restore this unit's HTTP posture without launching any agent or service."""
     from base.deploy.maintenance import admission
     from base.deploy.state.host_deploy_state import set_posture
 
     admission.require_start_allowed(operation)
-    set_posture(db, "idle")
+    set_posture(db, "idle", machine=local_machine.name())
     _log.info("[cluster] unpaused: posture -> idle")

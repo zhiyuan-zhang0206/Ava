@@ -10,6 +10,7 @@ from uuid import UUID
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from agent.ownership import hosted
 from agent.ownership.corpse_reap import ReapedCorpse
 from services.agent_runner.agent_host.runtime import _config_fingerprint
 from services.agent_runner.agent_host.tests.test_agent_host import (
@@ -203,7 +204,7 @@ class TestTurnLoop:
     ) -> None:
         """Renewal first, reap second: a reap failure must not starve leases.
         The reap publishes each corpse snapshot itself (agent/ownership/corpse_reap.py),
-        and the reaped corpses' recovery attempt rides right after the reap."""
+        without scheduling an execution replay."""
         import services.agent_runner.agent_host.host as host_mod
 
         calls: list[str] = []
@@ -217,7 +218,7 @@ class TestTurnLoop:
             calls.append("reap")
             return [ReapedCorpse(7), ReapedCorpse(9)]
 
-        monkeypatch.setattr(host_mod, "renew_hosted_owner", _renew)
+        monkeypatch.setattr(hosted, "renew_hosted_owner", _renew)
         monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
 
         host, _, _ = wired({1: _Row(status="idling")})
@@ -239,13 +240,42 @@ class TestTurnLoop:
         async def _reap(pool: object, machine: str, owner: UUID, *, bus: object) -> list[int]:
             raise RuntimeError("reap exploded")
 
-        monkeypatch.setattr(host_mod, "renew_hosted_owner", _renew)
+        monkeypatch.setattr(hosted, "renew_hosted_owner", _renew)
         monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
 
         host, _, _ = wired({1: _Row(status="idling")})
         await host.renew_ownership()  # must not raise
 
         assert renewed == ["renew"]
+
+    async def test_renew_failure_preserves_error_and_does_not_start_reaping(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed renewal escapes before the separate recovery failure boundary."""
+        import services.agent_runner.agent_host.host as host_mod
+
+        failure = RuntimeError("renewal rejected")
+        calls: list[str] = []
+
+        async def renew(pool: object, machine: str, owner: UUID) -> None:
+            calls.append("renew")
+            raise failure
+
+        async def reap(
+            pool: object, machine: str, owner: UUID, *, bus: object, wake_enabled: object
+        ) -> list[ReapedCorpse]:
+            calls.append("reap")
+            return []
+
+        monkeypatch.setattr(hosted, "renew_hosted_owner", renew)
+        monkeypatch.setattr(host_mod, "reap_crash_corpses", reap)
+        host, _, _ = wired({1: _Row(status="idling")})
+
+        with pytest.raises(RuntimeError, match="renewal rejected") as raised:
+            await host.renew_ownership()
+
+        assert raised.value is failure
+        assert calls == ["renew"]
 
     async def test_exit_requested_does_not_restore_idling(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch

@@ -28,7 +28,10 @@ from unittest.mock import Mock
 import pytest
 
 from base.cluster.dataplane import pooler as base_pooler
+from base.cluster.machine import MachineIdentity
 from cli.commands.data_plane import pgbouncer as _pb
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 
 _SECRET = "s3cr3t"  # noqa: S105 — test fixture, not a real credential
 _ADMIN = "pooler-admin-fixture"
@@ -80,14 +83,23 @@ def _fake_start(monkeypatch: pytest.MonkeyPatch, *, rc: int = 0) -> list[list[st
 
 
 def test_fresh_start_waits_for_reachable_bind_and_fails_fast_on_timeout(
-    monkeypatch: pytest.MonkeyPatch, _noop_write: None, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    _noop_write: None,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """The reachable address is not up within the bound: a fresh start must NOT
     birth a pooler that would silently degrade to loopback-only. Fail fast with an
     explicit message; the boot retry re-runs `ava start` once the network is up."""
     monkeypatch.setattr(_pb.ownership, "pooler", Mock(return_value=None))
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", lambda: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
+
+    def fake_wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
+        assert isinstance(machine, MachineIdentity)
+        return False
+
+    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
+    command_machine.set(host="10.0.0.5")
     calls = _fake_start(monkeypatch)
 
     rc = _pb.ensure_pgbouncer(
@@ -96,6 +108,7 @@ def test_fresh_start_waits_for_reachable_bind_and_fails_fast_on_timeout(
         db_name="ava_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
+        machine=command_machine,
     )
 
     assert rc == 1
@@ -110,12 +123,21 @@ def test_fresh_start_waits_for_reachable_bind_and_fails_fast_on_timeout(
 
 
 def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
-    monkeypatch: pytest.MonkeyPatch, _noop_write: None, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    _noop_write: None,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """The pooler came up (admin console answers on 127.0.0.1) but the reachable
     listener is missing — the exact silent degradation. The bring-up must abort
     with an explicit error, not print "✓ pgbouncer started"."""
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", lambda: True)  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
+        assert isinstance(machine, MachineIdentity)
+        return True
+
+    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb.ownership, "pooler", Mock(return_value=None))
     monkeypatch.setattr(base_pooler, "admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
@@ -123,7 +145,7 @@ def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
         "pgbouncer_public_listener_reachable",
         lambda *_a, **_kw: False,  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
+    command_machine.set(host="10.0.0.5")
     _fake_start(monkeypatch)
 
     rc = _pb.ensure_pgbouncer(
@@ -132,6 +154,7 @@ def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
         db_name="ava_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
+        machine=command_machine,
     )
 
     assert rc == 1
@@ -143,10 +166,19 @@ def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
 
 
 def test_fresh_start_with_public_listener_is_success(
-    monkeypatch: pytest.MonkeyPatch, _noop_write: None, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    _noop_write: None,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """Healthy double bind: loopback + reachable both answer → success as before."""
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", lambda: True)  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
+        assert isinstance(machine, MachineIdentity)
+        return True
+
+    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb.ownership, "pooler", Mock(return_value=None))
     monkeypatch.setattr(base_pooler, "admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(base_pooler, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
@@ -158,6 +190,7 @@ def test_fresh_start_with_public_listener_is_success(
         db_name="ava_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
+        machine=command_machine,
     )
 
     assert rc == 0
@@ -176,14 +209,23 @@ _AUTHORITY_ENV = {
 
 
 def test_the_pooler_daemon_inherits_no_ava_authority(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _noop_write: None
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    _noop_write: None,
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     # The operator's home is a real directory the code may create: `ava_home()` makes
     # its home, so a made-up `/Users/...` path would be created (or refused) on the host.
     authority = {**_AUTHORITY_ENV, "AVA_HOME": str(tmp_path / ".ava-operator")}
     for key, value in {**authority, "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}.items():
         monkeypatch.setenv(key, value)
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", lambda: True)  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
+        assert isinstance(machine, MachineIdentity)
+        return True
+
+    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb.ownership, "pooler", Mock(return_value=None))
     monkeypatch.setattr(base_pooler, "admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(base_pooler, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
@@ -202,6 +244,7 @@ def test_the_pooler_daemon_inherits_no_ava_authority(
             db_name="ava_main",
             userlist=_USERLIST,
             admin_password=_ADMIN,
+            machine=command_machine,
         )
         == 0
     )
@@ -219,6 +262,8 @@ def test_the_pooler_daemon_inherits_no_ava_authority(
 def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
     monkeypatch: pytest.MonkeyPatch,
     _noop_write: None,
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """A running, fully-bound pooler keeps the cheap reload path — never bounce
     live connections for nothing, and never wait on the reachable address."""
@@ -245,10 +290,15 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
     )
     monkeypatch.setattr(base_pooler, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(base_pooler, "admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
+        assert isinstance(machine, MachineIdentity)
+        return pytest.fail("a healthy running pooler must never wait")
+
     monkeypatch.setattr(
         _pb,
         "_wait_for_reachable_bind",
-        lambda _secret: pytest.fail("a healthy running pooler must never wait"),  # pyright: ignore[reportUnknownArgumentType]
+        fake_wait_for_reachable_bind,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         _pb, "subprocess", type("_SP", (), {"run": staticmethod(lambda *_a, **_kw: None)})()
@@ -259,6 +309,7 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
         db_name="ava_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
+        machine=command_machine,
     )
 
     assert rc == 0
@@ -267,7 +318,11 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
 
 
 def test_running_degraded_pooler_is_restarted_not_reloaded(
-    monkeypatch: pytest.MonkeyPatch, _noop_write: None, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    _noop_write: None,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """A running pooler missing its public listener is degraded (born in a bind
     race). Reload cannot fix it — pgbouncer never retries a listen_addr that failed
@@ -299,9 +354,14 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
         "pgbouncer_public_listener_reachable",
         lambda *_a, **_kw: next(public_answers),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", lambda: True)  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
+        assert isinstance(machine, MachineIdentity)
+        return True
+
+    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(base_pooler, "admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
+    command_machine.set(host="10.0.0.5")
     _fake_start(monkeypatch)
 
     rc = _pb.ensure_pgbouncer(
@@ -310,6 +370,7 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
         db_name="ava_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
+        machine=command_machine,
     )
 
     assert rc == 0
@@ -321,7 +382,11 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
 
 
 def test_running_degraded_pooler_surviving_terminate_is_reported(
-    monkeypatch: pytest.MonkeyPatch, _noop_write: None, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    _noop_write: None,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """P7: `OwnedPooler.stop` returning False means the degraded pooler survived
     the graceful stop — starting a second pooler on the same port would fail
@@ -334,7 +399,12 @@ def test_running_degraded_pooler_surviving_terminate_is_reported(
         "pgbouncer_public_listener_reachable",
         lambda *_a, **_kw: False,  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", lambda: True)  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
+        assert isinstance(machine, MachineIdentity)
+        return True
+
+    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb.OwnedPooler, "stop", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
     calls = _fake_start(monkeypatch)
 
@@ -344,6 +414,7 @@ def test_running_degraded_pooler_surviving_terminate_is_reported(
         db_name="ava_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
+        machine=command_machine,
     )
 
     assert rc == 1
@@ -352,7 +423,11 @@ def test_running_degraded_pooler_surviving_terminate_is_reported(
 
 
 def test_running_pooler_with_changed_userlist_is_restarted_never_reloaded(
-    monkeypatch: pytest.MonkeyPatch, _noop_write: None, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    _noop_write: None,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """E11: a SIGHUP reload keeps a removed user that already authenticated and
     still admits its new sessions, so changed userlist bytes RESTART a healthy
@@ -373,7 +448,12 @@ def test_running_pooler_with_changed_userlist_is_restarted_never_reloaded(
         _pb, "psutil", SimpleNamespace(Process=Mock(return_value=_ReloadProcess(4242, sighups)))
     )
     monkeypatch.setattr(base_pooler, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", lambda: True)  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
+        assert isinstance(machine, MachineIdentity)
+        return True
+
+    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(base_pooler, "admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     calls = _fake_start(monkeypatch)
 
@@ -383,6 +463,7 @@ def test_running_pooler_with_changed_userlist_is_restarted_never_reloaded(
         db_name="ava_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
+        machine=command_machine,
     )
 
     assert rc == 0

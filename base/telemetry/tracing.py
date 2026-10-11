@@ -65,6 +65,7 @@ import threading
 import time
 from collections.abc import Callable, Generator, Sequence
 from functools import wraps
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -72,6 +73,7 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.log import logger
 from base.paths import traces_dir
@@ -92,8 +94,6 @@ from base.telemetry.trace_mirror import (
     _prune_old_mirror,
 )
 
-# Mirror-hygiene re-exports: moved to base/telemetry/trace_mirror.py 2026-08-30 and
-# re-exported here for the existing test/caller surface.
 __all__ = [
     "OtlpJsonHttpSpanExporter",
     "_disk_usage",
@@ -127,13 +127,8 @@ _ATTR_TURN = "ava.turn"
 # truncate the turn trace, so the prefix check is the fail-safe boundary.
 _NODE_SPAN_PREFIX = "execute_task "
 
-# Explicit span name for the claim node's idle park: keeps the wait visible
-# and attributable instead of hiding it inside the node span's duration.
 _IDLE_WAIT_SPAN_NAME = "claim idle-wait"
 
-# The collector is a local sidecar, so a slow request is already a failed
-# request. One short attempt bounds the exporting SDK thread; repeated failures
-# open the circuit so later turns shed spans without touching the network.
 _TRACE_EXPORT_TIMEOUT_S = 2.0
 _TRACE_EXPORT_FAILURE_THRESHOLD = 3
 _TRACE_EXPORT_COOLDOWN_S = 30.0
@@ -237,8 +232,6 @@ def _strip_content_attributes(otlp: dict[str, Any]) -> None:
 
 
 # Module-level mutable state for the idempotent init guard and collector retry.
-# Dict mutation avoids ruff PLW0603 (global statement) while keeping
-# the same observable semantics without global assignment statements.
 _state: dict[str, Any] = {
     "closed": False,
     "arm_owner": None,
@@ -384,12 +377,12 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
         return None
 
 
-def _start_collector_retry() -> None:
+def _start_collector_retry(machine: MachineIdentity, home: Path) -> None:
     with _lifecycle_lock:
         if _state.get("closed") or _state.get("retry_owner") is not None:
             return
         owner = CollectorRetry(
-            initialize=initialize_tracing,
+            initialize=lambda: initialize_tracing(machine=machine, home=home),
             resolved=lambda: bool(_state["initialized"] or _state["arm_failed"]),
             interval=lambda: COLLECTOR_RETRY_INTERVAL_S,
         )
@@ -397,7 +390,13 @@ def _start_collector_retry() -> None:
         _state["retry_thread"] = owner._thread
 
 
-def _arm_tracing(endpoint: str, stop_requested: threading.Event | None = None) -> None:
+def _arm_tracing(
+    endpoint: str,
+    stop_requested: threading.Event | None = None,
+    *,
+    production: bool,
+    home: Path,
+) -> None:
     """Import traceloop and run Traceloop.init, on one daemon thread.
 
     The import + init cost ~2.5-3 s (traceloop.sdk pulls in pandas via its
@@ -419,8 +418,6 @@ def _arm_tracing(endpoint: str, stop_requested: threading.Event | None = None) -
 
         from traceloop.sdk import Traceloop
         from traceloop.sdk.instruments import Instruments
-
-        from base.telemetry.observability import production_identity
 
         # Mirror the LLM call paths Ava actually uses. LangGraph rides on the
         # LANGCHAIN instrumentor (its callback handler nests node spans), so
@@ -455,9 +452,9 @@ def _arm_tracing(endpoint: str, stop_requested: threading.Event | None = None) -
                     disable_batch=False,
                     telemetry_enabled=False,
                     resource_attributes={
-                        "cluster": cluster_label(),
+                        "cluster": cluster_label(home),
                         "service.line": "ava",
-                        "environment": "prod" if production_identity() else "dev",
+                        "environment": "prod" if production else "dev",
                     },
                 )
                 if stop_requested is not None and stop_requested.is_set():
@@ -491,12 +488,18 @@ def _arm_tracing(endpoint: str, stop_requested: threading.Event | None = None) -
         _state["init_resolved"].set()
 
 
-def _start_arm_thread(endpoint: str) -> None:
+def _start_arm_thread(endpoint: str, machine: MachineIdentity, home: Path) -> None:
     """Admit one arm; stop never acquires the slow SDK init lock."""
     with _lifecycle_lock:
         if _state.get("closed") or _state.get("arm_owner") is not None:
             return
-        owner = TraceArm(endpoint, _arm_tracing)
+        from base.telemetry.observability import production_identity
+
+        production = production_identity(machine, home=home)
+        owner = TraceArm(
+            endpoint,
+            lambda endpoint, stop: _arm_tracing(endpoint, stop, production=production, home=home),
+        )
         _state["arm_owner"] = owner
         _state["arm_thread"] = owner._thread
         _state["init_resolved"] = owner.finished
@@ -568,19 +571,19 @@ def is_initialized() -> bool:
     return bool(_state["initialized"])
 
 
-def _serialized_initialize(function: Callable[[], None]) -> Callable[[], None]:
+def _serialized_initialize[**P](function: Callable[P, None]) -> Callable[P, None]:
     """Apply the module init lock while preserving the public docstring."""
 
     @wraps(function)
-    def serialized() -> None:
+    def serialized(*args: P.args, **kwargs: P.kwargs) -> None:
         with _init_lock:
-            function()
+            function(*args, **kwargs)
 
     return serialized
 
 
 @_serialized_initialize
-def initialize_tracing() -> None:
+def initialize_tracing(*, machine: MachineIdentity, home: Path) -> None:
     """Initialize OTel span recording to the local collector. Idempotent.
 
     No-op when settings.observability.trace_enabled=False. When on, this call
@@ -619,7 +622,7 @@ def initialize_tracing() -> None:
         return
     if not settings.observability.trace_enabled:
         return
-    if not observability_export_allowed():
+    if not observability_export_allowed(machine, home=home):
         return
 
     # Bounded disk FIRST — before the watermark guard, so the relief valves
@@ -668,15 +671,10 @@ def initialize_tracing() -> None:
                 endpoint=endpoint,
             )
             _state["collector_offline_reported"] = True
-        _start_collector_retry()
+        _start_collector_retry(machine, home)
         return
 
-    # The heavy part — traceloop import + Traceloop.init (~2.5-3 s) — runs on
-    # one daemon thread. It must COMPLETE before the first turn opens its root
-    # span and before the first LangChain run configures a callback manager;
-    # turn_span() waits on ensure_init_resolved() for exactly that, keeping
-    # the synchronous boot path down to the cheap decisions above.
-    _start_arm_thread(endpoint)
+    _start_arm_thread(endpoint, machine, home)
 
 
 @contextlib.contextmanager

@@ -9,6 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -20,6 +21,7 @@ from services.agent_runner.agent_host.recovery.tests.test_reconcile_after_abort 
     seed_checkpoint,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_replaced_incarnation_writes_nothing(
@@ -29,6 +31,7 @@ async def test_replaced_incarnation_writes_nothing(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A replacement runtime owns the row now: the stale incarnation's pass is
     refused by the lease fence before any write."""
@@ -37,6 +40,7 @@ async def test_replaced_incarnation_writes_nothing(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "committed")
@@ -71,6 +75,7 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """At the settlement boundary the same refusal is a logged no-op — the
     abort's settlement must not fail because its reconcile was fenced out."""
@@ -79,6 +84,7 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "committed")

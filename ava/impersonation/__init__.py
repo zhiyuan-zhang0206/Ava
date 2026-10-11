@@ -44,6 +44,7 @@ def accept(request_id: str, start_message: str) -> NoReturn:
     relay cannot start, the acceptance rolls back loudly (the lease becomes
     rejected with the reason) and you keep running as native.
     """
+    import ava
     from ava.sdk_surface.settings import bus, database
     from base.agents.impersonation import accept as accept_request
 
@@ -55,6 +56,7 @@ def accept(request_id: str, start_message: str) -> NoReturn:
         incarnation.agent_id,
         incarnation,
         coerce_str(start_message, "start_message"),
+        local_machine=ava.context.require_machine().name(),
     )
     raise AgentImpersonation
 

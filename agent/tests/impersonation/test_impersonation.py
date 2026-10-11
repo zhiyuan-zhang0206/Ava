@@ -1,6 +1,6 @@
 """Takeover barriers: consent, resource closure, checkpoint ordering and replay."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,7 +15,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-from agent import impersonation
+from agent import impersonation, impersonation_process
 from agent.graph.exec._result import lifecycle_exception_from_name
 from agent.graph.exec.protocol import read_request, write_request
 from agent.state import BaseAgentState
@@ -25,6 +25,7 @@ from base.agents.impersonation.notes import HandoffNotes
 from base.agents.lifecycle import AgentImpersonation
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
 from base.clock import Clock, clock_config_from_boot
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -50,11 +51,13 @@ def gate_ctx(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> AvaContext:
     config = snapshot_process_config()
     return AvaContext(
         db=database,
         bus=event_bus,
+        machine=machine_identity,
         relays=relays,
         catalog=build_model_catalog(),
         clock_factory=lambda: Clock(clock_config_from_boot(config)),
@@ -129,6 +132,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     def add(left: int, right: int) -> int:
         return left + right
@@ -168,6 +172,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
             incarnation=incarnation,
             resources=None,
             notes=_notes(),
+            read_local_machine=machine_identity.name,
         )
     assert (await graph.aget_state(config)).values["counter"] == 3
     receipt.side_effect = None
@@ -180,6 +185,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
         incarnation=incarnation,
         resources=None,
         notes=_notes(),
+        read_local_machine=machine_identity.name,
     )
     assert (await graph.aget_state(config)).values["counter"] == 3
     assert receipt.call_count == 2
@@ -188,6 +194,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
 def test_accept_stops_exec_and_uses_captured_incarnation(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
+    machine_identity: MachineIdentity,
 ) -> None:
     from ava.impersonation import accept
 
@@ -197,7 +204,13 @@ def test_accept_stops_exec_and_uses_captured_incarnation(
     with pytest.raises(AgentImpersonation):
         accept("lease-1", "Hand the task to the external session.")
     accepted.assert_called_once_with(
-        ANY, ANY, "lease-1", 42, incarnation, "Hand the task to the external session."
+        ANY,
+        ANY,
+        "lease-1",
+        42,
+        incarnation,
+        "Hand the task to the external session.",
+        local_machine=machine_identity.name(),
     )
     assert isinstance(lifecycle_exception_from_name("AgentImpersonation"), AgentImpersonation)
 
@@ -243,6 +256,7 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(
         impersonation, "native_status", AsyncMock(return_value=_relay_session("accepted"))
@@ -252,7 +266,7 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
     checkpoint = AsyncMock()
     monkeypatch.setattr("agent.impersonation_handoff.ensure_start_marker", checkpoint)
 
-    def refused(*_args: object) -> bool:
+    def refused(*_args: object, read_local_machine: Callable[[], str]) -> bool:
         return False
 
     monkeypatch.setattr(impersonation, "establish_relay", refused)
@@ -265,6 +279,7 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
         incarnation=incarnation,
         resources=None,
         notes=_notes(),
+        read_local_machine=machine_identity.name,
     )
     activate.assert_not_called()
     checkpoint.assert_awaited_once()
@@ -276,6 +291,7 @@ async def test_settle_checkpoint_activates_only_after_relay_ready(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(
         impersonation, "native_status", AsyncMock(return_value=_relay_session("accepted"))
@@ -295,6 +311,7 @@ async def test_settle_checkpoint_activates_only_after_relay_ready(
         incarnation=incarnation,
         resources=None,
         notes=_notes(),
+        read_local_machine=machine_identity.name,
     )
     checkpoint.assert_awaited_once()
     establish.assert_called_once()
@@ -309,6 +326,7 @@ def test_establish_relay_session_relay_requires_a_fresh_heartbeat(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     from datetime import UTC, datetime, timedelta
 
@@ -317,11 +335,31 @@ def test_establish_relay_session_relay_requires_a_fresh_heartbeat(
     stale = _relay_session(
         "accepted", provider=provider, relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5)
     )
-    assert impersonation.establish_relay(database, event_bus, stale, incarnation, relays) is False
+    assert (
+        impersonation.establish_relay(
+            database,
+            event_bus,
+            stale,
+            incarnation,
+            relays,
+            read_local_machine=machine_identity.name,
+        )
+        is False
+    )
     fail.assert_called_once()
     fail.reset_mock()
     fresh = _relay_session("accepted", provider=provider, relay_heartbeat_at=datetime.now(UTC))
-    assert impersonation.establish_relay(database, event_bus, fresh, incarnation, relays) is True
+    assert (
+        impersonation.establish_relay(
+            database,
+            event_bus,
+            fresh,
+            incarnation,
+            relays,
+            read_local_machine=machine_identity.name,
+        )
+        is True
+    )
     fail.assert_not_called()
 
 
@@ -331,17 +369,25 @@ def test_establish_relay_codex_provisions_spawns_and_waits_for_heartbeat(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     from datetime import UTC, datetime
 
     provision = Mock(return_value={"relay_generation": 1})
     monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
     spawn = Mock(return_value=MagicMock(poll=Mock(return_value=None)))
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     ready = {"status": "accepted", "relay_heartbeat_at": datetime.now(UTC)}
     monkeypatch.setattr("base.agents.impersonation.relay_get", Mock(return_value=ready))
     assert (
-        impersonation.establish_relay(database, event_bus, _relay_session(), incarnation, relays)
+        impersonation.establish_relay(
+            database,
+            event_bus,
+            _relay_session(),
+            incarnation,
+            relays,
+            read_local_machine=machine_identity.name,
+        )
         is True
     )
     provision.assert_called_once()
@@ -358,6 +404,7 @@ def test_establish_relay_codex_spawn_exit_rolls_back(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     child = MagicMock()
     child.poll.return_value = 5
@@ -365,11 +412,18 @@ def test_establish_relay_codex_spawn_exit_rolls_back(
     monkeypatch.setattr(
         "base.agents.impersonation.provision_relay", Mock(return_value={"relay_generation": 1})
     )
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", Mock(return_value=child))
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", Mock(return_value=child))
     fail = Mock()
     monkeypatch.setattr("base.agents.impersonation.fail_acceptance", fail)
     assert (
-        impersonation.establish_relay(database, event_bus, _relay_session(), incarnation, relays)
+        impersonation.establish_relay(
+            database,
+            event_bus,
+            _relay_session(),
+            incarnation,
+            relays,
+            read_local_machine=machine_identity.name,
+        )
         is False
     )
     fail.assert_called_once()
@@ -383,20 +437,28 @@ def test_establish_relay_codex_readiness_timeout_rolls_back(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     child = MagicMock()
     child.poll.return_value = None
     monkeypatch.setattr(
         "base.agents.impersonation.provision_relay", Mock(return_value={"relay_generation": 1})
     )
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", Mock(return_value=child))
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", Mock(return_value=child))
     terminate = Mock()
     monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
     fail = Mock()
     monkeypatch.setattr("base.agents.impersonation.fail_acceptance", fail)
     monkeypatch.setattr(impersonation, "_RELAY_READY_TIMEOUT_S", 0.0)
     assert (
-        impersonation.establish_relay(database, event_bus, _relay_session(), incarnation, relays)
+        impersonation.establish_relay(
+            database,
+            event_bus,
+            _relay_session(),
+            incarnation,
+            relays,
+            read_local_machine=machine_identity.name,
+        )
         is False
     )
     terminate.assert_called_once()
@@ -418,12 +480,20 @@ async def test_missing_snapshot_cannot_kill_a_replacement_relay(
     conn.execute.return_value.fetchone.return_value = ("active",)
     db = MagicMock()
     db.connect.return_value.__enter__.return_value = conn
+    read_local_machine = Mock(side_effect=AssertionError("identity read before admission"))
     terminate = Mock()
     monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
     await impersonation.supervise_relay(
-        db, MagicMock(), None, 42, gate_ctx.relays, incarnation=None
+        db,
+        MagicMock(),
+        None,
+        42,
+        gate_ctx.relays,
+        incarnation=None,
+        read_local_machine=read_local_machine,
     )
     terminate.assert_not_called()
+    read_local_machine.assert_not_called()
     assert gate_ctx.relays.children[42].process is process
 
 
@@ -432,6 +502,7 @@ async def test_delayed_snapshot_cannot_retire_replacement_sender(
     monkeypatch: pytest.MonkeyPatch,
     gate_ctx: AvaContext,
     same_lease: bool,
+    machine_identity: MachineIdentity,
 ) -> None:
     session = _relay_session("active", relay_generation=1)
     process = MagicMock()
@@ -441,7 +512,13 @@ async def test_delayed_snapshot_cannot_retire_replacement_sender(
     terminate = Mock()
     monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
     await impersonation.supervise_relay(
-        MagicMock(), MagicMock(), session, 42, gate_ctx.relays, incarnation=None
+        MagicMock(),
+        MagicMock(),
+        session,
+        42,
+        gate_ctx.relays,
+        incarnation=None,
+        read_local_machine=machine_identity.name,
     )
     terminate.assert_not_called()
     assert gate_ctx.relays.children[42].process is process
@@ -475,7 +552,7 @@ async def test_claim_gate_recovers_stale_delivery_and_keeps_native_parked(
     monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
     new = MagicMock()
     spawn = Mock(return_value=new)
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     abort = Mock()
     monkeypatch.setattr("base.agents.impersonation.abort_lease", abort)
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
@@ -526,7 +603,7 @@ async def test_confirmed_child_exit_bypasses_fresh_heartbeat_and_startup_grace(
     monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
     new = MagicMock()
     spawn = Mock(return_value=new)
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     assert decision is not None and decision.goto == END
     assert provision.call_args.kwargs == {"expected_generation": 1}

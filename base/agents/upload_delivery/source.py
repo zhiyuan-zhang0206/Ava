@@ -78,9 +78,13 @@ def _claim(
     names: list[str],
     batch: list[tuple[str, bytes, str]],
     provenance: InboundProvenance,
+    *,
+    local_machine: str,
 ) -> tuple[Any, ...]:
     fingerprint = request_hash(names, batch)
-    source = current_unit()
+    source = current_unit(
+        local_machine=local_machine,
+    )
     directory = agent_upload_dir(agent_id, create=False).resolve()
     with write_transaction(pool) as conn:
         storage.lock_agent(conn, agent_id)
@@ -138,11 +142,23 @@ def accept(
     names: list[str],
     batch: list[tuple[str, bytes, str]],
     provenance: InboundProvenance,
+    *,
+    local_machine: str,
 ) -> Acceptance:
-    claimed = _claim(pool, key, agent_id, names, batch, provenance)
+    claimed = _claim(
+        pool,
+        key,
+        agent_id,
+        names,
+        batch,
+        provenance,
+        local_machine=local_machine,
+    )
     if claimed[4] is not None:
         return Acceptance.model_validate(claimed[4])
-    if UnitIdentity.model_validate(claimed[2]) != current_unit():
+    if UnitIdentity.model_validate(claimed[2]) != current_unit(
+        local_machine=local_machine,
+    ):
         raise UploadDeliveryConflictError("receiving source belongs to another native unit")
     manifest = Manifest.model_validate(claimed[1])
     directory = agent_upload_dir(agent_id, create=False).resolve()
@@ -194,7 +210,12 @@ def status(pool: ConnectionPool, agent_id: int, batch_id: str) -> DeliveryStatus
 
 
 def served_object(
-    pool: ConnectionPool, agent_id: int, batch_id: str, ordinal: int
+    pool: ConnectionPool,
+    agent_id: int,
+    batch_id: str,
+    ordinal: int,
+    *,
+    local_machine: str,
 ) -> tuple[Path, Object]:
     with pool.connection() as conn:
         row = conn.execute(
@@ -202,7 +223,9 @@ def served_object(
             "WHERE agent_id=%s AND batch_id=%s AND ready_at IS NOT NULL",
             (agent_id, batch_id),
         ).fetchone()
-    if row is None or UnitIdentity.model_validate(row[1]) != current_unit():
+    if row is None or UnitIdentity.model_validate(row[1]) != current_unit(
+        local_machine=local_machine,
+    ):
         raise UploadDeliveryConflictError("source object is not ready on this native unit")
     manifest = Manifest.model_validate(row[0])
     if not 0 <= ordinal < len(manifest.objects):
@@ -213,13 +236,25 @@ def served_object(
     return path, item
 
 
-def due(pool: ConnectionPool, limit: int = 8) -> list[ReceiveRequest]:
+def due(
+    pool: ConnectionPool,
+    limit: int = 8,
+    *,
+    local_machine: str,
+) -> list[ReceiveRequest]:
     with pool.connection() as conn:
         rows = conn.execute(
             "SELECT manifest, source_unit, target_unit FROM upload_delivery_batches "
             "WHERE state='pending' AND next_attempt_at<=now() AND source_unit=%s "
             "ORDER BY next_attempt_at, batch_id LIMIT %s",
-            (Jsonb(current_unit().model_dump()), limit),
+            (
+                Jsonb(
+                    current_unit(
+                        local_machine=local_machine,
+                    ).model_dump()
+                ),
+                limit,
+            ),
         ).fetchall()
     return [
         ReceiveRequest(

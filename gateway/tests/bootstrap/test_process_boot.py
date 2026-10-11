@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -21,6 +23,7 @@ from gateway.cluster import server
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_both_gateway_entries_use_the_same_first_load_fact() -> None:
@@ -28,27 +31,37 @@ def test_both_gateway_entries_use_the_same_first_load_fact() -> None:
     assert gateway_app.LOADED_IMAGE is LOADED_IMAGE
 
 
-def test_gateway_owner_construction_is_cold(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gateway_owner_construction_is_cold(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     def forbidden(_boot: ConfigBoot, _name: str) -> object:
         raise AssertionError("entry owner read configuration during construction")
 
     config = ConfigBoot()
     monkeypatch.setattr(ConfigBoot, "get_field", forbidden)
-    process = GatewayProcess(config=config, image=LoadedCommit(Path("unknown-source"), None))
+    process = GatewayProcess(
+        config=config, image=LoadedCommit(Path("unknown-source"), None), machine=machine_identity
+    )
     with process.lifetime():
         assert process.gate.min_read_due()
         assert process.clients.sync_events().status is DrainStatus.COMPLETED
 
 
-def test_gateway_handles_retain_the_same_entry_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gateway_handles_retain_the_same_entry_gate(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     gates: list[ProcessDbGate] = []
     original = Database.__init__
 
-    def build(handle: Database, config: DbConfig, *, gate: ProcessDbGate) -> None:
+    def build(
+        handle: Database, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+    ) -> None:
         gates.append(gate)
-        original(handle, config, gate=gate)
+        original(handle, config, gate=gate, local_host=local_host)
 
-    process = GatewayProcess(config=snapshot_process_config(), image=LOADED_IMAGE)
+    process = GatewayProcess(
+        config=snapshot_process_config(), image=LOADED_IMAGE, machine=machine_identity
+    )
     monkeypatch.setattr(Database, "__init__", build)
     with process.lifetime():
         first = process.database()
@@ -57,7 +70,9 @@ def test_gateway_handles_retain_the_same_entry_gate(monkeypatch: pytest.MonkeyPa
     assert gates == [process.gate, process.gate]
 
 
-def test_gateway_cleanup_preserves_a_startup_primary(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gateway_cleanup_preserves_a_startup_primary(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     from base.agents.context.clients import ClientSet
 
     primary = ValueError("startup failed")
@@ -66,7 +81,7 @@ def test_gateway_cleanup_preserves_a_startup_primary(monkeypatch: pytest.MonkeyP
     def fail(_clients: ClientSet) -> None:
         raise cleanup
 
-    process = GatewayProcess(config=ConfigBoot(), image=LOADED_IMAGE)
+    process = GatewayProcess(config=ConfigBoot(), image=LOADED_IMAGE, machine=machine_identity)
     monkeypatch.setattr(ClientSet, "close", fail)
     with pytest.raises(ValueError) as caught, process.lifetime():
         raise primary
@@ -134,7 +149,11 @@ print(json.dumps({"first": first, "after": repeated.sha, "same": repeated is LOA
 
 @pytest.mark.parametrize("sha", [None, "entry-image-sha"])
 def test_asgi_health_keeps_its_explicit_entry_image(
-    monkeypatch: pytest.MonkeyPatch, sha: str | None, database: Database
+    monkeypatch: pytest.MonkeyPatch,
+    sha: str | None,
+    database: Database,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     # Health image rendering uses this explicit native test database owner;
     # admission refusal for an unknown image has its own gate contract.
@@ -143,9 +162,14 @@ def test_asgi_health_keeps_its_explicit_entry_image(
 
     monkeypatch.setattr(GatewayProcess, "database", test_database)
     image = LoadedCommit(Path("entry-source"), sha)
-    process = GatewayProcess(config=snapshot_process_config(), image=image)
+    process = GatewayProcess(
+        config=snapshot_process_config(), image=image, machine=machine_identity
+    )
     monkeypatch.setattr(gateway_app.app.state, "gateway_process_input", process, raising=False)
-    with process.lifetime(), gateway_test_client(gateway_app.app) as client:
+    with (
+        process.lifetime(),
+        gateway_test_client(gateway_app.app, machine=machine_identity) as client,
+    ):
         first = client.get("/api/health")
         second = client.get("/api/health")
         assert first.status_code == second.status_code == 200

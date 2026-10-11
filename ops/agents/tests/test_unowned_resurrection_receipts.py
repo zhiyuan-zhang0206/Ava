@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.incarnation.resources import ResourceEvidenceError
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -28,6 +28,7 @@ from tests.components.ops.test_resurrection_admission import (
     _restarted,
 )
 from tests.components.ops.test_resurrection_admission import wakes as wakes
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
@@ -39,6 +40,7 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """An idle agent its host still owns: the force targets that incarnation,
     and resurrection waits for the original host to observe it, whatever origin
@@ -47,11 +49,11 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
         database,
         event_bus,
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         authority=config_authority,
         catalog=model_catalog,
     )
-    await _admitted(aops_pool, aid, database_gate=database_gate)
+    await _admitted(aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity)
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (aid,))
     db_conn.commit()
 
@@ -59,7 +61,9 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
 
     assert not unowned_receipt(db_conn, force_receipt)
     with pytest.raises(ResurrectSettlementDeferredError):
-        wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
+        wake.resurrect_agent(
+            database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+        )
     assert status(db_conn, aid) == ("terminated", "hosted")
 
 
@@ -74,6 +78,7 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A resurrected row is the unowned idle row it was before the force, which
     the drain parks; a terminated row carrying a receipt is outside its cohort."""
@@ -85,14 +90,21 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     force(resurrected)
-    wake.resurrect_agent(database, event_bus, resurrected, resurrected_by="user")
+    wake.resurrect_agent(
+        database,
+        event_bus,
+        resurrected,
+        resurrected_by="user",
+        local_machine=machine_identity.name(),
+    )
     ended, _, _, _ = create_agent_row(
         database,
         event_bus,
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         authority=config_authority,
         catalog=model_catalog,
     )
@@ -103,7 +115,7 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
 
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=None,
         holder=holder,
         acquired_at=when,
@@ -125,6 +137,7 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     aid = await _managed_restarted(
         db_conn,
@@ -132,6 +145,7 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     force(aid)
     if invalid == "unapplied":
@@ -146,8 +160,12 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
             (Jsonb({"outcome": "failed", "reason": "restart_deadline_expired"}), aid),
         )
     db_conn.commit()
-    wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
+    wake.resurrect_agent(
+        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+    )
     before = _resources(db_conn, aid)
     with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
-        await _admitted(aops_pool, aid, database_gate=database_gate)
+        await _admitted(
+            aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
+        )
     assert _resources(db_conn, aid) == before

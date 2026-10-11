@@ -9,12 +9,14 @@ from typing import Any
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops import host_config
 from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.asyncio
@@ -25,6 +27,8 @@ async def test_dispatch_config_read_calls_config_read_op(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """config_read kind -> ops.config_read_op, returns completed with its result."""
     from services.agent_runner.agent_ops import daemon
@@ -32,7 +36,8 @@ async def test_dispatch_config_read_calls_config_read_op(
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     captured: list[bool] = []
 
-    def _fake_config_read(*, authority: ConfigAuthority) -> ConfigReadResult:
+    def _fake_config_read(*, authority: ConfigAuthority, local_machine: str) -> ConfigReadResult:
+        del local_machine
         captured.append(True)
         return ConfigReadResult(machine="x", host_fields={}, raw_overrides={})
 
@@ -48,6 +53,7 @@ async def test_dispatch_config_read_calls_config_read_op(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )
     assert status == "completed"
     # _dispatch serializes the result model to a JSON dict for the wire.
@@ -63,6 +69,8 @@ async def test_dispatch_config_write_passes_overrides(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """config_write kind -> ops.config_write_op(payload['overrides'] + local/actor/trace_id),
     fail-fast on missing key."""
@@ -78,7 +86,9 @@ async def test_dispatch_config_write_passes_overrides(
         actor: str | None = None,
         trace_id: str | None = None,
         authority: ConfigAuthority,
+        local_machine: str,
     ) -> ConfigWriteOpResult:
+        del local_machine
         captured["overrides"] = overrides
         captured["local"] = local
         captured["actor"] = actor
@@ -97,6 +107,7 @@ async def test_dispatch_config_write_passes_overrides(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )
     assert status == "completed"
     assert captured["overrides"] == {"ops_concurrency": 2}
@@ -112,6 +123,8 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """payload missing 'overrides' key -> failed result (ConfigWritePayload
     validation rejects it, fail-fast, no silent fallback)."""
@@ -132,6 +145,7 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )  # no 'overrides' key
     assert status == "failed"
     assert "overrides" in str(result["error"])

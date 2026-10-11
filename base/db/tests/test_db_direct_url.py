@@ -14,6 +14,7 @@ import pytest
 from base import cluster, config
 from base import db as db_module
 from base.cluster import ClusterPorts, ClusterRecord
+from base.cluster.machine import MachineIdentity
 from base.config.domains.storage.data_plane import DataPlaneSettings
 from base.db import Database, DbConfig
 from base.db.code_version_gate import ProcessDbGate
@@ -92,6 +93,23 @@ def test_direct_handle_uses_owned_lazy_host_and_preserves_short_circuits(
     assert reads == ["host"]
 
 
+def test_the_direct_url_of_a_handle_without_a_pooler_is_its_url(
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    url = "postgresql://handle_user:pw@db.example:5432/handle_db"
+    config = DbConfig(
+        db_url=url,
+        db_sslmode="",
+        db_pool_min_size=1,
+        db_pool_max_size=2,
+        pgbouncer_enabled=False,
+    )
+    assert (
+        Database(config, gate=database_gate, local_host=machine_identity.host).direct_url() == url
+    )
+
+
 def test_direct_db_url_swaps_pooler_port_to_direct_pg(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_DB_URL carries the pooler port (pooling on) -> the admin plane dials
     the same URL with the port swapped to the record's direct Postgres port."""
@@ -109,6 +127,25 @@ def test_direct_db_url_never_rewrites_placeholder_url(monkeypatch: pytest.Monkey
     """The sentinel must stay byte-identical for the connect guard."""
     _set(monkeypatch, db_url=PLACEHOLDER_DB_URL, rec=_PG_REC)
     assert db_module.direct_db_url() == PLACEHOLDER_DB_URL
+
+
+def test_direct_host_comparison_requires_an_explicit_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = _POOLED.replace("127.0.0.1", "owned-host")
+    _set(monkeypatch, db_url=url, rec=_PG_REC)
+    with pytest.raises(RuntimeError, match="explicit local_host reader"):
+        db_module.direct_db_url()
+
+
+@pytest.mark.parametrize(
+    "url", [PLACEHOLDER_DB_URL, "postgresql://host:bad/ava", "postgresql://host/ava", _POOLED]
+)
+def test_direct_url_short_circuits_do_not_require_a_reader(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    _set(monkeypatch, db_url=url, rec=_PG_REC)
+    assert db_module.direct_db_url() == (_DIRECT if url == _POOLED else url)
 
 
 def test_direct_db_url_keeps_the_url_without_a_record(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -161,6 +198,7 @@ def test_direct_db_url_swaps_any_local_record_pooler(monkeypatch: pytest.MonkeyP
 def test_direct_db_url_remote_host_ignores_the_home_record(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A URL naming a REMOTE host (a split runner dialing the gateway, or a
     remote/SaaS plane — Task #1752) must not be resolved against this home's
@@ -175,7 +213,7 @@ def test_direct_db_url_remote_host_ignores_the_home_record(
         db_url="postgresql://ava_main:sek@10.0.0.9:6433/ava_main",
         rec=_PG_REC,
     )
-    got = db_module.direct_db_url()
+    got = db_module.direct_db_url(local_host=machine_identity.host)
     assert got == "postgresql://ava_main:sek@10.0.0.9:6433/ava_main"
     assert not any("direct_db_url" in r["message"] for r in loguru_records)
 
@@ -183,6 +221,7 @@ def test_direct_db_url_remote_host_ignores_the_home_record(
 def test_direct_db_url_split_runner_falls_back_with_an_info_line(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The split-runner case: this home's record does not explain the URL's port
     (the gateway's pooler port is a fact of the GATEWAY home's record). The URL is
@@ -198,7 +237,7 @@ def test_direct_db_url_split_runner_falls_back_with_an_info_line(
         db_url="postgresql://ava_main:sek@10.0.0.9:6433/ava_main",
         rec=None,
     )
-    got = db_module.direct_db_url()
+    got = db_module.direct_db_url(local_host=machine_identity.host)
     assert got == "postgresql://ava_main:sek@10.0.0.9:6433/ava_main"
     lines = [r for r in loguru_records if "this home's record" in r["message"]]
     assert [r["level"].name for r in lines] == ["INFO"]  # pyright: ignore[reportUnknownMemberType]

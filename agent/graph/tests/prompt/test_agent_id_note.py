@@ -10,6 +10,7 @@ propagate to the caller.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -48,7 +49,7 @@ def _no_label(_ctx: AvaContext, _agent_id: int) -> str | None:
     return None
 
 
-def _no_machine() -> str | None:
+def _no_machine(_ctx: AvaContext) -> str | None:
     return None
 
 
@@ -66,7 +67,7 @@ def _steward_label(_ctx: AvaContext, _agent_id: int) -> str | None:
     return "memory steward"
 
 
-def _runner_machine() -> str | None:
+def _runner_machine(_ctx: AvaContext) -> str | None:
     return "runner-a"
 
 
@@ -244,8 +245,16 @@ def test_unset_machine_name_drops_only_the_machine_clause(monkeypatch: pytest.Mo
     def _broken() -> str:
         raise RuntimeError("settings unreadable")
 
-    monkeypatch.setattr(machine, "machine_name", _unset)
-    assert _machine_clause() is None
-    monkeypatch.setattr(machine, "machine_name", _broken)
+    def context(reader: Callable[[], str]) -> AvaContext:
+        return AvaContext(
+            machine=machine.MachineIdentity(
+                name=reader,
+                role=lambda: frozenset({"agent-runner"}),
+                host=lambda: "localhost",
+                description=lambda: None,
+            )
+        )
+
+    assert _machine_clause(context(_unset)) is None
     with pytest.raises(RuntimeError, match="settings unreadable"):
-        _machine_clause()
+        _machine_clause(context(_broken))

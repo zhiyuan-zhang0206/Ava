@@ -18,19 +18,19 @@ addresses for the same unit.
 
 | Capability set | Advertised url | Dialers |
 |---|---|---|
-| gateway (with or without station) | `http://<reachable_host()>:<gateway port>` | informational; the page proxy's SSRF allowlist |
-| agent-runner (split or co-located) | `http://<reachable_host()>:<ops port>` | gateway cluster RPC (`ops/cluster/rpc.py`), spawn/lifecycle, roster + heartbeat probes |
-| observability-station (pure) | `http://<reachable_host()>:<OTLP ingress port>` | remote gateway collector relay, the station health probe |
+| gateway (with or without station) | `http://<machine.host()>:<gateway port>` | informational; the page proxy's SSRF allowlist |
+| agent-runner (split or co-located) | `http://<machine.host()>:<ops port>` | gateway cluster RPC (`ops/cluster/rpc.py`), spawn/lifecycle, roster + heartbeat probes |
+| observability-station (pure) | `http://<machine.host()>:<OTLP ingress port>` | remote gateway collector relay, the station health probe |
 
 Three rules:
 
-1. **The advertised host is always `reachable_host()`** (`AVA_MACHINE_HOST` >
+1. **The advertised host is always `machine.host()`** (`AVA_MACHINE_HOST` >
    `localhost`). A unit never advertises its bare
    gateway URL and never hardcodes loopback: a machine with a reachable
    identity must advertise it, or every consumer that dials the advertised
    address dials the wrong host — the 2026-08-30 page-serve 400, where a
    gateway unit advertising `localhost` made the page proxy refuse the
-   machine's real page servers (they bind `reachable_host()`, which is not in
+   machine's real page servers (they bind `machine.host()`, which is not in
    the loopback-only allowlist).
 2. **Loopback advertisement is legal only when nothing remote dials it.** A
    zero-config single box advertises `localhost` and everything is co-located.
@@ -61,7 +61,7 @@ The page reverse proxy (`gateway/routers/pages.py`) dials only loopback or
 the registering agent's home machine — its `agents_meta.machine` name plus
 the hostnames its `machine_units` rows advertise. The unit advertisement is
 therefore also the proxy's allowlist: a page server on a machine registers
-its `reachable_host()` and is allowed because the unit advertises exactly
+its `machine.host()` and is allowed because the unit advertises exactly
 that host. Keeping the advertisement truthful (rule 1) is what keeps the
 guard correct.
 

@@ -185,6 +185,7 @@ async def finish_completed_invocation(
                 incarnation=ctx.original_incarnation,
                 resources=ctx.hosted_resources,
                 notes=notes,
+                read_local_machine=lambda: ctx.require_machine().name(),
             )
         return TurnOutcome(exited=False, crashed=False)
     return None

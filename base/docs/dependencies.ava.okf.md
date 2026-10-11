@@ -21,7 +21,7 @@ The base-layer domain map below complements the public
 - [[agent/db/docs/db.ava.okf.md]] — base/db/__init__.py provides database connection pool, depended on by services and gateway
 - [[gateway-cli.ava.okf.md]] — gateway communicates with agent processes via the contracts in base/agents/contract.py
 - [[base/events/live/docs/live/live.ava.okf.md]] — `ava:events` live pub/sub payload union
-- [[base/cluster/docs/machine.ava.okf.md]] — machine name + capability set, `machines` table, spawn-target invariant
+- [[base/cluster/machine/docs/machine.ava.okf.md]] — machine name + capability set, `machines` table, spawn-target invariant
 - [[base/deploy/schema/docs/migrations.ava.okf.md]] — baseline + delta schema model, applied set, version assertion
 - [[paths.ava.okf.md]] — `$AVA_HOME` layout
 - [[install_registry.ava.okf.md]] — `installed.json` + the skill-scanner gate

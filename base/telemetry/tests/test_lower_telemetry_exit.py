@@ -68,12 +68,14 @@ atexit.register(observe)
 from base.telemetry import tracing
 entered = threading.Event()
 
-def arm(endpoint, stop_requested):
+def arm(endpoint, stop_requested, **_identity):
     entered.set()
     stop_requested.wait()
 
 tracing._arm_tracing = arm
-tracing._start_arm_thread('http://local-test-collector')
+from pathlib import Path
+from base.telemetry.tests.identity_inputs import machine_identity
+tracing._start_arm_thread('http://local-test-collector', machine_identity(), Path('.ava'))
 assert entered.wait(5)
 owners.append(tracing._state['arm_owner'])
 """,

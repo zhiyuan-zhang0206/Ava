@@ -26,7 +26,6 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
 from base.cluster import session_name
-from base.cluster.machine import machine_name
 from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home
@@ -466,7 +465,7 @@ async def guarded_draft_schedule(
     )
     spawned = await create_and_launch_agent(
         body_obj,
-        machine_name(),
+        request.app.state.machine.name(),
         request.app.state.db_pool,
         request.app.state.db,
         request.app.state.bus,

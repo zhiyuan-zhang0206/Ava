@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from functools import partial
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineRoles
 from gateway.app import app
 from gateway.routers.tests.test_memory_search import (
     _SEARCH_PERMITS,
@@ -45,7 +47,7 @@ class TestEventLoopIsolation:
         import gateway.routers.memory as _gw_memory
         import services.derived.memory_indexer.backends.factory as _factory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "a.md").write_text("---\ntype: Memory\n---\nx\n")
 
         in_flight = threading.Event()
@@ -351,7 +353,7 @@ class TestMemoryNoteEndpoint:
         frontmatter values arrive as structured fields."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -391,7 +393,7 @@ Body **with** markdown.
         """Nested notes resolve by their relative path (the graph's node path)."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "health").mkdir()
         (tmp_path / "health" / "overview.md").write_text(
             """---
@@ -417,7 +419,7 @@ tags: [health]
     ) -> None:
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         with TestClient(app) as client:
             resp = client.get("/api/memory/note", params={"path": "missing.md"})
         assert resp.status_code == 404
@@ -428,7 +430,7 @@ tags: [health]
         """Traversal paths are rejected, not resolved — no filesystem leak."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "secret.md").write_text(
             """---
 type: Memory
@@ -454,7 +456,7 @@ title: Secret
         """A .md file that is not a note (no frontmatter) is not a note."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "plain.md").write_text("# Just a heading\n", encoding="utf-8")
         with TestClient(app) as client:
             resp = client.get("/api/memory/note", params={"path": "plain.md"})
@@ -471,7 +473,7 @@ title: Secret
         """
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         with TestClient(app) as client:
             resp = client.get("/api/memory/note", params={"path": "ok\x00.md"})
         assert resp.status_code == 404
@@ -483,7 +485,7 @@ title: Secret
         a non-canonical-but-in-root path is legal, only escapes are 404."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "bar.md").write_text(
             """---
 type: Memory
@@ -499,3 +501,9 @@ tags: [tech-ops]
             resp = client.get("/api/memory/note", params={"path": "bar.md/../bar.md"})
         assert resp.status_code == 200
         assert resp.json()["title"] == "Bar"
+
+
+def _memory_root(root: Path, *, roles: MachineRoles) -> Path:
+    """Keep the original test filesystem while accepting the explicit role input."""
+    del roles
+    return root

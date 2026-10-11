@@ -18,10 +18,13 @@ import cli.commands.lifecycle.status as _status_commands
 import cli.commands.probe as _probe_commands
 import ops.roster as _roster
 from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 from base.config import settings
+from cli.database.runtime import CommandRuntime
 from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
 from cli.tests._commands_helpers import _FakeResponse, _FakeResult, _patch_gateway_http, _sess
 from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
@@ -30,11 +33,16 @@ def _local_status_boundary(
     monkeypatch: pytest.MonkeyPatch, operator_database: DatabaseFactory
 ) -> None:
     """Status presentation does not require native database tools or a live cluster."""
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import httpx
 
     from base.native_process.root_control.client import RootClientError
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
     def _unreachable(*_args: object, **_kwargs: object) -> None:
         raise httpx.ConnectError("isolated status test")
@@ -61,6 +69,8 @@ def test_status_explains_persistently_unselected_services(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from base.deploy.lifecycle import service_selection
 
@@ -69,7 +79,12 @@ def test_status_explains_persistently_unselected_services(
         "read_selection",
         lambda: service_selection.ServiceSelection("only", frozenset({"gateway"})),
     )
-    assert _status_commands.cmd_status(database_factory=operator_database) == 0
+    assert (
+        _status_commands.cmd_status(
+            database_factory=operator_database, machine=command_runtime.machine
+        )
+        == 0
+    )
     frontend = next(line for line in capsys.readouterr().out.splitlines() if "frontend" in line)
     assert "disabled by desired service set" in frontend
 
@@ -125,7 +140,11 @@ def test_fetch_gateway_cluster_status_without_a_credential_raises_instead_of_dia
 
 
 def test_status_runs_without_error(
-    monkeypatch: pytest.MonkeyPatch, capsys, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """status can output normally even when all command mocks return non-0 (empty cluster) (no raise)."""
 
@@ -135,7 +154,9 @@ def test_status_runs_without_error(
         return _FakeResult(returncode=0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _status_commands.cmd_status(database_factory=operator_database)
+    rc = _status_commands.cmd_status(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert _sess("gateway") in out
@@ -143,15 +164,25 @@ def test_status_runs_without_error(
 
 
 def test_status_gateway_excludes_ops(
-    monkeypatch: pytest.MonkeyPatch, capsys, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _status_commands.cmd_status(database_factory=operator_database)
+    rc = _status_commands.cmd_status(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert _sess("gateway") in out
@@ -159,11 +190,21 @@ def test_status_gateway_excludes_ops(
 
 
 def test_status_agent_runner_shows_ops(
-    monkeypatch: pytest.MonkeyPatch, capsys, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"agent-runner"})
 
-    rc = _status_commands.cmd_status(database_factory=operator_database)
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+
+    rc = _status_commands.cmd_status(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert _sess("ops") in out
@@ -171,12 +212,21 @@ def test_status_agent_runner_shows_ops(
 
 
 def test_status_shows_browser_skip_reason(
-    monkeypatch: pytest.MonkeyPatch, capsys, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Issue #1111: an enabled-but-incapable ava-browser is shown WITH its reason
     rather than silently dropped, so `ava status` (the first diagnostic command)
     is not blind to the broken service."""
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"agent-runner"})
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(settings.services, "browser_enabled", True)
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: "no display (headless)")
 
@@ -184,7 +234,9 @@ def test_status_shows_browser_skip_reason(
         return _FakeResult(returncode=0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _status_commands.cmd_status(database_factory=operator_database)
+    rc = _status_commands.cmd_status(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert _sess("browser") in out
@@ -195,20 +247,32 @@ def test_status_shows_the_gate_entry_row(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The entry service shares the root/identity readiness table with the app."""
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import cli.commands.lifecycle.status as status_module
     import cli.commands.probe as probe_module
     from cli.commands.probe import ServiceProbe
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(status_module, "_root_tree_units", lambda: {"gate": {"state": "running"}})
     monkeypatch.setattr(
         probe_module,
         "probe_service",
         lambda _spec: ServiceProbe(False, "down", "owned listener not ready"),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
-    assert _status_commands.cmd_status(database_factory=operator_database) == 0
+    assert (
+        _status_commands.cmd_status(
+            database_factory=operator_database, machine=command_runtime.machine
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     row = next(line for line in out.splitlines() if line.startswith(_sess("gate") + " "))
     assert "✓" in row and "✗" in row
@@ -217,31 +281,58 @@ def test_status_shows_the_gate_entry_row(
 
 
 def test_status_shows_the_end_to_end_redis_bridge_row(
-    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The host-level relay must not disappear behind healthy service rows."""
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import cli.commands.lifecycle.status as status_mod
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(
-        status_mod,
-        "print_redis_bridge_status",
-        lambda: sys.stdout.write("  ✗ 10.64.0.7:6380 Redis PING: connection refused\n"),
-    )
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
-    assert _status_commands.cmd_status(database_factory=operator_database) == 0
+    def print_bridge(*, machine: MachineIdentity) -> None:
+        assert machine is command_runtime.machine
+        sys.stdout.write("  ✗ 10.64.0.7:6380 Redis PING: connection refused\n")
+
+    monkeypatch.setattr(status_mod, "print_redis_bridge_status", print_bridge)
+
+    assert (
+        _status_commands.cmd_status(
+            database_factory=operator_database, machine=command_runtime.machine
+        )
+        == 0
+    )
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "redis bridge (private-network ingress):" in out
     assert "Redis PING: connection refused" in out
 
 
 def test_status_runner_only_has_no_gate_section(
-    monkeypatch: pytest.MonkeyPatch, capsys, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A pure agent-runner owns no entry port — same rule as the pg/redis section."""
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
 
-    rc = _status_commands.cmd_status(database_factory=operator_database)
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"agent-runner"})
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+
+    rc = _status_commands.cmd_status(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "gate (fleet UI entry):" not in out
@@ -249,12 +340,19 @@ def test_status_runner_only_has_no_gate_section(
 
 
 def test_status_reads_root_units(
-    monkeypatch: pytest.MonkeyPatch, capsys, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Service rows read root units; retired watchdogs have no runtime row."""
-    monkeypatch.setattr(
-        _repo_commands, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"})
-    )
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway", "agent-runner"})
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
     class _Client:
         def __init__(self, _socket_path: Path, *, timeout: float = 5.0) -> None:
@@ -277,7 +375,9 @@ def test_status_reads_root_units(
         return _FakeResult(returncode=0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _status_commands.cmd_status(database_factory=operator_database)
+    rc = _status_commands.cmd_status(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("ava-")}
@@ -288,10 +388,19 @@ def test_status_reads_root_units(
 
 
 def test_status_root_mode_survives_an_unreachable_root(
-    monkeypatch: pytest.MonkeyPatch, capsys, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Diagnostic-first: a down root reads as an empty tree, not a crash."""
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
     class _Down:
         def __init__(self, _socket_path: Path, *, timeout: float = 5.0) -> None:
@@ -308,7 +417,9 @@ def test_status_root_mode_survives_an_unreachable_root(
         return _FakeResult(returncode=0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _status_commands.cmd_status(database_factory=operator_database)
+    rc = _status_commands.cmd_status(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("ava-")}
@@ -391,15 +502,26 @@ def test_detect_prod_source_drift_detached(monkeypatch: pytest.MonkeyPatch, tmp_
 
 
 def test_cmd_status_warns_on_prod_source_drift(
-    monkeypatch: pytest.MonkeyPatch, capsys, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """cmd_status surfaces the drift warning when the prod source is off main
     (runs on any installed host, here agent-runner)."""
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"agent-runner"})
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(
         "base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: "ava-7/fix"
     )
-    rc = _status_commands.cmd_status(database_factory=operator_database)
+    rc = _status_commands.cmd_status(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "prod source" in out
@@ -409,14 +531,24 @@ def test_cmd_status_warns_on_prod_source_drift(
 
 
 def test_cmd_status_detached_prod_source_is_not_a_warning(
-    monkeypatch: pytest.MonkeyPatch, capsys, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A detached prod source (source-mode release state) prints an informational
     line, not the drift warning, and steers away from `checkout main`."""
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"agent-runner"})
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: "HEAD")
-    rc = _status_commands.cmd_status(database_factory=operator_database)
+    rc = _status_commands.cmd_status(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "detached at the released commit" in out
@@ -429,7 +561,12 @@ def test_cmd_status_detached_prod_source_is_not_a_warning(
 
 def _quiet_status(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     """Isolate `ava status` to its release section: a runner-only role, no probes."""
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"agent-runner"})
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: None)
     monkeypatch.setattr("base.paths.ava_home", lambda: home)
 
@@ -439,11 +576,18 @@ def test_cmd_status_names_the_source_checkout_it_runs(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     _quiet_status(monkeypatch, tmp_path)
     monkeypatch.setattr("base.deploy.git.cluster_drift.checkout_head_sha", lambda _repo: "c" * 40)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _status_commands.cmd_status(database_factory=operator_database) == 0
+    assert (
+        _status_commands.cmd_status(
+            database_factory=operator_database, machine=command_runtime.machine
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert re.search(r"release: source checkout \S+ at c{7}\n", out)
 
@@ -453,6 +597,8 @@ def test_cmd_status_shows_gateway_snapshot_by_default(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """`ava status` (no flag) runs local probes AND prints the gateway snapshot."""
 
@@ -469,7 +615,9 @@ def test_cmd_status_shows_gateway_snapshot_by_default(
             }
         ),
     )
-    rc = _status_commands.cmd_status(database_factory=operator_database)
+    rc = _status_commands.cmd_status(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert rc == 0
     out = capsys.readouterr().out
     assert _sess("gateway") in out  # local probe section still present
@@ -481,6 +629,8 @@ def test_cmd_status_gateway_unreachable_is_inline_not_fatal(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A down gateway prints inline; `ava status` still returns 0 (local probes ran)."""
     import httpx
@@ -492,7 +642,9 @@ def test_cmd_status_gateway_unreachable_is_inline_not_fatal(
         raise httpx.ConnectError("connection refused")
 
     monkeypatch.setattr("httpx.get", _boom)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _status_commands.cmd_status(database_factory=operator_database)
+    rc = _status_commands.cmd_status(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert rc == 0
     assert "gateway unreachable" in capsys.readouterr().out
 
@@ -501,7 +653,11 @@ def test_cmd_status_gateway_unreachable_is_inline_not_fatal(
 
 
 def test_status_prints_a_live_host_reading(
-    monkeypatch: pytest.MonkeyPatch, capsys, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """`ava status` reads CPU/memory/disk straight from psutil.
 
@@ -522,14 +678,22 @@ def test_status_prints_a_live_host_reading(
     monkeypatch.setattr(status_mod, "print_data_plane_status", _print_plane)
     monkeypatch.setattr(status_mod, "print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert status_mod.cmd_status(database_factory=operator_database) == 0
+    assert (
+        status_mod.cmd_status(database_factory=operator_database, machine=command_runtime.machine)
+        == 0
+    )
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     assert "host (live cpu/memory/disk):" in out
     assert re.search(r"cpu \d+%\s+memory \d+% \([\d.]+/[\d.]+ GB\)\s+disk \d+%", out)
 
 
 def test_status_host_reading_failure_does_not_hide_the_rest(
-    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A host without psutil still gets the service table and the release section —
     the reading degrades to its own reason line, it does not abort the verb."""
@@ -550,7 +714,10 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
         lambda: (_ for _ in ()).throw(RuntimeError("no psutil here")),
     )
 
-    assert status_mod.cmd_status(database_factory=operator_database) == 0
+    assert (
+        status_mod.cmd_status(database_factory=operator_database, machine=command_runtime.machine)
+        == 0
+    )
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     assert "unavailable (no psutil here)" in out
     assert "[ava status]" in out

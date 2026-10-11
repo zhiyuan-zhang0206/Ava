@@ -5,12 +5,14 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from base.telemetry import tracing
 from base.telemetry.otlp import trace_workers as lifecycle
+from base.telemetry.tests.identity_inputs import machine_identity
 
 
 @pytest.fixture
@@ -45,7 +47,7 @@ def test_first_use_timeout_still_allows_late_arm_success(
 ) -> None:
     entered, release = threading.Event(), threading.Event()
 
-    def initialize(_endpoint: str, stopped: threading.Event) -> None:
+    def initialize(_endpoint: str, stopped: threading.Event, **_identity: object) -> None:
         entered.set()
         assert release.wait(5)
         if not stopped.is_set():
@@ -53,7 +55,7 @@ def test_first_use_timeout_still_allows_late_arm_success(
 
     monkeypatch.setattr(tracing, "_arm_tracing", initialize)
     monkeypatch.setattr(tracing, "_INIT_RESOLVED_TIMEOUT_S", 0.01)
-    tracing._start_arm_thread("http://collector")
+    tracing._start_arm_thread("http://collector", machine_identity(), Path(".ava"))
     owner = fresh_state["arm_owner"]
     try:
         assert entered.wait(5)
@@ -64,7 +66,7 @@ def test_first_use_timeout_still_allows_late_arm_success(
         assert owner.finished.wait(5)
         assert fresh_state["initialized"]
         assert tracing.shutdown() == ()
-        tracing._start_arm_thread("http://replacement")
+        tracing._start_arm_thread("http://replacement", machine_identity(), Path(".ava"))
         assert fresh_state["arm_owner"] is owner
     finally:
         release.set()
@@ -80,7 +82,7 @@ def test_real_sdk_arm_block_does_not_hold_stop_lock(
         assert release.wait(5)
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", initialize)
-    tracing._start_arm_thread("http://collector")
+    tracing._start_arm_thread("http://collector", machine_identity(), Path(".ava"))
     owner = fresh_state["arm_owner"]
     try:
         assert entered.wait(5)
@@ -103,7 +105,7 @@ def test_unknown_late_arm_error_is_visible_then_original_stop_raises(
     error = RuntimeError("unexpected owner defect")
     seen: list[BaseException] = []
 
-    def initialize(_endpoint: str, _stopped: threading.Event) -> None:
+    def initialize(_endpoint: str, _stopped: threading.Event, **_identity: object) -> None:
         entered.set()
         assert release.wait(5)
         raise error
@@ -114,7 +116,7 @@ def test_unknown_late_arm_error_is_visible_then_original_stop_raises(
 
     monkeypatch.setattr(tracing, "_arm_tracing", initialize)
     monkeypatch.setattr(lifecycle, "report_no_pipeline", report)
-    tracing._start_arm_thread("http://collector")
+    tracing._start_arm_thread("http://collector", machine_identity(), Path(".ava"))
     owner = fresh_state["arm_owner"]
     try:
         assert entered.wait(5)
@@ -159,7 +161,7 @@ def test_retry_unknown_error_retains_identity(monkeypatch: pytest.MonkeyPatch) -
     observed = threading.Event()
     seen: list[BaseException] = []
 
-    def initialize() -> None:
+    def initialize(**_identity: object) -> None:
         raise error
 
     def report(_message: str, **details: Any) -> None:
@@ -177,3 +179,19 @@ def test_retry_unknown_error_retains_identity(monkeypatch: pytest.MonkeyPatch) -
     assert raised.value is error
     assert seen == [error]
     assert not owner._thread.is_alive()
+
+
+def test_trace_identity_defect_fails_before_sdk_arm(
+    monkeypatch: pytest.MonkeyPatch,
+    fresh_state: dict[str, Any],
+) -> None:
+    machine = machine_identity()
+
+    def invalid() -> str:
+        raise RuntimeError("invalid machine reader")
+
+    monkeypatch.setattr(machine, "name", invalid)
+    with pytest.raises(RuntimeError, match="invalid machine reader"):
+        tracing._start_arm_thread("http://collector", machine, Path(".ava"))
+    assert fresh_state.get("arm_owner") is None
+    assert not fresh_state["arm_failed"]

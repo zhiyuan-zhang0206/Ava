@@ -14,11 +14,12 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.host.private_storage import ensure_private_dir
 from gateway.routers.upload import batches as upload_batches
 from gateway.routers.upload.batches import UploadItem
 from gateway.schemas.uploads import UploadedBatch
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _CHILD = """
 import json, os, sys
@@ -27,8 +28,6 @@ from psycopg_pool import ConnectionPool
 config = json.load(sys.stdin)
 os.environ["AVA_HOME"] = config["home"]
 os.environ["AVA_CONFIG_FETCH"] = "skip"
-from base.cluster.machine import set_identity
-set_identity(name=config["machine"], role=["gateway", "agent-runner"])
 from gateway.routers.upload import batches as owner
 directory = Path(config["directory"])
 original_publish = owner.publish_files
@@ -48,12 +47,12 @@ owner.publish_files = publish
 with ConnectionPool(config["dsn"], min_size=1, max_size=1) as pool:
     owner.save_keyed_batch(pool, config.get("key", "crash"), 123, directory,
         [("a.png", b"aaa", "image/png"), ("b.png", b"bbb", "image/png")],
-        ["a.png", "b.png"], max_bytes=6, max_files=2)
+        ["a.png", "b.png"], max_bytes=6, max_files=2, local_machine=config["machine"])
 os._exit(41)
 """
 
 
-def _save(pool: ConnectionPool, directory: Path) -> UploadedBatch:
+def _save(pool: ConnectionPool, directory: Path, *, local_machine: str) -> UploadedBatch:
     return upload_batches.save_keyed_batch(
         pool,
         "crash",
@@ -63,6 +62,7 @@ def _save(pool: ConnectionPool, directory: Path) -> UploadedBatch:
         ["a.png", "b.png"],
         max_bytes=6,
         max_files=2,
+        local_machine=local_machine,
     )
 
 
@@ -77,7 +77,11 @@ def batch_target(db_conn: psycopg.Connection, tmp_path: Path) -> Path:
 
 @pytest.mark.parametrize("phase", ["receiving", "first-file", "published", "ready"])
 def test_hard_death_recovers_fixed_objects(
-    db_conn: psycopg.Connection, batch_target: Path, phase: str
+    db_conn: psycopg.Connection,
+    batch_target: Path,
+    phase: str,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     child = subprocess.run(  # noqa: S603 -- fixed Python program against isolated test DB
         [sys.executable, "-c", _CHILD],
@@ -87,7 +91,7 @@ def test_hard_death_recovers_fixed_objects(
                 "directory": str(batch_target),
                 "phase": phase,
                 "home": str(batch_target.parent.parent / "writer-home"),
-                "machine": machine_name(),
+                "machine": machine_identity.name(),
             }
         ),
         text=True,
@@ -101,8 +105,8 @@ def test_hard_death_recovers_fixed_objects(
     names = [item["stored_name"] for item in row[0]]
     assert (row[1] is not None) == (phase == "ready")
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn, min_size=1, max_size=2) as pool:
-        receipt = _save(pool, batch_target)
-        assert _save(pool, batch_target) == receipt
+        receipt = _save(pool, batch_target, local_machine=machine_identity.name())
+        assert _save(pool, batch_target, local_machine=machine_identity.name()) == receipt
     assert [Path(file.path).name for file in receipt.files] == names
     assert [Path(file.path).read_bytes() for file in receipt.files] == [b"aaa", b"bbb"]
     assert len([p for p in batch_target.iterdir() if p.is_file()]) == 2
@@ -112,6 +116,8 @@ def test_disconnected_writer_can_finish_after_recovery_without_overwriting(
     db_conn: psycopg.Connection,
     batch_target: Path,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     original_transaction = upload_batches.write_transaction
     original_publish = upload_batches.publish_files
@@ -135,7 +141,7 @@ def test_disconnected_writer_can_finish_after_recovery_without_overwriting(
 
     def old_writer(pool: ConnectionPool) -> UploadedBatch:
         writer_thread.append(threading.get_ident())
-        return _save(pool, batch_target)
+        return _save(pool, batch_target, local_machine=machine_identity.name())
 
     monkeypatch.setattr(upload_batches, "write_transaction", transaction)
     monkeypatch.setattr(upload_batches, "publish_files", publish)
@@ -146,18 +152,20 @@ def test_disconnected_writer_can_finish_after_recovery_without_overwriting(
                 assert blocked.wait(10)
                 db_conn.execute("SELECT pg_terminate_backend(%s)", (pid[0],))
                 db_conn.commit()
-                recovered = _save(pool, batch_target)
+                recovered = _save(pool, batch_target, local_machine=machine_identity.name())
             finally:
                 release.set()
             with pytest.raises(psycopg.OperationalError):
                 future.result(timeout=10)
-        assert _save(pool, batch_target) == recovered
+        assert _save(pool, batch_target, local_machine=machine_identity.name()) == recovered
     assert [Path(file.path).read_bytes() for file in recovered.files] == [b"aaa", b"bbb"]
     row = db_conn.execute("SELECT count(*) FROM agent_upload_batches").fetchone()
     assert row is not None and row[0] == 1
 
 
-def test_independent_processes_share_quota(db_conn: psycopg.Connection, batch_target: Path) -> None:
+def test_independent_processes_share_quota(
+    db_conn: psycopg.Connection, batch_target: Path, *, machine_identity: MachineIdentity
+) -> None:
     children: list[subprocess.Popen[str]] = []
     try:
         for key in ("one", "two"):
@@ -177,7 +185,7 @@ def test_independent_processes_share_quota(db_conn: psycopg.Connection, batch_ta
                         "phase": "ready",
                         "key": key,
                         "home": str(batch_target.parent.parent / "writer-home"),
-                        "machine": machine_name(),
+                        "machine": machine_identity.name(),
                     }
                 )
             )
@@ -201,8 +209,7 @@ def test_independent_processes_share_quota(db_conn: psycopg.Connection, batch_ta
 
 
 def test_receipts_use_explicit_writable_transactions(
-    db_conn: psycopg.Connection,
-    batch_target: Path,
+    db_conn: psycopg.Connection, batch_target: Path, *, machine_identity: MachineIdentity
 ) -> None:
     with ConnectionPool[psycopg.Connection](
         db_conn.info.dsn,
@@ -210,4 +217,4 @@ def test_receipts_use_explicit_writable_transactions(
         max_size=1,
         kwargs={"options": "-c default_transaction_read_only=on"},
     ) as pool:
-        assert len(_save(pool, batch_target).files) == 2
+        assert len(_save(pool, batch_target, local_machine=machine_identity.name()).files) == 2

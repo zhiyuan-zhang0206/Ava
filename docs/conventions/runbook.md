@@ -100,7 +100,7 @@ nodes of the packages that own the code:
 | plugin enable config (`plugins_config.json`) | `base/packages/plugins/docs/enable_config.ava.okf.md` |
 | `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/docs/install_registry.ava.okf.md` |
 | `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages/docs/packages.ava.okf.md` |
-| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/docs/machine.ava.okf.md` |
+| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/machine/docs/machine.ava.okf.md` |
 | which services each capability contributes | `services/docs/services.ava.okf.md` |
 
 Three operational consequences worth stating here:

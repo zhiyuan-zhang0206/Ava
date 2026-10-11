@@ -46,10 +46,6 @@ chain, and metric plumbing unimported — and complete at `finalize()` (clean
 exit), on hold saturation, or at the max-age bound. The policy and its
 semantics live in `base.telemetry.otlp.telemetry_otlp_defer`.
 
-Backend initialization is retried every five minutes after a failed collector
-probe or SDK setup. Each disabled/recovered attempt is emitted as a real event,
-not only through the ``_NO_EMITTER`` diagnostic path, so the surviving JSONL
-mirror records the outage even while OTLP itself cannot carry the event.
 """
 
 from __future__ import annotations
@@ -59,14 +55,17 @@ import queue
 import sys
 import threading
 import time
-from functools import cache
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
+from base.cluster.machine import MachineIdentity
 from base.telemetry import (
     DrainPhase,
     DrainResult,
     DrainStatus,
     Event,
+    EventPipeline,
     failure_isolated,
     report_no_pipeline,
     report_sink_failure,
@@ -107,14 +106,10 @@ from base.telemetry.otlp.telemetry_otlp_worker import OtlpWorker
 
 __all__ = [
     "COLLECTOR_RETRY_INTERVAL_S",
-    "defer_until_exit",
-    "deferred_state",
+    "ExportingEventPipeline",
+    "OtlpBackend",
     "endpoint_reachable",
-    "export_batch",
-    "finalize",
-    "flush",
-    "shutdown",
-    "warmup",
+    "observability_export_allowed",
 ]
 
 # ── knobs ─────────────────────────────────────────────────────────────────────
@@ -211,25 +206,21 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("gateway_process", "fd_count"): "gauge",
 }
 
-# Loguru extra key marking the OTLP side's own diagnostics, so they reach the
-# stderr/file sinks and never re-enter the event pipeline (same contract as
-# base.telemetry._NO_EMITTER).
 _NO_EMITTER = "_no_emitter"
 
 
-@cache
-def observability_export_allowed() -> bool:
-    """Whether this process may arm OTLP export, frozen once per process."""
+def observability_export_allowed(machine: MachineIdentity, *, home: Path) -> bool:
+    """Decide export eligibility from the caller's machine and unit home."""
     if endpoint_override_is_explicit("AVA_TELEMETRY_OTLP_ENDPOINT"):
         return True
-    if not production_identity():
+    if not production_identity(machine, home=home):
         return False
-    home = gateway_observability_home()
-    if home is None:
+    gateway_home = gateway_observability_home(machine, home=home)
+    if gateway_home is None:
         return True
     from base.telemetry.observability import home_is_observability_station
 
-    allowed = home_is_observability_station(home)
+    allowed = home_is_observability_station(gateway_home, machine=machine, unit_home=home)
     if not allowed:
         from base.log import logger
 
@@ -237,7 +228,7 @@ def observability_export_allowed() -> bool:
             "[otlp-exporter] OTLP export disabled: gateway home is not the "
             "observability station (no {} marker and no observability-station "
             "capability); set AVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
-            home / "lgtm-host",
+            gateway_home / "lgtm-host",
         )
     return allowed
 
@@ -302,8 +293,8 @@ def _emit_backend_event(event_name: str, **attributes: Any) -> None:
         telemetry.emit("telemetry", event_name, attributes=attributes)
 
 
-class _OtlpBackend:
-    """One OTLP export backend per process: bounded queue + worker thread that
+class OtlpBackend:
+    """One owned OTLP export backend: bounded queue + worker thread that
     feeds the OTel SDK log processor, plus direct in-memory metric recording.
 
     ``providers`` is the test seam — an injected (LoggerProvider,
@@ -314,9 +305,13 @@ class _OtlpBackend:
     def __init__(
         self,
         *,
+        export_allowed: Callable[[], bool],
         providers: tuple[Any, Any] | None = None,
         queue_maxsize: int = _QUEUE_MAXSIZE,
     ) -> None:
+        self._export_allowed = export_allowed
+        self._export_decision: bool | None = None
+        self._eligibility_lock = threading.Lock()
         self._queue: queue.Queue[Any] = queue.Queue(maxsize=queue_maxsize)
         self._dropped = 0
         self._dropped_lock = threading.Lock()
@@ -349,9 +344,9 @@ class _OtlpBackend:
     # ── public surface (called by base.telemetry) ─────────────────────────
 
     def export_batch(self, events: list[Event]) -> None:
-        """Export one emitter batch to the OTLP backend. Never raises, never
-        blocks the caller: logs enqueue to the bounded queue (shed when full),
-        metrics record in memory (lock-free atomics).
+        """Export one emitter batch; required identity defects propagate.
+        Transport failures stay isolated. Logs enqueue (shed when full),
+        while metrics record in memory (lock-free atomics).
 
         While deferred (exec-child arm, task #3816 M4b) the batch is held in the
         same bounded queue with no worker — no settings read, no OTel import —
@@ -411,7 +406,7 @@ class _OtlpBackend:
 
             with self._dropped_lock:
                 self._dropped += lost
-            report = report_loss(example, lost, "otlp")
+            report = report_loss(example, lost, "otlp", record_metric=self.record_loss)
             # The alarm itself bypasses both queues. Metrics can still export
             # while the log lane is full; the local mirror retains the evidence.
             _append_jsonl([report])
@@ -500,20 +495,36 @@ class _OtlpBackend:
 
     # ── flag + backend bring-up ──────────────────────────────────────────────
 
-    @staticmethod
-    def _enabled() -> bool:
-        """Read the startup-frozen OTLP flag. Any read failure degrades to
-        off — the OTLP side must never be the reason an emit path breaks."""
+    def _enabled(self) -> bool:
+        """Keep transport settings isolated; identity defects remain caller errors."""
         try:
             from base.config import settings
 
-            return (
-                bool(settings.observability.telemetry_otlp_enabled)
-                and observability_export_allowed()
-            )
+            enabled = bool(settings.observability.telemetry_otlp_enabled)
         except Exception as exc:
             report_sink_failure("otlp enabled-flag read", exc)
             return False
+        if not enabled:
+            return False
+        with self._eligibility_lock:
+            if self._export_decision is None:
+                self._export_decision = self._export_allowed()
+            return self._export_decision
+
+    def warmup(self) -> None:
+        """Resolve eligibility before isolating lazy SDK and network preparation."""
+        if self._enabled():
+            with failure_isolated("otlp warmup"):
+                self._ensure()
+
+    def deferred_state(self) -> bool:
+        """Whether this owner's backend holds an exec-child backlog."""
+        return self._deferral.is_active()
+
+    def record_loss(self, report: Event) -> None:
+        """Record a loss metric only when this owner already has a meter."""
+        if self._meter is not None:
+            self._record_metrics(report)
 
     @staticmethod
     def _endpoint_reachable(endpoint: str) -> bool:
@@ -747,54 +758,43 @@ def _metrics_resource() -> Any:
         telemetry_otlp_metrics.cluster_label = original_cluster_label
 
 
-# Module singleton — base.telemetry calls the module functions below; tests
-# replace `backend` wholesale with a providers-injected instance.
-backend = _OtlpBackend()
+class ExportingEventPipeline(EventPipeline):
+    """One ordinary writer and its downstream exporter share an explicit owner."""
 
+    def __init__(
+        self,
+        *,
+        writer: Callable[[list[Event], OtlpBackend], None],
+        export_allowed: Callable[[], bool],
+    ) -> None:
+        self._exporter = OtlpBackend(export_allowed=export_allowed)
+        self._exports_finished = False
+        super().__init__(writer=lambda events: writer(events, self._exporter))
 
-def export_batch(events: list[Event]) -> None:
-    """Dual-write one emitter batch to the OTLP backend (logs + metrics).
+    @property
+    def stopped(self) -> bool:
+        return super().stopped and self._exports_finished
 
-    No-op when AVA_TELEMETRY_OTLP_ENABLED is off; otherwise best-effort and
-    fully isolated — see the module docstring."""
-    backend.export_batch(events)
+    def stop(self, timeout: float = 5.0) -> DrainResult:
+        deadline = time.monotonic() + timeout
+        result = super().stop(timeout)
+        if result.status is DrainStatus.UNFINISHED:
+            return result
+        result = self._exporter.shutdown(timeout=max(0.0, deadline - time.monotonic()))
+        self._exports_finished = result.status is DrainStatus.COMPLETED
+        return result
 
+    def defer_exports(self) -> None:
+        self._exporter.defer_until_exit()
 
-def warmup() -> None:
-    """Bring up the enabled backend before short-lived code can emit events.
+    def finalize_exports(self) -> None:
+        self._exporter.finalize()
 
-    The bounded endpoint preflight and SDK setup happen before agent code runs;
-    a failed warmup is reported and retried after five minutes without ever
-    raising into the caller.
-    """
-    with failure_isolated("otlp warmup"):
-        if backend._enabled():
-            backend._ensure()
+    def warmup_exports(self) -> None:
+        self._exporter.warmup()
 
+    def exports_deferred(self) -> bool:
+        return self._exporter.deferred_state()
 
-def defer_until_exit() -> None:
-    """Arm deferred export on the process backend (task #3816 M4b).
-
-    The exec-child arm path; see `_OtlpBackend.defer_until_exit`.
-    """
-    backend.defer_until_exit()
-
-
-def finalize() -> None:
-    """Complete a deferred hold and flush (clean exit / shutdown, task #3816)."""
-    backend.finalize()
-
-
-def deferred_state() -> bool:
-    """Whether the process backend currently holds a deferred backlog."""
-    return backend._deferral.is_active()
-
-
-def flush() -> None:
-    """Synchronously process queued OTLP events (test seam / exit)."""
-    backend.flush()
-
-
-def shutdown(timeout: float = 2.0) -> DrainResult:
-    """Finitely stop the OTLP backend and report any residual owned exporter work."""
-    return backend.shutdown(timeout)
+    def record_export_loss(self, report: Event) -> None:
+        self._exporter.record_loss(report)

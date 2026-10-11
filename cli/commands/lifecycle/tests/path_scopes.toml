@@ -1,7 +1,7 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.cli_tests" = [
-    "test_commands_restart_stop.py",
+    "identity/test_commands_restart_stop.py",
     "test_commands_status.py",
     "test_maintenance_stop_report.py",
     "test_remote_data_plane.py",
@@ -15,7 +15,7 @@
 "tests.fixtures.unit.generation" = ["."]
 "tests.fixtures.unit.homes" = ["."]
 "base.deploy.lifecycle.tests.serving_root" = [
-    "test_commands_restart_stop.py",
+    "identity/test_commands_restart_stop.py",
 ]
 "tests.fixtures.unit.sdk" = [
     "startup/test_commands_start.py",
@@ -25,7 +25,7 @@
     "startup/test_start_readiness_gate.py",
     "startup/test_start_unready_signal.py",
     "test_commands_cluster_status_lifecycle.py",
-    "test_commands_restart_stop.py",
+    "identity/test_commands_restart_stop.py",
     "test_commands_status.py",
     "test_hold_report.py",
     "test_maintenance_stop_report.py",

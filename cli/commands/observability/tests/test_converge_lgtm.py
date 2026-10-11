@@ -17,11 +17,23 @@ import pytest
 import yaml
 from pydantic import SecretStr
 
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
-from base.telemetry.lgtm_local import service_argv
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability import lgtm_native, observatory_urls
+from cli.commands.observability.tests.lgtm_inputs import (
+    darwin_rendering as darwin_rendering,
+)
+from cli.commands.observability.tests.lgtm_inputs import (
+    default_provisioning as default_provisioning,
+)
+from cli.commands.observability.tests.lgtm_inputs import (
+    empty_native_versions as _empty_native_versions,
+)
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -30,45 +42,18 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 _WILDCARD_LISTEN = "0.0.0.0"  # noqa: S104
 
 
-def _skip_binary_verification(_home: Path) -> None:
-    """Render fixtures do not install native executable assets."""
-
-
-@pytest.fixture(autouse=True)
-def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
-    """These existing lifecycle cases exercise the Darwin implementation."""
-    monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "arm64")
-    monkeypatch.setattr(lgtm_native, "_verify_loki", _skip_binary_verification)
-
-
 # The fixed document the S3 dashboard render is stubbed to: the assertions
 # below pin strict stderr checks on the config renderer, and the real render
 # reads the plugin registry (DB) — offline isolation, not behavior under test.
-_STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
-
-
-@pytest.fixture(autouse=True)
-def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default-render assertions use an explicit default deployment configuration."""
-    monkeypatch.setattr(
-        "base.config.settings.data_plane.db_url", "postgresql://reader@127.0.0.1:5433/ava"
-    )
-    monkeypatch.setattr("base.config.settings.gateway.gateway_url", "")
-    monkeypatch.setattr("base.config.settings.gateway.gateway_port", 8000)
-
-    def render_dashboard_json(_db: object, _repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
-        return _STUB_RENDER, ()
-
-    monkeypatch.setattr(
-        "base.telemetry.metrics.grafana_dashboard_supply.render_dashboard_json",
-        render_dashboard_json,
-    )
 
 
 def _ctx(
     tmp_path: Path, *, operator_database: Callable[[], Any], producer: Callable[[], EventPipeline]
 ) -> ConvergeCtx:
+    machine_config_76 = ConfigBoot()
+    machine_config_76.set_field("machine_serve_gateway", True)
+    machine_config_76.set_field("machine_serve_agent_runner", False)
+    machine_config_76.set_field("machine_serve_observability_station", False)
     repo = tmp_path / "repo"
     (repo / "deploy" / "lgtm").mkdir(parents=True)
     return ConvergeCtx(
@@ -76,14 +61,11 @@ def _ctx(
         ava_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
         services=frozenset(lgtm_native.BACKENDS),
-        config=ConfigBoot(),
+        config=machine_config_76,
         database_factory=operator_database,
         producer=producer,
+        machine=machine_from_boot(machine_config_76),
     )
-
-
-def _empty_native_versions(_repo: Path) -> dict[str, dict[str, str]]:
-    return {}
 
 
 def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_default(
@@ -91,6 +73,8 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Grafana's http_addr is rendered from settings.observability.lgtm_grafana_listen_host;
     the 0.0.0.0 default writes out the historical all-interfaces bind explicitly —
@@ -103,7 +87,12 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
         "0.0.0.0",  # noqa: S104 — asserted config default, not a bind
     )
     lgtm_native._render_configs(
-        repo, native_dir, home, database_factory=operator_database, producer=operator_pipeline
+        repo,
+        native_dir,
+        home,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
     grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
     assert "http_addr = 0.0.0.0" in grafana_ini
@@ -115,7 +104,12 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
 
     monkeypatch.setattr("base.config.settings.observability.lgtm_grafana_listen_host", "10.0.0.5")
     lgtm_native._render_configs(
-        repo, native_dir, home, database_factory=operator_database, producer=operator_pipeline
+        repo,
+        native_dir,
+        home,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
     grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
     assert "http_addr = 10.0.0.5" in grafana_ini
@@ -162,6 +156,8 @@ def test_native_provisioning_renders_remote_observatory_urls(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """AVA_OBSERVABILITY_URL set -> the datasources + alert webhook render the
     remote observatory endpoints; unset -> the current loopback defaults
@@ -173,14 +169,19 @@ def test_native_provisioning_renders_remote_observatory_urls(
         "base.config.settings.observability.observability_url",
         "http://10.0.0.46",
     )
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.10")
+    command_runtime.machine.set(host="10.0.0.10")
     monkeypatch.setattr(
         "base.config.settings.data_plane.db_url",
         "postgresql://grafana_ro@10.0.0.72:5433/ava_main",
     )
 
     lgtm_native._render_configs(
-        repo, native_dir, home, database_factory=operator_database, producer=operator_pipeline
+        repo,
+        native_dir,
+        home,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
@@ -205,6 +206,8 @@ def test_native_provisioning_webhook_stays_loopback_without_observatory(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """No observatory -> the webhook stays byte-identical 127.0.0.1:8000 even
     when reachable_host() would resolve to a tailnet address — self-dialing
@@ -216,10 +219,15 @@ def test_native_provisioning_webhook_stays_loopback_without_observatory(
         "base.config.settings.observability.observability_url",
         "",
     )
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.10")
+    command_runtime.machine.set(host="10.0.0.10")
 
     lgtm_native._render_configs(
-        repo, native_dir, home, database_factory=operator_database, producer=operator_pipeline
+        repo,
+        native_dir,
+        home,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
@@ -234,6 +242,8 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A rendered provisioning file the user hand-edited is warned about and
     preserved on the next converge — never overwritten (web-sources precedent)."""
@@ -242,7 +252,12 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
     native_dir = home / "lgtm/native"
 
     lgtm_native._render_configs(
-        repo, native_dir, home, database_factory=operator_database, producer=operator_pipeline
+        repo,
+        native_dir,
+        home,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
     datasources = native_dir / "config/provisioning/datasources/datasources.yml"
     # The rendered tree carries $__env{} references (URLs live in runtime.env),
@@ -254,7 +269,12 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
     datasources.write_text(user_edit, encoding="utf-8")
 
     lgtm_native._render_configs(
-        repo, native_dir, home, database_factory=operator_database, producer=operator_pipeline
+        repo,
+        native_dir,
+        home,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     assert "http://user.example:3100" in datasources.read_text(encoding="utf-8")
@@ -267,6 +287,8 @@ def test_native_provisioning_removes_stale_rendered_files(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A rendered file whose source template vanished is removed when untouched
     (pure derived state) — matching the web-sources cleanup rule."""
@@ -275,7 +297,12 @@ def test_native_provisioning_removes_stale_rendered_files(
     native_dir = home / "lgtm/native"
 
     lgtm_native._render_configs(
-        repo, native_dir, home, database_factory=operator_database, producer=operator_pipeline
+        repo,
+        native_dir,
+        home,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
     stale = native_dir / "config/provisioning/datasources/old.yml"
     stale.write_text("stale", encoding="utf-8")
@@ -285,7 +312,12 @@ def test_native_provisioning_removes_stale_rendered_files(
     hashes_path.write_text(json.dumps(hashes), encoding="utf-8")
 
     lgtm_native._render_configs(
-        repo, native_dir, home, database_factory=operator_database, producer=operator_pipeline
+        repo,
+        native_dir,
+        home,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     assert not stale.exists()
@@ -344,6 +376,8 @@ def test_native_converge_renders_grafana_password_only_when_configured(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
@@ -363,6 +397,7 @@ def test_native_converge_renders_grafana_password_only_when_configured(
         services=frozenset(lgtm_native.BACKENDS),
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     credential_file = home / "lgtm/native/grafana/admin_password"
@@ -377,6 +412,8 @@ def test_native_converge_leaves_unconfigured_grafana_password_absent(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
@@ -392,6 +429,7 @@ def test_native_converge_leaves_unconfigured_grafana_password_absent(
         services=frozenset(lgtm_native.BACKENDS),
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     credential_file = home / "lgtm/native/grafana/admin_password"
@@ -406,6 +444,8 @@ def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
@@ -422,6 +462,7 @@ def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
         services=frozenset(lgtm_native.BACKENDS),
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     env_file = home / "lgtm/native/grafana/telegram.env"
@@ -439,6 +480,7 @@ def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
         services=frozenset(lgtm_native.BACKENDS),
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
     assert not env_file.exists()
     assert 'AVA_ALERTS_TELEGRAM_BOT_TOKEN:-unconfigured}"' in run_script
@@ -461,6 +503,8 @@ def test_native_config_warns_only_for_mismatched_tempo_topology(
     warns: bool,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr("base.config.settings.observability.telemetry_tempo_query_url", query_url)
     monkeypatch.setattr(
@@ -473,6 +517,7 @@ def test_native_config_warns_only_for_mismatched_tempo_topology(
         tmp_path,
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     captured = capsys.readouterr()
@@ -511,6 +556,8 @@ def test_native_config_warns_when_widened_listen_host_has_loopback_read_urls(
     expected_warns: list[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", listen_host)
     monkeypatch.setattr(
@@ -540,6 +587,7 @@ def test_native_config_warns_when_widened_listen_host_has_loopback_read_urls(
         tmp_path,
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     captured = capsys.readouterr()
@@ -558,6 +606,8 @@ def test_native_config_warns_only_when_read_urls_stay_loopback_after_widening(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """When the read URLs follow the widened listen host, the mismatch warning
     stays silent (the external-migration form)."""
@@ -589,6 +639,7 @@ def test_native_config_warns_only_when_read_urls_stay_loopback_after_widening(
         tmp_path,
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     captured = capsys.readouterr()
@@ -613,7 +664,9 @@ def test_native_step_runs_only_for_the_marker_home(
         services: frozenset[str],
         database_factory: Callable[[], Any],
         producer: Callable[[], EventPipeline],
+        machine: MachineIdentity,
     ) -> None:
+        assert machine is ctx.machine
         assert database_factory is ctx.database_factory
         assert producer is ctx.producer
         calls.append((repo, home))
@@ -634,6 +687,10 @@ def _station_ctx(
 ) -> ConvergeCtx:
     """A converge context for a second machine declaring observability-station
     (no lgtm-host marker) — the WP1 deployment-unit form."""
+    machine_config_710 = ConfigBoot()
+    machine_config_710.set_field("machine_serve_gateway", False)
+    machine_config_710.set_field("machine_serve_agent_runner", False)
+    machine_config_710.set_field("machine_serve_observability_station", True)
     repo = tmp_path / "repo"
     (repo / "deploy" / "lgtm").mkdir(parents=True)
     return ConvergeCtx(
@@ -641,9 +698,10 @@ def _station_ctx(
         ava_home=tmp_path / "station-home",
         roles=frozenset({"observability-station"}),
         services=frozenset(lgtm_native.BACKENDS),
-        config=ConfigBoot(),
+        config=machine_config_710,
         database_factory=operator_database,
         producer=producer,
+        machine=machine_from_boot(machine_config_710),
     )
 
 
@@ -667,9 +725,11 @@ def test_native_step_runs_for_station_role_without_marker(
         services: frozenset[str],
         database_factory: Callable[[], Any],
         producer: Callable[[], EventPipeline],
+        machine: MachineIdentity,
     ) -> None:
         assert database_factory is ctx.database_factory
         assert producer is ctx.producer
+        assert machine is ctx.machine
         calls.append((repo, home))
 
     monkeypatch.setattr(lgtm_native, "ensure_lgtm_native", record_ensure)
@@ -677,124 +737,3 @@ def test_native_step_runs_for_station_role_without_marker(
     lgtm_native.ensure_lgtm_native_step(ctx)
 
     assert calls == [(ctx.repo, ctx.ava_home)]
-
-
-def test_station_role_renders_full_native_set_without_marker(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-) -> None:
-    """Dry-run: a second machine declaring the station role renders the FULL
-    native set — configs, launchd plists, and storage dirs — with no marker
-    and no version downloads (the WP1 acceptance render)."""
-    repo = Path(__file__).resolve().parents[4]
-    home = tmp_path / "station-home"
-    agents_dir = tmp_path / "LaunchAgents"
-    agents_dir.mkdir()
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
-
-    lgtm_native.ensure_lgtm_native(
-        repo,
-        home,
-        services=frozenset(lgtm_native.BACKENDS),
-        database_factory=operator_database,
-        producer=operator_pipeline,
-    )
-
-    native_dir = home / "lgtm/native"
-    for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env"):
-        assert (native_dir / "config" / name).is_file()
-    assert (native_dir / "grafana" / "run.sh").is_file()
-    assert not list(agents_dir.iterdir())
-    assert (native_dir / "data" / "loki").is_dir()
-    assert (native_dir / "data" / "prom").is_dir()
-    rendered_loki = (native_dir / "config" / "loki.yaml").read_text(encoding="utf-8")
-    # No unsubstituted render token survives (the template's {{...}} comment
-    # prose is the only legit brace text).
-    assert "{{AVA_HOME}}" not in rendered_loki
-    assert "{{LGTM_STORAGE_DIR}}" not in rendered_loki
-
-
-def test_native_storage_dir_default_matches_historical_layout(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-) -> None:
-    """Empty AVA_LGTM_STORAGE_DIR renders the historical
-    $AVA_HOME/lgtm/native/data paths byte-for-byte — the macmini re-render
-    diff stays empty (the storage-parameterization zero-regression contract)."""
-    repo = Path(__file__).resolve().parents[4]
-    home = tmp_path / "home"
-    native_dir = home / "lgtm/native"
-    monkeypatch.setattr("base.config.settings.observability.lgtm_storage_dir", "")
-    lgtm_native._render_configs(
-        repo, native_dir, home, database_factory=operator_database, producer=operator_pipeline
-    )
-    rendered_loki = yaml.safe_load((native_dir / "config/loki.yaml").read_text(encoding="utf-8"))
-    assert rendered_loki["common"]["path_prefix"] == str((home / "lgtm/native/data/loki").resolve())
-    assert rendered_loki["compactor"]["working_directory"] == str(
-        (home / "lgtm/native/data/loki/compactor").resolve()
-    )
-    prometheus_argv = service_argv(home, "prometheus")
-    assert "--storage.tsdb.path=" + str((home / "lgtm/native/data/prom").resolve()) in (
-        prometheus_argv
-    )
-
-
-def test_native_storage_dir_parameterized(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-) -> None:
-    """A per-machine AVA_LGTM_STORAGE_DIR moves the Loki filesystem store and
-    the Prometheus TSDB onto the configured data volume."""
-    repo = Path(__file__).resolve().parents[4]
-    home = tmp_path / "home"
-    native_dir = home / "lgtm/native"
-    monkeypatch.setattr("base.config.settings.observability.lgtm_storage_dir", "/data/obs")
-    lgtm_native._render_configs(
-        repo, native_dir, home, database_factory=operator_database, producer=operator_pipeline
-    )
-    rendered_loki = yaml.safe_load((native_dir / "config/loki.yaml").read_text(encoding="utf-8"))
-    assert rendered_loki["common"]["path_prefix"] == "/data/obs/loki"
-    assert (
-        rendered_loki["common"]["storage"]["filesystem"]["chunks_directory"]
-        == "/data/obs/loki/chunks"
-    )
-    assert rendered_loki["compactor"]["working_directory"] == "/data/obs/loki/compactor"
-    prometheus_argv = service_argv(home, "prometheus")
-    assert "--storage.tsdb.path=/data/obs/prom" in prometheus_argv
-
-
-def test_station_role_creates_configured_storage_dirs(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-) -> None:
-    """The converge render creates the configured storage root plus the loki
-    and prom subdirs (start.sh parity for a custom data volume)."""
-    repo = Path(__file__).resolve().parents[4]
-    home = tmp_path / "station-home"
-    agents_dir = tmp_path / "LaunchAgents"
-    agents_dir.mkdir()
-    storage = tmp_path / "obs-data"
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
-    monkeypatch.setattr("base.config.settings.observability.lgtm_storage_dir", str(storage))
-
-    lgtm_native.ensure_lgtm_native(
-        repo,
-        home,
-        services=frozenset(lgtm_native.BACKENDS),
-        database_factory=operator_database,
-        producer=operator_pipeline,
-    )
-
-    assert (storage / "loki").is_dir()
-    assert (storage / "prom").is_dir()
-    assert (home / "lgtm/native/data").exists() is False

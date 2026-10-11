@@ -9,12 +9,13 @@ from base.agents import InvalidModelConfig
 from base.agents.birth_config import set_cluster_default_model
 from base.agents.tasks.creation import create_task_in_transaction
 from base.agents.tasks.model import Task
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.plugin_providers import build_model_catalog
 from ops.agents.birth_transaction import insert_agent_birth
 from ops.agents.creation_identity import creation_request_hash
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _seed_parent(conn: psycopg.Connection) -> int:
@@ -38,7 +39,11 @@ def _counts(conn: psycopg.Connection) -> tuple[int, ...]:
 
 
 def test_actual_birth_model_effort_failure_rolls_back_every_effect(
-    db_conn: psycopg.Connection, cluster_defaults_unset: None, *, config_authority: ConfigAuthority
+    db_conn: psycopg.Connection,
+    cluster_defaults_unset: None,
+    *,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     before = _counts(db_conn)
     with (
@@ -49,7 +54,7 @@ def test_actual_birth_model_effort_failure_rolls_back_every_effect(
         set_cluster_default_model(cur, "mimo-v2.6-pro", updated_by="test")
         insert_agent_birth(
             cur,
-            machine=machine_name(),
+            machine=machine_identity.name(),
             config={"reasoning_effort": "max"},
             prompt="This birth must roll back",
             prompt_source="user",
@@ -66,6 +71,7 @@ def test_caller_owns_birth_task_audit_and_inbound_commit(
     commit: bool,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     parent = _seed_parent(db_conn)
     with database.connect(autocommit=True) as observer:
@@ -74,13 +80,13 @@ def test_caller_owns_birth_task_audit_and_inbound_commit(
         with expected, db_conn.transaction(), db_conn.cursor() as cur:
             actor = insert_agent_birth(
                 cur,
-                machine=machine_name(),
+                machine=machine_identity.name(),
                 catalog=build_model_catalog(),
                 authority=config_authority,
             )
             birth = insert_agent_birth(
                 cur,
-                machine=machine_name(),
+                machine=machine_identity.name(),
                 prompt="First instruction",
                 prompt_source="user",
                 catalog=build_model_catalog(),
@@ -108,7 +114,11 @@ def test_caller_owns_birth_task_audit_and_inbound_commit(
 
 
 def test_task_validation_failure_rolls_back_birth_and_prompt(
-    db_conn: psycopg.Connection, database: Database, *, config_authority: ConfigAuthority
+    db_conn: psycopg.Connection,
+    database: Database,
+    *,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     _seed_parent(db_conn)
     row = db_conn.execute(
@@ -127,7 +137,7 @@ def test_task_validation_failure_rolls_back_birth_and_prompt(
         ):
             birth = insert_agent_birth(
                 cur,
-                machine=machine_name(),
+                machine=machine_identity.name(),
                 prompt="First instruction",
                 prompt_source="user",
                 catalog=build_model_catalog(),
@@ -153,12 +163,15 @@ def test_fleet_task_model_remains_the_shared_model() -> None:
 
 
 def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
-    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+    db_conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     with db_conn.transaction(), db_conn.cursor() as cur:
         original = insert_agent_birth(
             cur,
-            machine=machine_name(),
+            machine=machine_identity.name(),
             prompt="First instruction",
             prompt_source="user",
             creation_key="transaction-birth",
@@ -171,7 +184,7 @@ def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
     with db_conn.transaction(), db_conn.cursor() as cur:
         replay = insert_agent_birth(
             cur,
-            machine=machine_name(),
+            machine=machine_identity.name(),
             prompt="First instruction",
             prompt_source="user",
             creation_key="transaction-birth",

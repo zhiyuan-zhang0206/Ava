@@ -1,6 +1,7 @@
 """Assemble one host root's live policy inputs from its configuration owner."""
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ava.sdk_surface.install import Installation
@@ -10,19 +11,31 @@ from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
 from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.agents.impersonation.notes import HandoffNotes
 from base.clock import Clock, clock_config_from_boot
-from base.cluster.machine import MachineIdentity, roles_from_flags
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.env.dotenv_boot import resolve_ava_home
 from base.log.process import init_gateway_process
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
 
 __all__ = [
+    "boot_process",
     "host_machine",
     "host_policy",
     "initialize_logging",
     "load_installation",
     "understanding_inputs",
 ]
+
+
+def boot_process() -> tuple[ConfigBoot, Path]:
+    """Prepare this composition root before capturing its delivered process home."""
+    config = ConfigBoot()
+    config.boot()
+    config.ensure_eager()
+    home = resolve_ava_home()
+    return config, home
 
 
 def host_policy(config: ConfigBoot) -> HostPolicy:
@@ -71,16 +84,7 @@ def understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
 
 def host_machine(config: ConfigBoot) -> MachineIdentity:
     """Keep machine validation lazy on the same process configuration owner."""
-    return MachineIdentity(
-        name=lambda: config.view.general.machine_name,
-        role=lambda: roles_from_flags(
-            serve_gateway=config.view.general.machine_serve_gateway,
-            serve_agent_runner=config.view.general.machine_serve_agent_runner,
-            serve_observability_station=config.view.general.machine_serve_observability_station,
-        ),
-        host=lambda: config.view.general.machine_host,
-        description=lambda: config.view.general.machine_description,
-    )
+    return machine_from_boot(config)
 
 
 def load_installation(

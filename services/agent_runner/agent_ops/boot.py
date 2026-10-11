@@ -15,14 +15,15 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from pathlib import Path
 
 import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import daemon_acceptance
+from base.cluster.machine import MachineIdentity, daemon_acceptance
 from base.cluster.port_preflight import serves_off_box
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.db import Database
 from base.events.live.bus import EventBus
 
@@ -31,7 +32,14 @@ __all__ = ["open_db_pool", "ops_acceptance", "ops_bind_host", "ops_handles", "re
 _log = logging.getLogger("services.agent_runner.agent_ops.daemon")
 
 
-def register_boot(*, database: Callable[[], Database]) -> None:
+def register_boot(
+    *,
+    database: Callable[[], Database],
+    config: ConfigBoot,
+    machine: MachineIdentity,
+    ops_port: int,
+    home: Path,
+) -> None:
     """Re-announce this unit as up, now that the ops daemon is actually serving.
 
     The `machine_units` row is a liveness record, and until this call the only
@@ -54,12 +62,28 @@ def register_boot(*, database: Callable[[], Database]) -> None:
     outage this function exists to prevent. The failure is logged at error so a
     permanently unregistered runner is visible rather than quietly absent.
     """
-    from base.cluster.machine import machine_role
     from base.cluster.machines import register_self, unit_dial_url
 
     try:
-        url = unit_dial_url(machine_role())
-        register_self(database(), url=url)
+        roles = machine.role()
+        gateway = config.view.gateway.gateway_url.strip() or None
+        url = unit_dial_url(
+            roles,
+            host=machine.host(),
+            ops_port=ops_port,
+            gateway_port=config.view.gateway.gateway_port,
+            telemetry_otlp_port=config.view.observability.telemetry_otlp_port,
+            gateway=gateway,
+        )
+        register_self(
+            database(),
+            url=url,
+            name=machine.name(),
+            roles=roles,
+            description=machine.description(),
+            home=str(home),
+            gateway=gateway,
+        )
     except Exception:
         _log.exception(
             "boot registration failed — this unit's machines row keeps its previous "
@@ -69,7 +93,7 @@ def register_boot(*, database: Callable[[], Database]) -> None:
     _log.info("registered this unit as up at %s", url)
 
 
-def ops_bind_host() -> str:
+def ops_bind_host(*, machine: MachineIdentity) -> str:
     """The ops server's bind address — 0.0.0.0 when this host declares a reachable
     address other machines dial (`port_preflight.serves_off_box`), loopback otherwise.
 
@@ -81,7 +105,7 @@ def ops_bind_host() -> str:
     served on the same port and stays reachable via localhost (unauthenticated —
     it leaks no secret).
     """
-    if serves_off_box():
+    if serves_off_box(machine=machine):
         return "0.0.0.0"  # noqa: S104 — inbound ops port; authenticated, the gateway is the trust boundary
     return "127.0.0.1"
 

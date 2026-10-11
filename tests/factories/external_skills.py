@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
+from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
@@ -28,14 +29,17 @@ def skill_ctx(
     *,
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> ConvergeCtx:
+    config, machine = command_config_machine
     ava_home = tmp_path / "ava-home"
     (ava_home / "configs").mkdir(parents=True)
     return ConvergeCtx(
         repo=repo,
         ava_home=ava_home,
         roles=None,
-        config=ConfigBoot(),
+        config=config,
+        machine=machine,
         database_factory=operator_database,
         producer=producer,
     )

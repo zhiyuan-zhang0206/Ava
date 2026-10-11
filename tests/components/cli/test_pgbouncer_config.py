@@ -15,9 +15,11 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.db import Database, DbConfig
 from base.db.code_version_gate import ProcessDbGate
 from cli.commands.data_plane import pgbouncer
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _assert_transaction_pooling_with_scram_clients(ini: str) -> None:
@@ -79,11 +81,14 @@ def _assert_quiet_connection_logs_and_userlist_only_console(ini: str) -> None:
     assert console <= set(ini.splitlines())
 
 
-def test_render_ini_is_transaction_scram_and_socket_server() -> None:
+def test_render_ini_is_transaction_scram_and_socket_server(
+    machine_identity: MachineIdentity,
+) -> None:
     ini = pgbouncer._render_ini(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
+        machine=machine_identity,
     )
     _assert_transaction_pooling_with_scram_clients(ini)
     _assert_database_entry_forwards_over_owner_only_socket(ini)
@@ -92,28 +97,36 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     _assert_quiet_connection_logs_and_userlist_only_console(ini)
 
 
-def test_render_ini_authenticates_and_binds_loopback_on_a_single_box() -> None:
+def test_render_ini_authenticates_and_binds_loopback_on_a_single_box(
+    machine_identity: MachineIdentity,
+) -> None:
     """The internal data plane always authenticates, and a box that declares no
     reachable address (`AVA_MACHINE_HOST` unset) binds loopback alone."""
-    ini = pgbouncer._render_ini(pg_port=5433, listen_port=6433, db_name="ava")
+    machine_identity.set(host="localhost")
+    ini = pgbouncer._render_ini(
+        pg_port=5433, listen_port=6433, db_name="ava", machine=machine_identity
+    )
     assert "auth_type = scram-sha-256" in ini.splitlines()
     assert "trust" not in ini
     assert "listen_addr = 127.0.0.1" in ini.splitlines()
 
 
 def test_render_ini_adds_only_the_declared_reachable_address(
-    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
-    ini = pgbouncer._render_ini(pg_port=5433, listen_port=6433, db_name="ava")
+    machine_identity.set(host="10.0.0.5")
+    ini = pgbouncer._render_ini(
+        pg_port=5433, listen_port=6433, db_name="ava", machine=machine_identity
+    )
     assert "listen_addr = 127.0.0.1, 10.0.0.5" in ini.splitlines()
 
 
-def test_render_ini_binds_loopback_never_all_interfaces() -> None:
+def test_render_ini_binds_loopback_never_all_interfaces(machine_identity: MachineIdentity) -> None:
     ini = pgbouncer._render_ini(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
+        machine=machine_identity,
     )
     listen = next(ln for ln in ini.splitlines() if ln.startswith("listen_addr ="))
     assert "127.0.0.1" in listen

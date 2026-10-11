@@ -14,10 +14,11 @@ from typing import Any
 import pytest
 
 from base.cluster.machine import MachineRoles
-from base.config import ConfigBoot
 from base.telemetry import EventPipeline
 from cli.commands.converge import health_preflight as _hp
 from cli.commands.converge.spec import ConvergeCtx
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -37,14 +38,16 @@ def _preflight_ctx(
     *,
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
+    command_runtime: CommandRuntime,
 ) -> ConvergeCtx:
     return ConvergeCtx(
         repo=tmp_path / "repo",
         ava_home=tmp_path / "home",
         roles=roles,
-        config=ConfigBoot(),
+        config=command_runtime.config,
         database_factory=operator_database,
         producer=producer,
+        machine=command_runtime.machine,
     )
 
 
@@ -90,10 +93,17 @@ def test_health_preflight_warns_and_logs(
     capsys,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ):
     """A data-plane / checkout finding → the start CONTINUES (rc-free step) but
     prints the warning and appends it to $AVA_HOME/logs/health_preflight.log."""
-    ctx = _preflight_ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _preflight_ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     monkeypatch.setattr(
         _hp,
         "collect_health_warnings",
@@ -116,9 +126,16 @@ def test_health_preflight_silent_when_clean(
     capsys,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ):
     """No findings → no output, no log file."""
-    ctx = _preflight_ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _preflight_ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     monkeypatch.setattr(_hp, "collect_health_warnings", lambda _ctx: [])  # pyright: ignore[reportUnknownArgumentType]
 
     _hp.ensure_health_preflight(ctx)
@@ -133,10 +150,17 @@ def test_health_preflight_never_fails_start_on_scan_error(
     capsys,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ):
     """A scan exception prints a notice and returns — the step must not turn a
     warning pass into a failed start."""
-    ctx = _preflight_ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _preflight_ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     monkeypatch.setattr(
         _hp,
         "collect_health_warnings",
@@ -157,12 +181,19 @@ def test_data_plane_gateway_cold_start_skipped(
     _upstream,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ):
     """Gateway with neither pg nor redis bound → nothing probed, no warnings: the
     start sequence brings the instance up right after converge, so probing now
     would warn on every boot."""
     _install_fake_settings(monkeypatch)
-    ctx = _preflight_ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _preflight_ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     monkeypatch.setattr(
         _hp,
         "get_record",
@@ -179,12 +210,19 @@ def test_data_plane_gateway_partial_up_probes(
     _upstream,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ):
     """Gateway with one of the two bound → probes, and a failed probe warns."""
     import socket
 
     _install_fake_settings(monkeypatch)
-    ctx = _preflight_ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _preflight_ctx(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
+    )
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     sock.listen(1)
@@ -212,6 +250,8 @@ def test_data_plane_runner_probes_unconditionally(
     _upstream,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ):
     """A runner's plane is remote — an unreachable one is the real signal, so even
     a fully cold host probes (the runner has no local bring-up to fix it)."""
@@ -221,6 +261,7 @@ def test_data_plane_runner_probes_unconditionally(
         roles=frozenset({"agent-runner"}),
         operator_database=operator_database,
         producer=operator_pipeline,
+        command_runtime=command_runtime,
     )
 
     assert _hp._data_plane_warnings(ctx) == []  # probes pass → silent
@@ -234,10 +275,16 @@ def test_data_plane_unconfigured_skipped(
     _upstream,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ):
     """roles=None (unit not configured yet) → nothing probed."""
     ctx = _preflight_ctx(
-        tmp_path, roles=None, operator_database=operator_database, producer=operator_pipeline
+        tmp_path,
+        roles=None,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
     )
 
     assert _hp._data_plane_warnings(ctx) == []
@@ -274,6 +321,7 @@ def _git_repo(
     *,
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
+    command_runtime: CommandRuntime,
 ) -> tuple[ConvergeCtx, str, str]:
     """A real git repo with two commits → (ctx, head_sha, first_sha)."""
     repo = tmp_path / "repo"
@@ -317,9 +365,10 @@ def _git_repo(
         repo=repo,
         ava_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
-        config=ConfigBoot(),
+        config=command_runtime.config,
         database_factory=operator_database,
         producer=producer,
+        machine=command_runtime.machine,
     )
     return ctx, head, first
 
@@ -329,10 +378,16 @@ def test_checkout_dirty_warns(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ):
     """Uncommitted changes in the source tree → a warning naming the count."""
     ctx, _head, _first = _git_repo(
-        tmp_path, monkeypatch, operator_database=operator_database, producer=operator_pipeline
+        tmp_path,
+        monkeypatch,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
     )
     (tmp_path / "repo" / "stray.txt").write_text("uncommitted\n")
 
@@ -346,11 +401,17 @@ def test_checkout_clean_is_silent(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ):
     """A clean checkout at any commit warns nothing: there is no cluster target
     commit to compare its HEAD against."""
     ctx, _head, _first = _git_repo(
-        tmp_path, monkeypatch, operator_database=operator_database, producer=operator_pipeline
+        tmp_path,
+        monkeypatch,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_runtime=command_runtime,
     )
 
     assert _hp._checkout_warnings(ctx) == []
@@ -361,6 +422,8 @@ def test_checkout_worktree_skipped(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ):
     """A dev worktree path → checkout state is skipped entirely (dev context)."""
     wt = tmp_path / ".claude" / "worktrees" / "some-task"
@@ -369,9 +432,10 @@ def test_checkout_worktree_skipped(
         repo=wt,
         ava_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
-        config=ConfigBoot(),
+        config=command_runtime.config,
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
     (wt / "stray.txt").write_text("dirty\n")
 

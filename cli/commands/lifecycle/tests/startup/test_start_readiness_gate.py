@@ -15,11 +15,14 @@ import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.probe as _probe_commands
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.cluster.machine import MachineIdentity
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import start
 from cli.commands.lifecycle.root_driver import LaunchOutcome
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from ops.roster.service_spec import _GATEWAY, ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
@@ -56,7 +59,10 @@ def _roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None],
         "ops.spec.services_for_capabilities_annotated", _ignoring_args(lambda: specs)
     )
 
-    def selected(_roles: object, skip: set[str]) -> tuple[ServiceSpec, ...]:
+    def selected(
+        _roles: object, skip: set[str], *, machine: MachineIdentity
+    ) -> tuple[ServiceSpec, ...]:
+        del machine
         return tuple(spec for spec, reason in specs if reason is None and spec.session not in skip)
 
     monkeypatch.setattr(_root_driver_commands, "start_roster", selected)
@@ -64,7 +70,11 @@ def _roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None],
 
 @pytest.fixture(autouse=True)
 def _hermetic_start(
-    serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    serving_root: RootBirth,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 
@@ -87,7 +97,7 @@ def _hermetic_start(
     monkeypatch.setattr(start, "_refuse_occupied_health_ports", _ignoring_args(lambda: 0))
     monkeypatch.setattr(start, "_record_running_sha", _ignoring_args(lambda: None))
     monkeypatch.setattr(start, "cmd_status", _ignoring_args(lambda: 0))
-    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(command_runtime.machine, "role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
         _setup_commands,
         "_collect_setup_values",
@@ -129,6 +139,8 @@ def test_unready_frontend_is_failure_and_never_serving(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
 
     def probe(spec: ServiceSpec) -> _probe_commands.ServiceProbe:
@@ -137,7 +149,10 @@ def test_unready_frontend_is_failure_and_never_serving(
     monkeypatch.setattr(_probe_commands, "probe_service", probe)
     assert (
         _start_commands.cmd_start(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == SERVICES_NOT_READY_EXIT_CODE
     )
@@ -148,6 +163,8 @@ def test_live_repeat_start_never_runs_mutating_preparation(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
 
     def no_prepare(*_args: object, **_kwargs: object) -> None:
@@ -160,7 +177,10 @@ def test_live_repeat_start_never_runs_mutating_preparation(
     )
     assert (
         _start_commands.cmd_start(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )
@@ -172,6 +192,8 @@ def test_start_marks_serving_for_live_and_cold_admission(
     live: bool,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: live))
     monkeypatch.setattr(
@@ -179,7 +201,10 @@ def test_start_marks_serving_for_live_and_cold_admission(
     )
     assert (
         _start_commands.cmd_start(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )
@@ -190,6 +215,8 @@ def test_changed_live_generation_refuses_before_selection_or_converge(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from base.deploy.lifecycle import service_selection
 
@@ -214,6 +241,7 @@ def test_changed_live_generation_refuses_before_selection_or_converge(
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
+            command=command_runtime,
         )
         == 1
     )
@@ -224,6 +252,8 @@ def test_live_schema_mismatch_refuses_without_applying_migrations(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: True))
     monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 1)
@@ -237,7 +267,10 @@ def test_live_schema_mismatch_refuses_without_applying_migrations(
     )
     assert (
         _start_commands.cmd_start(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 1
     )
@@ -247,6 +280,8 @@ def test_failed_launch_never_becomes_serving(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(
         "cli.commands.lifecycle.root_driver.complete_boot_start",
@@ -259,7 +294,10 @@ def test_failed_launch_never_becomes_serving(
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", failed)
     assert (
         _start_commands.cmd_start(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == SERVICES_NOT_READY_EXIT_CODE
     )
@@ -270,6 +308,8 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from base.cluster.machine import MachineRoles
     from base.deploy.lifecycle import service_selection
@@ -284,7 +324,9 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
         services: frozenset[str],
         database_factory: Callable[[], Any],
         producer: Callable[[], EventPipeline],
+        command: CommandRuntime,
     ) -> None:
+        assert command is command_runtime
         assert database_factory is operator_database
         assert producer is operator_pipeline
         assert not service_selection.selection_path().exists()
@@ -297,6 +339,7 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )
@@ -308,11 +351,16 @@ def test_lost_generation_never_reports_serving(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(start_serving, "mark_serving", _ignoring_args(lambda: False))
     assert (
         _start_commands.cmd_start(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 1
     )
@@ -322,6 +370,8 @@ def test_only_service_persists_for_repeated_start(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     launched: list[tuple[str, ...]] = []
 
@@ -336,12 +386,16 @@ def test_only_service_persists_for_repeated_start(
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )
     assert (
         _start_commands.cmd_start(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )
@@ -352,6 +406,8 @@ def test_invalid_selection_never_launches(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(
         _root_driver_commands,
@@ -364,6 +420,7 @@ def test_invalid_selection_never_launches(
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
+            command=command_runtime,
         )
 
 
@@ -371,6 +428,8 @@ def test_storage_schema_migration_grants_pooler_precede_application(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from cli.commands.data_plane import bringup
 
@@ -399,7 +458,10 @@ def test_storage_schema_migration_grants_pooler_precede_application(
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
     assert (
         _start_commands.cmd_start(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )
@@ -412,6 +474,8 @@ def test_internal_start_leaves_boot_publication_to_public_dispatch(
     ready: bool,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from cli.commands.lifecycle import root_driver
 
@@ -425,7 +489,10 @@ def test_internal_start_leaves_boot_publication_to_public_dispatch(
         root_driver, "complete_boot_start", lambda: pytest.fail("public dispatch owns publication")
     )
     assert _start_commands.cmd_start(
-        retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        retained_children=[],
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        command=command_runtime,
     ) == (0 if ready else SERVICES_NOT_READY_EXIT_CODE)
 
 

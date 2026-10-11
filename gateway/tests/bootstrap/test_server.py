@@ -32,7 +32,7 @@ def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
     monkeypatch.setattr(_server, "assert_schema_current", _ignore)
     monkeypatch.setattr(_server, "raise_fd_limit", _ignore)
     monkeypatch.setattr(_server, "init_gateway_process", _ignore)
-    monkeypatch.setattr(_server, "is_gateway", lambda: False)
+    monkeypatch.setattr(settings.general, "machine_serve_gateway", False)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _record_serve)
 
@@ -87,7 +87,7 @@ def test_gateway_start_raises_the_min_code_version_after_schema_and_logging(
 
     monkeypatch.setattr(_server, "init_gateway_process", logging_initialized)
     monkeypatch.setattr(ProcessDbGate, "raise_min_code_version", _raised)
-    monkeypatch.setattr(_server, "is_gateway", lambda: serves_gateway)
+    monkeypatch.setattr(settings.general, "machine_serve_gateway", serves_gateway)
     monkeypatch.setattr(_server, "verify_transport_encryption", _ignore)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _ignore)
@@ -121,7 +121,7 @@ def _stub_process_entry(
     monkeypatch.setattr(_server, "raise_fd_limit", _ignore)
     monkeypatch.setattr(_server, "init_gateway_process", _ignore)
     monkeypatch.setattr(ProcessDbGate, "raise_min_code_version", _ignore)
-    monkeypatch.setattr(_server, "is_gateway", lambda: gateway)
+    monkeypatch.setattr(settings.general, "machine_serve_gateway", gateway)
     monkeypatch.setattr(_server, "verify_transport_encryption", _ignore)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _serve)
@@ -162,7 +162,7 @@ def test_gateway_bind_follows_the_declared_reachable_address_not_the_secret(
     with a non-loopback address binds exactly as it always has (all interfaces)."""
     steps = _stub_process_entry(monkeypatch, tmp_path, gateway=gateway)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: reachable)
+    monkeypatch.setattr(settings.general, "machine_host", reachable)
 
     _server.main()
 

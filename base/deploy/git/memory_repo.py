@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from base.clock import Clock
-from base.cluster.machine import is_agent_runner, is_gateway, machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host.proc import run_bounded
 from base.paths import gateway_memory_dir, memory_dir
@@ -81,7 +81,7 @@ class MemoryRepoUninitialized(RuntimeError):  # noqa: N818
 
 
 class MemoryBranchMismatch(RuntimeError):  # noqa: N818
-    """The initialized repo is on the wrong branch — `machine_name()` does not match working tree branch."""
+    """The initialized repo is on the wrong branch — the supplied machine name does not match the working tree branch."""
 
 
 def memory_remote() -> str:
@@ -104,18 +104,18 @@ def memory_remote() -> str:
     )
 
 
-def branch_name() -> str:
+def branch_name(*, machine: MachineIdentity) -> str:
     """This unit's agent-runner memory branch. Returns `machine-<name>` when
     this unit carries the agent-runner capability (even on a combined unit that
     also serves as gateway). Falls back to `main` for a gateway-only unit
     (which has no agent-runner — the consolidated checkout managed by
     init_gateway() always tracks `main`)."""
-    if is_agent_runner():
-        return f"machine-{machine_name()}"
+    if "agent-runner" in machine.role():
+        return f"machine-{machine.name()}"
     return "main"
 
 
-def pull_main() -> str:
+def pull_main(*, machine: MachineIdentity) -> str:
     """Fast-forward the gateway's consolidated memory checkout to origin/main
     and return the resulting HEAD commit sha. Operates on the gateway memory
     path (gateway_memory_dir()) so it always targets the consolidated pool, even
@@ -131,7 +131,7 @@ def pull_main() -> str:
         subprocess.CalledProcessError: fetch/merge failure or a non-fast-forward
             (the local checkout diverged from origin/main).
     """
-    cwd = gateway_memory_dir()
+    cwd = gateway_memory_dir(roles=machine.role())
     from base.config import settings
 
     if settings.general.memory_keep_local:
@@ -148,10 +148,10 @@ def is_initialized() -> bool:
     return (memory_dir() / ".git").is_dir()
 
 
-def gateway_is_initialized() -> bool:
+def gateway_is_initialized(*, machine: MachineIdentity) -> bool:
     """Whether the gateway's consolidated memory checkout is already a git
     repo (`.git` directory exists)."""
-    return (gateway_memory_dir() / ".git").is_dir()
+    return (gateway_memory_dir(roles=machine.role()) / ".git").is_dir()
 
 
 # Bounds a single git invocation. Generous because these include network work
@@ -267,7 +267,7 @@ def _download_pool_snapshot(url: str, headers: dict[str, str]) -> tuple[str | No
         raise MemoryPoolBootstrapFailed(f"GET {url} failed: {e}") from e
 
 
-def bootstrap_from_gateway() -> None:
+def bootstrap_from_gateway(*, machine: MachineIdentity) -> None:
     """Fetch the consolidated pool from the gateway and lay it down as this
     machine's initial memory checkout.
 
@@ -309,7 +309,7 @@ def bootstrap_from_gateway() -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp_dir = Path(tempfile.mkdtemp(prefix=".memory-bootstrap-", dir=str(target.parent)))
     try:
-        checkout_dir = _unpack_bundle(bundle_bytes, head, tmp_dir)
+        checkout_dir = _unpack_bundle(bundle_bytes, head, tmp_dir, machine=machine)
         if target.exists():
             # Pre-init leftovers only — init() never calls this on a git
             # checkout, so nothing authored is here to lose.
@@ -323,7 +323,9 @@ def bootstrap_from_gateway() -> None:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _unpack_bundle(bundle_bytes: bytes, head: str | None, tmp_dir: Path) -> Path:
+def _unpack_bundle(
+    bundle_bytes: bytes, head: str | None, tmp_dir: Path, *, machine: MachineIdentity
+) -> Path:
     """Clone the served bundle into a temp checkout, verify its HEAD against the
     advertised X-Pool-Head, drop the junk bundle-path origin, and cut the machine
     branch. Returns the ready checkout dir. Raises MemoryPoolBootstrapFailed on
@@ -350,7 +352,7 @@ def _unpack_bundle(bundle_bytes: bytes, head: str | None, tmp_dir: Path) -> Path
     # The bundle-path origin the clone records is junk (a temp file) —
     # a remote is only ever attached by explicit memory-remote setup.
     _run_git("remote", "remove", "origin", cwd=checkout_dir)
-    _run_git("checkout", "-q", "-b", branch_name(), cwd=checkout_dir)
+    _run_git("checkout", "-q", "-b", branch_name(machine=machine), cwd=checkout_dir)
     return checkout_dir
 
 
@@ -366,11 +368,11 @@ class RepoStatus:
     last_fetch: str  # ISO ts of `.git/FETCH_HEAD` mtime, or "never"
 
 
-def _reconcile_initialized(branch: str, *, keep_local: bool) -> None:
+def _reconcile_initialized(branch: str, *, keep_local: bool, machine: MachineIdentity) -> None:
     """`init()` on an already-initialized checkout: settle the branch, strip remotes if local-only."""
     current = _run_git("rev-parse", "--abbrev-ref", "HEAD")
     if current != branch:
-        if is_gateway() and not is_agent_runner():
+        if "gateway" in machine.role() and "agent-runner" not in machine.role():
             # gateway-only unit: the memory checkout is the consolidated
             # pool; an existing checkout on a stale machine-<name> branch
             # is safe to move onto main (it never authors, so there is no
@@ -390,16 +392,16 @@ def _reconcile_initialized(branch: str, *, keep_local: bool) -> None:
         _strip_remotes(memory_dir())
 
 
-def _init_without_remote(branch: str) -> None:
+def _init_without_remote(branch: str, *, machine: MachineIdentity) -> None:
     """`init()` with no memory remote configured: bootstrap from the gateway or birth a local repo."""
-    if is_agent_runner() and not is_gateway():
+    if "agent-runner" in machine.role() and "gateway" not in machine.role():
         # Split agent-runner without a configured remote: the shared pool
         # must still reach its agents, so bootstrap from the gateway's
         # consolidated checkout. Never a silent local stub (2026-08-27
         # company-mini incident) — when the gateway cannot be reached
         # either, fail loud instead of birthing an empty pool.
         try:
-            bootstrap_from_gateway()
+            bootstrap_from_gateway(machine=machine)
         except MemoryPoolBootstrapFailed as e:
             raise MemoryRemoteMissing(
                 "memory remote not configured and the gateway pool snapshot "
@@ -415,7 +417,7 @@ def _init_without_remote(branch: str) -> None:
     _init_local_repo(branch, memory_dir())
 
 
-def init() -> None:
+def init(*, machine: MachineIdentity) -> None:
     """First-time setup of the memory repo — idempotent.
 
     The branch this unit's checkout tracks is role-aware (`branch_name()`):
@@ -452,10 +454,10 @@ def init() -> None:
         subprocess.CalledProcessError: git command failure (network /
             auth / remote does not exist, etc.).
     """
-    branch = branch_name()
+    branch = branch_name(machine=machine)
     keep_local = settings.general.memory_keep_local
     if is_initialized():
-        _reconcile_initialized(branch, keep_local=keep_local)
+        _reconcile_initialized(branch, keep_local=keep_local, machine=machine)
         return
 
     if keep_local:
@@ -467,7 +469,7 @@ def init() -> None:
     try:
         remote = memory_remote()
     except MemoryRemoteMissing:
-        _init_without_remote(branch)
+        _init_without_remote(branch, machine=machine)
         return
 
     # `git clone` into a non-existent directory — cwd is the parent
@@ -496,7 +498,7 @@ def init() -> None:
         _run_git("push")
 
 
-def init_gateway() -> None:
+def init_gateway(*, machine: MachineIdentity) -> None:
     """First-time setup of the gateway's consolidated memory checkout — idempotent.
 
     Always tracks `main` (the consolidated pool). On a combined unit
@@ -523,9 +525,9 @@ def init_gateway() -> None:
             auth / remote does not exist, etc.).
     """
     branch = "main"
-    gmd = gateway_memory_dir()
+    gmd = gateway_memory_dir(roles=machine.role())
     keep_local = settings.general.memory_keep_local
-    if gateway_is_initialized():
+    if gateway_is_initialized(machine=machine):
         current = _run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=gmd)
         if current != branch:
             if not keep_local:

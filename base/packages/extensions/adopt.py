@@ -101,14 +101,15 @@ class AdoptionResult:
     nothing under that name."""
 
 
-def adopt_local_installs(pool: ConnectionPool, *, skills_root: Path) -> AdoptionResult:
+def adopt_local_installs(
+    pool: ConnectionPool, *, skills_root: Path, machine_name: str
+) -> AdoptionResult:
     """Upload every unclaimed `origin='user'` skill on this machine.
 
     Idempotent: a second pass finds every name already claimed with a matching
     hash and writes nothing. Safe to run on every converge, which is what makes
     this adoption rather than a one-shot migration somebody has to remember.
     """
-    from base.cluster.machine import machine_name
     from base.packages.extensions import install_registry
 
     result = AdoptionResult()
@@ -154,7 +155,7 @@ def adopt_local_installs(pool: ConnectionPool, *, skills_root: Path) -> Adoption
             root=root,
             name=pkg.name,
             kind="skill",
-            source=f"local:{machine_name()}",
+            source=f"local:{machine_name}",
             # Trust is a cluster-level fact about these bytes (issue #218): the
             # local review tier travels with the content it was given for.
             trust=pkg.trust,

@@ -70,7 +70,13 @@ def _check_sampling(fn: object, sampling: SamplingPolicyOwner) -> None:
 
 def _caller(
     producer: Callable[[], Any] | None,
-) -> tuple[dict[str, Any], SdkCallTally | None, SdkCaptureOwner | None, Callable[[], Any] | None]:
+) -> tuple[
+    dict[str, Any],
+    SdkCallTally | None,
+    SdkCaptureOwner | None,
+    Callable[[], Any] | None,
+    Callable[[], str] | None,
+]:
     """Snapshot this call's provenance; invalid identity rejects admission."""
     from base.agents.messages.external_caller import external_caller
 
@@ -85,11 +91,15 @@ def _caller(
     source = f"agent:{agent_id}" if agent_id else (actor or "system")
     if external and borrowed is None:
         source = external.source()
+    identity = {"agent_id": agent_id, "source": source}
+    if bound is None:
+        return identity, None, None, producer, None
     return (
-        {"agent_id": agent_id, "source": source},
-        None if bound is None else bound.sdk_calls,
-        None if bound is None else bound.sdk_capture,
-        producer if bound is None else bound.clients.event_pipeline,
+        identity,
+        bound.sdk_calls,
+        bound.sdk_capture,
+        bound.clients.event_pipeline,
+        None if bound.machine is None else bound.machine.name,
     )
 
 
@@ -106,7 +116,7 @@ def _make_recorder(
     def recorder(*args: Any, **kwargs: Any) -> Any:
         from base.agents.sdk.telemetry import run_metered
 
-        identity, tally, capture_owner, call_producer = _caller(producer)
+        identity, tally, capture_owner, call_producer, machine_reader = _caller(producer)
         return run_metered(
             fq,
             original,
@@ -117,6 +127,7 @@ def _make_recorder(
             capture_owner=capture_owner,
             sampling_owner=sampling,
             producer=call_producer,
+            machine_reader=machine_reader,
         )
 
     if inspect.iscoroutinefunction(original):
@@ -125,7 +136,7 @@ def _make_recorder(
         async def async_recorder(*args: Any, **kwargs: Any) -> Any:
             from base.agents.sdk import telemetry as sdk_usage_telemetry
 
-            identity, tally, capture_owner, call_producer = _caller(producer)
+            identity, tally, capture_owner, call_producer, machine_reader = _caller(producer)
             return await sdk_usage_telemetry.run_metered_async(
                 fq,
                 original,
@@ -136,6 +147,7 @@ def _make_recorder(
                 capture_owner=capture_owner,
                 sampling_owner=sampling,
                 producer=call_producer,
+                machine_reader=machine_reader,
             )
 
         return _recorder(async_recorder, sampling)
@@ -161,7 +173,7 @@ def _make_mcp_recorder(
     def recorder(server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
         from base.agents.sdk.telemetry import run_metered
 
-        identity, tally, capture_owner, call_producer = _caller(producer)
+        identity, tally, capture_owner, call_producer, machine_reader = _caller(producer)
         return run_metered(
             f"mcps.{server}.{tool}",
             original,
@@ -172,6 +184,7 @@ def _make_mcp_recorder(
             capture_owner=capture_owner,
             sampling_owner=sampling,
             producer=call_producer,
+            machine_reader=machine_reader,
         )
 
     return _recorder(recorder, sampling)

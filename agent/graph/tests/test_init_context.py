@@ -98,7 +98,7 @@ def _tags(msgs: list[AnyMessage]) -> list[str | None]:
 def skills_unit(unit_home: Path, set_machine_identity: Callable[..., None]) -> None:
     """A per-test unit home, so `<home>/skills` is this test's own skill load dir,
     that still names its machine: the capability index the node renders needs one."""
-    set_machine_identity("agent-runner", "test-machine")
+    set_machine_identity(role="agent-runner", name="test-machine")
 
 
 async def test_empty_window_lays_down_system_prompt_then_notes(

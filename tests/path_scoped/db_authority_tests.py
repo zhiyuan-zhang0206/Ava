@@ -52,6 +52,9 @@ from base.cluster.authority import (
     require_ledger,
 )
 from base.cluster.dataplane.pg_tools import pg_start_env, pg_tool, throwaway_postgres
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 from base.deploy.schema.migrations import apply_pending_migrations
 
 OWNER = "ava_test_owner"
@@ -109,7 +112,7 @@ def _restart(data_dir: Path) -> None:
     )
 
 
-def _build_template(tcp: str) -> None:
+def _build_template(tcp: str, *, machine: MachineIdentity) -> None:
     with psycopg.connect(f"{tcp}/{_TEMPLATE}", autocommit=True) as conn:
         conn.execute(sql.SQL("SET ROLE {}").format(sql.Identifier(OWNER)))
         conn.execute(_SCHEMA.read_text())  # type: ignore[arg-type]
@@ -117,7 +120,7 @@ def _build_template(tcp: str) -> None:
     with PostgresSaver.from_conn_string(as_owner) as saver:
         saver.setup()
     with psycopg.connect(as_owner) as conn:
-        apply_pending_migrations(conn)
+        apply_pending_migrations(conn, machine_name=machine.name)
 
 
 def _authenticate(instance: Instance, tcp: str, data_dir: Path) -> None:
@@ -135,7 +138,7 @@ def _authenticate(instance: Instance, tcp: str, data_dir: Path) -> None:
 
 
 @pytest.fixture(scope="module")
-def _authority_instance() -> Iterator[Instance]:
+def _authority_instance(process_config: ConfigBoot) -> Iterator[Instance]:
     with throwaway_postgres() as url:
         port = urlsplit(url).port
         assert port is not None
@@ -153,7 +156,7 @@ def _authority_instance() -> Iterator[Instance]:
             )
         data_dir = Path(data_row[0])
         _restart(data_dir)
-        _build_template(tcp)
+        _build_template(tcp, machine=machine_from_boot(process_config))
         with psycopg.connect(f"{tcp}/postgres", autocommit=True) as conn:
             conn.execute("DROP DATABASE ava_citest")
             conn.execute("DROP ROLE ava_citest")

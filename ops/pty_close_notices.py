@@ -43,7 +43,6 @@ import psycopg
 from psycopg import sql
 
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.cluster.machine import machine_name
 from base.db import Database, insert_inbound_message_in_transaction, publish_inbound_wake
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -167,9 +166,10 @@ def notices_for(
     reason: str,
     operation: str | None = None,
     acquired_at: datetime | None = None,
+    local_machine: str,
 ) -> list[ClosureNotice]:
     """One notice per closed busy session that is an agent shell, from this machine."""
-    machine = machine_name()
+    machine = local_machine
     built = (
         closure_notice(
             machine=machine,

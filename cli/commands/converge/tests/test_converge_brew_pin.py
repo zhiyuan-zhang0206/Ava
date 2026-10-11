@@ -11,9 +11,11 @@ import pytest
 
 import cli.commands.converge._brew_pin as cbp
 import cli.commands.converge.host as cv
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host import brew_pin
 from base.telemetry import EventPipeline
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -38,13 +40,15 @@ EXPECTED_PINNED_FORMULAE = frozenset(
 def _ctx(
     tmp_path: Path, *, operator_database: Callable[[], Any], producer: Callable[[], EventPipeline]
 ) -> cv.ConvergeCtx:
+    machine_config = ConfigBoot()
     return cv.ConvergeCtx(
         repo=Path("/repo"),
         ava_home=tmp_path,
         roles=cv.ALL_ROLES,
-        config=ConfigBoot(),
+        config=machine_config,
         database_factory=operator_database,
         producer=producer,
+        machine=machine_from_boot(machine_config),
     )
 
 

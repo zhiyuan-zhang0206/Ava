@@ -10,8 +10,10 @@ import psutil
 import pytest
 
 from base.cluster import port_preflight
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host import proc
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @dataclass(frozen=True)
@@ -281,31 +283,38 @@ def test_strict_listeners_raises_when_lsof_is_unreachable(
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost", "ip6-localhost"])
 def test_bind_addrs_adds_nothing_for_a_loopback_reachable_host(
-    monkeypatch: pytest.MonkeyPatch, host: str
+    monkeypatch: pytest.MonkeyPatch,
+    host: str,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A single box names itself by any loopback alias; none of them is a second address
     to bind, so it binds loopback alone — whatever its cluster secret (every cluster
     has one)."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: host)
-    assert port_preflight.bind_addrs() == ["127.0.0.1"]
-    assert port_preflight.serves_off_box() is False
+    machine_identity.set(host=host)
+    assert port_preflight.bind_addrs(machine=machine_identity) == ["127.0.0.1"]
+    assert port_preflight.serves_off_box(machine=machine_identity) is False
 
 
 def test_bind_addrs_includes_the_declared_reachable_address(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A declared private-network address (`AVA_MACHINE_HOST`) joins loopback: the
     posture a secret-bearing cluster has always had when its operator declared one."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
-    assert port_preflight.bind_addrs() == ["127.0.0.1", "10.0.0.5"]
-    assert port_preflight.serves_off_box() is True
+    machine_identity.set(host="10.0.0.5")
+    assert port_preflight.bind_addrs(machine=machine_identity) == ["127.0.0.1", "10.0.0.5"]
+    assert port_preflight.serves_off_box(machine=machine_identity) is True
 
 
-def test_bind_addrs_ignores_the_ambient_cluster_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bind_addrs_ignores_the_ambient_cluster_secret(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """Reach follows the declared address alone: neither a present nor an inherited
     foreign secret opens the LAN of a box that declares none."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "foreign-sibling-secret")
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "localhost")
-    assert port_preflight.bind_addrs() == ["127.0.0.1"]
+    machine_identity.set(host="localhost")
+    assert port_preflight.bind_addrs(machine=machine_identity) == ["127.0.0.1"]

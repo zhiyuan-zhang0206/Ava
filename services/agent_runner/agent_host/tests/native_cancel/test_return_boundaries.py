@@ -22,6 +22,7 @@ from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
@@ -35,6 +36,9 @@ from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
+from tests.fixtures.unit.identity import machine_identity as machine_identity
+
+__all__ = ["blocked_host"]
 
 
 @pytest.mark.parametrize("fault_site", ["none", "after_ack"])
@@ -48,7 +52,9 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
+    machine_identity.set(name="claim-test")
     async with hosted_scope(
         expected_error=FatalProviderError if ending == "provider_failure" else None
     ) as resources:
@@ -75,8 +81,12 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
                 goto="__end__",
             )
 
-        graph, _saver, host, ctx = await _blocked_host(
-            aops_pool, model, model_catalog=model_catalog, database_gate=database_gate
+        graph, _saver, host, ctx = await blocked_host(
+            aops_pool,
+            model,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            machine=machine_identity,
         )
         faults = _install_faults(monkeypatch, initial.agent_id, fault_site)
         running = asyncio.create_task(
@@ -152,13 +162,15 @@ def _assert_original_return_receipt(
         assert resources.require_service().failures == [(resources, failure)]
 
 
-async def _blocked_host(
+async def blocked_host(
     pool: AsyncConnectionPool[Any],
     model: Any,
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
+    machine: MachineIdentity,
 ) -> tuple[Any, Any, AgentHost, AvaContext]:
+    """Build a real blocked graph and host that borrow one explicit machine owner."""
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
     wrap_saver_writes_with_nstep_interval(saver, 100)
@@ -173,12 +185,13 @@ async def _blocked_host(
         pool=pool,
         checkpointer=saver,
         graph=graph,
-        machine="claim-test",
+        machine=machine,
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     ctx = AvaContext(
+        machine=machine,
         ops_pool=pool,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),

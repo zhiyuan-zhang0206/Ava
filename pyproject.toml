@@ -158,6 +158,38 @@ root_packages = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "a
 # The migration audit fails on unclassified boundaries; these declarations do
 # not grant access to other modules, private members, or undeclared consumers.
 [[tool.ava.public_contracts.components]]
+module = "base.cluster.machine"
+entry_modules = ["base.cluster.machine", "base.cluster.machine.boot"]
+
+[[tool.ava.public_contracts.components]]
+module = "base.agents.context"
+entry_modules = ["base.agents.context", "base.agents.context.clients"]
+
+[[tool.ava.public_contracts.components]]
+module = "base.tests.impersonation.support"
+entry_modules = ["base.tests.impersonation.support"]
+
+[[tool.ava.public_contracts.components]]
+module = "base.agents.tests.capture_inputs"
+entry_modules = ["base.agents.tests.capture_inputs"]
+
+[[tool.ava.public_contracts.components]]
+module = "agent.tests.impersonation.handoff_inputs"
+entry_modules = ["agent.tests.impersonation.handoff_inputs"]
+
+[[tool.ava.public_contracts.components]]
+module = "agent.tests.claim"
+entry_modules = ["agent.tests.claim.claim_support", "agent.tests.claim.claim_status_support"]
+
+[[tool.ava.public_contracts.components]]
+module = "tests.fixtures.units"
+entry_modules = ["tests.fixtures.units"]
+
+[[tool.ava.public_contracts.components]]
+module = "tests.fixtures.unit.identity"
+entry_modules = ["tests.fixtures.unit.identity"]
+
+[[tool.ava.public_contracts.components]]
 module = "tests.fixtures.unit.sdk"
 entry_modules = ["tests.fixtures.unit.sdk"]
 
@@ -270,7 +302,13 @@ entry_modules = ["scripts.structure.placement"]
 
 [[tool.ava.public_contracts.components]]
 module = "cli"
-entry_modules = ["cli.main", "cli.parsers"]
+entry_modules = [
+    "cli.main", "cli.parsers", "cli.database", "cli.database.runtime",
+    "cli.tests.bootstrap.command_inputs",
+    "cli.commands.lifecycle.tests.identity.restart_inputs",
+    "cli.commands.observability.tests.lgtm_inputs",
+    "cli.commands.converge.tests.context_inputs",
+]
 
 [[tool.importlinter.contracts]]
 name = "Layered architecture (base < ava < agent < gateway < cli)"
@@ -560,7 +598,6 @@ check-typed-exception = true
 "ava/mcps/tests/test_daemon.py" = ["S110"]
 "agent/graph/claim/tests/test_core.py" = ["S110"]
 "base/deploy/schema/tests/test_migration_reset.py" = ["S110"]
-"gateway/tests/extensions/test_schedule_runner.py" = ["S110"]
 "tests/integration/test_grafana_native_runtime.py" = ["S110"]
 "tests/components/services/test_backup_scheduler_shutdown.py" = ["S110"]
 # T20 exemptions — print() is legitimate here: cli/ writes to the user's
@@ -975,6 +1012,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/cluster/dataplane/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/cluster/machine/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

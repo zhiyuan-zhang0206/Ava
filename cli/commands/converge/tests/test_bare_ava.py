@@ -15,6 +15,8 @@ import pytest
 
 from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -31,6 +33,7 @@ def _first_start_converge(
     existing_target: Path | None = None,
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
+    command_runtime: CommandRuntime,
 ) -> tuple[Path, Path, Path]:
     """Run a scratch home's first-start CLI wiring; returns (checkout, home, bare link)."""
     user_home = tmp_path / "home"
@@ -50,6 +53,7 @@ def _first_start_converge(
         services=frozenset(),
         database_factory=operator_database,
         producer=producer,
+        command=command_runtime,
     )
     return checkout, ava_home, bare_link
 
@@ -59,6 +63,8 @@ def test_prod_first_start_links_bare_ava_to_the_checkout_cli(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     checkout, ava_home, bare_link = _first_start_converge(
         tmp_path,
@@ -66,6 +72,7 @@ def test_prod_first_start_links_bare_ava_to_the_checkout_cli(
         prod=True,
         operator_database=operator_database,
         producer=operator_pipeline,
+        command_runtime=command_runtime,
     )
 
     assert bare_link.readlink() == checkout / ".venv" / "bin" / "ava"
@@ -77,6 +84,8 @@ def test_prod_start_repoints_the_retired_launcher_link(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A host wired by the launcher is rewritten by its next start, with no manual step."""
     retired = tmp_path / "home" / ".ava" / "source" / "scripts" / "ava-launcher.sh"
@@ -87,6 +96,7 @@ def test_prod_start_repoints_the_retired_launcher_link(
         existing_target=retired,
         operator_database=operator_database,
         producer=operator_pipeline,
+        command_runtime=command_runtime,
     )
 
     assert bare_link.readlink() == checkout / ".venv" / "bin" / "ava"
@@ -97,6 +107,8 @@ def test_non_prod_first_start_leaves_the_host_link_alone(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     prod_cli = tmp_path / "prod" / "source" / ".venv" / "bin" / "ava"
     _, ava_home, bare_link = _first_start_converge(
@@ -106,6 +118,7 @@ def test_non_prod_first_start_leaves_the_host_link_alone(
         existing_target=prod_cli,
         operator_database=operator_database,
         producer=operator_pipeline,
+        command_runtime=command_runtime,
     )
 
     assert bare_link.readlink() == prod_cli
@@ -117,6 +130,8 @@ def test_non_prod_first_start_creates_no_bare_link_when_none_existed(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     _, _, bare_link = _first_start_converge(
         tmp_path,
@@ -124,6 +139,7 @@ def test_non_prod_first_start_creates_no_bare_link_when_none_existed(
         prod=False,
         operator_database=operator_database,
         producer=operator_pipeline,
+        command_runtime=command_runtime,
     )
 
     assert not bare_link.exists()

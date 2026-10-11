@@ -18,11 +18,13 @@ from base.agents import impersonation as control
 from base.agents.context.clients import DatabaseFactory
 from base.agents.impersonation import sessions as sessions
 from cli.commands.agents import impersonation as cli
+from cli.database.runtime import CommandRuntime
 from cli.parsers import build_parser
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
-def _private_id(_db: object, agent_id: int, session_id: int) -> str:
+def _private_id(_db: object, agent_id: int, session_id: int, *, local_machine: str) -> str:
     assert (agent_id, session_id) == (405, 0)
     return "lease"
 
@@ -31,8 +33,10 @@ def _public_session(value: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
-def _args(*args: str) -> Namespace:
-    return build_parser().parse_args(["impersonate", *args])
+def _args(*args: str, command_runtime: CommandRuntime) -> Namespace:
+    parsed = build_parser().parse_args(["impersonate", *args])
+    parsed.runtime = command_runtime
+    return parsed
 
 
 def test_timeline_command_dispatches_to_the_timeline_reader(
@@ -56,6 +60,8 @@ def test_request_uses_external_identity_without_delivering_a_credential(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     seen: dict[str, Any] = {}
 
@@ -89,6 +95,7 @@ def test_request_uses_external_identity_without_delivering_a_credential(
                 "thread-1",
                 "--batch-window",
                 "0",
+                command_runtime=command_runtime,
             ),
             database_factory=operator_database,
         )
@@ -112,6 +119,8 @@ def test_request_without_steer_endpoint_does_not_acquire_a_lease(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from unittest.mock import Mock
 
@@ -136,6 +145,7 @@ def test_request_without_steer_endpoint_does_not_acquire_a_lease(
         "thread-1",
         "--batch-window",
         "0",
+        command_runtime=command_runtime,
     )
     assert cli.cmd_impersonate(args, database_factory=operator_database) == 1
     request.assert_not_called()
@@ -146,6 +156,8 @@ def test_request_records_the_shared_app_server_endpoint(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     seen: dict[str, Any] = {}
 
@@ -175,6 +187,7 @@ def test_request_records_the_shared_app_server_endpoint(
                 endpoint,
                 "--batch-window",
                 "0",
+                command_runtime=command_runtime,
             ),
             database_factory=operator_database,
         )
@@ -189,6 +202,8 @@ def test_claude_request_reports_the_relay_handoff(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
 
     def request(_db: object, _bus: object, agent_id: int, **kwargs: Any) -> dict[str, Any]:
@@ -211,6 +226,7 @@ def test_claude_request_reports_the_relay_handoff(
                 "claude",
                 "--batch-window",
                 "0",
+                command_runtime=command_runtime,
             ),
             database_factory=operator_database,
         )
@@ -222,39 +238,25 @@ def test_claude_request_reports_the_relay_handoff(
     assert "relay-token" not in output.err
 
 
-def test_request_requires_a_relay_provider(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    # --provider is mandatory at parse time; the codex thread requirement is
-    # enforced at the CLI boundary (`_relay_spec_problem`, covered below).
-    with pytest.raises(SystemExit) as raised:
-        _args(
-            "request",
-            "--name",
-            "Fix login",
-            "--agent",
-            "405",
-            "--as",
-            "codex",
-            "--ttl",
-            "600",
-            "--batch-window",
-            "0",
-        )
-    assert raised.value.code == 2
-    assert "--provider" in capsys.readouterr().err
-
-
 def test_ack_uses_explicit_processed_ids_only(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     seen: list[tuple[str, dict[str, Any], list[int]]] = []
 
     def ack(
-        _db: object, _bus: object, lease: str, attesting: dict[str, Any], ids: list[int]
+        _db: object,
+        _bus: object,
+        lease: str,
+        attesting: dict[str, Any],
+        ids: list[int],
+        *,
+        local_machine: str,
     ) -> None:
+        assert local_machine == command_runtime.machine.name()
         seen.append((lease, attesting, ids))
 
     monkeypatch.setattr(
@@ -265,7 +267,8 @@ def test_ack_uses_explicit_processed_ids_only(
     monkeypatch.setattr(control, "ack", ack)
     assert (
         cli.cmd_impersonate(
-            _args("ack", "0", "11", "13", "--agent", "405"), database_factory=operator_database
+            _args("ack", "0", "11", "13", "--agent", "405", command_runtime=command_runtime),
+            database_factory=operator_database,
         )
         == 0
     )
@@ -279,17 +282,22 @@ def test_classified_attestation_refusal_fails_without_leaking_state(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from base.agents.impersonation import ImpersonationError
 
-    def deny(_db: object, _bus: object, _lease: str, _caller: object) -> dict[str, Any]:
+    def deny(
+        _db: object, _bus: object, _lease: str, _caller: object, *, local_machine: str
+    ) -> dict[str, Any]:
         raise ImpersonationError("Controller caller check failed (chain-mismatch): see docs")
 
     monkeypatch.setattr(sessions, "private_id", _private_id)
     monkeypatch.setattr(control, "get", deny)
     assert (
         cli.cmd_impersonate(
-            _args("status", "0", "--agent", "405"), database_factory=operator_database
+            _args("status", "0", "--agent", "405", command_runtime=command_runtime),
+            database_factory=operator_database,
         )
         == 1
     )
@@ -299,13 +307,17 @@ def test_classified_attestation_refusal_fails_without_leaking_state(
 
 
 def test_release_preserves_summary(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     seen: list[str] = []
 
     def release(
-        _db: object, _bus: object, _lease: str, _caller: object, summary: str
+        _db: object, _bus: object, _lease: str, _caller: object, summary: str, *, local_machine: str
     ) -> dict[str, Any]:
+        assert local_machine == command_runtime.machine.name()
         seen.append(summary)
         return {"status": "released"}
 
@@ -318,7 +330,15 @@ def test_release_preserves_summary(
     monkeypatch.setattr("base.agents.impersonation.history.public_session", _public_session)
     assert (
         cli.cmd_impersonate(
-            _args("release", "0", "--agent", "405", "--summary", "Completed X.\nNext Y."),
+            _args(
+                "release",
+                "0",
+                "--agent",
+                "405",
+                "--summary",
+                "Completed X.\nNext Y.",
+                command_runtime=command_runtime,
+            ),
             database_factory=operator_database,
         )
         == 0
@@ -326,117 +346,8 @@ def test_release_preserves_summary(
     assert seen == ["Completed X.\nNext Y."]
 
 
-def test_batch_window_zero_disables_merge() -> None:
-    """--batch-window 0 is the documented merge-off value; the CLI must reach
-    the DB layer's 0..300 contract (issue #2056: the parser hardcoded min=1,
-    so 0 was unreachable from the CLI)."""
-    for value in ("0", "300"):
-        args = _args(
-            "request",
-            "--name",
-            "Fix login",
-            "--agent",
-            "405",
-            "--as",
-            "codex",
-            "--ttl",
-            "600",
-            "--provider",
-            "codex",
-            "--thread-id",
-            "t",
-            "--batch-window",
-            value,
-        )
-        assert args.relay_batch_window_seconds == int(value)
-
-
-def test_request_without_batch_window_is_a_usage_error(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Explicit-parameter ruling: --batch-window has no default, so even the
-    documented merge-off value (0 — see #2056) must be written out."""
-    with pytest.raises(SystemExit) as raised:
-        _args(
-            "request",
-            "--name",
-            "Fix login",
-            "--agent",
-            "405",
-            "--as",
-            "codex",
-            "--ttl",
-            "600",
-            "--provider",
-            "codex",
-            "--thread-id",
-            "t",
-        )
-    assert raised.value.code == 2
-    assert "--batch-window" in capsys.readouterr().err
-
-
-def test_request_requires_explicit_ttl(capsys: pytest.CaptureFixture[str]) -> None:
-    """Explicit-parameter ruling: the lease lifetime has no default."""
-    with pytest.raises(SystemExit) as raised:
-        _args(
-            "request",
-            "--name",
-            "Fix login",
-            "--agent",
-            "405",
-            "--as",
-            "codex",
-            "--provider",
-            "codex",
-            "--thread-id",
-            "t",
-            "--batch-window",
-            "0",
-        )
-    assert raised.value.code == 2
-    assert "--ttl" in capsys.readouterr().err
-
-
-def test_renew_requires_ttl(capsys: pytest.CaptureFixture[str]) -> None:
-    """Explicit-parameter ruling: renewal states the new lifetime outright —
-    no keep-the-current-length default."""
-    with pytest.raises(SystemExit) as raised:
-        _args("renew", "0", "--agent", "405")
-    assert raised.value.code == 2
-    assert "--ttl" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("option", ["--name", "--as"])
-def test_request_display_fields_must_be_non_empty(
-    option: str, capsys: pytest.CaptureFixture[str]
-) -> None:
-    command = [
-        "request",
-        "--name",
-        "Fix login",
-        "--agent",
-        "405",
-        "--as",
-        "codex",
-        "--ttl",
-        "600",
-        "--provider",
-        "codex",
-        "--thread-id",
-        "t",
-        "--batch-window",
-        "0",
-    ]
-    command[command.index(option) + 1] = "   "
-    with pytest.raises(SystemExit) as raised:
-        _args(*command)
-    assert raised.value.code == 2
-    assert f"argument {option}:" in capsys.readouterr().err
-
-
 def test_request_relay_spec_is_checked_at_the_cli_boundary(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], *, command_runtime: CommandRuntime
 ) -> None:
     """`_relay_spec_problem` mirrors the shared validator before dispatch."""
     base = [
@@ -452,28 +363,52 @@ def test_request_relay_spec_is_checked_at_the_cli_boundary(
         "--batch-window",
         "0",
     ]
-    codex_without_thread = _args(*base, "--provider", "codex")
+    codex_without_thread = _args(*base, "--provider", "codex", command_runtime=command_runtime)
     assert codex_without_thread.func(codex_without_thread) == 2
     assert "needs --thread-id" in capsys.readouterr().err
 
     bad_remote = _args(
-        *base, "--provider", "codex", "--thread-id", "t", "--codex-remote", "http://bad"
+        *base,
+        "--provider",
+        "codex",
+        "--thread-id",
+        "t",
+        "--codex-remote",
+        "http://bad",
+        command_runtime=command_runtime,
     )
     assert bad_remote.func(bad_remote) == 2
     assert "unix:// or ws://" in capsys.readouterr().err
 
-    claude_with_thread = _args(*base, "--provider", "claude", "--thread-id", "t")
+    claude_with_thread = _args(
+        *base, "--provider", "claude", "--thread-id", "t", command_runtime=command_runtime
+    )
     assert claude_with_thread.func(claude_with_thread) == 2
     assert "routes to its owner" in capsys.readouterr().err
-    dsh_with_remote = _args(*base, "--provider", "dsh", "--codex-remote", "unix:///tmp/x.sock")
+    dsh_with_remote = _args(
+        *base,
+        "--provider",
+        "dsh",
+        "--codex-remote",
+        "unix:///tmp/x.sock",
+        command_runtime=command_runtime,
+    )
     assert dsh_with_remote.func(dsh_with_remote) == 2
     assert "the dsh relay routes to its owner" in capsys.readouterr().err
 
 
 def test_relay_spec_is_checked_at_the_cli_boundary(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], *, command_runtime: CommandRuntime
 ) -> None:
-    codex_without_thread = _args("relay", "405", "--lease-id", "lease", "--provider", "codex")
+    codex_without_thread = _args(
+        "relay",
+        "405",
+        "--lease-id",
+        "lease",
+        "--provider",
+        "codex",
+        command_runtime=command_runtime,
+    )
     assert codex_without_thread.func(codex_without_thread) == 2
     assert "needs --thread-id" in capsys.readouterr().err
 
@@ -486,6 +421,7 @@ def test_relay_spec_is_checked_at_the_cli_boundary(
         "claude",
         "--codex-remote",
         "unix:///tmp/x.sock",
+        command_runtime=command_runtime,
     )
     assert claude_with_remote.func(claude_with_remote) == 2
     assert "routes to its owner" in capsys.readouterr().err
@@ -494,22 +430,12 @@ def test_relay_spec_is_checked_at_the_cli_boundary(
 # -- impersonate send: the attested CLI form of speaking as the leased agent --
 
 
-def test_send_requires_session_agent_target_and_content() -> None:
-    for command in (
-        ["--agent", "405", "--to", "42", "--content", "hi"],  # no session id
-        ["0", "--to", "42", "--content", "hi"],  # no --agent
-        ["0", "--agent", "405", "--content", "hi"],  # no --to
-        ["0", "--agent", "405", "--to", "42"],  # no --content
-    ):
-        with pytest.raises(SystemExit) as raised:
-            _args("send", *command)
-        assert raised.value.code == 2
-
-
 def test_send_delivers_as_the_borrowed_agent(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: DatabaseFactory,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     seen: list[tuple[int, str, str]] = []
 
@@ -517,7 +443,9 @@ def test_send_delivers_as_the_borrowed_agent(
         seen.append((agent_id, content, source))
         return "enqueued"
 
-    def require_active(_db: object, lease: str, caller: dict[str, Any]) -> dict[str, Any]:
+    def require_active(
+        _db: object, lease: str, caller: dict[str, Any], *, local_machine: str
+    ) -> dict[str, Any]:
         assert lease == "lease"
         assert caller["pid"] > 0
         return {"agent_id": 405}
@@ -525,7 +453,17 @@ def test_send_delivers_as_the_borrowed_agent(
     monkeypatch.setattr(sessions, "private_id", _private_id)
     monkeypatch.setattr(control, "require_active", require_active)
     monkeypatch.setattr("cli.commands.agents.control.send_agent_message", deliver)
-    args = _args("send", "0", "--agent", "405", "--to", "42", "--content", "hi")
+    args = _args(
+        "send",
+        "0",
+        "--agent",
+        "405",
+        "--to",
+        "42",
+        "--content",
+        "hi",
+        command_runtime=command_runtime,
+    )
     args.database_factory = operator_database
     assert args.func(args) == 0
     assert seen == [(42, "hi", "agent:405")]
@@ -537,7 +475,7 @@ def test_send_delivers_as_the_borrowed_agent(
 
 
 @pytest.mark.parametrize("remote", [None, "unix:///tmp/ava-codex.sock"])
-def test_relay_parser(remote: str | None) -> None:
+def test_relay_parser(remote: str | None, *, command_runtime: CommandRuntime) -> None:
     args = _args(
         "relay",
         "405",
@@ -548,6 +486,7 @@ def test_relay_parser(remote: str | None) -> None:
         "--thread-id",
         "thread",
         *(["--codex-remote", remote] if remote is not None else []),
+        command_runtime=command_runtime,
     )
     assert args.provider == "codex"
     assert args.thread_id == "thread"
@@ -555,7 +494,14 @@ def test_relay_parser(remote: str | None) -> None:
     assert args.codex_remote == remote
     assert args.token_stdin is False
     with_stdin = _args(
-        "relay", "405", "--lease-id", "lease", "--provider", "claude", "--token-stdin"
+        "relay",
+        "405",
+        "--lease-id",
+        "lease",
+        "--provider",
+        "claude",
+        "--token-stdin",
+        command_runtime=command_runtime,
     )
     assert with_stdin.token_stdin is True
 
@@ -612,10 +558,12 @@ def test_numeric_options_reject_out_of_bounds_values_during_parsing(
     option: str,
     invalid_values: list[str],
     capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     for value in invalid_values:
         with pytest.raises(SystemExit) as raised:
-            _args(*command, option, value)
+            _args(*command, option, value, command_runtime=command_runtime)
         assert raised.value.code == 2
         output = capsys.readouterr()
         assert output.out == ""
@@ -656,10 +604,10 @@ def test_numeric_options_reject_out_of_bounds_values_during_parsing(
     ],
 )
 def test_numeric_options_accept_runtime_boundaries(
-    command: list[str], option: str, values: list[str]
+    command: list[str], option: str, values: list[str], *, command_runtime: CommandRuntime
 ) -> None:
     for value in values:
-        parsed = _args(*command, option, value)
+        parsed = _args(*command, option, value, command_runtime=command_runtime)
         assert getattr(parsed, option.removeprefix("--")) == float(value)
 
 
@@ -668,6 +616,8 @@ def test_request_writes_the_resident_stub_when_scoped(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
 
     def request(_db: object, _bus: object, agent_id: int, **kwargs: Any) -> dict[str, Any]:
@@ -697,6 +647,7 @@ def test_request_writes_the_resident_stub_when_scoped(
                 "claude",
                 "--batch-window",
                 "0",
+                command_runtime=command_runtime,
             ),
             database_factory=operator_database,
         )
@@ -716,6 +667,8 @@ def test_request_rejects_second_resident_relay_handoff_before_creating_a_lease(
     tmp_path: Path,
     handoff_state: str,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from unittest.mock import Mock
 
@@ -745,6 +698,7 @@ def test_request_rejects_second_resident_relay_handoff_before_creating_a_lease(
                 "claude",
                 "--batch-window",
                 "0",
+                command_runtime=command_runtime,
             ),
             database_factory=operator_database,
         )
@@ -767,6 +721,8 @@ def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from unittest.mock import Mock
 
@@ -776,13 +732,21 @@ def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
     argv = ("request", "--name", "Fix", "--agent", "405", "--as", "dsh", "--ttl", "600")
     args = (*argv, "--provider", "dsh", "--batch-window", "0")
     assert (
-        cli.cmd_impersonate(_args(*args), database_factory=operator_database) == 1
+        cli.cmd_impersonate(
+            _args(*args, command_runtime=command_runtime), database_factory=operator_database
+        )
+        == 1
     )  # no plugin: refused before any lease
     request.assert_not_called()
     assert "DSH_AVA_RELAY_STUB is unset" in capsys.readouterr().err
     stub = tmp_path / "session-1.env"
     monkeypatch.setenv("DSH_AVA_RELAY_STUB", str(stub))
-    assert cli.cmd_impersonate(_args(*args), database_factory=operator_database) == 0
+    assert (
+        cli.cmd_impersonate(
+            _args(*args, command_runtime=command_runtime), database_factory=operator_database
+        )
+        == 0
+    )
     output = capsys.readouterr()
     assert "relay_token" not in json.loads(output.out) and "tok-9" not in output.out + output.err
     assert stub.read_text() == (

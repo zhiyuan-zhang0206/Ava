@@ -9,12 +9,14 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster import operations as cluster_ops
 from services.agent_runner.agent_ops import daemon
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_dispatch_requires_daemon_pool() -> None:
@@ -39,6 +41,8 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The steady-state probe reuses the daemon's already-open central DB pool."""
     from ops.cluster_status import ClusterStatus
@@ -47,7 +51,10 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
     seen: list[object] = []
     dispatch_pool: ConnectionPool = pool
 
-    def _status(_db: Database, probe_pool: object, *, image: LoadedCommit) -> ClusterStatus:
+    def _status(
+        _db: Database, probe_pool: object, *, image: LoadedCommit, local_machine: MachineIdentity
+    ) -> ClusterStatus:
+        del local_machine
         assert image is ops_image
         assert _db is ops_database()
         seen.append(probe_pool)
@@ -71,6 +78,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )
 
     assert status == "completed"

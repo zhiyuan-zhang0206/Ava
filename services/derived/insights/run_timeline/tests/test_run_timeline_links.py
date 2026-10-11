@@ -12,11 +12,13 @@ import psycopg
 import pytest
 from fastapi import HTTPException, Request
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.derived.insights.run_timeline import links
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 _INSERT: LiteralString = (
@@ -82,10 +84,17 @@ def message(
 
 @pytest.fixture
 def receiver(
-    model_catalog: ModelCatalog, config_authority: ConfigAuthority, *, database_gate: ProcessDbGate
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     return spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
 
 

@@ -10,25 +10,31 @@ from fastapi.testclient import TestClient
 import ava
 from ava.gateway_client.transport import use_client
 from ava.sdk_surface.install import Installation
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.plugin_providers import build_model_catalog
 from tests.fixtures.configuration import snapshot_process_config
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
-def spawn_agent(*, config_authority: ConfigAuthority, database_gate: ProcessDbGate) -> int:
+def spawn_agent(
+    *,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
+) -> int:
     """Setup helper — a row for the SDK's self identity (Task #1236 split: the
     row is created by create_agent_row; nothing launches, these tests only need
     the row to exist)."""
-    from base.cluster.machine import machine_name
     from ops.agents.spawn import create_agent_row
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
-        machine=machine_name(),
+        machine=local_machine.name(),
         catalog=build_model_catalog(),
         authority=config_authority,
     )
@@ -42,6 +48,8 @@ def sdk_via_gateway(
     event_bus: EventBus,
     model_installation: Installation,
     config_authority: ConfigAuthority,
+    *,
+    machine_identity: MachineIdentity,
 ):
     """SDK ↔ Gateway path in-process test apparatus:
     1. monkeypatch session noop — spawn / resurrect / respawn don't really start child python
@@ -56,7 +64,6 @@ def sdk_via_gateway(
         raising=False,
     )
     from base.cluster import machines as _machines
-    from base.cluster.machine import machine_name
     from gateway.agents import forward as _agents_forward_router
     from gateway.agents import router as _agents_router
     from gateway.app import app
@@ -72,7 +79,12 @@ def sdk_via_gateway(
         _db: object, target: str, body: LaunchAgentRequest
     ) -> SpawnedAgent:
         return await launch_agent_op(
-            database, event_bus, body, app.state.db_pool, catalog=build_model_catalog()
+            database,
+            event_bus,
+            body,
+            app.state.db_pool,
+            catalog=build_model_catalog(),
+            local_machine=machine_identity.name(),
         )
 
     # Same pattern for lifecycle ops (terminate / resurrect / restart): the
@@ -90,6 +102,7 @@ def sdk_via_gateway(
                 json_body,
                 app.state.db_pool,
                 catalog=build_model_catalog(),
+                local_machine=machine_identity.name(),
             )
         ).model_dump(mode="json")
 
@@ -98,7 +111,7 @@ def sdk_via_gateway(
     real_lookup_role = _machines.lookup_role
 
     def _lookup_role(_db: Database, name: str) -> list[str]:
-        if name == machine_name():
+        if name == machine_identity.name():
             return ["gateway", "agent-runner"]
         return real_lookup_role(_db, name)
 
@@ -107,7 +120,7 @@ def sdk_via_gateway(
     real_is_paused = _machines.is_paused
 
     def _is_paused(_db: Database, name: str) -> bool:
-        if name == machine_name():
+        if name == machine_identity.name():
             return False
         return real_is_paused(_db, name)
 

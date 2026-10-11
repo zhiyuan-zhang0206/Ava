@@ -18,6 +18,7 @@ import pytest
 
 from base.cluster import ownership
 from base.cluster.dataplane import pooler as base_pooler
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.deploy.maintenance import admission
 from base.native_process import pid_starttime_ticks
@@ -31,6 +32,7 @@ from cli.commands.lifecycle.tests.stop_support import Launcher, PtyServiceProces
 from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
@@ -502,7 +504,10 @@ def _nonloopback_addr() -> str | None:
 
 
 def _launch_incident_shape_pooler(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_machine: MachineIdentity,
 ) -> tuple[int, str, str, int]:
     """Start a real pooler on the incident's degraded-path config.
 
@@ -523,8 +528,8 @@ def _launch_incident_shape_pooler(
         pytest.skip("this host has no non-loopback address for the reachable bind")
 
     monkeypatch.setattr(base_pooler, "ava_home", lambda: home)
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: addr)
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: addr)
+    command_machine.set(host=addr)
+    command_machine.set(host=addr)
     monkeypatch.setattr(pb, "_pg_socket_dir", lambda: home / "pg-socket")  # pyright: ignore[reportUnknownArgumentType] — private fixture home
 
     port = _free_port()
@@ -535,6 +540,7 @@ def _launch_incident_shape_pooler(
         listen_port=port,
         db_name="ava_maintenance_test",
         userlist=f'"{role}" "{secret}"\n'.encode(),
+        machine=command_machine,
     )
     subprocess.run(
         [binary, "-d", str(base_pooler.ini_path())], check=True, capture_output=True, timeout=5
@@ -593,12 +599,17 @@ def _kill_test_poolers(*pids: int | None) -> None:
 
 
 def test_real_start_retains_pooler_with_held_client(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """A normal start cannot force a pooler past its held drain."""
     import psycopg
 
-    port, role, secret, pid = _launch_incident_shape_pooler(home, monkeypatch)
+    port, role, secret, pid = _launch_incident_shape_pooler(
+        home, monkeypatch, command_machine=command_machine
+    )
     old = stop.OwnedProcess.capture(psutil.Process(pid))
     config = (base_pooler.ini_path().read_bytes(), pb._userlist_path().read_bytes())
     try:
@@ -609,7 +620,9 @@ def test_real_start_retains_pooler_with_held_client(
             os.kill(pid, signal.SIGTERM)
             deadline = time.monotonic() + 5.0
             while time.monotonic() < deadline:
-                if not base_pooler.pgbouncer_public_listener_reachable(port, role):
+                if not base_pooler.pgbouncer_public_listener_reachable(
+                    port, role, machine=command_machine
+                ):
                     break
                 time.sleep(0.05)
             else:
@@ -622,6 +635,7 @@ def test_real_start_retains_pooler_with_held_client(
                     db_name="ava_maintenance_test",
                     userlist=f'"{role}" "{secret}"\n'.encode(),
                     admin_password=secret,
+                    machine=command_machine,
                 )
             assert old.live(), "normal start must retain a pooler still draining its client"
             assert pb._running_pid() == pid, "no replacement may be launched"

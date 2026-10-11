@@ -51,6 +51,10 @@ handles from that attachment share its thirty-second admission interval.
 Independent attachments do not retain each other's check timestamp. An existing
 context lends its original factory and gate; detach never closes those clients.
 An independent attachment captures the process's existing configuration delivery.
+It retains its own lazy `MachineIdentity`, supplied to its context, database host
+reader and event pipeline. A borrowed attachment retains the prior context's exact
+machine owner; lease validation precedes binding, and detach restores the prior
+context without resetting that owner's field caches.
 Its lite reads, eager model and complete SDK read model use those same inputs;
 overlays remain local to that owner. It never reloads or projects `.env` into
 `os.environ`, fetches bootstrap into the environment, or changes process `TZ`.

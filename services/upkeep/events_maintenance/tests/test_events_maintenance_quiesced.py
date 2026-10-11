@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
+from functools import partial
 from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
 from services.upkeep.events_maintenance import daemon
@@ -17,18 +19,24 @@ from services.upkeep.events_maintenance.tests.slices import (
     events_maintenance_config,
     events_maintenance_db,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _Loop = Callable[..., Coroutine[Any, Any, None]]
 
 
 def _rollup(
-    pool: Any, progress: LoopProgress, config: EventsMaintenanceConfig, *, tasks: asyncio.TaskGroup
+    pool: Any,
+    progress: LoopProgress,
+    config: EventsMaintenanceConfig,
+    *,
+    tasks: asyncio.TaskGroup,
+    local_machine: MachineIdentity,
 ) -> Any:
     return daemon._dispatch_loop(
         pool,
         progress,
         config,
-        events_maintenance_db(),
+        events_maintenance_db(local_machine=local_machine),
         tasks=tasks,
     )
 
@@ -42,9 +50,11 @@ _LOOPS: dict[str, tuple[_Loop, str]] = {
 @pytest.mark.parametrize("quiesced", [True, False])
 @pytest.mark.parametrize("name", list(_LOOPS))
 async def test_a_quiesced_unit_runs_no_pass(
-    monkeypatch: pytest.MonkeyPatch, name: str, quiesced: bool
+    monkeypatch: pytest.MonkeyPatch, name: str, quiesced: bool, machine_identity: MachineIdentity
 ) -> None:
     loop, pass_name = _LOOPS[name]
+    if name == "rollup":
+        loop = partial(loop, local_machine=machine_identity)
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
     passes: list[object] = []
 

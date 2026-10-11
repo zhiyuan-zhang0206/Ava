@@ -706,10 +706,9 @@ def emit_snapshot(snapshot: dict[str, Any], *, pipeline: Any) -> None:
     """Emit absolute states after all repositories succeed, using the exporter
     process dimension for both standalone and scheduled invocation."""
     from base import telemetry
-    from base.telemetry.otlp import telemetry_otlp
 
     telemetry.init_telemetry(process=PROCESS_NAME, pipeline=pipeline)
-    telemetry_otlp.warmup()
+    pipeline.warmup_exports()
     for repo, payload in snapshot["repositories"].items():
         for day, fields in sorted(payload["days"].items()):
             telemetry.emit(

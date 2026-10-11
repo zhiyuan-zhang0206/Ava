@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Iterator
+from functools import partial
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineRoles
 from base.packages.docs.notes import Note
 from gateway.app import app
 
@@ -56,7 +58,7 @@ def test_graph_builds_once_per_pool_revision(
     root = tmp_path / "pool"
     root.mkdir()
     _init_repo(root)
-    monkeypatch.setattr(gw_memory, "gateway_memory_dir", lambda: root)
+    monkeypatch.setattr(gw_memory, "gateway_memory_dir", partial(_memory_root, root))
     calls = _track_builds(monkeypatch)
 
     with TestClient(app) as client:
@@ -92,10 +94,16 @@ def test_graph_uncached_without_a_git_revision(
     root = tmp_path / "plain"
     root.mkdir()
     (root / "README.md").write_text("not a repo")
-    monkeypatch.setattr(gw_memory, "gateway_memory_dir", lambda: root)
+    monkeypatch.setattr(gw_memory, "gateway_memory_dir", partial(_memory_root, root))
     calls = _track_builds(monkeypatch)
 
     with TestClient(app) as client:
         assert client.get("/api/memory/graph").status_code == 200
         assert client.get("/api/memory/graph").status_code == 200
     assert len(calls) == 2
+
+
+def _memory_root(root: Path, *, roles: MachineRoles) -> Path:
+    """Keep the original test filesystem while accepting the explicit role input."""
+    del roles
+    return root

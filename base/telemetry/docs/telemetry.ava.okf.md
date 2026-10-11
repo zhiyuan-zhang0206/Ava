@@ -50,8 +50,11 @@ its original worker error is collected before replacement. Downstream exit
 cleanup still runs through the last concrete binding.
 
 The public `EventPipeline` resource lives in `delivery/pipeline.py`; construction starts
-its worker and requires the root's writer. `build_pipeline(database=...)` binds
-ordinary sinks to that root's database factory. Controlled host/exec logging binds
+its worker and requires the root's writer. `build_pipeline(database=..., machine=..., home=...)` binds
+ordinary sinks to that root's database factory and owns one lazy OTLP backend.
+The backend reads its machine eligibility only when enabled export is requested;
+no global machine identity or exporter is discovered. Its eligibility verdict is
+frozen within that backend, so independent attachment owners cannot share it. Controlled host/exec logging binds
 this actual writer through `init_telemetry(pipeline=..., machine_reader=...)`;
 All process entries supply the concrete writer; emission before initialization reports a missing owner without constructing a database or worker. SDK ClientSet roots retain this
 constructor without invoking it until a selected event enqueues. Quiet sync and
@@ -65,3 +68,13 @@ and releasing settled ownership. A writer failure still permits bounded lease
 release, pool cleanup and pidfile removal. The first original native, boot or
 writer failure remains primary; later cleanup failures are attached as notes.
 Unfinished native resources retain the clients and pools until process exit.
+
+The concrete exporting pipeline exposes `defer_exports()`, `finalize_exports()`,
+`warmup_exports()` and `exports_deferred()`; writer-only test pipelines have no
+exporter. Stop joins the ordinary writer before closing its own exporter under
+the same deadline. An unfinished ordinary writer keeps its downstream resources;
+an unfinished exporter keeps the pipeline retained for later observation.
+Event producers may pass `machine_reader` to `emit()` or `prepare_event()` to
+attribute that event to their captured context without rebinding process logging.
+Missing names retain the hostname diagnostic dimension; invalid identity and
+unexpected reader defects propagate rather than selecting another identity.

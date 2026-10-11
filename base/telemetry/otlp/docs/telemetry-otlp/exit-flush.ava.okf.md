@@ -14,9 +14,10 @@ tags:
 `base/telemetry/otlp/telemetry_otlp_metrics._build_providers` builds both SDK providers
 with `shutdown_on_exit=False`, so neither registers an atexit shutdown of
 its own. `base.telemetry._drain_on_exit` is the single ordered exit seam:
-it closes emitter admission and joins its sole writer within a finite deadline,
-then `telemetry_otlp.shutdown(timeout=2)` closes OTLP admission and observes its
-same worker within one caller-overridable local deadline. Provider construction,
+the concrete pipeline closes emitter admission and joins its sole writer,
+then closes its own OTLP admission and observes that same exporter worker
+within the remaining caller deadline. Independent attachments close their own
+pipelines through `ClientSet`, without finalizing or shutting another owner. Provider construction,
 queue draining, FIFO flush and SDK teardown all stay on that worker. A caller
 never becomes a rescue writer or runs provider teardown itself.
 

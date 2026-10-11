@@ -16,6 +16,7 @@ import pytest
 
 from base.telemetry import Event
 from base.telemetry.otlp import telemetry_otlp
+from base.telemetry.tests.identity_inputs import allow_identity
 
 _AGENT = 8902
 
@@ -28,15 +29,7 @@ def _clean_deferral_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: True, raising=False)
-
-
-@pytest.fixture(autouse=True)
-def _fresh_observability_export_gate() -> Any:
-    gate = telemetry_otlp.observability_export_allowed
-    gate.cache_clear()
-    yield
-    gate.cache_clear()
+    monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity, raising=False)
 
 
 def _event(**overrides: Any) -> Event:
@@ -74,8 +67,10 @@ def _make_backend(*, queue_maxsize: int = 8) -> tuple[Any, Any, Any]:
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(resource_exporter))
     metric_reader = InMemoryMetricReader()
     metric_provider = MeterProvider(metric_readers=[metric_reader])
-    backend = telemetry_otlp._OtlpBackend(
-        providers=(logger_provider, metric_provider), queue_maxsize=queue_maxsize
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True,
+        providers=(logger_provider, metric_provider),
+        queue_maxsize=queue_maxsize,
     )
     return backend, log_exporter, metric_reader
 
@@ -108,11 +103,11 @@ def _spy_calls(monkeypatch: pytest.MonkeyPatch, backend: Any, name: str) -> list
 
 @pytest.fixture
 def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """An `_OtlpBackend` with in-memory providers, installed as the module
-    singleton (so module-level wrappers hit it); not yet armed."""
+    """An `OtlpBackend` with in-memory providers, retained by this test
+    owner (so module-level wrappers hit it); not yet armed."""
     monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
     backend, log_exporter, metric_reader = _make_backend()
-    monkeypatch.setattr(telemetry_otlp, "backend", backend)
+
     yield backend, log_exporter, metric_reader
     backend.shutdown()
 
@@ -216,17 +211,17 @@ def test_empty_hold_finalize_skips_bringup(
     assert backend._thread is None  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_module_wrappers_arm_and_complete(otlp_backend: Any) -> None:
+def test_explicit_backend_arms_and_completes(otlp_backend: Any) -> None:
     backend, log_exporter, _ = otlp_backend
 
-    telemetry_otlp.defer_until_exit()
-    assert telemetry_otlp.deferred_state() is True
-    telemetry_otlp.export_batch([_event()])
+    backend.defer_until_exit()
+    assert backend.deferred_state() is True
+    backend.export_batch([_event()])
     assert backend._queue.qsize() == 1  # pyright: ignore[reportUnknownMemberType]
     assert not log_exporter.get_finished_logs()
 
-    telemetry_otlp.finalize()
-    assert telemetry_otlp.deferred_state() is False
+    backend.finalize()
+    assert backend.deferred_state() is False
     assert len(log_exporter.get_finished_logs()) == 1
 
 
@@ -296,3 +291,28 @@ def test_deferred_completion_during_finalization_keeps_hold(
     assert backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
     assert backend._logs is None  # pyright: ignore[reportUnknownMemberType]
     assert not log_exporter.get_finished_logs()
+
+
+def test_invalid_eligibility_preserves_deferred_records_and_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.cluster.machine import MachineRoleInvalid
+
+    error = MachineRoleInvalid("invalid configured role")
+
+    def invalid() -> bool:
+        raise error
+
+    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    backend = telemetry_otlp.OtlpBackend(export_allowed=invalid)
+    backend.defer_until_exit()
+    backend.export_batch([_event()])
+    try:
+        with pytest.raises(MachineRoleInvalid) as raised:
+            backend.finalize()
+        assert raised.value is error
+        assert backend._queue.qsize() == 1
+        assert backend._worker is None
+    finally:
+        with pytest.raises(MachineRoleInvalid):
+            backend.shutdown()

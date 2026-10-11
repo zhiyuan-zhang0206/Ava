@@ -1,34 +1,16 @@
-"""This host's stable machine identifier + cluster role — the two core
-labels of a multi-machine deployment.
+"""Explicitly owned machine identity and cluster capability values.
 
-Multi-machine deployment (public TLS central PG/Redis on VPS + per-machine
-steward agent syncing the memory git repo): manual setup once per host;
-we do **not** read `socket.gethostname()` (drifts on macOS when switching
-wifi).
+Composition roots supply four independent lazy readers. Each MachineIdentity
+caches its own name, capabilities, reachable host and optional description;
+resetting one owner never changes another. The startup factory is defined in
+base.cluster.machine.boot and consumes the root's ConfigBoot without reading
+any fields at construction. SDK consumers use the machine in their AvaContext.
 
-- `machine_name()`: stable identifier — memory git branch
-  (`machine-<name>`) / `agents_meta.machine` / `machines` table PK all
-  read from this.
-- `machine_role()`: this host's capability SET (frozenset). `gateway` =
-  owns PG/Redis + the HTTP gateway + all gateway daemons; `agent-runner` =
-  runs agent-host+ops+watchdog and disposable tool children (its DB/Redis URLs
-  point at a gateway node); `observability-station` = owns the native LGTM
-  observability backends (the declarative form of the `$AVA_HOME/lgtm-host`
-  marker). A host carries any combination; a single-box deployment is
-  `gateway,agent-runner`. `ava start` brings up the union of the services
-  each capability needs. Prefer `is_gateway()` / `is_agent_runner()` /
-  `is_observability_station()` over comparing the set directly.
-
-Source: the home's `.env` (read through Settings), nothing else.
-- machine_name: `AVA_MACHINE_NAME`, else MachineNameMissing.
-- machine_role: derived from independent capability flags, each the bool of
-  `AVA_MACHINE_SERVE_GATEWAY` / `AVA_MACHINE_SERVE_AGENT_RUNNER` /
-  `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` (unset = off). A host with no
-  capability raises MachineRoleMissing.
-
-`ava init --machine-name X --serve-gateway` records these in the home's `.env`;
-if no capability is set, a start fails loud and prints an actionable hint.
-**No** TTY prompt — agent-first design, agent has no TTY and would hang.
+Machine names are stable deployment labels, never inferred from hostnames.
+Capabilities are independently declared gateway, agent-runner and
+observability-station flags; a host runs their union. Missing name/role and
+invalid capability tokens retain their explicit errors. Gateway URL and bearer
+helpers validate the existing client credential policy independently of identity.
 """
 
 import enum
@@ -36,17 +18,36 @@ from collections.abc import Callable, Iterable
 from typing import Literal
 
 from base.cluster.auth import bearer_header, delivered_token, require_cluster_secret
-from base.config import settings
 from base.host.env.dotenv_boot import launcher_context
+
+__all__ = [
+    "GatewayApiBaseMissing",
+    "GatewayApiTokenMissing",
+    "MachineIdentity",
+    "MachineNameMissing",
+    "MachineRole",
+    "MachineRoleInvalid",
+    "MachineRoleMissing",
+    "MachineRoles",
+    "daemon_acceptance",
+    "format_capabilities",
+    "gateway_api_base",
+    "gateway_auth_headers",
+    "gateway_bearer",
+    "resolve_gateway_api_base",
+    "resolve_gateway_bearer",
+    "roles_from_flags",
+    "validate_machine_name",
+]
 
 # A machine carries a SET of capabilities, not a single role. `gateway` owns
 # Postgres/Redis + the HTTP gateway; `agent-runner` runs agent processes;
 # `observability-station` owns the native LGTM observability backends. A
 # single-box deployment carries gateway+agent-runner. Each capability is
 # declared independently by its own boolean flag (`AVA_MACHINE_SERVE_*`, unset =
-# off); `_resolve_role` collapses the booleans into the frozenset.
+# off); `roles_from_flags` collapses the booleans into the frozenset.
 # The DB still encodes the set as a TEXT[] of capability tokens. `MachineRole`
-# is one capability; `MachineRoles` is the set machine_role() returns.
+# is one capability; `MachineRoles` is the set MachineIdentity.role() returns.
 MachineRole = Literal["gateway", "agent-runner", "observability-station"]
 # The set type is frozenset[str] (not frozenset[MachineRole]): values flow in
 # from the DB (TEXT[]) and a comma-separated env string, and frozenset is
@@ -159,49 +160,6 @@ class MachineIdentity:
         self._host = None
 
 
-def machine_name() -> str:
-    """Get this host's identifier from settings (`AVA_MACHINE_NAME`).
-
-    Raises:
-        MachineNameMissing: settings.general.machine_name is empty.
-    """
-    return _identity.name()
-
-
-def machine_role() -> MachineRoles:
-    """Get this host's capability set, from the `AVA_MACHINE_SERVE_*` settings.
-
-    Returns a frozenset of capabilities, each `gateway`, `agent-runner`, or
-    `observability-station`. Prefer `is_gateway()` / `is_agent_runner()` /
-    `is_observability_station()` at branch sites.
-
-    Raises:
-        MachineRoleMissing: not set.
-        MachineRoleInvalid: set but contains an unknown token / is empty.
-    """
-    return _identity.role()
-
-
-def is_gateway() -> bool:
-    """True when this host carries the `gateway` capability (owns the data plane
-    + HTTP gateway). Raises MachineRoleMissing/Invalid like machine_role()."""
-    return "gateway" in machine_role()
-
-
-def is_agent_runner() -> bool:
-    """True when this host carries the `agent-runner` capability (runs agent
-    processes). Raises MachineRoleMissing/Invalid like machine_role()."""
-    return "agent-runner" in machine_role()
-
-
-def is_observability_station() -> bool:
-    """True when this host carries the `observability-station` capability (owns
-    the native LGTM observability backends — the declarative form of the
-    `$AVA_HOME/lgtm-host` marker). Raises MachineRoleMissing/Invalid like
-    machine_role()."""
-    return "observability-station" in machine_role()
-
-
 def format_capabilities(
     serve_gateway: bool,  # noqa: FBT001 — capability flags, mirror is_gateway/is_agent_runner
     serve_agent_runner: bool,  # noqa: FBT001
@@ -229,63 +187,6 @@ def format_capabilities(
     return " + ".join(caps) or "none"
 
 
-def machine_description() -> str | None:
-    """Get this host's free-text description (settings, `AVA_MACHINE_DESCRIPTION`) or None.
-
-    Unlike machine_name / machine_role, absence is legal: a machine without a
-    description is valid, so this returns None instead of raising.
-    """
-    return _identity.description()
-
-
-def reachable_host() -> str:
-    """Get this host's reachable address on the cluster's private network.
-
-    The address other cluster nodes and the user's browser dial — used to build
-    direct page URLs (`ava.ui.show` -> `http://<host>:<port>/`) and, on a gateway,
-    the data-plane endpoint enrolled agent-runners connect to.
-
-    Precedence:
-    1. `settings.general.machine_host` (env `AVA_MACHINE_HOST`, which
-       `ava init --machine-host` records in `.env`), when non-empty
-    2. `localhost` — a single box is reachable only at loopback (zero-config).
-
-    The operator declares this address; it is not auto-detected, so the codebase
-    makes no assumption about how the machines reach each other (VPN / LAN /
-    overlay network / etc.). A misconfigured remote host that falls through
-    to `localhost` is caught downstream by the loopback guard in
-    `base.cluster.machines.register_self`, not by this resolver.
-
-    Resolved once per process and cached.
-    """
-    return _identity.host()
-
-
-def set_identity(
-    *,
-    name: str | _Unset = _UNSET,
-    role: str | Iterable[str] | _Unset = _UNSET,
-    description: str | _Unset | None = _UNSET,
-    host: str | _Unset = _UNSET,
-) -> None:
-    """Inject machine identity, overriding settings resolution for the fields
-    provided. Fields left unset keep their current resolved/injected value.
-    Used by tests and by explicit bootstrap. Call reset_identity() to clear.
-    """
-    _identity.set(name=name, role=role, description=description, host=host)
-
-
-def reset_identity() -> None:
-    """Clear all injected/resolved identity; the next read re-resolves from
-    settings.
-    """
-    _identity.reset()
-
-
-def _resolve_name() -> str:
-    return validate_machine_name(settings.general.machine_name)
-
-
 def validate_machine_name(value: str) -> str:
     """Normalize a configured name and reject an uninitialized machine."""
     env = value.strip()
@@ -294,14 +195,6 @@ def validate_machine_name(value: str) -> str:
     raise MachineNameMissing(
         "machine name not set — `ava init --machine-name <name>` records it for a new "
         "home; for an initialized one set AVA_MACHINE_NAME in its `.env` (e.g. host-a / host-b)."
-    )
-
-
-def _resolve_role() -> MachineRoles:
-    return roles_from_flags(
-        serve_gateway=bool(settings.general.machine_serve_gateway),
-        serve_agent_runner=bool(settings.general.machine_serve_agent_runner),
-        serve_observability_station=bool(settings.general.machine_serve_observability_station),
     )
 
 
@@ -332,40 +225,6 @@ def roles_from_flags(
     return frozenset(caps)
 
 
-def _resolve_description() -> str | None:
-    return settings.general.machine_description.strip() or None
-
-
-def _resolve_host() -> str:
-    env = settings.general.machine_host.strip()
-    if env:
-        return env
-    # Zero-config single box: reachable only at loopback. A remote runner that
-    # wrongly lands here is rejected at registration time by the loopback guard in
-    # base.cluster.machines.register_self, so this never silently registers a
-    # self-dialing address.
-    return "localhost"
-
-
-_identity = MachineIdentity(
-    name=_resolve_name,
-    role=_resolve_role,
-    host=_resolve_host,
-    description=_resolve_description,
-)
-
-
-def _resolve_gateway_url() -> str | None:
-    """Resolve the configured gateway base URL (`AVA_GATEWAY_URL`) or None.
-    Trailing slash stripped.
-
-    The single source both gateway_api_base() (this module) and
-    base.cluster.machines.gateway_url() read, so the "where is the gateway" answer
-    never drifts between them.
-    """
-    return _normalize_gateway_url(settings.gateway.gateway_url)
-
-
 def _normalize_gateway_url(value: str) -> str | None:
     value = value.strip()
     return value.rstrip("/") if value else None
@@ -385,6 +244,8 @@ def gateway_api_base() -> str:
     Raises:
         GatewayApiBaseMissing: gateway_url unset.
     """
+    from base.config import settings
+
     return resolve_gateway_api_base(settings.gateway.gateway_url)
 
 
@@ -424,6 +285,8 @@ def gateway_bearer() -> str:
             `AVA_API_TOKEN`, or the process holds neither a token nor the
             human secret (the API always authenticates).
     """
+    from base.config import settings
+
     return resolve_gateway_bearer(
         token_reader=delivered_token,
         secret_reader=lambda: settings.data_plane.cluster_secret,
@@ -469,6 +332,7 @@ def _plane_delivers_no_tokens() -> bool:
     The one case where `api_delivery` hands out no token although the API is
     authenticated: the plane keeps no write generations to issue one from.
     """
+    from base.config import settings
     from base.host.env.bootstrap import config_source_is_local
 
     return config_source_is_local() and settings.data_plane.is_remote
@@ -495,6 +359,7 @@ def daemon_acceptance() -> frozenset[str]:
     """
     from base.cluster.authority.api import acceptance, token_digest
     from base.cluster.authority.unit import load_unit_capability
+    from base.config import settings
     from base.paths import ava_home
 
     home = ava_home().resolve()

@@ -10,6 +10,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.daemon.health import Liveness
 from services.derived.memory_indexer import daemon
 from services.derived.memory_indexer.tests.test_memory_indexer import _cancel_quietly, _FakeProvider
@@ -19,16 +20,17 @@ from services.derived.memory_indexer.tests.test_memory_indexer import (
 from services.derived.memory_indexer.tests.test_memory_indexer import (
     store_backend as store_backend,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_reconcile_retry_inflight_pass_cancels_promptly(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     from threading import Event
 
     entered, release, finished = Event(), Event(), Event()
 
-    def slow_reconcile(*args: Any) -> bool:
+    def slow_reconcile(*args: Any, machine: MachineIdentity) -> bool:
         entered.set()
         try:
             assert release.wait(timeout=2.0)
@@ -41,7 +43,9 @@ async def test_reconcile_retry_inflight_pass_cancels_promptly(
     retry = daemon._ReconcileRetrySchedule(base_s=0.01, cap_s=0.01)
     retry.record_incomplete()
     task = asyncio.create_task(
-        daemon._drain_loop(Mock(), queue.Queue(), Liveness(1.0), _FakeProvider(), retry)
+        daemon._drain_loop(
+            Mock(), queue.Queue(), Liveness(1.0), _FakeProvider(), retry, machine=machine_identity
+        )
     )
     try:
         async with asyncio.timeout(1.0):

@@ -10,6 +10,7 @@ from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
 from base import telemetry
 from base.api_contracts.idempotency import keyed_headers
+from base.cluster.machine import MachineIdentity
 from base.db import fetch_one
 from base.db import pool as db_pool
 from base.db.code_version_gate import ProcessDbGate
@@ -57,6 +58,7 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
     db_conn: psycopg.Connection,
     root_task_id: int,
     monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
     actor = _seed_agent(db_conn)
     old_owner = _seed_agent(db_conn)
@@ -70,7 +72,9 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
     def unavailable(*args: object) -> None:
         raise psycopg.OperationalError("queue unavailable")
 
-    with gateway_test_client(app, raise_server_exceptions=False) as client:
+    with gateway_test_client(
+        app, raise_server_exceptions=False, machine=machine_identity
+    ) as client:
         monkeypatch.setattr(tasks, "enqueue_task_notifications", unavailable)
         assert (
             client.patch(

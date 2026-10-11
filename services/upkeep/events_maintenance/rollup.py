@@ -186,12 +186,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.first > args.last:
         parser.error("--from is after --to")
+    from base.cluster.machine.boot import machine_from_boot
+    from base.config import ConfigBoot
     from services.upkeep.events_maintenance.token_totals import folded_through, rebuild_totals
 
+    config = ConfigBoot()
+    config.boot()
+    machine = machine_from_boot(config)
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())
-    with events_maintenance_db(gate=gate).connect() as conn:
+    with events_maintenance_db(gate=gate, local_host=machine.host).connect() as conn:
         result = roll_days(conn, args.first, args.last)
         # A day at or before the watermark is already inside the folded totals.
         if args.first <= folded_through(conn):

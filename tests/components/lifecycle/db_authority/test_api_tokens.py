@@ -27,7 +27,12 @@ from starlette.requests import Request
 from base.cluster import authority
 from base.cluster.auth import ClusterSecretMissingError, bearer_header, cookie_name
 from base.cluster.authority import api, ledger, unit
-from base.cluster.machine import GatewayApiTokenMissing, MachineRole, gateway_auth_headers
+from base.cluster.machine import (
+    GatewayApiTokenMissing,
+    MachineIdentity,
+    MachineRole,
+    gateway_auth_headers,
+)
 from base.config import settings
 from base.daemon.http_transport import start_daemon_http
 from cli.commands.data_plane import bringup
@@ -128,9 +133,11 @@ def test_cluster_credential_names_the_verifying_credential(gateway: Path) -> Non
 # ── the gateway app: middleware, bootstrap, login ───────────────────────────
 
 
-def test_gateway_api_admits_the_active_generation_and_the_human_secret(gateway: Path) -> None:
+def test_gateway_api_admits_the_active_generation_and_the_human_secret(
+    gateway: Path, machine_identity: MachineIdentity
+) -> None:
     before = _tokens(gateway).api
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         for token in (_HUMAN, before.gateway, before.runner):
             assert client.get("/api/agents", headers=bearer_header(token)).status_code == 200
         assert client.get("/api/agents").status_code == 401
@@ -142,19 +149,21 @@ def test_gateway_api_admits_the_active_generation_and_the_human_secret(gateway: 
 
 
 def test_a_blank_human_secret_admits_only_the_active_generation(
-    gateway: Path, monkeypatch: pytest.MonkeyPatch
+    gateway: Path, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
 ) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     tokens = _tokens(gateway).api
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         assert client.get("/api/agents").status_code == 401
         assert client.get("/api/agents", headers=bearer_header("")).status_code == 401
         assert client.get("/api/agents", headers=bearer_header(tokens.runner)).status_code == 200
 
 
-def test_bootstrap_serves_a_runner_token_but_never_the_human_secret(gateway: Path) -> None:
+def test_bootstrap_serves_a_runner_token_but_never_the_human_secret(
+    gateway: Path, machine_identity: MachineIdentity
+) -> None:
     runner = _tokens(gateway).api.runner
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         served = client.get("/api/bootstrap", headers=bearer_header(runner))
         assert served.status_code == 200
         payload = served.json()
@@ -168,9 +177,11 @@ def _login(client: TestClient, password: str) -> int:
     return client.post("/api/auth/login", json={"password": password}).status_code
 
 
-def test_login_admits_the_active_runner_token_for_the_managed_browser(gateway: Path) -> None:
+def test_login_admits_the_active_runner_token_for_the_managed_browser(
+    gateway: Path, machine_identity: MachineIdentity
+) -> None:
     tokens = _tokens(gateway).api
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         assert _login(client, tokens.gateway) == 401
         response = client.post("/api/auth/login", json={"password": tokens.runner})
         assert response.status_code == 200 and response.cookies[cookie_name()]
@@ -178,13 +189,15 @@ def test_login_admits_the_active_runner_token_for_the_managed_browser(gateway: P
         assert _login(client, tokens.runner) == 401
 
 
-def test_only_the_human_secret_issues_a_login_ticket(gateway: Path) -> None:
+def test_only_the_human_secret_issues_a_login_ticket(
+    gateway: Path, machine_identity: MachineIdentity
+) -> None:
     """A write generation's tokens, and a managed-browser session one of them
     minted, cannot issue a browser login ticket: the ticket would open a session
     the generation's revocation could not be sure to end."""
     tokens = _tokens(gateway).api
     ticket_path = "/api/auth/login-ticket"
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         for machine in (tokens.runner, tokens.gateway):
             assert client.post(ticket_path, headers=bearer_header(machine)).status_code == 403
         runner_cookie = client.post("/api/auth/login", json={"password": tokens.runner}).cookies[
@@ -206,23 +219,27 @@ def _cookie_authenticates(client: TestClient, cookie: str) -> tuple[int, bool]:
 
 
 def test_a_human_minted_session_dies_with_the_rotated_secret(
-    gateway: Path, monkeypatch: pytest.MonkeyPatch
+    gateway: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A browser logged in with the human secret stays authenticated while the secret
     holds, but not past a rotation of the secret itself: the restarted gateway admits
     only sessions its current secret minted."""
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         cookie = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
         assert _cookie_authenticates(client, cookie) == (200, True)
         monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-" + "r" * 40)
         assert _cookie_authenticates(client, cookie) == (401, False)
 
 
-def test_a_session_cookie_names_its_credential_only_through_a_keyed_mac(gateway: Path) -> None:
+def test_a_session_cookie_names_its_credential_only_through_a_keyed_mac(
+    gateway: Path, machine_identity: MachineIdentity
+) -> None:
     """The cookie travels to the browser, so the mint in it must not let its
     holder brute-force the human secret offline: it is an HMAC under the
     gateway's private session key, never a plain digest of the credential."""
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         cookie = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
         mint, _, _random = cookie.partition(".")
         assert mint.startswith("human-")
@@ -241,10 +258,12 @@ def test_a_session_cookie_names_its_credential_only_through_a_keyed_mac(gateway:
         assert _cookie_authenticates(client, renewed) == (200, True)
 
 
-def test_a_session_records_which_credential_minted_it(gateway: Path) -> None:
+def test_a_session_records_which_credential_minted_it(
+    gateway: Path, machine_identity: MachineIdentity
+) -> None:
     """Inbound provenance tells a machine-minted browser session from a human one."""
     runner = _tokens(gateway).api.runner
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         human = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
         client.cookies.clear()
         machine = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
@@ -259,13 +278,15 @@ def test_a_session_records_which_credential_minted_it(gateway: Path) -> None:
         )
 
 
-def test_the_sessions_list_shows_only_sessions_that_authenticate(gateway: Path) -> None:
+def test_the_sessions_list_shows_only_sessions_that_authenticate(
+    gateway: Path, machine_identity: MachineIdentity
+) -> None:
     """`/api/auth/sessions` lists what the session check would still admit: an id
     without a mint (the pre-mint format) never appears."""
     from base.cluster.auth import new_session_id
 
     runner = _tokens(gateway).api.runner
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         machine = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
         client.cookies.clear()
         human = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
@@ -281,7 +302,10 @@ def test_the_sessions_list_shows_only_sessions_that_authenticate(gateway: Path) 
 
 
 def test_a_machine_token_cannot_choose_the_human_secret(
-    gateway: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    gateway: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A runner token authenticates the administrator, but it must not turn a
     generation-bound admission into a human bearer of its choosing."""
@@ -292,7 +316,7 @@ def test_a_machine_token_cannot_choose_the_human_secret(
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: store)
     monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
     runner = _tokens(gateway).api.runner
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         resp = client.put(
             "/api/config",
             json={"cluster_secret": "chosen-" + "c" * 40},
@@ -303,7 +327,10 @@ def test_a_machine_token_cannot_choose_the_human_secret(
 
 
 def test_a_machine_token_cannot_open_the_mcp_endpoint(
-    gateway: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    gateway: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Switching `/mcp` on decides whether MCP client tokens, which outlive
     every generation, authenticate at all: no config write may choose it."""
@@ -314,7 +341,7 @@ def test_a_machine_token_cannot_open_the_mcp_endpoint(
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: store)
     monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
     runner = _tokens(gateway).api.runner
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         resp = client.put(
             "/api/config", json={"mcp_endpoint_enabled": True}, headers=bearer_header(runner)
         )
@@ -322,7 +349,9 @@ def test_a_machine_token_cannot_open_the_mcp_endpoint(
     assert not (store / ".env").exists()
 
 
-def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
+def test_only_a_human_credential_manages_mcp_clients(
+    gateway: Path, machine_identity: MachineIdentity
+) -> None:
     """An MCP client token lives in `mcp_clients`, bound to no write generation.
     A generation-bound admission (either machine token, or a session a runner
     token minted) must not mint one that outlives it, nor list or revoke them;
@@ -330,7 +359,7 @@ def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
     from gateway.mcp_server import clients
 
     tokens = _tokens(gateway).api
-    with gateway_test_client(config_app()) as client:
+    with gateway_test_client(config_app(), machine=machine_identity) as client:
         pool = client.app.state.db_pool  # type: ignore[attr-defined]
         runner_session = client.post("/api/auth/login", json={"password": tokens.runner})
         client.cookies.clear()
@@ -445,13 +474,13 @@ def test_gateway_home_ops_fails_closed_while_no_generation_is_active(gateway: Pa
     [("localhost", "127.0.0.1"), ("10.0.0.5", "0.0.0.0")],  # noqa: S104
 )
 def test_ops_bind_follows_the_declared_reachable_address(
-    monkeypatch: pytest.MonkeyPatch, reachable: str, bind: str
+    reachable: str, bind: str, machine_identity: MachineIdentity
 ) -> None:
     """The bearer is required either way; only a declared reachable address
     (`AVA_MACHINE_HOST`) opens /ops beyond loopback, as it always has for a
     cluster with a secret."""
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: reachable)
-    assert ops_boot.ops_bind_host() == bind
+    machine_identity.set(host=reachable)
+    assert ops_boot.ops_bind_host(machine=machine_identity) == bind
 
 
 def test_ops_without_a_secret_or_capability_refuses_to_serve(
@@ -644,13 +673,15 @@ def test_changed_ledger_refusal_is_not_hidden_by_warm_acceptance(gateway: Path) 
         api.acceptance(gateway, cache=cache)
 
 
-def test_gateway_lifespans_own_independent_machine_acceptance_caches(gateway: Path) -> None:
+def test_gateway_lifespans_own_independent_machine_acceptance_caches(
+    gateway: Path, machine_identity: MachineIdentity
+) -> None:
     from gateway.app import app
 
-    with gateway_test_client(app):
+    with gateway_test_client(app, machine=machine_identity):
         first: api.AcceptanceCache = app.state.machine_token_acceptance
         assert api.acceptance(gateway, cache=first)
-    with gateway_test_client(app):
+    with gateway_test_client(app, machine=machine_identity):
         second: api.AcceptanceCache = app.state.machine_token_acceptance
         assert second is not first
         assert second == {}

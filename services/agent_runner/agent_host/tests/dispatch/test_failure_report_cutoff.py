@@ -19,6 +19,7 @@ from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure
 from base.agents.context import AvaContext
 from base.agents.recovery.breaker import admit_pending_wake
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -33,6 +34,7 @@ from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.invocation import finish_pending_failure
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -80,8 +82,11 @@ async def _admit(
     catalog: ModelCatalog,
     authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> RuntimeIncarnation:
-    agent_id = spawn_agent(catalog=catalog, authority=authority, database_gate=database_gate)
+    agent_id = spawn_agent(
+        catalog=catalog, authority=authority, database_gate=database_gate, machine=local_machine
+    )
     machine = conn.execute("SELECT machine FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     assert machine is not None
     incarnation = await admit_hosted_runtime(
@@ -100,9 +105,16 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(
-        db_conn, aops_pool, database, model_catalog, config_authority, database_gate
+        db_conn,
+        aops_pool,
+        database,
+        model_catalog,
+        config_authority,
+        database_gate,
+        machine_identity,
     )
     agent_id = incarnation.agent_id
     old_claim = _insert(db_conn, agent_id, "user", claimed=True)
@@ -245,9 +257,16 @@ async def test_changed_incarnation_withholds_original_failure_report(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(
-        db_conn, aops_pool, database, model_catalog, config_authority, database_gate
+        db_conn,
+        aops_pool,
+        database,
+        model_catalog,
+        config_authority,
+        database_gate,
+        machine_identity,
     )
     replacement = uuid4()
     db_conn.execute(

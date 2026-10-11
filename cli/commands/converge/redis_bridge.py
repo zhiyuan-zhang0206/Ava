@@ -20,6 +20,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
@@ -53,15 +54,14 @@ class _RedisBridgeUnconfiguredError(RuntimeError):
     pass
 
 
-def _bridge_config(home: Path) -> RedisBridgeConfig | None:
+def _bridge_config(home: Path, *, machine: MachineIdentity) -> RedisBridgeConfig | None:
     """Return this host's relay config, or None when no relay should exist."""
     if sys.platform != "darwin" or settings.data_plane.is_remote:
         return None
 
     from base.cluster import get_record
-    from base.cluster.machine import reachable_host
 
-    listen_host = reachable_host()
+    listen_host = machine.host()
     if is_loopback_host(listen_host):
         return None
     record = get_record(home)
@@ -220,7 +220,7 @@ def _retire_launchd_bridge(home: Path) -> None:
 
 def ensure_redis_bridge(ctx: ConvergeCtx) -> None:
     """Install and supervise the bridge when this gateway has off-box Redis clients."""
-    config = _bridge_config(ctx.ava_home)
+    config = _bridge_config(ctx.ava_home, machine=ctx.machine)
     if config is None:
         if sys.platform == "darwin":
             _retire_launchd_bridge(ctx.ava_home)
@@ -233,13 +233,13 @@ def ensure_redis_bridge(ctx: ConvergeCtx) -> None:
     )
 
 
-def probe_redis_bridge(home: Path | None = None) -> RedisBridgeStatus:
+def probe_redis_bridge(home: Path | None = None, *, machine: MachineIdentity) -> RedisBridgeStatus:
     """PING Redis through the relay and report its independent supervisor state."""
     from base.paths import ava_home
 
     target = (home or ava_home()).expanduser()
     try:
-        config = _bridge_config(target)
+        config = _bridge_config(target, machine=machine)
     except _RedisBridgeUnconfiguredError as exc:
         return RedisBridgeStatus(
             required=True,
@@ -291,8 +291,8 @@ def probe_redis_bridge(home: Path | None = None) -> RedisBridgeStatus:
     )
 
 
-def print_redis_bridge_status() -> None:
-    status = probe_redis_bridge()
+def print_redis_bridge_status(*, machine: MachineIdentity) -> None:
+    status = probe_redis_bridge(machine=machine)
     if not status.required:
         print("  · not required (Redis has no local off-box ingress)")
         return

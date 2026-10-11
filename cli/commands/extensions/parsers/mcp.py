@@ -77,10 +77,10 @@ def _h_memory_refresh(_args: argparse.Namespace) -> int:
     return cmd_memory_refresh()
 
 
-def _h_memory_init(_args: argparse.Namespace) -> int:
+def _h_memory_init(args: argparse.Namespace) -> int:
     from cli.commands.extensions.memory import cmd_memory_init
 
-    return cmd_memory_init()
+    return cmd_memory_init(machine=args.runtime.machine)
 
 
 def _h_memory_search(args: argparse.Namespace) -> int:

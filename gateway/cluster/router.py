@@ -21,10 +21,7 @@ from pydantic import BaseModel
 from base.api_contracts.status import MachineStatus
 from base.cluster import machines
 from base.cluster.machine import (
-    is_agent_runner,
-    is_gateway,
-    is_observability_station,
-    machine_name,
+    MachineIdentity,
 )
 from base.config import settings
 from base.db import Database
@@ -48,17 +45,19 @@ router = APIRouter()
 _log = logging.getLogger(__name__)
 
 
-def _local_snapshot_blocking(db: Database, *, image: LoadedCommit) -> ClusterStatus:
+def _local_snapshot_blocking(
+    db: Database, *, image: LoadedCommit, local_machine: MachineIdentity
+) -> ClusterStatus:
     """Sync local snapshot for a pure gateway (no ops server) — via to_thread:
     paused flag (file), orchestration liveness (session probe) and the
     prod-source HEAD (git rev-parse) are all child-process / disk reads that
     must not run on the event loop."""
-    paused = cluster_is_paused(db)
+    paused = cluster_is_paused(db, machine_name=local_machine.name)
     return ClusterStatus(
-        machine_name=machine_name(),
-        serve_gateway=is_gateway(),
-        serve_agent_runner=is_agent_runner(),
-        serve_observability_station=is_observability_station(),
+        machine_name=local_machine.name(),
+        serve_gateway=("gateway" in local_machine.role()),
+        serve_agent_runner=("agent-runner" in local_machine.role()),
+        serve_observability_station=("observability-station" in local_machine.role()),
         paused=paused,
         # This local snapshot resolves paused from the posture row alone, so a
         # true verdict here has exactly one possible cause.
@@ -68,7 +67,7 @@ def _local_snapshot_blocking(db: Database, *, image: LoadedCommit) -> ClusterSta
         # gateway that outlived a checkout advance reports the old commit and the
         # roster shows the drift.
         running_sha=image.sha,
-        schema_mismatch=schema_mismatch_status(db),
+        schema_mismatch=schema_mismatch_status(db, local_machine=local_machine.name()),
     )
 
 
@@ -89,6 +88,7 @@ async def _roster_statuses(
     *,
     fresh: bool,
     image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> list[MachineStatus]:
     """The roster of every unpaused machine: from the heartbeat liveness pass's
     snapshot, or — when `fresh` — by dialing every runner now."""
@@ -97,7 +97,13 @@ async def _roster_statuses(
         return []
     found = None if fresh else await asyncio.to_thread(snapshots.read_all_blocking, pool)
     return await gather_cluster_status(
-        db, rows, machine_name(), identity_log=identity_log, snapshots=found, image=image
+        db,
+        rows,
+        local_machine.name(),
+        identity_log=identity_log,
+        snapshots=found,
+        image=image,
+        local_machine=local_machine,
     )
 
 
@@ -165,16 +171,22 @@ async def get_cluster_status(request: Request) -> ClusterStatus:
     during pause — observability is always online.
     """
     return await cluster_status_snapshot(
-        request.app.state.db, image=request.app.state.process_image
+        request.app.state.db,
+        image=request.app.state.process_image,
+        local_machine=request.app.state.machine,
     )
 
 
-async def cluster_status_snapshot(db: Database, *, image: LoadedCommit) -> ClusterStatus:
+async def cluster_status_snapshot(
+    db: Database, *, image: LoadedCommit, local_machine: MachineIdentity
+) -> ClusterStatus:
     """The `/api/cluster/status` body, also read by the MCP `cluster_status` tool."""
-    if is_agent_runner():
-        result = await _dispatch_op(db, machine_name(), "status_probe", {})
+    if "agent-runner" in local_machine.role():
+        result = await _dispatch_op(db, local_machine.name(), "status_probe", {})
         return ClusterStatus.model_validate(result)
-    return await asyncio.to_thread(_local_snapshot_blocking, db, image=image)
+    return await asyncio.to_thread(
+        _local_snapshot_blocking, db, image=image, local_machine=local_machine
+    )
 
 
 @router.get("/api/cluster/roster", response_model=list[MachineStatus])
@@ -202,6 +214,7 @@ async def get_cluster_roster(
         request.app.state.identity_mismatch_log,
         fresh=fresh,
         image=request.app.state.process_image,
+        local_machine=request.app.state.machine,
     )
 
 
@@ -360,6 +373,7 @@ async def get_cluster_machines(
         request.app.state.identity_mismatch_log,
         fresh=fresh,
         image=request.app.state.process_image,
+        local_machine=request.app.state.machine,
     )
     # This is the AGENT view: it lists only machines that can run agent processes
     # (carry the agent-runner capability). A gateway-only node is intentionally
@@ -420,7 +434,7 @@ def delete_cluster_machine(name: str, request: Request) -> MachineDeleteResponse
     on startup, so a runtime DELETE wouldn't be repaired until next
     restart).
     """
-    if name == machine_name():
+    if name == request.app.state.machine.name():
         raise HTTPException(
             status_code=400,
             detail=f"refusing to delete this host's own machines row ({name!r}); "

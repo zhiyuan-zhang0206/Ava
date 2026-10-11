@@ -8,12 +8,14 @@ from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from services.desktop.computer import mcp_daemon as daemon
+from tests.fixtures.configuration import snapshot_process_config
 
 
 @pytest.mark.parametrize("sha", ["captured-computer", None])
@@ -25,12 +27,15 @@ def test_entry_shares_the_captured_gate_with_logging_and_actions(
     gates: list[ProcessDbGate] = []
     reads: list[tuple[Path, str]] = []
     factories: list[Callable[[], Database]] = []
+    machines: list[MachineIdentity] = []
+    readers: list[Callable[[], str]] = []
     pipeline = object()
 
     class Store:
         @classmethod
-        def from_settings(cls, *, gate: ProcessDbGate) -> Store:
+        def from_settings(cls, *, gate: ProcessDbGate, local_host: Callable[[], str]) -> Store:
             gates.append(gate)
+            readers.append(local_host)
             return cls()
 
     def capture() -> LoadedCommit:
@@ -41,10 +46,11 @@ def test_entry_shares_the_captured_gate_with_logging_and_actions(
         reads.append((root, commit))
         return 42
 
-    def build(*, database: Callable[[], Database]) -> object:
+    def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
         stages.append("producer")
         assert gates == []  # The producer keeps the existing lazy database dial.
         factories.append(database)
+        machines.append(machine)
         return pipeline
 
     def initialize(**inputs: Any) -> None:
@@ -65,10 +71,12 @@ def test_entry_shares_the_captured_gate_with_logging_and_actions(
     monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
     monkeypatch.setattr(code_version, "first_parent_count", count)
     monkeypatch.setattr(daemon, "Database", Store)
+    monkeypatch.setattr(daemon, "ConfigBoot", snapshot_process_config)
     monkeypatch.setattr(daemon, "build_pipeline", build)
     monkeypatch.setattr(daemon, "init_gateway_process", initialize)
     monkeypatch.setattr(daemon, "run", work)
     daemon.main()
+    assert readers == [machines[0].host, machines[0].host]
     assert stages == ["capture", "producer", "logging", "run"]
     assert len(gates) == 2 and gates[0] is gates[1]
     if sha is None:

@@ -21,6 +21,8 @@ import pytest
 import ava.skills as skills_mod
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.skill import cmd_skill_install
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 # Every test here installs a package, which records `local:<machine>` provenance
@@ -83,13 +85,26 @@ def _installed_names() -> set[str]:
 
 
 def test_bare_standard_skill_from_local_path(
-    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+    unit_home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A skill folder with SKILL.md at its root installs from a local path, with
     its bundled `scripts/` + `references/` carried along, and mounts."""
     src = _write_skill(tmp_path / "pdf-processing", "pdf-processing")
 
-    assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 0
+    assert (
+        cmd_skill_install(
+            str(src),
+            None,
+            None,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
+        == 0
+    )
 
     dest = unit_home / "skills" / "pdf-processing"
     assert (dest / "SKILL.md").is_file()
@@ -102,7 +117,11 @@ def test_bare_standard_skill_from_local_path(
 
 
 def test_optional_standard_fields_do_not_block_the_mount(
-    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+    unit_home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """`allowed-tools` / `license` / `compatibility` / `metadata` are valid
     standard fields Ava does not act on — they must not keep the skill from
@@ -110,7 +129,11 @@ def test_optional_standard_fields_do_not_block_the_mount(
     _write_skill(tmp_path / "code-review", "code-review")
     assert (
         cmd_skill_install(
-            str(tmp_path / "code-review"), None, None, database_factory=operator_database
+            str(tmp_path / "code-review"),
+            None,
+            None,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
         )
         == 0
     )
@@ -122,7 +145,11 @@ def test_optional_standard_fields_do_not_block_the_mount(
 
 
 def test_claude_code_skills_tree(
-    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+    unit_home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """An unmodified `.claude/skills/` tree — the Claude Code on-disk layout —
     installs every skill it holds, each as its own tracked package."""
@@ -132,7 +159,12 @@ def test_claude_code_skills_tree(
     (repo / "README.md").write_text("my dotfiles\n", encoding="utf-8")
     url = _commit_repo(repo)
 
-    assert cmd_skill_install(url, None, None, database_factory=operator_database) == 0
+    assert (
+        cmd_skill_install(
+            url, None, None, database_factory=operator_database, machine=command_runtime.machine
+        )
+        == 0
+    )
 
     assert {"commit-style", "release-notes"} <= _installed_names()
     assert reg.get("commit-style") is not None and reg.get("release-notes") is not None
@@ -140,7 +172,11 @@ def test_claude_code_skills_tree(
 
 
 def test_skills_collection_keeps_nested_subskills(
-    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+    unit_home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A `skills/` collection installs each top-level skill whole, so a skill
     with sub-skills keeps its namespace shape (`ava.skills.<pkg>.<child>`)."""
@@ -149,14 +185,23 @@ def test_skills_collection_keeps_nested_subskills(
     _write_skill(repo / "skills" / "workflows" / "brainstorming", "brainstorming")
     url = _commit_repo(repo)
 
-    assert cmd_skill_install(url, None, None, database_factory=operator_database) == 0
+    assert (
+        cmd_skill_install(
+            url, None, None, database_factory=operator_database, machine=command_runtime.machine
+        )
+        == 0
+    )
 
     assert (unit_home / "skills" / "workflows" / "brainstorming" / "SKILL.md").is_file()
     assert skills_mod.workflows.brainstorming.name == "brainstorming"
 
 
 def test_bare_collection_of_skill_folders(
-    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+    unit_home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A repo that is just a pile of skill folders (no `skills/` wrapper)
     installs them all; hidden dirs like `.git` are never mistaken for one."""
@@ -165,19 +210,34 @@ def test_bare_collection_of_skill_folders(
     _write_skill(repo / "web-research", "web-research")
     url = _commit_repo(repo)
 
-    assert cmd_skill_install(url, None, None, database_factory=operator_database) == 0
+    assert (
+        cmd_skill_install(
+            url, None, None, database_factory=operator_database, machine=command_runtime.machine
+        )
+        == 0
+    )
     assert {"data-analysis", "web-research"} <= _installed_names()
 
 
 def test_path_selects_a_subdirectory(
-    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+    unit_home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     repo = tmp_path / "monorepo"
     _write_skill(repo / "tools" / "pdf-processing", "pdf-processing")
     url = _commit_repo(repo)
 
     assert (
-        cmd_skill_install(url, None, "tools/pdf-processing", database_factory=operator_database)
+        cmd_skill_install(
+            url,
+            None,
+            "tools/pdf-processing",
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
         == 0
     )
     assert "pdf-processing" in _installed_names()
@@ -185,7 +245,11 @@ def test_path_selects_a_subdirectory(
 
 
 def test_crlf_and_bom_skill_installs(
-    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+    unit_home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A standard skill authored on Windows (CRLF, UTF-8 BOM) is still a valid
     standard skill — the encoding must not be what rejects it."""
@@ -194,7 +258,16 @@ def test_crlf_and_bom_skill_installs(
     body = "---\nname: windows-skill\ndescription: written on windows\n---\n\n# hi\n"
     (src / "SKILL.md").write_text("﻿" + body.replace("\n", "\r\n"), encoding="utf-8")
 
-    assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 0
+    assert (
+        cmd_skill_install(
+            str(src),
+            None,
+            None,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
+        == 0
+    )
     assert "windows-skill" in _installed_names()
 
 
@@ -203,6 +276,8 @@ def test_collision_leaves_the_load_dir_untouched(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """One already-installed skill aborts the whole multi-skill install before
     the first copy — no half-populated load dir."""
@@ -210,10 +285,26 @@ def test_collision_leaves_the_load_dir_untouched(
     _write_skill(repo / "alpha", "alpha")
     _write_skill(repo / "beta", "beta")
     assert (
-        cmd_skill_install(str(repo / "alpha"), None, None, database_factory=operator_database) == 0
+        cmd_skill_install(
+            str(repo / "alpha"),
+            None,
+            None,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
+        == 0
     )
 
-    assert cmd_skill_install(str(repo), None, None, database_factory=operator_database) == 1
+    assert (
+        cmd_skill_install(
+            str(repo),
+            None,
+            None,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
+        == 1
+    )
     assert "already installed: alpha" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert not (unit_home / "skills" / "beta").exists()
     assert reg.get("beta") is None
@@ -224,12 +315,23 @@ def test_no_skill_in_source_fails_fast(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     src = tmp_path / "not-a-skill"
     (src / "docs").mkdir(parents=True)
     (src / "README.md").write_text("nothing here\n", encoding="utf-8")
 
-    assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 1
+    assert (
+        cmd_skill_install(
+            str(src),
+            None,
+            None,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
+        == 1
+    )
     assert "no skill found" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.load().packages == []
 
@@ -239,6 +341,8 @@ def test_malformed_skill_md_fails_fast(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Unlike the runtime scan (which skip-warns past a broken third-party
     skill), an explicit install refuses it — the user is here to hear about it."""
@@ -246,7 +350,16 @@ def test_malformed_skill_md_fails_fast(
     src.mkdir()
     (src / "SKILL.md").write_text("---\nname: broken\n---\n\nno description\n", encoding="utf-8")
 
-    assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 1
+    assert (
+        cmd_skill_install(
+            str(src),
+            None,
+            None,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
+        == 1
+    )
     assert "description" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.load().packages == []
 
@@ -256,14 +369,29 @@ def test_missing_path_in_source_errors(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     src = _write_skill(tmp_path / "solo", "solo")
-    assert cmd_skill_install(str(src), None, "nope", database_factory=operator_database) == 1
+    assert (
+        cmd_skill_install(
+            str(src),
+            None,
+            "nope",
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
+        == 1
+    )
     assert "not found in source" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_install_skips_junk_names(
-    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+    unit_home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Copy hygiene matches converge: __pycache__ / .DS_Store never ride along
     into the load dir (audit #10)."""
@@ -273,7 +401,16 @@ def test_install_skips_junk_names(
     (src / "__pycache__" / "x.pyc").write_bytes(b"x")
     (src / ".DS_Store").write_bytes(b"x")
 
-    assert cmd_skill_install(str(src), None, None, database_factory=operator_database) == 0
+    assert (
+        cmd_skill_install(
+            str(src),
+            None,
+            None,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
+        == 0
+    )
 
     dest = unit_home / "skills" / "clean-skill"
     assert (dest / "SKILL.md").is_file()
@@ -282,7 +419,11 @@ def test_install_skips_junk_names(
 
 
 def test_install_records_explicit_update_policy(
-    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+    unit_home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """`--update-mode` / `--check-every` write an explicit policy onto the row;
     unset fields stay None so the refresh pass resolves the defaults later."""
@@ -296,6 +437,7 @@ def test_install_records_explicit_update_policy(
             update_mode="notify",
             check_every="2h",
             database_factory=operator_database,
+            machine=command_runtime.machine,
         )
         == 0
     )
@@ -313,11 +455,18 @@ def test_install_rejects_a_bad_check_every(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     src = _write_skill(tmp_path / "bad-duration", "bad-duration")
     assert (
         cmd_skill_install(
-            str(src), None, None, check_every="soon", database_factory=operator_database
+            str(src),
+            None,
+            None,
+            check_every="soon",
+            database_factory=operator_database,
+            machine=command_runtime.machine,
         )
         == 1
     )

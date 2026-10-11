@@ -11,10 +11,12 @@ from typing import Any
 import pytest
 
 from base.cluster.dataplane import pg_runtime, runtime_binaries
-from base.config import ConfigBoot, settings
+from base.config import settings
 from base.telemetry import EventPipeline
 from cli.commands.converge._steps import _ensure_pg_binaries_step
 from cli.commands.converge.spec import ConvergeCtx
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -70,15 +72,18 @@ def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
     installed: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     _ensure_pg_binaries_step(
         ConvergeCtx(
             installed.parent,
             installed.parent,
             frozenset({"gateway"}),
-            config=ConfigBoot(),
+            config=command_runtime.config,
             database_factory=operator_database,
             producer=operator_pipeline,
+            machine=command_runtime.machine,
         )
     )
     assert pg_runtime.pg_tool("postgres") == installed / "postgres"
@@ -89,6 +94,8 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
 
     def remote(_self: object) -> bool:
@@ -104,8 +111,9 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
             tmp_path,
             tmp_path,
             frozenset({"gateway"}),
-            config=ConfigBoot(),
+            config=command_runtime.config,
             database_factory=operator_database,
             producer=operator_pipeline,
+            machine=command_runtime.machine,
         )
     )
