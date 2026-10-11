@@ -17,6 +17,7 @@ import pytest
 
 from base.db import Database
 
+from ...permissions_helper.client import UserAbortError
 from .. import mcp_daemon as daemon_mod
 from .. import ocr as ocr_mod
 from .. import ocr_text as ocr_text_mod
@@ -237,6 +238,37 @@ async def test_click_executes_and_converts_coordinates(
     assert resp["ok"] is True
     # physical -> logical: divide by the 2x backing scale
     assert ("click", {"x": 50.0, "y": 100.0, "double": False}) in fake_helper.calls
+
+
+async def test_user_abort_is_an_error_and_is_never_retried_or_replayed(
+    fake_helper: FakeHelper,
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    refusals = ["Stopped by the user: the mouse is parked in the top-left corner"]
+
+    def click(x: float, y: float, **kw: Any) -> dict[str, Any]:
+        fake_helper.calls.append(("click", {"x": x, "y": y, **kw}))
+        if refusals:
+            raise UserAbortError(refusals.pop())
+        return {"clicked": {"x": x, "y": y}, "double": False}
+
+    monkeypatch.setattr(daemon_mod.helper, "click", click)
+    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
+    d = _daemon()
+    refused = await _call(d, "click", {"x": 100, "y": 200})
+    assert refused["ok"] is False
+    assert "Stopped by the user" in refused["error"]
+    assert refused["error"].startswith("UserAbortError")
+    # One native attempt: no retry, no fallback, and the audit row says error.
+    assert [c[0] for c in fake_helper.calls].count("click") == 1
+    [row] = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
+    assert row["payload"]["outcome"] == "error"
+    # Observation is unaffected by the refusal; a new request is a new decision.
+    assert (await _call(d, "cursor_position"))["ok"] is True
+    assert [c[0] for c in fake_helper.calls].count("click") == 1
+    assert (await _call(d, "click", {"x": 100, "y": 200}))["ok"] is True
+    assert [c[0] for c in fake_helper.calls].count("click") == 2
 
 
 async def test_snapshot_returns_path_and_geometry(

@@ -24,7 +24,7 @@ from typing import Any, NamedTuple
 import pytest
 
 from services.desktop.permissions_helper import client
-from services.desktop.permissions_helper.client import PermissionsHelperError
+from services.desktop.permissions_helper.client import PermissionsHelperError, UserAbortError
 
 
 def _read_line(conn: socket.socket) -> bytes:
@@ -123,6 +123,26 @@ def test_ok_false_raises_with_server_error(fake_helper) -> None:
     path = fake_helper(lambda req: {"id": req["id"], "ok": False, "error": "no focused window"})
     with pytest.raises(PermissionsHelperError, match="no focused window"):
         client.ax_window_info("Finder", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+
+
+def test_user_abort_reply_raises_its_own_error(fake_helper) -> None:
+    path = fake_helper(
+        lambda req: {
+            "id": req["id"],
+            "ok": False,
+            "error": "stopped by the user",
+            "error_code": "user_abort",
+        }
+    )
+    with pytest.raises(UserAbortError, match="stopped by the user") as raised:
+        client.click(1, 2, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    # Existing handlers of helper failures still see it as one.
+    assert isinstance(raised.value, PermissionsHelperError)
+    # Any other failure stays a plain helper error.
+    other = fake_helper(lambda req: {"id": req["id"], "ok": False, "error": "no focused window"})
+    with pytest.raises(PermissionsHelperError) as plain:
+        client.click(1, 2, sock_path=other)  # pyright: ignore[reportUnknownArgumentType]
+    assert not isinstance(plain.value, UserAbortError)
 
 
 def test_unreachable_socket_raises() -> None:
