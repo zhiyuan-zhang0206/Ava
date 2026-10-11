@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -25,12 +26,10 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster import operations as cluster_ops
 from ops.rpc_schemas import LaunchAgentRequest
 from services.agent_runner.agent_ops import daemon, health
-
-_db = Database.from_settings
-
 
 _REPO = Path(__file__).resolve().parents[4]
 
@@ -83,6 +82,8 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """spawn-launch kind -> ops.launch_agent_op."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -112,6 +113,8 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "completed"
     assert result == {"id": 777}
@@ -124,6 +127,8 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """shell_probe kind -> cluster.shell_probe_op(agent_id), serialized."""
     from ops.rpc_schemas import ShellInfo, ShellProbeResult
@@ -145,6 +150,8 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "completed"
     assert seen == {"agent_id": 42}
@@ -167,6 +174,8 @@ async def test_dispatch_shell_probe_bad_payload_fails(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """shell_probe without agent_id fails without invoking the op."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -188,6 +197,8 @@ async def test_dispatch_shell_probe_bad_payload_fails(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "failed"
     assert "agent_id" in str(result["error"])
@@ -199,6 +210,8 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """shell_kill resolves and kills one host-local persistent session."""
     from ops.rpc_schemas import ShellKillResult
@@ -220,6 +233,8 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 5}
@@ -232,6 +247,8 @@ async def test_dispatch_shell_kill_reports_absent(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """A shell already gone is a successful, idempotent absent result."""
     from ops.rpc_schemas import ShellKillResult
@@ -255,6 +272,8 @@ async def test_dispatch_shell_kill_reports_absent(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "completed"
     assert result == {"mode": "absent", "interrupted": False, "name": None}
@@ -266,6 +285,8 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """agent_skill_view kind -> cluster.agent_skill_view_op(agent_id, pool)."""
     from ops.rpc_schemas import AgentSkillViewResult, OpsCommandItem
@@ -291,6 +312,8 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "pool": pool}
@@ -306,6 +329,8 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """agent_skill_view without an id is rejected before it reaches the op."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -327,6 +352,8 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "failed"
     assert "agent_id" in str(result["error"])
@@ -338,6 +365,8 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """shell_capture kind -> cluster.shell_capture_op(agent_id, session_id, lines)."""
     from ops.rpc_schemas import ShellCaptureResult
@@ -361,6 +390,8 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 3, "lines": 500}
@@ -378,6 +409,8 @@ async def test_dispatch_shell_capture_defaults_lines(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """shell_capture without lines defaults to 200."""
     from ops.rpc_schemas import ShellCaptureResult
@@ -399,6 +432,8 @@ async def test_dispatch_shell_capture_defaults_lines(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "completed"
     assert seen == {"lines": 200}
@@ -410,6 +445,8 @@ async def test_dispatch_unknown_kind(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """Unknown kind returns failed; routing table is exhaustive."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -422,6 +459,8 @@ async def test_dispatch_unknown_kind(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "failed"
     assert "unknown kind" in str(result["error"])
@@ -433,6 +472,8 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """shell_capture_op raising ShellNotFoundError (the session died) lands as a
     plain failed result, not a crash for _ops_route's catch-all to log."""
@@ -453,6 +494,8 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == "failed"
     assert "ShellNotFoundError" in str(result["error"])
@@ -468,6 +511,8 @@ async def test_ops_route_wraps_dispatch_in_envelope(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """A valid body returns 200 with {status, result} from _dispatch."""
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
@@ -483,6 +528,8 @@ async def test_ops_route_wraps_dispatch_in_envelope(
         executor: ThreadPoolExecutor,
         catalog: ModelCatalog,
         authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
     ) -> tuple[str, dict[str, object]]:
         assert kind == "status_probe"
         return "completed", {"paused": False}
@@ -498,6 +545,8 @@ async def test_ops_route_wraps_dispatch_in_envelope(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == 200
     assert ctype == "application/json"
@@ -510,6 +559,8 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """status_probe through the real _dispatch must survive _ops_route's json.dumps
     even when ClusterStatus carries datetime values nested inside it.
@@ -529,7 +580,7 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
     dispatch_pool: ConnectionPool = _stub_pool()
     created = datetime(2026, 6, 11, 8, 30, 0, tzinfo=UTC)
 
-    def _status(_db: Database, probe_pool: object) -> ClusterStatus:
+    def _status(_db: Database, probe_pool: object, *, image: LoadedCommit) -> ClusterStatus:
         assert probe_pool is dispatch_pool
         return ClusterStatus(
             machine_name="runner-1",
@@ -560,6 +611,8 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == 200
     assert ctype == "application/json"
@@ -576,6 +629,8 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """DB-down, including an unreachable paused row, remains HTTP 200 completed."""
     from ops.cluster_status import ClusterStatus
@@ -584,8 +639,11 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
     dispatch_sem = asyncio.Semaphore(1)
     dispatch_pool: ConnectionPool = pool
 
-    def _degraded_status(_db: Database, probe_pool: object) -> ClusterStatus:
+    def _degraded_status(
+        _db: Database, probe_pool: object, *, image: LoadedCommit
+    ) -> ClusterStatus:
         assert probe_pool is pool
+        assert image is ops_image
         return ClusterStatus(
             machine_name="runner-a",
             serve_gateway=False,
@@ -606,6 +664,8 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
 
     assert status == 200

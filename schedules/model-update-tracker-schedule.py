@@ -12,10 +12,11 @@ from typing import Any
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from base.db import Database
 from schedules.catchup import cluster_timezone, fire_slot_once
 from base.paths import ava_home, repo_root
 from base.daemon.schedules.watcher import next_fire
+from base.daemon.schedules.inputs import ScheduleInputs
+from schedules.entry import schedule_entry
 
 
 CRON = "0 6 * * *"
@@ -139,8 +140,8 @@ def _fire_tracker(_slot: datetime, _trigger: None) -> None:
     run_tracker()
 
 
-def _main_loop() -> None:
-    db = Database.from_settings()
+def _main_loop(*, inputs: ScheduleInputs) -> None:
+    db = inputs.database()
     last_run_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)
@@ -162,4 +163,10 @@ if __name__ == "__main__":
         {"IDLING", "RUNNING", "TERMINATED"},
         schedule_name="model-update-tracker",
     )
-    _main_loop()
+    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    if entry_inputs is None:
+        from base.log import prepare_process_logging
+
+        prepare_process_logging()
+    with schedule_entry(entry_inputs) as inputs:
+        _main_loop(inputs=inputs)

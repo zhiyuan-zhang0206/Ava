@@ -5,17 +5,22 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from base.lm.catalog import ModelCatalog
+from base.lm.pricing import cost_usd
 from tests.components.base.poll_until import poll_until
 from tests.e2e.fakes.scenarios import budget_handoff
+from tests.fixtures.model_catalog import model_catalog as model_catalog
 
 _WRITER = """
 import os
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 import ava
 from base.agents.context import AvaContext
@@ -118,3 +123,22 @@ def test_readers_keep_the_previous_snapshot_until_publication(
     saved = json.loads(state.read_text())
     assert saved["status"] == ("paused" if transition == "pause" else "running")
     assert saved["peers"] == ([] if transition == "pause" else [2])
+
+
+@pytest.mark.parametrize("model", ["deepseek-flash", budget_handoff.BUDGET_MODEL])
+def test_handoff_budget_across_the_daily_price_boundary(
+    model_catalog: ModelCatalog, model: str
+) -> None:
+    """Only a fixed-price scenario guarantees four calls below and six above its limit."""
+    before = datetime(2026, 10, 11, 9, 59, 59, tzinfo=UTC)
+    after = datetime(2026, 10, 11, 10, 0, 0, tzinfo=UTC)
+    limit = cost_usd(model, 50, 25, 0, prices=model_catalog.prices, at=before)
+    initial_call = cost_usd(model, 10, 5, 0, prices=model_catalog.prices, at=before)
+    later_call = cost_usd(model, 10, 5, 0, prices=model_catalog.prices, at=after)
+    assert limit is not None and initial_call is not None and later_call is not None
+    assert initial_call * 4 < limit
+    if model == budget_handoff.BUDGET_MODEL:
+        assert initial_call == later_call
+        assert later_call * 6 >= limit
+    else:
+        assert later_call * 6 < limit  # The original CI case can never trigger its reminder.

@@ -15,13 +15,14 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from base.db import Database, pool
+from base.db.code_version_gate import ProcessDbGate
 from base.packages.plugins import stats
 
 
 @pytest.fixture
-def stat_pool() -> Iterator[ConnectionPool]:
+def stat_pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
     """A sanctioned read pool on the session's test DB (caller-owned)."""
-    p = pool()
+    p = pool(gate=database_gate)
     try:
         yield p
     finally:

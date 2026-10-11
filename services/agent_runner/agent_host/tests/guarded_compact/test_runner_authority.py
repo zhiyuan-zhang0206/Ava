@@ -11,6 +11,7 @@ from psycopg.conninfo import make_conninfo
 from psycopg_pool import AsyncConnectionPool
 
 from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
@@ -24,6 +25,8 @@ async def test_real_runner_login_closes_compact_without_admission_or_metadata_in
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     role = "compact_runner_" + uuid4().hex
     password = uuid4().hex
@@ -50,7 +53,14 @@ async def test_real_runner_login_closes_compact_without_admission_or_metadata_in
         async with AsyncConnectionPool[psycopg.AsyncConnection](
             dsn, min_size=1, max_size=1, open=False
         ) as pool:
-            accepted = await admit(db_conn, pool, client, monkeypatch, catalog=model_catalog)
+            accepted = await admit(
+                db_conn,
+                pool,
+                client,
+                monkeypatch,
+                catalog=model_catalog,
+                database_gate=database_gate,
+            )
             await accepted.host.run_turn(accepted.agent)
             status = accepted.status(client)
             assert status["outcome"] == "applied" and status["continuation_released"]

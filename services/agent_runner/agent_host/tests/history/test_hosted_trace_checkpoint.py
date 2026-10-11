@@ -17,11 +17,12 @@ from psycopg_pool import AsyncConnectionPool
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import BaseAgentState
-from agent.tests.claim.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.context import AvaContext
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -35,13 +36,12 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     async with hosted_scope() as resources:
-        agent_id = _agent(db_conn)
-        incarnation = await _admit(
-            aops_pool,
-            agent_id,
-        )
+        agent_id = agent_row(db_conn)
+        incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
         traces: list[str] = []
         provider = TracerProvider()
         tracer = provider.get_tracer(__name__)
@@ -81,7 +81,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                 graph=graph,
                 machine="test",
                 bus=EventBus.from_settings(),
-                db=Database.from_settings(),
+                db=Database.from_settings(gate=database_gate),
                 catalog=model_catalog,
             )
             assert not (
@@ -93,7 +93,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                             agent=AgentSlices.resolve(
                                 default_reader=configured_policy().default_reader
                             ),
-                            db=Database.from_settings(),
+                            db=Database.from_settings(gate=database_gate),
                             bus=EventBus.from_settings(),
                             catalog=model_catalog,
                             clock_factory=configured_policy().clock_factory,
@@ -109,7 +109,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
         # This is the actual gateway trace-content reader, using fresh connections.
         checkpoint_id, messages = await asyncio.to_thread(
             load_checkpoint_messages_by_trace,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             agent_id,
             traces[0],
         )

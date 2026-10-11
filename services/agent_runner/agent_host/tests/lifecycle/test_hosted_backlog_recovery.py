@@ -10,7 +10,6 @@ from uuid import uuid4
 import psutil
 import psycopg
 import pytest
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
@@ -20,10 +19,9 @@ from base.agents.incarnation import resources as resource_codec
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from services.agent_runner.agent_host import dispatcher
-from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.recovery.tests.helpers import admit as _admit
@@ -32,30 +30,20 @@ from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.components.base.poll_until import poll_until_async
 
 
-def _accept_model_config(**_kwargs: object) -> str:
-    return "test"
-
-
-@pytest.fixture(autouse=True)
-def isolated_clocks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.03)
-    monkeypatch.setattr(runtime_module, "validate_model_config", _accept_model_config)
-    monkeypatch.setattr(
-        runtime_module,
-        "boot_agent_scope",
-        AsyncMock(return_value=(FakeListChatModel(responses=["unused"]), None)),
-    )
-
-
 async def test_pending_scan_classifies_lifecycle_work_and_lease(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     insert_inbound: Callable[..., int],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent,))
@@ -67,7 +55,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
         checkpointer=AsyncMock(),
         graph=AsyncMock(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
 
@@ -101,9 +89,14 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
     insert_inbound: Callable[..., int],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
     inbound = insert_inbound(db_conn, agent, "Queued before host recovery", "user")
@@ -131,7 +124,7 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
         graph=graph,
         checkpointer=saver,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     host._owner = incarnation.owner
@@ -177,9 +170,14 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
     boundary: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
     host = AgentHost(
@@ -188,7 +186,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
         checkpointer=AsyncMock(),
         graph=AsyncMock(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     if boundary == "same_owner":
@@ -221,9 +219,14 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
     status: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     agent = incarnation.agent_id
     host = AgentHost(
@@ -232,7 +235,7 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
         checkpointer=AsyncMock(),
         graph=AsyncMock(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     with subprocess.Popen(

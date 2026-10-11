@@ -24,9 +24,14 @@ import sys
 
 from base.config import ConfigBoot
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.lm.plugin_providers import build_model_catalog
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.packages.docs.notes import walk_notes
 from base.paths import gateway_memory_dir
+from base.telemetry.emitter import process_name
 from services.derived.memory_indexer.backends.base import MemorySearchBackend
 from services.derived.memory_indexer.backends.factory import get_backend_named
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
@@ -89,6 +94,14 @@ def _connect_backends(
     return True
 
 
+def _reconcile_database(boot: ConfigBoot) -> Database:
+    """Capture this standalone entry's gated database at its original dial boundary."""
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process=process_name())
+    return Database(db_config_from_boot(boot), gate=gate)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--a", required=True, help="first backend name (e.g. numpy)")
@@ -124,7 +137,7 @@ def main() -> int:
         timeout_reader=lambda: boot.view.services.memory_embed_timeout_seconds,
         api_key_reader=api_key,
     )
-    database = Database.from_settings()
+    database = _reconcile_database(boot)
     backend_a = get_backend_named(
         args.a,
         database=database,

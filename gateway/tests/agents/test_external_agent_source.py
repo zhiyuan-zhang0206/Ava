@@ -31,6 +31,7 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.unit.gateway_auth import without_credentials
 
 _ENVELOPE_INPUTS = EnvelopeReadInputs(Clock.from_settings, lambda: False)
@@ -38,7 +39,9 @@ _SECRET = "external-agent-source-secret"  # noqa: S105 -- isolated test credenti
 _EXTERNAL = "external_agent:claude_code:run-7"
 
 
-async def _admit(db: psycopg.Connection, pool: AsyncConnectionPool) -> RuntimeIncarnation:
+async def _admit(
+    db: psycopg.Connection, pool: AsyncConnectionPool, database: Database
+) -> RuntimeIncarnation:
     """A real hosted admission: the target is a live agent whose claim path reads the inbound."""
     agent_id = create_agent(db)
     db.execute(
@@ -48,7 +51,7 @@ async def _admit(db: psycopg.Connection, pool: AsyncConnectionPool) -> RuntimeIn
     )
     db.commit()
     incarnation = await admit_hosted_runtime(
-        pool, agent_id, "host-test", uuid4(), expected_from="idling", db=Database.from_settings()
+        pool, agent_id, "host-test", uuid4(), expected_from="idling", db=database
     )
     assert incarnation is not None
     assert await settle_hosted_runtime(
@@ -68,7 +71,7 @@ def authenticated_gateway(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClie
         "base.cluster.machine.gateway_auth_headers",
         Mock(return_value={"Authorization": f"Bearer {_SECRET}"}),
     )
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
 
         def post(url: str, **kwargs: Any) -> httpx2.Response:
             return client.post(url, **kwargs)
@@ -98,9 +101,10 @@ async def _claimed_text(
 async def test_cli_send_as_user_reaches_the_agent_as_a_plain_user_message(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    incarnation = await _admit(db_conn, aops_pool)
+    incarnation = await _admit(db_conn, aops_pool, database)
     with authenticated_gateway(monkeypatch):
         assert cmd_agents_send(incarnation.agent_id, "run the checks", "user") == 0
     source, content, payload = await _claimed_text(aops_pool, incarnation)
@@ -113,9 +117,10 @@ async def test_cli_send_as_user_reaches_the_agent_as_a_plain_user_message(
 async def test_cli_send_as_external_agent_reaches_the_agent_as_that_agent(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    incarnation = await _admit(db_conn, aops_pool)
+    incarnation = await _admit(db_conn, aops_pool, database)
     with authenticated_gateway(monkeypatch):
         assert cmd_agents_send(incarnation.agent_id, "I finished the refactor", _EXTERNAL) == 0
     source, content, payload = await _claimed_text(aops_pool, incarnation)
@@ -131,10 +136,11 @@ async def test_cli_send_as_external_agent_reaches_the_agent_as_that_agent(
 async def test_external_agent_message_is_listed_with_its_source_for_the_timeline(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The UI shows the sender from the inbound's `source`, so the row must carry it."""
-    incarnation = await _admit(db_conn, aops_pool)
+    incarnation = await _admit(db_conn, aops_pool, database)
     with authenticated_gateway(monkeypatch):
         assert cmd_agents_send(incarnation.agent_id, "hello", _EXTERNAL) == 0
     row = db_conn.execute(
@@ -180,10 +186,11 @@ def test_gateway_rejects_a_malformed_declaration_before_any_insert(
 async def test_an_unauthenticated_external_agent_declaration_is_refused(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Declaring an identity is not a credential: the gateway check still applies."""
-    incarnation = await _admit(db_conn, aops_pool)
+    incarnation = await _admit(db_conn, aops_pool, database)
     with authenticated_gateway(monkeypatch) as client:
         response = without_credentials(client).post(
             f"/api/agents/{incarnation.agent_id}/messages",

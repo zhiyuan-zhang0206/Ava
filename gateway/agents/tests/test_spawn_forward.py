@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 
 from base.agents.observation.evidence import AvailabilityReason
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.agents import forward
 from gateway.agents import router as app_module
@@ -310,7 +311,7 @@ class TestRouting:
 
 @pytest.mark.asyncio
 async def test_spawn_forward_classifies_rpc_unreachable_and_uses_launch_kind(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     from uuid import uuid4
 
@@ -328,7 +329,7 @@ async def test_spawn_forward_classifies_rpc_unreachable_and_uses_launch_kind(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fail)
     with pytest.raises(forward.LaunchForwardError) as raised:
         await forward.forward_spawn_to_remote(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             "runner",
             LaunchAgentRequest(agent_id=4, launch_attempt_id=attempt_id),
         )
@@ -338,7 +339,7 @@ async def test_spawn_forward_classifies_rpc_unreachable_and_uses_launch_kind(
 
 @pytest.mark.asyncio
 async def test_spawn_forward_preserves_runner_rejection_detail(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     from ops.cluster.rpc import ClusterOpFailed
 
@@ -354,7 +355,7 @@ async def test_spawn_forward_preserves_runner_rejection_detail(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fail)
     with pytest.raises(forward.LaunchForwardError) as raised:
         await forward.forward_spawn_to_remote(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             "runner",
             LaunchAgentRequest(agent_id=4, launch_attempt_id=uuid4()),
         )

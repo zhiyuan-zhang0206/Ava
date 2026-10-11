@@ -16,7 +16,7 @@ on the gateway.
 |---|---|
 | gateway middleware, `/api/bootstrap`, alert webhooks | the human secret, or the ACTIVE generation's gateway or runner token (never a pending one; `acceptance`, cached per ledger identity in the gateway lifespan; `gateway.http.auth.request_principal.cluster_credential` records `cluster_bearer` or `machine_token:<class>`) |
 | `/api/auth/login` | the human secret, or the active runner token (the managed browser's cookie); the session is bound to that credential and ends when the credential stops being accepted or the human secret rotates (`gateway.http.auth.request_principal.session_mints`) |
-| a unit's `/ops` (`services/agent_runner/agent_ops/_boot._ops_acceptance`) | digests of its generation's gateway and runner tokens: a remote unit's capability carries the gateway digest, never the gateway token |
+| a unit's `/ops` (`services/agent_runner/agent_ops/boot.ops_acceptance`) | digests of its generation's gateway and runner tokens: a remote unit's capability carries the gateway digest, never the gateway token |
 
 The gateway checks the ledger identity on every request using its lifespan-owned
 `machine_token_acceptance` cache; one-shot boot readers pass no cache and read

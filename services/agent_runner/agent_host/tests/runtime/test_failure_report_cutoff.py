@@ -21,6 +21,7 @@ from base.agents.context import AvaContext
 from base.agents.recovery.breaker import admit_pending_wake
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.projection import Error
 from base.events.live.publisher import AgentEventPublisher
@@ -78,8 +79,9 @@ async def _admit(
     database: Database,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> RuntimeIncarnation:
-    agent_id = spawn_agent(catalog=catalog, authority=authority)
+    agent_id = spawn_agent(catalog=catalog, authority=authority, database_gate=database_gate)
     machine = conn.execute("SELECT machine FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     assert machine is not None
     incarnation = await admit_hosted_runtime(
@@ -97,8 +99,11 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
     db_url: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(db_conn, aops_pool, database, model_catalog, config_authority)
+    incarnation = await _admit(
+        db_conn, aops_pool, database, model_catalog, config_authority, database_gate
+    )
     agent_id = incarnation.agent_id
     old_claim = _insert(db_conn, agent_id, "user", claimed=True)
     pending = _failure()
@@ -239,8 +244,11 @@ async def test_changed_incarnation_withholds_original_failure_report(
     db_url: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(db_conn, aops_pool, database, model_catalog, config_authority)
+    incarnation = await _admit(
+        db_conn, aops_pool, database, model_catalog, config_authority, database_gate
+    )
     replacement = uuid4()
     db_conn.execute(
         "UPDATE agents_meta SET runtime_generation=%s WHERE id=%s",

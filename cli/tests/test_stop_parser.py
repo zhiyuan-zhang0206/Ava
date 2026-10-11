@@ -2,26 +2,34 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 
+from base.agents.context.clients import DatabaseFactory
 from base.deploy.maintenance import admission, pause_owner
 from cli.commands.lifecycle._pause_resume import resume_after_start
 from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.parsers import build_parser
 from tests.components.agent.test_maintenance import isolate as isolate
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def test_plain_start_and_parser_need_no_manual_operation(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], operator_database: Callable[[], Any]
 ) -> None:
+
     @resume_after_start
-    def start(operation: pause_owner.PauseOwnerSnapshot | None) -> int:
+    def start(
+        operation: pause_owner.PauseOwnerSnapshot | None, database_factory: DatabaseFactory
+    ) -> int:
         assert operation is None
         assert not admission.held()
         return 0
 
-    assert start(None) == start(None) == 0
+    assert start(None, operator_database) == start(None, operator_database) == 0
     assert "hold released" not in capsys.readouterr().out
     parser = build_parser()
     stop = parser.parse_args(["stop", "--keep-infra", "--keep-service", "gateway", "--force"])

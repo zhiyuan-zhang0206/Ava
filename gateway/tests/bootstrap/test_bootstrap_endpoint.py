@@ -10,7 +10,6 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base import config, paths
 from base.cluster.auth import bearer_header
@@ -18,6 +17,7 @@ from base.config.domains.storage.data_plane import self_machine_host
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
 from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.unit.gateway_auth import without_credentials
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture, not a real secret
@@ -30,7 +30,7 @@ def _auth() -> dict[str, str]:
 @pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_returns_config_with_secret(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 200
     body = cast(dict[str, str], resp.json())
@@ -56,7 +56,7 @@ def test_bootstrap_carries_no_cluster_name(db_conn, monkeypatch: pytest.MonkeyPa
     identity is the gateway URL + secret; the db/role identifiers ride inside
     the connection URLs as data."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 200
     assert "AVA_CLUSTER" not in resp.json()
@@ -65,14 +65,14 @@ def test_bootstrap_carries_no_cluster_name(db_conn, monkeypatch: pytest.MonkeyPa
 def test_bootstrap_rejects_missing_secret(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:
     """No bearer -> 401 (reachability is not trust)."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = without_credentials(client).get("/api/bootstrap")
     assert resp.status_code == 401
 
 
 def test_bootstrap_rejects_wrong_secret(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/bootstrap", headers=bearer_header("wrong-secret"))
     assert resp.status_code == 401
 
@@ -84,7 +84,7 @@ def test_bootstrap_rejects_every_caller_when_secret_unset(
 ) -> None:
     """A blank secret opens nothing: there is no no-credential posture to serve."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = without_credentials(client).get("/api/bootstrap")
     assert resp.status_code == 401
 
@@ -98,7 +98,7 @@ def test_old_role_runner_request_gets_no_database_login(
     with the bearer. It receives the credential-free endpoint, never the active
     generation's login, so a stale runner cannot re-authorize itself here."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/bootstrap", params={"role": "runner"}, headers=_auth())
     assert resp.status_code == 200
     body: dict[str, str] = resp.json()
@@ -120,7 +120,7 @@ def test_bootstrap_without_a_database_endpoint_refused(
     (tmp_path / ".env").write_text("AVA_REDIS_URL=redis://127.0.0.1:1/0\n")
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 400
     assert "AVA_DB_URL is missing" in resp.json()["detail"]
@@ -140,7 +140,7 @@ def test_bootstrap_strips_a_remote_managed_planes_provider_password(
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     monkeypatch.setattr(type(config.settings.data_plane), "is_remote", property(lambda _s: True))
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 200, resp.text
     served = urlsplit(cast(dict[str, str], resp.json())["AVA_DB_URL"])

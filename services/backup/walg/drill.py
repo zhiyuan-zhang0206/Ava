@@ -43,7 +43,7 @@ from urllib.parse import urlsplit
 import psycopg
 
 from base.cluster.dataplane.pg_throwaway_base import select_throwaway_base
-from base.db import connect_url, pg_admin
+from base.db import Database, connect_url, pg_admin
 from base.log import logger
 from services.backup.walg.backups import Backup
 from services.backup.walg.config import WalgConfigError
@@ -156,11 +156,13 @@ def _admin_user(target: PgTarget) -> str:
     return user
 
 
-def _verify(instance_url: str, reached: int | None) -> str:
+def _verify(
+    instance_url: str, reached: int | None, *, database_for_url: Callable[[str], Database]
+) -> str:
     """Content check and target check on the promoted scratch instance; returns the summary."""
     from scripts.data_plane_ops.restore_drill import verify_restored_database
 
-    report = verify_restored_database(instance_url)
+    report = verify_restored_database(instance_url, database_for_url=database_for_url)
     if reached is not None:
         with connect_url(instance_url, autocommit=True, connect_timeout=_CONNECT_TIMEOUT_S) as conn:
             row = conn.execute(
@@ -182,6 +184,7 @@ def _restore_and_verify(
     report: Report,
     *,
     path_reader: Callable[[], Path | None],
+    database_for_url: Callable[[str], Database],
 ) -> str:
     """Restore `backup` to the newest archived segment and verify it; returns the summary."""
     base = select_throwaway_base(required_bytes(backup, facts))
@@ -200,7 +203,9 @@ def _restore_and_verify(
             keep_data=False,
             path_reader=path_reader,
         ) as instance:
-            summary = _verify(instance.url(target.database), reached)
+            summary = _verify(
+                instance.url(target.database), reached, database_for_url=database_for_url
+            )
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     return summary
@@ -214,6 +219,7 @@ def run_drill(
     now: Callable[[], datetime],
     *,
     path_reader: Callable[[], Path | None],
+    database_for_url: Callable[[str], Database],
 ) -> DrillRecord:
     """Run one drill against `backup`; every failure becomes a record with `ok=False`."""
     started = time.monotonic()
@@ -222,7 +228,13 @@ def run_drill(
         facts = read_source_facts(target, backup)
         reached = target_lsn(backup, facts)
         detail = _restore_and_verify(
-            target, backup, facts, reached, report, path_reader=path_reader
+            target,
+            backup,
+            facts,
+            reached,
+            report,
+            path_reader=path_reader,
+            database_for_url=database_for_url,
         )
         ok = True
     except _EXPECTED_FAILURES as exc:

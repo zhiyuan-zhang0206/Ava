@@ -14,6 +14,7 @@ from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -68,7 +69,7 @@ def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
 
 
 def test_lease_expiring_during_operation_lock_wait_cannot_write(
-    db_conn: psycopg.Connection, root_task_id: int
+    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor, owner, tid = _setup(db_conn, root_task_id)
     active, validated = Event(), Event()
@@ -81,7 +82,7 @@ def test_lease_expiring_during_operation_lock_wait_cannot_write(
         return actor
 
     def append() -> None:
-        clients = ClientSet(database=Database.from_settings)
+        clients = ClientSet(database=lambda: Database.from_settings(gate=database_gate))
         try:
             identity = AgentIdentity(
                 owner, False, lease=ExternalLease(actor, validate, lambda: None)

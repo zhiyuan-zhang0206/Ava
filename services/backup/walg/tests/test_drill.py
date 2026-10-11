@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 import tempfile
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -25,7 +25,11 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.config import settings
-from base.db import pg_admin
+from base.db import Database, pg_admin
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_settings
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from services.backup.walg import drill, restore
 from services.backup.walg.backups import Backup, parse_backups
 from services.backup.walg.drill import SourceFacts
@@ -43,6 +47,17 @@ from services.backup.walg.tests.support import (
 
 T0 = datetime(2026, 10, 2, 6, 25, 0, tzinfo=UTC)
 SEGMENT = 16 * 1024 * 1024
+
+
+def _database_factory() -> Callable[[str], Database]:
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="backup-test")
+
+    def for_url(url: str) -> Database:
+        return Database(replace(db_config_from_settings(), db_url=url), gate=gate)
+
+    return for_url
 
 
 def _backup(**overrides: Any) -> Backup:
@@ -187,6 +202,7 @@ def test_an_expected_failure_is_recorded_with_its_message_and_keeps_the_last_suc
         lambda _line: None,
         lambda: T0,
         path_reader=lambda: settings.walg.walg_config_file,
+        database_for_url=_database_factory(),
     )
 
     assert (record.ok, record.detail, record.backup) == (False, "no archiver state", _backup().name)
@@ -204,6 +220,7 @@ def test_an_unexpected_failure_names_its_type(monkeypatch: pytest.MonkeyPatch) -
         lambda _line: None,
         lambda: T0,
         path_reader=lambda: settings.walg.walg_config_file,
+        database_for_url=_database_factory(),
     )
 
     assert not record.ok and record.detail == "KeyError: 'boom'"
@@ -220,6 +237,7 @@ def test_a_long_failure_message_is_cut_for_the_state_file(monkeypatch: pytest.Mo
         lambda _line: None,
         lambda: T0,
         path_reader=lambda: settings.walg.walg_config_file,
+        database_for_url=_database_factory(),
     )
 
     assert len(record.detail) == drill._DETAIL_CHARS
@@ -344,6 +362,7 @@ def _run_drill(
         lines.append,
         lambda: T0,
         path_reader=lambda: settings.walg.walg_config_file,
+        database_for_url=_database_factory(),
     )
     return record, lines
 

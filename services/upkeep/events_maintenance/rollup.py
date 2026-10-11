@@ -33,7 +33,11 @@ from datetime import UTC, date, datetime, timedelta
 
 import psycopg
 
+from base.db.code_version_gate import ProcessDbGate
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry import process_name
 from base.telemetry.event_sql import numeric
 from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
 
@@ -184,7 +188,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--from is after --to")
     from services.upkeep.events_maintenance.token_totals import folded_through, rebuild_totals
 
-    with events_maintenance_db().connect() as conn:
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process=process_name())
+    with events_maintenance_db(gate=gate).connect() as conn:
         result = roll_days(conn, args.first, args.last)
         # A day at or before the watermark is already inside the folded totals.
         if args.first <= folded_through(conn):

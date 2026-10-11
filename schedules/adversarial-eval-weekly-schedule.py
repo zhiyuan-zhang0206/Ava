@@ -36,8 +36,9 @@ from schedules.adversarial_eval_cases import (
     write_scenario,
 )
 from schedules.agent_status_guard import ensure_agent_status_members
-from base.db import Database
 from schedules.catchup import cluster_timezone, fire_slot_once
+from base.daemon.schedules.inputs import ScheduleInputs
+from schedules.entry import schedule_entry
 
 
 CRON = "0 4 * * 3"
@@ -499,9 +500,9 @@ def _fire_weekly_batch(_slot: datetime, _trigger: None) -> None:
         print(f"adversarial-eval batch failed: {exc}")
 
 
-def main() -> None:
+def main(*, inputs: ScheduleInputs) -> None:
     """Serve future Wednesday slots without replaying downtime."""
-    db = Database.from_settings()
+    db = inputs.database()
     while True:
         nxt = next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone())
         while datetime.now(UTC) < nxt:
@@ -515,4 +516,10 @@ if __name__ == "__main__":
         {"IDLING", "TERMINATED"},
         schedule_name="adversarial-eval-weekly",
     )
-    main()
+    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    if entry_inputs is None:
+        from base.log import prepare_process_logging
+
+        prepare_process_logging()
+    with schedule_entry(entry_inputs) as inputs:
+        main(inputs=inputs)

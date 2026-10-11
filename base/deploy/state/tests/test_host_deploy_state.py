@@ -13,11 +13,12 @@ import psycopg
 import pytest
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.state import host_deploy_state as hds
 
 
-def _db() -> Database:
-    return Database.from_settings()
+def _db(database_gate: ProcessDbGate) -> Database:
+    return Database.from_settings(gate=database_gate)
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +81,9 @@ def test_posture_round_trips_and_stamps_the_database_clock(database: Database) -
     assert idle.updated_at >= paused.updated_at
 
 
-def test_read_all_returns_every_machines_row(database: Database) -> None:
+def test_read_all_returns_every_machines_row(
+    database: Database, database_gate: ProcessDbGate
+) -> None:
     hds.set_posture(database, "paused")
-    rows = hds.read_all(_db())
+    rows = hds.read_all(_db(database_gate=database_gate))
     assert rows[_machine()].posture == "paused"

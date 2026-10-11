@@ -12,6 +12,7 @@ from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops import lifecycle
@@ -24,12 +25,14 @@ async def test_permanent_reject_blocks_heartbeat_but_fresh_chat_can_try_again(
     event_bus: EventBus,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     agent = terminated(
         db_conn,
         ResourceBirth(birth=uuid4()).model_dump(mode="json"),
         config_authority=config_authority,
         model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     db_conn.execute(
         "UPDATE agents_meta SET permanent_reject_streak=1,last_permanent_reject_reason='billing' "
@@ -83,9 +86,10 @@ def terminated(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> int:
     agent, *_ = create_agent_row(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
         machine=machine_name(),
@@ -107,6 +111,7 @@ async def test_idling_owner_blocks_background_wake_until_new_chat(
     event_bus: EventBus,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     from base.agents.recovery.breaker import admit_pending_wake
 
@@ -115,6 +120,7 @@ async def test_idling_owner_blocks_background_wake_until_new_chat(
         ResourceBirth(birth=uuid4()).model_dump(mode="json"),
         config_authority=config_authority,
         model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     db_conn.execute(
         "UPDATE agents_meta SET status='idling',last_turn_fatal_at=clock_timestamp(),permanent_reject_streak=1 WHERE id=%s",

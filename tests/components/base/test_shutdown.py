@@ -156,8 +156,10 @@ async def run():
 
 if {ops!r}:
     from services.agent_runner.agent_ops import daemon
+    async def ops_run(*, database, image):
+        await run()
     daemon.init_gateway_process = lambda **kwargs: None
-    daemon._main = run
+    daemon._main = ops_run
     daemon.main()
 else:
     try:

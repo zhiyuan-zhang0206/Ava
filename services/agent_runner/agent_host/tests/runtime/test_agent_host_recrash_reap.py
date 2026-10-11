@@ -27,6 +27,7 @@ from agent.ownership.hosted import (
 )
 from base.config import settings
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
@@ -46,6 +47,7 @@ async def _close_captured(
     settlement: TurnSettlement,
     order: list[str],
     reap_result: list[int] | None = None,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Run the real close_hosted_turn with each step swapped for a recorder."""
 
@@ -103,8 +105,7 @@ def _skips(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 async def test_aborted_recrash_reaps_after_settle_and_reconcile(
-    monkeypatch: pytest.MonkeyPatch,
-    reap_enabled: None,
+    monkeypatch: pytest.MonkeyPatch, reap_enabled: None, *, database_gate: ProcessDbGate
 ) -> None:
     """The reap runs last: the abort's reconcile needs the abort's own live
     incarnation, and the reap terminates it."""
@@ -114,13 +115,13 @@ async def test_aborted_recrash_reaps_after_settle_and_reconcile(
         outcome=TurnOutcome(exited=False, crashed=True, aborted=True),
         settlement=_settlement(crashed=True, recrash=True, settled=True),
         order=order,
+        database_gate=database_gate,
     )
     assert order == ["settle", "reconcile", "reap"]
 
 
 async def test_unclassified_recrash_reaps_after_the_settle(
-    monkeypatch: pytest.MonkeyPatch,
-    reap_enabled: None,
+    monkeypatch: pytest.MonkeyPatch, reap_enabled: None, *, database_gate: ProcessDbGate
 ) -> None:
     order: list[str] = []
     await _close_captured(
@@ -128,13 +129,13 @@ async def test_unclassified_recrash_reaps_after_the_settle(
         outcome=TurnOutcome(exited=False, crashed=True),
         settlement=_settlement(crashed=True, recrash=True, settled=True),
         order=order,
+        database_gate=database_gate,
     )
     assert order == ["settle", "reap"]
 
 
 async def test_first_crash_keeps_its_full_grace(
-    monkeypatch: pytest.MonkeyPatch,
-    reap_enabled: None,
+    monkeypatch: pytest.MonkeyPatch, reap_enabled: None, *, database_gate: ProcessDbGate
 ) -> None:
     """The first death under a mark is never prompt-reaped: the grace window
     is the one self-heal chance the mechanism deliberately keeps."""
@@ -144,13 +145,13 @@ async def test_first_crash_keeps_its_full_grace(
         outcome=TurnOutcome(exited=False, crashed=True, aborted=True),
         settlement=_settlement(crashed=True, recrash=False, settled=True),
         order=order,
+        database_gate=database_gate,
     )
     assert order == ["settle", "reconcile"]
 
 
 async def test_clean_turn_never_reaps(
-    monkeypatch: pytest.MonkeyPatch,
-    reap_enabled: None,
+    monkeypatch: pytest.MonkeyPatch, reap_enabled: None, *, database_gate: ProcessDbGate
 ) -> None:
     order: list[str] = []
     await _close_captured(
@@ -158,6 +159,7 @@ async def test_clean_turn_never_reaps(
         outcome=TurnOutcome(exited=False, crashed=False),
         settlement=_settlement(crashed=False, recrash=False, settled=True),
         order=order,
+        database_gate=database_gate,
     )
     assert order == ["settle"]
 
@@ -165,6 +167,8 @@ async def test_clean_turn_never_reaps(
 async def test_switch_off_skips_the_reap_logged(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(settings.daemon, "hosted_recrash_prompt_reap_enabled", False)
     order: list[str] = []
@@ -173,6 +177,7 @@ async def test_switch_off_skips_the_reap_logged(
         outcome=TurnOutcome(exited=False, crashed=True),
         settlement=_settlement(crashed=True, recrash=True, settled=True),
         order=order,
+        database_gate=database_gate,
     )
     assert order == ["settle"]
     assert [r["extra"]["reason"] for r in _skips(loguru_records)] == ["disabled"]
@@ -182,6 +187,8 @@ async def test_unsettled_turn_skips_the_reap_logged(
     monkeypatch: pytest.MonkeyPatch,
     reap_enabled: None,
     loguru_records: list[dict[str, Any]],
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A settle that could not reach idling (unsettled resources, or a row
     already replaced) leaves the corpse to the grace-window reap."""
@@ -191,6 +198,7 @@ async def test_unsettled_turn_skips_the_reap_logged(
         outcome=TurnOutcome(exited=False, crashed=True),
         settlement=_settlement(crashed=True, recrash=True, settled=False),
         order=order,
+        database_gate=database_gate,
     )
     assert order == ["settle"]
     assert [r["extra"]["reason"] for r in _skips(loguru_records)] == ["settle_incomplete"]
@@ -200,6 +208,8 @@ async def test_row_moved_on_skips_the_reap_logged(
     monkeypatch: pytest.MonkeyPatch,
     reap_enabled: None,
     loguru_records: list[dict[str, Any]],
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     order: list[str] = []
     await _close_captured(
@@ -208,6 +218,7 @@ async def test_row_moved_on_skips_the_reap_logged(
         settlement=_settlement(crashed=True, recrash=True, settled=True),
         order=order,
         reap_result=[],
+        database_gate=database_gate,
     )
     assert order == ["settle", "reap"]
     assert [r["extra"]["reason"] for r in _skips(loguru_records)] == ["row_moved_on"]
@@ -260,6 +271,7 @@ async def _crash_a_fresh_admission(
     *,
     agent_id: int,
     owner: UUID,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Admit the idling agent as a hosted turn and settle that turn as crashed."""
     incarnation = await admit_hosted_runtime(
@@ -299,6 +311,8 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     loguru_records: list[dict[str, Any]],
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The drill: crash -> (grace kept) -> retry crash -> immediate reap.
 
@@ -309,7 +323,9 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     effects = _capture_reap_effects(monkeypatch)
     agent_id, owner = _agent(db_conn), uuid4()
 
-    await _crash_a_fresh_admission(aops_pool, database, event_bus, agent_id=agent_id, owner=owner)
+    await _crash_a_fresh_admission(
+        aops_pool, database, event_bus, agent_id=agent_id, owner=owner, database_gate=database_gate
+    )
 
     row = db_conn.execute(
         "SELECT status, last_turn_fatal_at IS NOT NULL FROM agents_meta WHERE id = %s",
@@ -322,7 +338,9 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     assert effects.events == [] and effects.published == []
 
     # The retry: a wake admits the zombie again, and this turn dies too.
-    await _crash_a_fresh_admission(aops_pool, database, event_bus, agent_id=agent_id, owner=owner)
+    await _crash_a_fresh_admission(
+        aops_pool, database, event_bus, agent_id=agent_id, owner=owner, database_gate=database_gate
+    )
 
     row = db_conn.execute(
         "SELECT status, termination_source, lease_expires_at, "

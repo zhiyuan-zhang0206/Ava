@@ -17,6 +17,7 @@ from agent.graph.tests.test_llm_helpers import _make_runtime as _llm_make_runtim
 from base.agents.context import AvaContext
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -36,7 +37,7 @@ from tests.fixtures.units import spawn_agent
 
 
 async def test_llm_node_closes_circuit_on_success(
-    hosted_resources: HostedTurnResources,
+    hosted_resources: HostedTurnResources, *, database_gate: ProcessDbGate
 ) -> None:
     """A successful LLM call is the circuit-healed signal — the breaker closes
     so heartbeats resume routing normally."""
@@ -54,7 +55,12 @@ async def test_llm_node_closes_circuit_on_success(
 
     cmd = await llm_node(
         state,
-        _llm_make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _llm_make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _LLM_CONFIG,
         ledger=LlmLedger(),
     )
@@ -64,7 +70,7 @@ async def test_llm_node_closes_circuit_on_success(
 
 
 async def test_llm_node_cancel_does_not_close_circuit(
-    hosted_resources: HostedTurnResources, fake_cancel_event
+    hosted_resources: HostedTurnResources, fake_cancel_event, *, database_gate: ProcessDbGate
 ) -> None:
     """The cancel path discards the partial generation — no stream completed,
     so the breaker must stay open (closing it without a healed call would
@@ -86,7 +92,12 @@ async def test_llm_node_cancel_does_not_close_circuit(
     trigger = asyncio.create_task(_trigger())
     cmd = await llm_node(
         state,
-        _llm_make_runtime(resources=hosted_resources, llm=fake_llm, event_publisher=MagicMock()),
+        _llm_make_runtime(
+            resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=MagicMock(),
+            database_gate=database_gate,
+        ),
         _LLM_CONFIG,
         ledger=LlmLedger(),
     )
@@ -102,14 +113,19 @@ async def test_first_permanent_rejection_trips_the_recovery_breaker(
     loguru_records: list[dict[str, Any]],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """One permanent rejection halts background recovery and reports the cause."""
     ancestor_id, child_id = _spawn_child_under_idling_ancestor(
-        db_conn, model_catalog=model_catalog, config_authority=config_authority
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
     )
     publisher = _RecordingPublisher()
 
-    await _reject_turn(aops_pool, child_id, publisher=publisher)
+    await _reject_turn(aops_pool, child_id, publisher=publisher, database_gate=database_gate)
     row = db_conn.execute(
         "SELECT permanent_reject_streak, wake_suppress_reason FROM agents_meta WHERE id = %s",
         (child_id,),
@@ -147,15 +163,27 @@ async def test_transient_rejection_does_not_count_or_trip(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Only the PERMANENT class counts: a configured-fatal/transient rejection
     aborts the turn but never arms the recovery breaker."""
-    child_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    child_id = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     exc = FatalProviderError(
         "rate limited", error_class="transient", provider="deepseek", status=429
     )
     for _ in range(3):
-        await _reject_turn(aops_pool, child_id, publisher=_RecordingPublisher(), exc=exc)
+        await _reject_turn(
+            aops_pool,
+            child_id,
+            publisher=_RecordingPublisher(),
+            exc=exc,
+            database_gate=database_gate,
+        )
     row = db_conn.execute(
         "SELECT permanent_reject_streak, wake_suppress_reason FROM agents_meta WHERE id = %s",
         (child_id,),
@@ -169,13 +197,19 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The completed-turn UPDATE is the single reset: it clears the corpse
     marker, the recovery-breaker streak, and the recorded reject reason
     together (agent/graph/llm/node.py)."""
     from agent.graph.llm.node import _persist_last_active
 
-    child_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    child_id = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     db_conn.execute(
         "UPDATE agents_meta SET permanent_reject_streak = 2, "
         "last_permanent_reject_reason = 'billing', last_turn_fatal_at = now() "
@@ -190,7 +224,7 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=configured_policy().clock_factory,
