@@ -16,7 +16,12 @@ from typing import Any
 import pytest
 
 import base.db
-from base.cluster.authority.api import publish_telemetry_token, telemetry_token
+from base.cluster.authority.api import (
+    publish_telemetry_token,
+    read_telemetry_token,
+    telemetry_token,
+    telemetry_token_path,
+)
 from base.config import settings
 from base.paths import ava_home
 from services.wake.heartbeat import station_probe as hc
@@ -168,7 +173,8 @@ def test_station_answers_without_a_published_token_warns_and_fails_open(
 ) -> None:
     """No published telemetry token -> cannot authenticate the probe; warn and treat as
     alive rather than alerting on a config problem (fail-open)."""
-    publish_telemetry_token(ava_home(), "")
+    telemetry_token_path(ava_home()).unlink()  # a start that has not published yet
+    assert read_telemetry_token(ava_home()) is None
 
     def _fail_if_called(_req: object, **_kw: object) -> None:
         pytest.fail("must not dial without a token")

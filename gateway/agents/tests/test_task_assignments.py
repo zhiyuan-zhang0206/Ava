@@ -27,7 +27,6 @@ SECRET = "compound-test-secret"  # noqa: S105 -- isolated test authentication
 def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterator[TestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
 
     async def accept(db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         return SpawnedAgent(id=body.agent_id)
@@ -254,7 +253,7 @@ def test_missing_or_wrong_admission_headers_cannot_write(
     assert _counts(db_conn) == before
 
 
-def test_revoked_and_unverified_principals_cannot_replay(
+def test_revoked_principals_cannot_replay(
     client: TestClient,
     db_conn: psycopg.Connection,
     body: dict[str, Any],
@@ -264,8 +263,6 @@ def test_revoked_and_unverified_principals_cannot_replay(
     before = _counts(db_conn)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-compound-secret")
     assert client.post(PATH, json=body, headers=HEADERS).status_code == 401
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
-    assert client.post(PATH, json=body, headers=HEADERS).status_code == 422
     assert _counts(db_conn) == before
 
 

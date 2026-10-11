@@ -33,6 +33,7 @@ from base.cluster.auth import (
 from base.config.domains.gateway import GatewaySettings
 from gateway.app import app
 from gateway.http.auth.cors import cors_allowed_origins
+from tests.fixtures.unit.gateway_auth import disable_default_gateway_credentials
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -109,13 +110,12 @@ def _legacy_hmac_cookie() -> str:
 
 @pytest.fixture(autouse=True)
 def _patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Enable auth with a known secret for every test in this module.
+    """Run every test in this module against a known secret.
 
-    The root `_clean_state` disables the middleware (auth_middleware_enabled=false)
-    for the rest of the suite; the auth contract tests re-enable it here and set a
-    real secret so the middleware actually runs.
+    This module tests authentication itself, so its clients are anonymous: they
+    do not carry the suite's default bearer and present only what a test gives them.
     """
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
+    disable_default_gateway_credentials(monkeypatch)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
 
 
@@ -619,19 +619,6 @@ def test_check_returns_false_with_invalid_cookie() -> None:
         )
     assert resp.status_code == 200
     assert resp.json()["authenticated"] is False
-
-
-def test_check_returns_true_when_auth_middleware_disabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With auth_middleware_enabled=false, check reports authenticated without a cookie —
-    the e2e browser is on a different host so a SameSite=Lax cookie cannot
-    reach the cross-site check request."""
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", False)
-    with TestClient(app) as client:
-        resp = client.get("/api/auth/check")
-    assert resp.status_code == 200
-    assert resp.json()["authenticated"] is True
 
 
 def test_check_returns_false_with_expired_cookie(db_conn: psycopg.Connection) -> None:

@@ -29,7 +29,6 @@ HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
 def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterator[TestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
 
     async def accept(db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         return SpawnedAgent(id=body.agent_id)
@@ -60,16 +59,6 @@ def test_invalid_admission_has_no_birth(
     client: TestClient, db_conn: psycopg.Connection, headers: dict[str, str]
 ) -> None:
     assert client.post(PATH, json={}, headers=headers).status_code == 422
-    assert _count(db_conn) == 0
-
-
-def test_no_auth_posture_cannot_claim_guarded_scope(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
-    assert client.post(PATH, json={}, headers=HEADERS).status_code == 422
     assert _count(db_conn) == 0
 
 

@@ -123,7 +123,6 @@ def test_agent_specific_dismissal_is_rejected(client: TestClient) -> None:
 def test_gateway_auth_protects_resolution_routes(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "resolution-test-secret")
 
     response = client.post("/api/event-resolutions", json=_body())

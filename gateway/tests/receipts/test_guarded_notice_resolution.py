@@ -6,7 +6,6 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.config import settings
 from gateway.agents import notices
 from gateway.app import app
 from gateway.tests.events.test_notices_endpoint import _insert_notice, _seed_agent
@@ -143,8 +142,6 @@ def test_authentication_and_principal_are_rechecked_on_replay(
         ).status_code
         == 401
     )
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
-    assert client.post(path, json=body, headers=HEADERS).status_code == 422
 
 
 def test_guarded_and_legacy_paths_do_not_share_receipts(

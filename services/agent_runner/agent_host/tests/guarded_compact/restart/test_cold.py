@@ -40,7 +40,6 @@ async def test_released_sigkill_original_restart_is_no_effect_not_successor_rest
     agent = prepare_agent(db_conn)
     secret = "guarded-compact-test-secret"  # noqa: S105 -- isolated credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     headers = {
         "Authorization": f"Bearer {secret}",
         "Idempotency-Scope": "principal-v1",
