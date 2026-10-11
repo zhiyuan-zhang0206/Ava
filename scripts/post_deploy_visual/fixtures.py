@@ -195,7 +195,6 @@ FIXTURES: dict[str, object] = {
             }
         ],
         "edges": [],
-        "stale": False,
         "truncated": False,
         "telemetry_stale": False,
         "snapshot_at": None,

@@ -83,20 +83,11 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-gw-latency-slow-error` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
 | `ava-ops-tempo-backend-down` | `ava-ops-slow` | Tempo backend reachable | up{job="tempo"}=0 for 1h (Prometheus) | 1h | warning |
 | `ava-ops-events-low-water` | `ava-ops` | event stream below low-water mark | count in 5m < 150 (Loki) | 10m | warning |
-| `ava-ops-fleet-graph-stale` | `ava-ops` | fleet graph served stale | `fleet_graph_stale` episodes in 10m > 1 (Loki) | 0m | warning |
 | `ava-ops-telemetry-queue-loss` | `ava-ops` | telemetry queue lost events | a machine+process+queue's last drop < 300s old (Prometheus) | 0s | error |
 | `ava-ops-recovery-drill-failed` | `ava-ops` | scheduled recovery drill failed | `recovery_drill_failed` (level=error) by drill in 1h > 0 (Loki) | 0m | error |
 | `ava-ops-llm-rate-limit` | `ava-ops-slow` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
 | `ava-ops-llm-stall-pair` | `ava-ops` | LLM stream stall pair | `stream_stall_pair_terminated` in 15m > 0 (Loki) | 0m | warning |
 | `ava-ops-llm-stall-burst` | `ava-ops` | LLM provider stall burst | `stream_stalled_retry` per vendor in 15m > 4 (Loki) | 0m | warning |
-
-For `ava-ops-fleet-graph-stale`, the threshold counts degradation
-**episodes** (two in ten minutes): the gateway emits one `fleet_graph_stale`
-event per degraded episode and rate-caps repeats per reason
-(`AVA_FLEET_GRAPH_STALE_EMIT_INTERVAL_S`, 30s default), so a retry storm
-cannot fabricate a cluster while a single blip stays quiet. A planned update
-is silenced by the fleet update's one silence (see Notifications below); no
-per-rule window is provisioned.
 
 The two provider-stall rules (task #3948) surface the stall-wave telemetry:
 `ava-ops-llm-stall-burst` is calibrated on the trailing 7 days (52 stalls

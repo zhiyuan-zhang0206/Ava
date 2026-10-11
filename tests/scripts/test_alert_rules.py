@@ -53,7 +53,6 @@ _EXPECTED_UIDS = {
     "ava-ops-delivery-stalled-backlog",
     "ava-ops-events-freshness",
     "ava-ops-events-low-water",
-    "ava-ops-fleet-graph-stale",
     "ava-ops-llm-stall-pair",
     "ava-ops-llm-stall-burst",
     "ava-ops-gateway-metrics-silent",
@@ -322,33 +321,6 @@ def test_events_low_water_rule_detects_partial_write_loss() -> None:
     assert _threshold_params(rule) == [[150]]
     threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
     assert threshold["model"]["conditions"][0]["evaluator"]["type"] == "lt"
-
-
-def test_fleet_graph_stale_rule_counts_episodes() -> None:
-    """The route's stale-serving fallback alerts on the fleet_graph_stale
-    event stream: two+ degradation episodes in ten minutes (task #3925; 405
-    ruling 2026-09-18 — event-type signals report clusters, not first
-    occurrences, and the ten-minute window is the whole debounce)."""
-    rules = {r["uid"]: r for r in _load_rules()}
-    rule = rules["ava-ops-fleet-graph-stale"]
-
-    assert _exprs(rule, "loki") == [
-        'sum(count_over_time({service_name="unknown_service", '
-        'event_name="fleet_graph_stale"} | json | cluster=".ava" | '
-        'category="telemetry" [10m]))'
-    ]
-    assert rule["for"] == "0m"
-    assert rule["noDataState"] == "OK"
-    assert rule["execErrState"] == "OK"
-    assert rule["labels"] == {
-        "severity": "warning",
-        "ruleUID": "ava-ops-fleet-graph-stale",
-        "metric": "fleet_graph_stale",
-        "team": "ava-ops",
-    }
-    assert _threshold_params(rule) == [[1]]
-    threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
-    assert threshold["model"]["conditions"][0]["evaluator"]["type"] == "gt"
 
 
 def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
