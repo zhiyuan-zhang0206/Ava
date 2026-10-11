@@ -501,17 +501,22 @@ def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
             _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
 
-def _bind_identity(request: RequestPayload, *, context: Any) -> None:
+def _bind_identity(
+    request: RequestPayload, *, context: Any, clock_factory: Callable[[], Any]
+) -> None:
     """Bind this child's `AvaContext` and the incarnation from its validated request."""
     import ava
     from base.agents.context import AvaContext
 
     ava.bind_context(
-        AvaContext.from_description(
-            request.context,
-            original_incarnation=request.incarnation,
-            clients=context.clients,
-            machine=context.require_machine(),
+        replace(
+            AvaContext.from_description(
+                request.context,
+                original_incarnation=request.incarnation,
+                clients=context.clients,
+                machine=context.require_machine(),
+            ),
+            clock_factory=clock_factory,
         )
     )
     # No eager OTLP warmup: the backend comes up lazily on the first export
@@ -541,10 +546,10 @@ def _run(
     birth, overlay = _pop_overlay_env()
     from base.clock import Clock, clock_config_from_boot
 
-    _bind_identity(request, context=context)
-
     def clock_factory() -> Clock:
         return Clock(clock_config_from_boot(config))
+
+    _bind_identity(request, context=context, clock_factory=clock_factory)
 
     # Two-phase overlay application, mirroring the agent process's own boot:
     # framework fields early (before any settings read), plugin fields after
@@ -565,18 +570,14 @@ def _run(
     # upgrades to the agent-runtime faces (state fields feed the state schema)
     # — the child start stays off the agent runtime either way (task #3633).
     # The install applies the env baseline AVA_SDK_DISABLE as part of the load.
-    child.ava.ensure_plugins_loaded(
+    ava.initialize_context(
+        ava.context,
         config=config,
         clock_factory=clock_factory,
         producer=ava.context.clients.event_pipeline,
     )
-    from dataclasses import replace
-
     from ava.sdk_surface import settings as sdk_settings
 
-    ava.bind_context(
-        replace(ava.context, catalog=sdk_settings.model_catalog(), clock_factory=clock_factory)
-    )
     _apply_overlay_scope(birth, overlay, scope="plugin")
 
     def read_agent_default(_domain: str, field: str) -> Any:

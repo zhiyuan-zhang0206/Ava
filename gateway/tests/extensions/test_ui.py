@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 
 import ava
 from ava.gateway_client.transport import use_client
+from ava.sdk_surface import agent_identity
 from ava.ui import InvalidPageName, PageClosed
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -55,7 +56,7 @@ def _use_page_host(
     def build() -> ava.ui.PageHost:
         return ava.ui.PageHost(
             host=local_machine.host(),
-            agent_id=ava.sdk_surface.agent_identity.require_agent_id(),
+            agent_id=agent_identity.require_agent_id(),
             **overrides,
         )
 
@@ -160,10 +161,10 @@ class TestShow:
         assert page.title == "Picker"
         assert (
             page.url
-            == f"http://test-gateway.invalid:8000/pages/{ava.sdk_surface.agent_identity.require_agent_id()}-cleanup/"
+            == f"http://test-gateway.invalid:8000/pages/{agent_identity.require_agent_id()}-cleanup/"
         )
         db_conn.rollback()
-        assert _open_pages(db_conn, ava.sdk_surface.agent_identity.require_agent_id()) == [
+        assert _open_pages(db_conn, agent_identity.require_agent_id()) == [
             ("cleanup", 13580, "Picker", None)
         ]
 
@@ -190,7 +191,7 @@ class TestShow:
         ava.ui.show("p2", 13581)
         db_conn.rollback()
         # Only p2 is open; p1 was auto-closed (single page per agent).
-        assert _open_pages(db_conn, ava.sdk_surface.agent_identity.require_agent_id()) == [
+        assert _open_pages(db_conn, agent_identity.require_agent_id()) == [
             ("p2", 13581, None, None)
         ]
 
@@ -216,10 +217,10 @@ class TestShow:
         assert page.port == 13579
         assert (
             page.url
-            == f"http://test-gateway.invalid:8000/pages/{ava.sdk_surface.agent_identity.require_agent_id()}-custom/"
+            == f"http://test-gateway.invalid:8000/pages/{agent_identity.require_agent_id()}-custom/"
         )
         db_conn.rollback()
-        assert _open_pages(db_conn, ava.sdk_surface.agent_identity.require_agent_id()) == [
+        assert _open_pages(db_conn, agent_identity.require_agent_id()) == [
             ("custom", 13579, "Custom", None)
         ]
 
@@ -405,7 +406,7 @@ class TestClose:
         ava.ui.show("p", 13583)
         ava.ui.close("p")
         db_conn.rollback()
-        assert _open_pages(db_conn, ava.sdk_surface.agent_identity.require_agent_id()) == []
+        assert _open_pages(db_conn, agent_identity.require_agent_id()) == []
 
     def test_close_missing_raises_page_closed(
         self,
@@ -463,7 +464,7 @@ class TestServe:
         assert page.name == "srv"
         assert page.port == stub.port
         db_conn.rollback()
-        assert _open_pages(db_conn, ava.sdk_surface.agent_identity.require_agent_id()) == [
+        assert _open_pages(db_conn, agent_identity.require_agent_id()) == [
             ("srv", stub.port, "Served", str(tmp_path))
         ]
 
@@ -561,7 +562,7 @@ class TestServe:
             ava.ui.serve(str(tmp_path), "nod", port=free)
         db_conn.rollback()
         # The declaration is durable even when the server is not up yet.
-        assert _open_pages(db_conn, ava.sdk_surface.agent_identity.require_agent_id()) == [
+        assert _open_pages(db_conn, agent_identity.require_agent_id()) == [
             ("nod", free, None, str(tmp_path))
         ]
 
@@ -618,7 +619,7 @@ class TestServe:
         ):
             ava.ui.serve(str(tmp_path), "blocked", port=silent.port)
         db_conn.rollback()
-        assert _open_pages(db_conn, ava.sdk_surface.agent_identity.require_agent_id()) == []
+        assert _open_pages(db_conn, agent_identity.require_agent_id()) == []
 
     def test_serve_rejects_port_held_by_non_page_http_server(
         self,
@@ -649,7 +650,7 @@ class TestServe:
         ):
             ava.ui.serve(str(tmp_path), "blocked", port=foreign.port)
         db_conn.rollback()
-        assert _open_pages(db_conn, ava.sdk_surface.agent_identity.require_agent_id()) == []
+        assert _open_pages(db_conn, agent_identity.require_agent_id()) == []
 
     def test_serve_rejects_port_held_by_another_agents_page(
         self,
@@ -686,7 +687,7 @@ class TestServe:
             ava.ui.serve(str(tmp_path), "clash", port=13586)
         db_conn.rollback()
         assert [r[0] for r in _open_pages(db_conn, owner)] == ["held"]
-        assert _open_pages(db_conn, ava.sdk_surface.agent_identity.require_agent_id()) == []
+        assert _open_pages(db_conn, agent_identity.require_agent_id()) == []
 
     def test_serve_refusal_leaves_current_page_untouched(
         self,
@@ -758,9 +759,9 @@ class TestServe:
                 ava.ui.serve(str(tmp_path), "wedged2", port=silent.port)
         db_conn.rollback()
         # The replacement row was registered; only the (stub) server never came up.
-        assert [
-            r[0] for r in _open_pages(db_conn, ava.sdk_surface.agent_identity.require_agent_id())
-        ] == ["wedged2"]
+        assert [r[0] for r in _open_pages(db_conn, agent_identity.require_agent_id())] == [
+            "wedged2"
+        ]
 
     def test_serve_ready_timeout_covers_a_slow_daemon_pass(self) -> None:
         """The serve() wait must exceed the slowest observed daemon pass
@@ -793,6 +794,4 @@ class TestServe:
             ava.ui.serve(str(tmp_path), "once", port=stub.port)
             ava.ui.serve(str(tmp_path), "twice", port=stub.port)
         db_conn.rollback()
-        assert [
-            r[0] for r in _open_pages(db_conn, ava.sdk_surface.agent_identity.require_agent_id())
-        ] == ["twice"]
+        assert [r[0] for r in _open_pages(db_conn, agent_identity.require_agent_id())] == ["twice"]

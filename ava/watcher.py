@@ -161,14 +161,12 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     generated code and the id is the agent's own, so nothing sensitive leaks.
     Overwrite, not setdefault: the watcher belongs to the spawning agent, so
     a stale env value (e.g. a parent-shell id accidentally forwarded) must
-    not win. ``ava.sdk_surface.agent_identity`` then lazily establishes identity from the env var
-    on first use (``owns_loop=False``).
+    not win. The child's first ``import ava`` composes that identity
+    (``owns_loop=False``), cold clients and plugin surface from one boot owner.
 
-    Plugin namespaces are loaded explicitly (``ava.ensure_plugins_loaded()``)
-    before the script runs: a fresh child's ``import ava`` is the factory module
-    with none of the agent process's plugin setattrs, so without this step
-    ``ava.tasks`` (and every other plugin-registered namespace) would raise
-    ``AttributeError`` inside the watcher.
+    The explicit ``ava.ensure_plugins_loaded()`` remains an idempotent readiness
+    check before the watcher script runs. It reuses the completed parent import
+    rather than constructing another configuration or plugin installation.
 
     The ``ava`` module is still imported and passed via ``init_globals`` to
     ``runpy.run_path`` so that watcher code can use ``ava`` without an
@@ -280,11 +278,8 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         "import ava\n"
         "\n"
         f"{watchdog}"
-        # Load plugin namespaces (ava.tasks etc.) into this child before the
-        # watcher script runs — a fresh process's `import ava` is the factory
-        # module with none of the agent process's plugin setattrs. Identity is
-        # set explicitly above; this is the symmetric step for plugin
-        # namespaces.
+        # Parent import completed the launched context and plugin surface.
+        # Keep the explicit readiness check; it reuses that installation.
         "ava.ensure_plugins_loaded()\n"
         "try:\n"
         f"    runpy.run_path({str(script_path)!r}, run_name='__main__', init_globals={{'ava': ava}})\n"
