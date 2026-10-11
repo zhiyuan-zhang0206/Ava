@@ -210,7 +210,7 @@ export function setTelemetryPage(page: string): void {
 
 /** Normalize a router pathname to the telemetry page vocabulary:
  *  "/" → "home", "/shell/42" → "shell" (agent ids collapsed), nested
- *  routes keep their segments ("control/config", "insights/metrics"). */
+ *  routes keep their segments ("control/config", "insights/ops"). */
 export function normalizePage(pathname: string): string {
   const p = pathname.replace(/^\/+/, "").replace(/\/+$/, "");
   if (p === "") return "home";
