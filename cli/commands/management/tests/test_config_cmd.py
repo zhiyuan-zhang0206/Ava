@@ -28,6 +28,8 @@ from base.host.env import runtime_config
 from cli.commands.management import config as cfg
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
+_CHILD = Path(__file__).with_name("child_config_cmd.py")
+
 
 def _field(
     name: str,
@@ -403,14 +405,7 @@ def test_cli_module_imports_without_settings(tmp_path: Path) -> None:
     _write_incident_env(tmp_path)
     repo_root = Path(__file__).parents[4]
     result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "from cli.commands.management.config import cmd_config_get; "
-                "raise SystemExit(cmd_config_get(None, None, local=True))"
-            ),
-        ],
+        [sys.executable, str(_CHILD), "get"],
         cwd=repo_root,
         env={
             "AVA_CONFIG_FETCH": "skip",
@@ -622,15 +617,7 @@ def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
     before = (local_env_home / ".env").read_bytes()
     repo_root = Path(__file__).parents[4]
     result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "from cli.commands.management.config import cmd_config_set; "
-                "raise SystemExit(cmd_config_set("
-                "['AVA_EXEC_NODE_TIMEOUT_SECONDS=2000'], None, local=True))"
-            ),
-        ],
+        [sys.executable, str(_CHILD), "set", "AVA_EXEC_NODE_TIMEOUT_SECONDS=2000"],
         cwd=repo_root,
         env={
             "AVA_CONFIG_FETCH": "skip",
