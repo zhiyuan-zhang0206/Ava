@@ -50,7 +50,7 @@ restart it, but explicit acknowledged shutdown does not. External signals are
 failures, not implicit stop requests.
 
 The root keeper restarts an unexpectedly exited root (or a failed spawn) with
-bounded backoff, but only through three consecutive unstable failures — an exit
+backoff (20 s, then 40 s), but only through three consecutive unstable failures — an exit
 before the root has been up for ten seconds counts, a longer run resets the
 count. The third failure leaves the keeper in `exited`: no restart is pending, the
 last exit stays in `root_status`, and the seed wait of `ava start` reports it. The

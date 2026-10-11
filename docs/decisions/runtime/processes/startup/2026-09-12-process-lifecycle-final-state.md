@@ -46,7 +46,7 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
    alive; root keeps the whole tree alive (parallel pull-up + startup gating,
    self-healing units; no declarative dependency DAG). *Amended 2026-10-12: the
    OS adapter keeps root alive within a finite budget, like root's own units —
-   the macOS keeper stops after three consecutive unstable failures, systemd
+   the macOS keeper stops after three consecutive unstable failures spanning about a minute, systemd
    after its start limit, and the boot job after ten attempts per boot; each
    leaves an observable failure and an operator's `ava start` re-arms it.*
 6. **One-shot (big-bang) migration** per the 2026-08-07 precedent; the
