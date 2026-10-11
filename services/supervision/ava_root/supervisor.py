@@ -15,6 +15,7 @@ from typing import Protocol
 
 import psutil
 
+from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 from base.native_process.child_env import inherited_process_env
 from base.native_process.ownership import OwnedProcess
@@ -231,8 +232,8 @@ class Supervisor(StoppingMixin):
         self-rescue into a stop, and it never rewrites an explicit stop into a
         run unless this verb is that operator word. Each member ends either with
         a fresh active generation or with an explicit `restart_failed` state
-        (intent stays running) that the health monitor counts and retries under
-        its backoff. A member whose stop was refused keeps its old generation
+        (intent stays running) that the health monitor may retry within
+        its finite budget. A member whose stop was refused keeps its old generation
         while the rest of the subtree is still processed; refusals are raised
         together afterwards. Spawn acceptance is not readiness; callers must
         observe the new generation.
@@ -387,15 +388,7 @@ class Supervisor(StoppingMixin):
         return generation.identity, generation.started_at
 
     def revival_deferral(self, unit_id: str) -> str | None:
-        """Preserve explicit stop and never-restart policy.
-
-        Classification reads the unit's intent — the policy fact — never a
-        mechanical transition residue: only an explicit stop is the expected,
-        silent state. A recorded replacement failure is deliberately not a
-        deferral: suppressing the action here would recreate exactly the
-        silence class the record exists to surface (task #4872) — its retry
-        cadence belongs to the health monitor's backoff.
-        """
+        """Preserve stop/never policy and the code-version gate's permanent refusal."""
         runtime = self._units.get(unit_id)
         if runtime is None:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
@@ -403,6 +396,10 @@ class Supervisor(StoppingMixin):
             return "held down"
         if runtime.manifest.restart is RestartPolicy.NEVER:
             return "policy never"
+        if not self._is_active(runtime) and runtime.last_exit == _describe_exit(
+            CODE_BEHIND_MINIMUM_EXIT_CODE
+        ):
+            return "code behind cluster minimum; update required"
         return None
 
     def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
@@ -497,7 +494,7 @@ class Supervisor(StoppingMixin):
 
             logger.warning(
                 "unit {unit} replacement failed at its {stage} half — explicit failure state "
-                "recorded; intent stays running and the health monitor retries under its backoff",
+                "recorded; intent stays running and the health monitor has a finite automatic restart budget",
                 event="root_restart_failed",
                 unit=runtime.manifest.id,
                 stage=failure.stage.value,
