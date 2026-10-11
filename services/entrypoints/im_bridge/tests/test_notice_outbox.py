@@ -19,16 +19,16 @@ from base.lm.catalog import ModelCatalog
 from services.entrypoints.im_bridge.adapters.telegram import TelegramAdapter
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound.types import (
-    NoticePollImportReason,
-    OutboundAdapterKind,
-    OutboundChunk,
-    PreparedOutboundSend,
-)
+from services.entrypoints.im_bridge.outbound.types import NoticePollImportReason
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config, telegram_config
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import FakeGateway
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as pool
+from services.entrypoints.im_bridge.types import (
+    OutboundAdapterKind,
+    OutboundChunk,
+    PreparedOutboundSend,
+)
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 

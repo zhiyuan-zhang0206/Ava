@@ -19,14 +19,14 @@ from base.lm.catalog import ModelCatalog
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.notice_bridge import NoticeBridge, _state_dir
-from services.entrypoints.im_bridge.outbound.types import (
+from services.entrypoints.im_bridge.tests import test_im_bridge_core
+from services.entrypoints.im_bridge.tests.slices import gateway_client, im_bridge_config
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.types import (
     OutboundAdapterKind,
     OutboundChunk,
     PreparedOutboundSend,
 )
-from services.entrypoints.im_bridge.tests import test_im_bridge_core
-from services.entrypoints.im_bridge.tests.slices import gateway_client, im_bridge_config
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 

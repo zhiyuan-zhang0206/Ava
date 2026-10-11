@@ -21,11 +21,11 @@ from services.entrypoints.im_bridge.alert_outbound import (
     AlertOwnerDecision,
 )
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound.types import OutboundIntent, PreparedOutboundSend
+from services.entrypoints.im_bridge.outbound.types import OutboundIntent
 from services.entrypoints.im_bridge.outbound.worker import IMOutboxWorker
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as pool
-from services.entrypoints.im_bridge.types import SendNotStartedError
+from services.entrypoints.im_bridge.types import PreparedOutboundSend, SendNotStartedError
 
 
 def item(fp: str, *, status: str = "firing", severity: str = "error") -> dict[str, Any]:

@@ -7,6 +7,7 @@ from typing import Any, NamedTuple
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from services.entrypoints.im_bridge.cursor_store import PushWatermark
+from services.entrypoints.im_bridge.types import PreparedOutboundSend
 
 
 class OutboundStatus(StrEnum):
@@ -17,37 +18,11 @@ class OutboundStatus(StrEnum):
     FAILED = "failed"
 
 
-class OutboundAdapterKind(StrEnum):
-    TELEGRAM = "telegram-v1"
-    FEISHU = "feishu-v1"
-    WEIXIN = "weixin-v1"
-
-
 class OutboundSourceKind(StrEnum):
     MESSAGE = "message"
     INBOUND = "inbound"
     NOTICE = "notice"
     ALERT_GROUP = "alert_group"
-
-
-class OutboundChunk(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    text: str
-    fallback_text: str | None = None
-    html: bool = False
-
-
-class PreparedOutboundSend(BaseModel):
-    """Credential-free adapter-owned rendering, frozen before acceptance."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    adapter_kind: OutboundAdapterKind
-    account_id: str = Field(min_length=1)
-    chunks: tuple[OutboundChunk, ...] = Field(min_length=1)
-    markdown: bool
-    buttons: tuple[tuple[str, str], ...] | None = None
 
 
 class OutboundSource(BaseModel):

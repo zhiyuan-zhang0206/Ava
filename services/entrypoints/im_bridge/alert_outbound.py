@@ -21,11 +21,11 @@ from services.entrypoints.im_bridge.outbound.types import (
     OutboundIntent,
     OutboundSource,
     OutboundSourceKind,
-    PreparedOutboundSend,
 )
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
     IMAdapter,
+    PreparedOutboundSend,
     SendNotStartedError,
 )
 
