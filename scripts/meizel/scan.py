@@ -37,6 +37,8 @@ _PATCH_CALLS = {
     "unittest.mock.patch.multiple": "multiple",
     "unittest.mock.patch.dict": "dict",
 }
+_MONKEYPATCH_METHODS = frozenset({"setattr", "delattr", "setitem", "delitem"})
+_SYS_MODULES_METHODS = frozenset({"setdefault", "pop", "update", "get"})
 _PATCH_OPTIONS = frozenset({"spec", "create", "spec_set", "autospec", "new_callable"})
 _SHELL_CALLS = frozenset(
     {
@@ -130,6 +132,7 @@ class Scanner:
             ast.Attribute: self.visit_attribute,
             ast.Name: self.visit_name,
             ast.Call: self.visit_call,
+            ast.Subscript: self.visit_subscript,
             ast.FunctionDef: self.visit_function,
             ast.AsyncFunctionDef: self.visit_function,
             ast.ClassDef: self.visit_class_def,
@@ -354,6 +357,8 @@ class Scanner:
             self.patch_call(node, kind)
         elif self.is_monkeypatch(node.func):
             self.monkeypatch_call(node)
+        elif self.is_sys_modules_method(node.func):
+            self.sys_modules_call(node)
         elif callee in _SHELL_CALLS:
             self.shell_call(node)
         fixtures.record_call(self.scan.fixtures, node, callee)
@@ -361,7 +366,7 @@ class Scanner:
 
     @staticmethod
     def is_monkeypatch(func: ast.expr) -> bool:
-        if not isinstance(func, ast.Attribute) or func.attr not in {"setattr", "delattr"}:
+        if not isinstance(func, ast.Attribute) or func.attr not in _MONKEYPATCH_METHODS:
             return False
         receiver = func.value
         name = receiver.id if isinstance(receiver, ast.Name) else getattr(receiver, "attr", "")
@@ -370,7 +375,11 @@ class Scanner:
     def patch_call(self, node: ast.Call, kind: str) -> None:
         first = node.args[0] if node.args else None
         if kind == "patch" or _const_str(first) is not None:
-            self.restrict(node.lineno, "string patch target", _const_str(first) or "")
+            self.string_target(first, node.lineno)
+            if kind == "dict":
+                self.patched_sys_modules(node)
+        elif kind == "dict":
+            self.patched_sys_modules(node)
         elif first is not None and kind in {"object", "multiple"}:
             names = self.patched_names(node, kind)
             self.patch_fact(first, names, node.lineno, f"patch.{kind}")
@@ -390,11 +399,71 @@ class Scanner:
     def monkeypatch_call(self, node: ast.Call) -> None:
         if not node.args:
             return
+        method = cast("ast.Attribute", node.func).attr
+        if method in {"setitem", "delitem"}:
+            if self.is_sys_modules(node.args[0]) and len(node.args) > 1:
+                self.fake_module(node.args[1], node.lineno)
+            return
         if _const_str(node.args[0]) is not None:
-            self.restrict(node.lineno, "string patch target", _const_str(node.args[0]) or "")
+            self.string_target(node.args[0], node.lineno)
             return
         name = _const_str(node.args[1]) if len(node.args) > 1 else None
         self.patch_fact(node.args[0], (name,) if name else (), node.lineno, "monkeypatch")
+
+    def string_target(self, target: ast.expr | None, line: int) -> None:
+        """A string patch target hides a dependency only when it names first-party code."""
+        text = None if target is None else self.string_value(target)
+        if text is None or self.u.is_first_party_name(text):
+            self.restrict(line, "string patch target", text or "")
+
+    # --- sys.modules ---------------------------------------------------------------
+
+    def is_sys_modules(self, expr: ast.expr) -> bool:
+        return self.dotted(expr) == "sys.modules"
+
+    def is_sys_modules_method(self, func: ast.expr) -> bool:
+        return (
+            isinstance(func, ast.Attribute)
+            and func.attr in _SYS_MODULES_METHODS
+            and self.is_sys_modules(func.value)
+        )
+
+    def fake_module(self, key: ast.expr, line: int) -> None:
+        """Reaching a first-party module through `sys.modules` by a literal name."""
+        text = _const_str(key)
+        if text is not None and self.u.is_first_party_name(text):
+            self.restrict(line, "sys.modules access to a first-party module", text)
+
+    def sys_modules_call(self, node: ast.Call) -> None:
+        if not node.args:
+            for keyword in node.keywords:
+                self.fake_module(ast.Constant(keyword.arg), node.lineno)
+            return
+        first = node.args[0]
+        if isinstance(first, ast.Dict):
+            for key in first.keys:
+                if key is not None:
+                    self.fake_module(key, node.lineno)
+        else:
+            self.fake_module(first, node.lineno)
+
+    def visit_subscript(self, node: ast.Subscript) -> None:
+        if self.is_sys_modules(node.value):
+            self.fake_module(node.slice, node.lineno)
+        self.children(node)
+
+    def patched_sys_modules(self, node: ast.Call) -> None:
+        """`patch.dict(sys.modules, {...})` (or the string form) with first-party keys."""
+        first = node.args[0] if node.args else None
+        if first is None or not (self.is_sys_modules(first) or _const_str(first) == "sys.modules"):
+            return
+        values = node.args[1] if len(node.args) > 1 else None
+        if isinstance(values, ast.Dict):
+            for key in values.keys:
+                if key is not None:
+                    self.fake_module(key, node.lineno)
+        for keyword in node.keywords:
+            self.fake_module(ast.Constant(keyword.arg), node.lineno)
 
     def shell_call(self, node: ast.Call) -> None:
         text = _const_str(node.args[0]) if node.args else None
