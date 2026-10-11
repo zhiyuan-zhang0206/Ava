@@ -66,8 +66,8 @@ def _steward_label(_ctx: AvaContext, _agent_id: int) -> str | None:
     return "memory steward"
 
 
-def _wsl_machine() -> str | None:
-    return "wsl"
+def _runner_machine() -> str | None:
+    return "runner-a"
 
 
 def _content() -> str:
@@ -84,9 +84,9 @@ def _content() -> str:
 def test_states_the_id_label_and_machine(monkeypatch: pytest.MonkeyPatch) -> None:
     """The identity line carries id + label + machine."""
     monkeypatch.setattr("agent.graph.prompt.context_notes._own_label", _steward_label)
-    monkeypatch.setattr("agent.graph.prompt.context_notes._machine_clause", _wsl_machine)
+    monkeypatch.setattr("agent.graph.prompt.context_notes._machine_clause", _runner_machine)
 
-    assert _content().startswith("Your Agent ID is 29 (label: memory steward, machine: wsl).")
+    assert _content().startswith("Your Agent ID is 29 (label: memory steward, machine: runner-a).")
 
 
 def test_id_only_when_no_optional_clauses() -> None:
@@ -99,8 +99,8 @@ def test_partial_clauses_render_alone(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _content() == "Your Agent ID is 29 (label: memory steward)."
 
     monkeypatch.setattr("agent.graph.prompt.context_notes._own_label", _no_label)
-    monkeypatch.setattr("agent.graph.prompt.context_notes._machine_clause", _wsl_machine)
-    assert _content() == "Your Agent ID is 29 (machine: wsl)."
+    monkeypatch.setattr("agent.graph.prompt.context_notes._machine_clause", _runner_machine)
+    assert _content() == "Your Agent ID is 29 (machine: runner-a)."
 
 
 def test_workspace_clause_carries_the_concrete_path(

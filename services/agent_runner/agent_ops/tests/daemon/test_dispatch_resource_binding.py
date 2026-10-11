@@ -46,7 +46,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
     def _status(_db: Database, probe_pool: object) -> ClusterStatus:
         seen.append(probe_pool)
         return ClusterStatus(
-            machine_name="win",
+            machine_name="runner-a",
             serve_gateway=False,
             serve_agent_runner=True,
             paused=False,
@@ -66,7 +66,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
     )
 
     assert status == "completed"
-    assert result["machine_name"] == "win"
+    assert result["machine_name"] == "runner-a"
     assert seen == [pool]
 
 

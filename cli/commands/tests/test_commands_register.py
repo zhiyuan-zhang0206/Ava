@@ -173,7 +173,7 @@ def test_register_agent_runner_advertises_ops_url(monkeypatch: pytest.MonkeyPatc
 
     rc = _register_machine_or_die(
         Database.from_settings(),
-        cast(SetupValues, {"machine_name": "wsl"}),
+        cast(SetupValues, {"machine_name": "runner-a"}),
         frozenset({"agent-runner"}),
     )
     assert rc == 0
@@ -198,7 +198,7 @@ def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.M
 
     rc = _register_machine_or_die(
         Database.from_settings(),
-        cast(SetupValues, {"machine_name": "wsl"}),
+        cast(SetupValues, {"machine_name": "runner-a"}),
         frozenset({"agent-runner"}),
     )
     assert rc == 1

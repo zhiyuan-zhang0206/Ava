@@ -50,7 +50,7 @@ _STUB_STATUS_BODY = {
     "cluster": {
         "machines": [
             {
-                "name": "wsl",
+                "name": "runner-a",
                 "role": "agent-runner",
                 "online": True,
                 "paused": False,

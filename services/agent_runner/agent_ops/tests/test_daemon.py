@@ -648,7 +648,7 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
     def _degraded_status(_db: Database, probe_pool: object) -> ClusterStatus:
         assert probe_pool is pool
         return ClusterStatus(
-            machine_name="win",
+            machine_name="runner-a",
             serve_gateway=False,
             serve_agent_runner=True,
             paused=False,

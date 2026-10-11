@@ -69,7 +69,7 @@ async def test_completed_returns_result(monkeypatch: pytest.MonkeyPatch) -> None
     )
     result = await cluster_rpc.dispatch_to_machine(
         _db(),
-        "wsl",
+        "runner-a",
         "spawn-launch-v2",
         {"agent_id": 5, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"},
         retries=0,
@@ -99,7 +99,7 @@ async def test_failed_raises_cluster_op_failed(monkeypatch: pytest.MonkeyPatch) 
         ),
     )
     with pytest.raises(cluster_rpc.ClusterOpFailed) as ei:
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "lifecycle", {}, retries=0)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "lifecycle", {}, retries=0)
     assert ei.value.result == {"error": "boom"}
 
 
@@ -112,7 +112,7 @@ async def test_unknown_status_raises_unreachable(monkeypatch: pytest.MonkeyPatch
         handler=lambda _r: httpx.Response(200, json={"status": "pending", "result": {}}),
     )
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="malformed response"):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=0)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, retries=0)
 
 
 @pytest.mark.asyncio
@@ -120,7 +120,7 @@ async def test_non_200_raises_unreachable(monkeypatch: pytest.MonkeyPatch) -> No
     """A non-200 from the ops server -> ClusterOpUnreachable (not ClusterOpFailed)."""
     _patch(monkeypatch, handler=lambda _r: httpx.Response(503, text="ops down"))
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="503"):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=0)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, retries=0)
 
 
 @pytest.mark.asyncio
@@ -132,7 +132,7 @@ async def test_httpx_error_raises_unreachable(monkeypatch: pytest.MonkeyPatch) -
 
     _patch(monkeypatch, handler=_boom)
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="unreachable"):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=0)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, retries=0)
 
 
 @pytest.mark.asyncio
@@ -150,7 +150,7 @@ async def test_status_probe_unreachable_logs_debug(
         caplog.at_level(logging.DEBUG, logger="ops.cluster.rpc"),
         pytest.raises(cluster_rpc.ClusterOpUnreachable),
     ):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=0)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, retries=0)
     recs = [r for r in caplog.records if "unreachable after" in r.getMessage()]
     assert recs and all(r.levelno == logging.DEBUG for r in recs)
 
@@ -170,7 +170,7 @@ async def test_non_probe_unreachable_stays_warning(
         caplog.at_level(logging.DEBUG, logger="ops.cluster.rpc"),
         pytest.raises(cluster_rpc.ClusterOpUnreachable),
     ):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "spawn-launch-v2", {}, retries=0)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "spawn-launch-v2", {}, retries=0)
     recs = [r for r in caplog.records if "unreachable after" in r.getMessage()]
     assert recs and all(r.levelno == logging.WARNING for r in recs)
 
@@ -194,9 +194,9 @@ async def test_null_gateway_url_raises_unreachable(monkeypatch: pytest.MonkeyPat
     ClusterOpUnreachable (translated from MachineGatewayUrlMissing), NOT the
     target-absent subclass: the row exists, so the machine is not definitively
     gone (task #4143)."""
-    _patch(monkeypatch, lookup_exc=MachineGatewayUrlMissing("wsl advertises no gateway_url"))
+    _patch(monkeypatch, lookup_exc=MachineGatewayUrlMissing("runner-a advertises no gateway_url"))
     with pytest.raises(cluster_rpc.ClusterOpUnreachable) as excinfo:
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=0)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, retries=0)
     assert not isinstance(excinfo.value, cluster_rpc.ClusterOpTargetAbsent)
     assert "cannot resolve an address" in str(excinfo.value)
 
@@ -214,7 +214,7 @@ async def test_provided_ops_url_bypasses_machines_lookup(monkeypatch: pytest.Mon
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {"ok": 1}}),
     )
     result = await cluster_rpc.dispatch_to_url(
-        "wsl", "status_probe", {}, ops_url="http://direct:8106"
+        "runner-a", "status_probe", {}, ops_url="http://direct:8106"
     )
     assert result == {"ok": 1}
     assert str(captured["request"].url) == "http://direct:8106/ops"
@@ -241,7 +241,7 @@ async def test_default_timeout_comes_from_settings(
         return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(cluster_rpc.httpx, "AsyncClient", _client_factory)  # pyright: ignore[reportUnknownArgumentType]
-    await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=0)
+    await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, retries=0)
     assert seen["timeout"].read == 12.5
 
 
@@ -260,7 +260,7 @@ async def test_client_ignores_system_proxy(monkeypatch: pytest.MonkeyPatch) -> N
         return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(cluster_rpc.httpx, "AsyncClient", _client_factory)  # pyright: ignore[reportUnknownArgumentType]
-    await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=0)
+    await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, retries=0)
     assert seen["trust_env"] is False
 
 
@@ -281,7 +281,7 @@ async def test_connect_timeout_capped_by_timeout_s(monkeypatch: pytest.MonkeyPat
         return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(cluster_rpc.httpx, "AsyncClient", _client_factory)  # pyright: ignore[reportUnknownArgumentType]
-    await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, timeout_s=3.0)
+    await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, timeout_s=3.0)
     assert seen["timeout"].connect == 3.0
 
 
@@ -316,7 +316,7 @@ async def test_transient_failure_retries_then_succeeds(monkeypatch: pytest.Monke
     captured = _patch(monkeypatch, handler=_flaky)
     sleeps = _pin_retry(monkeypatch)
 
-    result = await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=1)
+    result = await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, retries=1)
 
     assert result == {"ok": 1}
     assert calls["n"] == 2
@@ -338,7 +338,7 @@ async def test_two_connection_resets_exhaust_single_retry(
     sleeps = _pin_retry(monkeypatch)
 
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="after 2 attempt"):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=1)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, retries=1)
 
     assert len(captured["requests"]) == 2
     assert sleeps == [0.5]
@@ -359,7 +359,7 @@ async def test_retries_exhausted_raises_after_all_attempts(
     sleeps = _pin_retry(monkeypatch)
 
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="after 3 attempt"):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "lifecycle", {}, retries=2)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "lifecycle", {}, retries=2)
 
     assert len(captured["requests"]) == 3  # 1 + 2 retries
     assert sleeps == [0.5, 1.0]
@@ -405,7 +405,7 @@ async def test_non_idempotent_kind_retries_with_stable_idempotency_key(
 
     result = await cluster_rpc.dispatch_to_machine(
         _db(),
-        "wsl",
+        "runner-a",
         "spawn-launch-v2",
         {"agent_id": 5, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"},
         retries=2,
@@ -431,7 +431,7 @@ async def test_caller_supplied_idempotency_key_rides_envelope(
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),
     )
     await cluster_rpc.dispatch_to_machine(
-        _db(), "wsl", "spawn-launch-v2", {}, idempotency_key="my-logical-op-1"
+        _db(), "runner-a", "spawn-launch-v2", {}, idempotency_key="my-logical-op-1"
     )
     body = json.loads(captured["request"].content)
     assert body["idempotency_key"] == "my-logical-op-1"
@@ -450,10 +450,10 @@ async def test_spawn_launch_defaults_to_its_agent_idempotency_key(
     )
 
     for target, payload in (
-        ("wsl", {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"}),
-        ("wsl", {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 42}),
+        ("runner-a", {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"}),
+        ("runner-a", {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 42}),
         ("linux", {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"}),
-        ("wsl", {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000002"}),
+        ("runner-a", {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000002"}),
     ):
         result = await cluster_rpc.dispatch_to_machine(
             _db(), target, "spawn-launch-v2", payload, retries=0
@@ -462,7 +462,7 @@ async def test_spawn_launch_defaults_to_its_agent_idempotency_key(
 
     keys = [json.loads(request.content)["idempotency_key"] for request in captured["requests"]]
     assert keys[0] == keys[1]
-    assert keys[0].startswith("spawn-launch-v2:wsl:42:")
+    assert keys[0].startswith("spawn-launch-v2:runner-a:42:")
     assert keys[2] != keys[0]
     assert keys[3] != keys[0]
 
@@ -470,10 +470,10 @@ async def test_spawn_launch_defaults_to_its_agent_idempotency_key(
 def test_versioned_launch_key_is_stable_within_attempt_and_rotates_between_attempts() -> None:
     first = {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"}
     second = {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000002"}
-    key = cluster_rpc._default_idempotency_key("wsl", "spawn-launch-v2", first)
-    assert key == cluster_rpc._default_idempotency_key("wsl", "spawn-launch-v2", first)
-    assert key != cluster_rpc._default_idempotency_key("wsl", "spawn-launch-v2", second)
-    assert key.startswith("spawn-launch-v2:wsl:42:")
+    key = cluster_rpc._default_idempotency_key("runner-a", "spawn-launch-v2", first)
+    assert key == cluster_rpc._default_idempotency_key("runner-a", "spawn-launch-v2", first)
+    assert key != cluster_rpc._default_idempotency_key("runner-a", "spawn-launch-v2", second)
+    assert key.startswith("spawn-launch-v2:runner-a:42:")
 
 
 @pytest.mark.asyncio
@@ -492,8 +492,8 @@ async def test_only_spawn_launch_reuses_a_business_idempotency_key(
         ("lifecycle", {"trigger_inbound_id": 17, "action": "restart"}),
     )
     for kind, payload in operations:
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", kind, payload, retries=0)
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", kind, payload, retries=0)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", kind, payload, retries=0)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", kind, payload, retries=0)
 
     keys = [json.loads(request.content)["idempotency_key"] for request in captured["requests"]]
     assert keys[0] != keys[1]
@@ -510,7 +510,7 @@ async def test_idempotent_kind_carries_no_key(monkeypatch: pytest.MonkeyPatch) -
         monkeypatch,
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),
     )
-    await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {})
+    await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {})
     body = json.loads(captured["request"].content)
     assert body.get("idempotency_key") is None
 
@@ -530,7 +530,7 @@ async def test_5xx_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     captured = _patch(monkeypatch, handler=_flaky)
     _pin_retry(monkeypatch)
 
-    result = await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=2)
+    result = await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, retries=2)
 
     assert result == {"paused": True}
     assert calls["n"] == 2
@@ -545,7 +545,7 @@ async def test_4xx_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     _pin_retry(monkeypatch)
 
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="returned 404"):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {}, retries=3)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {}, retries=3)
 
     assert len(captured["requests"]) == 1
 
@@ -564,7 +564,7 @@ async def test_cluster_op_failed_is_not_retried(monkeypatch: pytest.MonkeyPatch)
     _pin_retry(monkeypatch)
 
     with pytest.raises(cluster_rpc.ClusterOpFailed):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "spawn-launch-v2", {}, retries=3)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "spawn-launch-v2", {}, retries=3)
 
     assert len(captured["requests"]) == 1
 
@@ -580,7 +580,7 @@ async def test_malformed_response_is_not_retried(monkeypatch: pytest.MonkeyPatch
     _pin_retry(monkeypatch)
 
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="malformed response"):
-        await cluster_rpc.dispatch_to_machine(_db(), "wsl", "spawn-launch-v2", {}, retries=3)
+        await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "spawn-launch-v2", {}, retries=3)
 
     assert len(captured["requests"]) == 1
 
@@ -603,7 +603,7 @@ async def test_retries_default_from_settings(monkeypatch: pytest.MonkeyPatch) ->
     _pin_retry(monkeypatch)
     monkeypatch.setattr(settings.gateway, "cluster_rpc_max_retries", 2)
 
-    await cluster_rpc.dispatch_to_machine(_db(), "wsl", "status_probe", {})
+    await cluster_rpc.dispatch_to_machine(_db(), "runner-a", "status_probe", {})
     assert calls["n"] == 3  # 1 + 2 configured retries
 
 
@@ -619,7 +619,7 @@ async def test_retired_launch_is_rejected_before_machine_lookup(
     with pytest.raises(ValueError, match="unknown op kind"):
         await cluster_rpc.dispatch_to_machine(
             _db(),
-            "wsl",
+            "runner-a",
             "spawn-launch",
             {},
             idempotency_key="historical-key",  # pyright: ignore[reportArgumentType]

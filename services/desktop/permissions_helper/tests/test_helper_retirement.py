@@ -542,6 +542,15 @@ def test_unproven_shutdown_never_boots_out_native_job(
     assert all(args[0] == "print" for args in commands)
 
 
+# A freshly compiled test binary holds no Screen Recording grant, so the region-capture
+# preflight would reject the request before the controlled child ever runs.
+_REGION_GRANT_GUARD = (
+    "    guard CGPreflightScreenCaptureAccess() else {\n"
+    '        throw OpError.bad("Screen Recording grant missing for region capture")\n'
+    "    }\n"
+)
+
+
 @pytest.mark.skipif(
     sys.platform != "darwin" or shutil.which("swiftc") is None,
     reason="native serial helper request and Foundation child contract",
@@ -558,8 +567,12 @@ def test_helper_shutdown_waits_for_inflight_gui_child_before_acknowledging() -> 
         ready, release = home / "child-ready", home / "child-release"
         script = home / "child.sh"
         script.write_text('touch "$1"\nwhile [ ! -e "$2" ]; do sleep 0.01; done\n')
-        source = lifecycle._SOURCE.read_text().replace("    reportResponsiblePID()\n", "")
-        source = source.replace("    registerPermissions()\n", "")
+        source = (
+            lifecycle._SOURCE.read_text()
+            .replace("    reportResponsiblePID()\n", "")
+            .replace("    registerPermissions()\n", "")
+            .replace(_REGION_GRANT_GUARD, "")
+        )
         source = source.replace(
             'URL(fileURLWithPath: "/usr/sbin/screencapture")', 'URL(fileURLWithPath: "/bin/sh")'
         )
@@ -573,7 +586,7 @@ def test_helper_shutdown_waits_for_inflight_gui_child_before_acknowledging() -> 
         compiled = subprocess.run(
             ["swiftc", str(program), "-o", str(executable)],
             capture_output=True,
-            timeout=30,
+            timeout=120,
             check=False,
         )
         assert compiled.returncode == 0, compiled.stderr.decode()

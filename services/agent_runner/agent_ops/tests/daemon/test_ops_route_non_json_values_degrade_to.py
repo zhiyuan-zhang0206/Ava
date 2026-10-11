@@ -364,7 +364,7 @@ def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -
     )
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
     pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
-    set_identity(name="wsl", role="agent-runner")
+    set_identity(name="runner-a", role="agent-runner")
     try:
         daemon._register_boot()
     finally:
@@ -395,7 +395,7 @@ def test_register_boot_failure_does_not_stop_the_daemon(
 
     monkeypatch.setattr(daemon._log, "exception", log_exception)
 
-    set_identity(name="wsl", role="agent-runner")
+    set_identity(name="runner-a", role="agent-runner")
     try:
         daemon._register_boot()  # must not raise
     finally:
