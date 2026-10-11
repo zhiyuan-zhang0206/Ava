@@ -13,8 +13,8 @@ from typing import Any, cast
 import pytest
 
 from base.daemon.health import DaemonProbe
-from cli.commands._repo import ServiceSpec
 from cli.commands.lifecycle import root_driver as driver
+from ops.roster.service_spec import ServiceSpec
 
 # Keep the public readiness entry point real when this owner suite reaches it.
 pytestmark = pytest.mark.real_service_readiness_gate
@@ -172,14 +172,6 @@ def test_collector_config_bytes_change_the_live_unit_generation(
     config.write_text("receivers: {otlp: {protocols: {http: {}}}}\n")
     after = driver.tree_manifest((collector,), tmp_path, roles=frozenset({"gateway"}))
     assert driver._changed_units(after, live) == {"otel-collector"}
-
-
-def test_windows_adapter_gap_is_explicit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(driver.sys, "platform", "win32")
-    with pytest.raises(RuntimeError, match="Windows root supervision requires"):
-        driver._bring_up_root(
-            tmp_path, tmp_path, tmp_path / "manifest", object(), {}, retained_children=[]
-        )
 
 
 def test_obsolete_custody_records_do_not_block_an_absent_root(
@@ -654,9 +646,6 @@ def test_direct_child_cannot_be_reaped_by_an_unrelated_subprocess(
     import time
 
     import psutil
-
-    if sys.platform == "win32":
-        pytest.skip("POSIX child reaping contract")
 
     def command(_run: Path, _manifest: Path, _runtime: object = None) -> list[str]:
         return [sys.executable, "-c", "pass"]

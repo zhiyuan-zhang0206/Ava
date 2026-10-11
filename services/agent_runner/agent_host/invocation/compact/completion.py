@@ -30,7 +30,7 @@ async def close_terminal(
         incarnation.generation,
         incarnation.owner,
     ):
-        await recover_native_cancel(pool, saver, graph, incarnation, resources=resources)
+        await recover_native_cancel(pool, incarnation)
     await settle_native_invocation(
         pool,
         saver,

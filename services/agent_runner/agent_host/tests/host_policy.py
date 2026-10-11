@@ -26,7 +26,6 @@ def configured_policy() -> HostPolicy:
             clock_factory=Clock.from_settings,
             timestamps_enabled=lambda: settings.general.message_timestamps,
         ),
-        recovery_wake_enabled=lambda: settings.daemon.hosted_crash_recovery_wake_enabled,
         recrash_reap_enabled=lambda: settings.daemon.hosted_recrash_prompt_reap_enabled,
         reconcile_inputs=ReconcileReadInputs(
             stale_claimed_seconds=lambda: (

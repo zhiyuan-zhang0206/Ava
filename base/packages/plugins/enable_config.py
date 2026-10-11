@@ -311,7 +311,7 @@ def installed_plugin_dirs() -> dict[str, Path]:
     ServiceSpecs into `build_services()`. The roster is a machine/cluster concern
     and must not depend on the agent-plugin-registration plane; a plugin gates its
     own service via an explicit settings field in `ServiceSpec.gate` (e.g.
-    task-maintenance's `AVA_TASK_MAINTENANCE_ENABLED`).
+    task-maintenance's Fleet `task_maintenance_enabled`).
     """
     return discover_plugins()
 
@@ -391,16 +391,11 @@ def _update_one_disk_image(name: str, plugin_dir: Path) -> PluginUpdateEntry:
         cls = declared_config_class(name, plugin_dir)
         if cls is None:
             return PluginUpdateEntry(name=name, status="skipped", detail="no default_config.py")
-        from base.config.admin.plugin_config import import_legacy_config
-        from base.packages.plugin_config_images import PluginConfigOwner
-        from base.packages.plugins.config_registration import disk_image_path
-
-        imported = import_legacy_config(PluginConfigOwner(name, cls, disk_image_path(name)))
         added, removed = merge_disk_image_schema(name, cls)
     except Exception as e:
         return PluginUpdateEntry(name=name, status="error", detail=str(e))
 
-    if not added and not removed and not imported:
+    if not added and not removed:
         return PluginUpdateEntry(name=name, status="no_diff")
     return PluginUpdateEntry(
         name=name, status="updated", added=sorted(added), removed=sorted(removed)

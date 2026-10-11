@@ -1,10 +1,20 @@
 ---
 type: doc
 title: Hosted-turn liveness recovery
-description: Delivery-watchdog job 6 — wedge detection for hosted `running` turns against the agent-host progress heartbeat, and the committed recovery wake (task #1712).
+description: Observe stalled turns and bound local cancellation without force/resurrect recovery.
 tags: []
 ---
 
-# Hosted-turn liveness recovery
+# Hosted turn liveness
 
-**Hosted-turn liveness recovery** (`turn_liveness.py`, task #1712) — every round, confirm each hosted `running` agent whose DB activity is older than the 2400 s wedged-agent budget (`wedged_agent_inbound_age_seconds`) against the agent-host's independent 15 s Redis progress heartbeat (`host_turn_progress:<machine>`, 60 s TTL): a missing heartbeat or equally stale per-turn marks is a wedged turn. Recovery force-terminates the incarnation and commits the marked `hosted_turn_recovery` chat in the terminating transaction itself (`terminate_agent_op(recovery_wake=...)`; the wake's id sits above the force fence and its `created_at` is the statement clock, both of which the resurrection trigger requires) — so a committed recovery always has its wake, a failed insert rolls the force back and leaves the agent running and wedged for a later scan, and guarded resurrection retries survive restarts; the marker is the system-notice carve-out (task #3687) that lets the recovery wake its owner — one attempt per agent per persisted 10-minute cooldown, at most four recoveries at once, with `host_turn_stall_detected` evidence.
+The watchdog no longer force-terminates and resurrects wedged hosted turns.
+Stalled delivery and machine/host health remain observable through their
+existing alerts and probes. The host's no-progress guard cancels its local task;
+cleanup has a finite deadline and a refused unwind requires process shutdown.
+Neither path automatically resumes old graph work.
+
+After fixing or restarting the host, new chat or normal heartbeat input can
+wake a runnable agent. A permanent provider rejection suppresses background
+heartbeat and recovery. Fresh chat is an explicit attempt after the fix.
+The home machine and filesystem stay authoritative; no executor migration is
+performed.

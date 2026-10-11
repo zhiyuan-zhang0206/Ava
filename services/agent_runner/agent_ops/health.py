@@ -1,6 +1,6 @@
 """Health reporting for the agent-runner ops control plane.
 
-The wedge threshold follows the rollout family's single no-progress bound with
+The wedge threshold follows the deploy family's single no-progress bound with
 a five-minute margin. Health degrades only after work has outlived that shared
 safety budget and the margin for observation and recovery.
 """
@@ -12,7 +12,7 @@ import time
 from base.daemon.health_schema import DEGRADED, OK, component
 from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
 
-_WEDGE_AFTER_S = NO_PROGRESS_TIMEOUT_S + 300.0  # 900s no-progress bound + 5min margin = 1200s
+_WEDGE_AFTER_S = NO_PROGRESS_TIMEOUT_S + 300.0  # 360s no-progress bound + 5min margin = 660s
 
 
 def ops_components(

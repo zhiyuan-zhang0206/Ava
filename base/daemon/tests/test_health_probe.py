@@ -1,5 +1,5 @@
 """`base.daemon.health` probe paths: probe_daemon/probe_home fresh-vs-stale verdicts,
-commit/identity checks, and the Windows 8106 port-warning; split from base/daemon/tests/test_health.py (task #4922)."""
+commit/identity checks; split from base/daemon/tests/test_health.py (task #4922)."""
 
 from __future__ import annotations
 
@@ -204,7 +204,7 @@ async def test_probe_rejects_daemon_from_another_home(
     """A daemon of another UNIT (different `$AVA_HOME`) holding our port is not
     our daemon, even with a matching name and a pid we would accept.
 
-    Verdict PORT_TAKEN — terminal. This is the `win`/WSL2 case: the foreign daemon
+    Verdict PORT_TAKEN — terminal. This is the shared-loopback case: the foreign daemon
     runs under its own home's socket, so no respawn this unit can
     perform frees the port, and the 2026-07-29 loop respawned into that wall every
     60s for hours. The two units there were in the SAME cluster (#977), which is

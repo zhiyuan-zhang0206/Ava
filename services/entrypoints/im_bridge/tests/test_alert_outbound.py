@@ -352,7 +352,7 @@ async def test_actual_daemon_rpc_auth_and_new_path_does_not_claim_legacy_success
     server = await start_health_server(
         "im_bridge",
         0,
-        extra_routes={("POST", "/send/alert-outbound-v1"): service.handle},
+        extra_routes={("POST", "/send/alert-outbound"): service.handle},
         auth_digests=frozenset({sha256(b"mock-api-token").hexdigest()}),
         image=unknown_image(),
     )
@@ -360,10 +360,10 @@ async def test_actual_daemon_rpc_auth_and_new_path_does_not_claim_legacy_success
         port = server.sockets[0].getsockname()[1]
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
             payload = {"group_id": group, "source_origin": "native-v1"}
-            assert (await client.post("/send/alert-outbound-v1", json=payload)).status_code == 401
+            assert (await client.post("/send/alert-outbound", json=payload)).status_code == 401
             auth = {"Authorization": "Bearer mock-api-token"}
             assert (await client.post("/send", json=payload, headers=auth)).status_code == 404
-            response = await client.post("/send/alert-outbound-v1", json=payload, headers=auth)
+            response = await client.post("/send/alert-outbound", json=payload, headers=auth)
             assert response.status_code == 200 and response.json()["intent_ids"]
         with pool.connection() as conn:
             assert native_sent_count(conn, {group}) == 0

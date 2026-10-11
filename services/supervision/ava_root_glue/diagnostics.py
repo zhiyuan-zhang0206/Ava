@@ -272,7 +272,7 @@ class RootHealthRounds:
             from base import telemetry
 
             try:
-                await asyncio.to_thread(telemetry.sync, timeout=2, bounded=True)
+                await asyncio.to_thread(telemetry.sync, timeout=2)
             except BaseException as exc:
                 failures.append(exc)
         try:

@@ -205,20 +205,20 @@ def test_docs_and_frontend_check_directories_without_widening_python_rules(
     assert "file is 801 lines" not in output
 
 
-def test_baseline_introduction_skips_guard_when_absent_from_head(
+def test_comparison_revision_without_baseline_directory_fails_the_guard(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _git(tmp_path, "rm", "-r", baseline_shards.SHARD_DIR)
     _write(tmp_path, "README.md", 1)
     _git(tmp_path, "add", "README.md")
-    _git(tmp_path, "commit", "--quiet", "-m", "Before baseline introduction")
+    _git(tmp_path, "commit", "--quiet", "-m", "No baseline directory")
     _write(tmp_path, "tests/oversized.py", 801)
     _baseline(tmp_path)
 
     assert lcs.main([], repo_root=tmp_path) == 1
-    captured = capsys.readouterr()
-    assert "hard ceiling" in captured.out
-    assert "baseline guard skipped" in captured.err
+    output = capsys.readouterr().out
+    assert "hard ceiling" in output
+    assert f"{baseline_shards.SHARD_DIR}: baseline directory missing at" in output
 
 
 def test_non_git_checkout_fails_the_guard(
@@ -226,9 +226,7 @@ def test_non_git_checkout_fails_the_guard(
 ) -> None:
     (tmp_path / ".git").rename(tmp_path / "saved-git")
     assert lcs.main([], repo_root=tmp_path) == 1
-    captured = capsys.readouterr()
-    assert "baseline guard skipped" not in captured.err
-    assert "cannot resolve" in captured.out
+    assert "cannot resolve" in capsys.readouterr().out
 
 
 def test_missing_default_base_fails_instead_of_using_head(
@@ -727,23 +725,3 @@ def test_retired_budget_sections_cannot_be_reintroduced(
     (directory / "tests.json").write_text(json.dumps({kind: entries}), encoding="utf-8")
     assert lcs.main([], repo_root=tmp_path) == 1
     assert f"unknown section '{kind}'" in capsys.readouterr().err
-
-
-def test_zeroed_historical_budgets_do_not_restore_exemptions(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    retired: dict[str, dict[str, int]] = {
-        kind: {} for kind in ("files", "directories", "complexity", "nesting")
-    }
-    directory = _clear_baseline_dir(tmp_path)
-    (directory / "tests.json").write_text(json.dumps(retired), encoding="utf-8")
-    _commit_baseline(tmp_path)
-    _baseline(tmp_path)
-    assert lcs.main([], repo_root=tmp_path) == 0
-    assert capsys.readouterr().out == ""
-    retired["files"] = {"tests/big.py": 900}
-    (directory / "tests.json").write_text(json.dumps(retired), encoding="utf-8")
-    _commit_baseline(tmp_path)
-    _baseline(tmp_path)
-    assert lcs.main([], repo_root=tmp_path) == 1
-    assert "retired files baseline must be empty" in capsys.readouterr().out

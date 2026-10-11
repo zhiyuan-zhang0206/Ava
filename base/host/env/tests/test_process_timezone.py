@@ -38,29 +38,3 @@ assert "base.config" not in sys.modules
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
-
-
-def test_process_timezone_exports_without_platform_tzset() -> None:
-    result = run_bounded(
-        [
-            sys.executable,
-            "-c",
-            """
-import os
-import sys
-import time
-from base.host.env.dotenv_boot import apply_process_timezone
-
-if hasattr(time, "tzset"):
-    del time.tzset
-apply_process_timezone("Asia/Shanghai")
-assert os.environ["TZ"] == "Asia/Shanghai"
-assert "base.config" not in sys.modules
-""",
-        ],
-        env={**os.environ, "TZ": "UTC"},
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stderr

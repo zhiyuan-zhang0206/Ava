@@ -358,19 +358,6 @@ def test_impersonation_entry_grant_reaches_a_cluster_born_before_the_table(
     assert row == (1,)
 
 
-def test_refresh_revokes_the_alert_writes_an_earlier_release_granted(runner_db: str) -> None:
-    """A cluster born when the runner matrix granted INSERT/UPDATE on alerts
-    converges to read-only: the grant refresh revokes what the matrix no longer
-    names."""
-    _grant_runner(runner_db)
-    with psycopg.connect(runner_db, autocommit=True) as conn:
-        conn.execute("GRANT INSERT, UPDATE ON alerts TO ava_runner")
-
-    _grant_runner(runner_db)
-    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
-        _assert_alert_writes_denied(conn)
-
-
 def test_understanding_queue_insert_grant_reaches_a_cluster_born_before_the_entry(
     runner_db: str,
 ) -> None:

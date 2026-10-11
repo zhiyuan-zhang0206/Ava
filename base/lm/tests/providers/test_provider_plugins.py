@@ -22,7 +22,7 @@ from langchain_core.messages import AIMessage
 from base import paths
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import pricing, provider_api, stop
-from base.lm.catalog import CatalogBuilder, ModelCatalog, provider_contract
+from base.lm.catalog import CatalogBuilder, ModelCatalog
 from base.lm.factory import (
     build_chat_model,
     model_supports_vision,
@@ -43,6 +43,7 @@ _REPO_PROVIDER_PLUGINS = {
     "lm_google",
     "lm_moonshot",
     "lm_openai",
+    "lm_typesafe",
     "lm_xiaomi",
     "lm_zhipu",
 }
@@ -81,7 +82,9 @@ _REPO_MODEL_VENDORS = {
     "gpt-6.1-sol": "openai",
     "gpt-6.1-sol-fast": "openai",
     "gpt-6-luna": "openai",
+    "gpt-6-luna-decisions": "openai",
     "gpt-6-luna-fast": "openai",
+    "jev-1.13.0": "typesafe",
     "kimi-k3": "moonshot",
     "mimo-v2.5-pro": "xiaomi",
     "mimo-v2.6-pro": "xiaomi",
@@ -123,26 +126,15 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 
 
 def test_repo_model_vendor_vocabulary_is_complete(model_catalog: ModelCatalog) -> None:
-    assert set(model_catalog.models) == _REPO_MODEL_VENDORS.keys()
+    assert {*model_catalog.models, *model_catalog.decision_models} == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
-    # what remains is the catalog-only services plus models the registry no
-    # longer carries — historical usage stays priceable from the archive.
+    # what remains is the catalog-only services plus the DeepSeek names the
+    # page-reconciliation workflow still prices.
     assert set(model_catalog.prices.archive) == {
         "gemini-embedding-2",
-        "deepseek-v4.1-flash-expires-on-0910",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
-        "mimo-v2.5-pro-ultraspeed",
-        "claude-opus-4-8",
-        "claude-opus-4-7",
-        "claude-opus-4-6",
-        "claude-sonnet-4-6",
-        "claude-haiku-4-5",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gpt-5.5",
-        "gpt-5.4-mini",
     }
     assert {
         model: pricing.model_vendor(model, prices=model_catalog.prices)
@@ -347,8 +339,6 @@ def _assert_mimo_models_registered_with_pricing_vendor(catalog: ModelCatalog) ->
     assert {model for model in catalog.models if model.startswith("mimo-")} == mimo_models
     assert set(catalog.supported_models["mimo"]) == mimo_models
     assert catalog.models["mimo-v2.5-pro"].superseded_by == "mimo-v2.6-pro"
-    assert "mimo-v2.5-pro-ultraspeed" not in catalog.prices.plugin
-    assert pricing.model_vendor("mimo-v2.5-pro-ultraspeed", prices=catalog.prices) == "xiaomi"
     assert pricing.model_vendor("mimo-v2.5-pro", prices=catalog.prices) == "xiaomi"
 
 
@@ -387,7 +377,6 @@ def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None])
     assert catalog.knowledge_cutoffs["testp-1"] == "2026-01"
     assert provider_key_of_model("testp-1", catalog=catalog) == "testp"
     assert "testp-1" in catalog.prices
-    assert next(iter(pricing.RETIRED_MODEL_PRICING)) not in catalog.prices
 
     llm = build_chat_model(
         "testp-1", catalog=catalog, llm_override="", overrides=ModelOverrides.from_pins({})
@@ -777,24 +766,3 @@ def test_provider_only_dir_is_not_a_plugin(provider_plugin: Callable[..., None])
     catalog = build_model_catalog()
     assert "kept-1" in catalog.models
     assert "orphan-provider-1" not in catalog.models
-
-
-@pytest.mark.parametrize(
-    "name",
-    [
-        "PROVIDER_API_VERSION",
-        "AttachPolicy",
-        "BuildContext",
-        "InferenceSpeed",
-        "PricePeriod",
-        "PriceRates",
-        "PriceTier",
-        "PriceWindow",
-        "ProviderBinding",
-        "ProviderContribution",
-        "ProviderRegistrationError",
-        "ThinkingConfig",
-    ],
-)
-def test_provider_api_exposes_the_single_declaration_owner(name: str) -> None:
-    assert getattr(provider_api, name) is getattr(provider_contract, name)

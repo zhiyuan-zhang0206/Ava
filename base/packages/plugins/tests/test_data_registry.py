@@ -45,7 +45,7 @@ def _metric(name: str = "demo_metric", **over: Any) -> MetricSpec:
         "title": "Demo",
         "event_name": "turn_end",
         "category": "telemetry",
-        "query": "SELECT count(*) FROM events WHERE event_name = 'turn_end'",
+        "query": "SELECT count(*) FROM agents_meta WHERE event_name = 'turn_end'",
     }
     data.update(over)
     return MetricSpec(**data)
@@ -278,7 +278,7 @@ def test_a_duplicate_metric_within_one_plugin_is_refused(
 def test_an_invalid_query_template_refuses_the_plugin(
     reported: list[tuple[str, BaseException]],
 ) -> None:
-    bad = _metric("bad", query="SELECT pg_sleep(1) FROM events")
+    bad = _metric("bad", query="SELECT pg_sleep(1) FROM agents_meta")
 
     registry, refused = build_data_registry(
         [_face("good", (_metric("good"),)), _face("bad_plugin", (_metric("ok"), bad))]

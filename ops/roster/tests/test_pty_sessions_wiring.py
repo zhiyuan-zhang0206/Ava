@@ -9,8 +9,6 @@ derives its stop window from.
 
 from __future__ import annotations
 
-import pytest
-
 from base.cluster.machine import MachineIdentity
 from ops import roster, spec
 from ops.roster import service_spec
@@ -57,23 +55,3 @@ def test_the_stop_window_covers_the_services_own_closure() -> None:
     assert shutdown_budget.SHUTDOWN_CEILING_S > (
         shutdown_budget.SHUTDOWN_HANGUP_WAIT_S + shutdown_budget.SHUTDOWN_KILL_S
     )
-
-
-@pytest.mark.parametrize(("sockets", "gated"), [(False, True), (True, False)])
-def test_the_service_is_gated_out_where_there_are_no_unix_sockets(
-    monkeypatch: pytest.MonkeyPatch,
-    sockets: bool,
-    gated: bool,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    monkeypatch.setattr("ops.spec.unix_sockets_available", lambda: sockets)
-    reason = {
-        s.session: why
-        for s, why in spec.services_for_capabilities_annotated(
-            frozenset({"agent-runner"}), machine=machine_identity
-        )
-    }["pty-sessions"]
-    assert (reason is not None) is gated
-    if gated:
-        assert reason is not None and "POSIX-only" in reason

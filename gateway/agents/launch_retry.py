@@ -55,7 +55,7 @@ async def retry_launch(
         await rpc.dispatch_to_machine(
             request.app.state.db,
             target_machine=target,
-            kind="launch-reconcile-v1",
+            kind="launch-reconcile",
             payload=LaunchReconcileRequest(launch_attempt_id=accepted.launch_attempt_id).model_dump(
                 mode="json"
             ),

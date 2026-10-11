@@ -48,8 +48,8 @@ def test_begin_maintenance_records_and_refresh_re_stamps_the_shepherd() -> None:
     assert after.driver == stamp
 
 
-def test_a_legacy_journal_without_a_shepherd_reads_none() -> None:
-    """A pre-#3270 journal is valid state with missing evidence, not an error."""
+def test_a_journal_without_a_shepherd_reads_none() -> None:
+    """A journal without a shepherd is valid state with missing evidence, not an error."""
     from base.deploy.maintenance.state import MaintenanceHold
 
     pause_owner.state_path().write_text(
@@ -137,9 +137,7 @@ def test_journal_written_with_the_retired_repair_record_still_decodes() -> None:
     assert "repair_record" not in hold.encode()
 
 
-@pytest.mark.parametrize(
-    "phase", ["preparing", "draining", "drained", "stopping", "stopped", "starting", "ready"]
-)
+@pytest.mark.parametrize("phase", ["preparing", "draining", "drained", "stopping", "stopped"])
 def test_maintenance_journal_restores_owned_phase_vocabulary(phase: str) -> None:
     import json
 
@@ -150,12 +148,10 @@ def test_maintenance_journal_restores_owned_phase_vocabulary(phase: str) -> None
     restored = MaintenanceHold.decode(json.loads(json.dumps(wire)))
     assert restored.phase is MaintenancePhase(phase)
     assert restored.encode() == wire
-    assert restored.settled_after_drain(7) == (
-        phase in {"drained", "stopping", "stopped", "starting", "ready"}
-    )
+    assert restored.settled_after_drain(7) == (phase in {"drained", "stopping", "stopped"})
 
 
-@pytest.mark.parametrize("phase", ["future", None, 7, [], {}])
+@pytest.mark.parametrize("phase", ["future", "starting", "ready", None, 7, [], {}])
 def test_maintenance_journal_rejects_unknown_phase(phase: object) -> None:
     from base.deploy.maintenance.state import MaintenanceHold
 

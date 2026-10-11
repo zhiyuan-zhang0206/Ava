@@ -30,7 +30,7 @@ from base.native_process.ownership import OwnedProcess
         (OwnedProcess(41, 100.0, None), OwnedProcess(41, 100.01, None), False),
     ],
 )
-@pytest.mark.parametrize("platform", ["linux", "darwin", "win32"])
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
 def test_same_birth(
     monkeypatch: pytest.MonkeyPatch,
     left: OwnedProcess,
@@ -89,7 +89,6 @@ def test_invalid_current_ticks_never_prove_native_exit(
             observe()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal custody")
 def test_native_signal_keeps_exact_birth_and_preserves_sibling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -177,7 +176,7 @@ def test_native_descriptor_retains_exited_task_without_inheritance(
 def test_native_boot_scope_is_explicit_and_stable() -> None:
     first = native_boot_id()
     assert first == native_boot_id()
-    assert (first is None) == (sys.platform == "win32")
+    assert first is not None
 
 
 def test_recapture_retains_original_receipt_per_native_birth(

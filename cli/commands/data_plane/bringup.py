@@ -425,8 +425,7 @@ def adopt_gateway_login(home: Path, endpoint: str) -> None:
 
 
 def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) -> Generation:
-    """Birth: groups, monitor, owner and groups demoted to NOLOGIN, ledger,
-    generation 0."""
+    """Birth: groups, monitor, ledger, generation 0."""
     from functools import partial
 
     from base import cluster
@@ -436,7 +435,6 @@ def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) 
     groups = authority.Groups(gateway=authority.GATEWAY_GROUP, runner=authority.RUNNER_GROUP)
     authority.ensure_groups(conn, owner=owner, database=database, groups=groups)
     authority.ensure_monitor(conn, database=database)
-    authority.retire_legacy_logins(conn, owner=owner, groups=groups)
     authority.create_ledger(home, owner=owner, groups=groups)
     authority.ensure_pooler_admin(home, encrypt=partial(authority.scram_verifier, conn))
     authority.mint_generation(conn, home)

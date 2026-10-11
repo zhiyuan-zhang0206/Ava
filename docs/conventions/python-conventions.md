@@ -117,9 +117,7 @@ layering and single-owner checks remain enforced during this migration.
 
 Rules 4, 5, 6 and 8 reject every measured site directly. Their retired
 `private_imports`, `owner_bypasses`, `path_imports` and `patch_targets` baseline fields may not
-be reintroduced, even empty. Historical comparison revisions may carry empty
-retired fields; nonempty historical locality/path-import fields are invalid too.
-Historical patch-target fields are parsed and discarded without granting any allowance.
+be reintroduced, even empty, in the working tree or in the comparison revision.
 
 Only ambient-state sites retain exact `path::target -> site count` maps in their
 baseline shards until the remaining debt is cleared. Their guards remain shrink-only,
@@ -271,10 +269,8 @@ The remaining site-exemption guard selects one comparison commit:
    can explicitly set `LINT_STRUCTURE_BASELINE_BASE=HEAD` or another fetched revision.
 
 Git rename-query and historical-read failures are hard errors. The guard reads the
-baseline at the selected commit. Only a valid revision that predates the baseline
-directory emits a note and skips comparison. Empty retired budget sections in the comparison
-revision are discarded; nonempty retired sections or malformed baselines fail.
-Retired sections are always refused in the working tree, including empty ones.
+baseline at the selected commit; a revision without the baseline directory, with a
+retired section (even an empty one) or with a malformed baseline fails.
 Every remaining site section stays shrink-only when a lint is added or its rule
 version changes; a new measurement does not authorize new exemptions. This
 catches raises after committing them too:
@@ -455,16 +451,15 @@ running. Use `base.host.proc.run_bounded(argv, timeout=...)` instead — same sh
 but it kills the whole tree (descendants enumerated *before* the parent dies)
 and still raises `TimeoutExpired`, so caller control flow is unchanged.
 
-The gap is invisible on POSIX for a well-behaved child and load-bearing on
-Windows, where `C:\Program Files\Git\cmd\git.exe` is a launcher stub for the real
-git: the fleet's Windows agent-runner accumulated 66 orphaned `git.exe` + 66
-`ssh.exe` + 63 `sh.exe`, all below a killed stub. Anything with a shell in the
-middle (`shell=True`, a `-lc` wrapper) has the same shape on every platform.
+The gap is invisible for a well-behaved child and load-bearing when the
+spawned process is a launcher for the real work (git, ssh): orphaned `git` +
+`ssh` + `sh` processes accumulated below a killed launcher. Anything with a
+shell in the middle (`shell=True`, a `-lc` wrapper) has the same shape.
 
 Git specifically: pass `env=base.deploy.git.gitenv.git_env()` so a credential prompt
 errors instead of blocking on a terminal that does not exist, and ssh neither
 asks nor dials unbounded. Note that `ConnectTimeout` is not the bound — an
-`ssh.exe` on that box reached a state where its own timeout never fired, so the
+`ssh` process can reach a state where its own timeout never fires, so the
 caller's bound is the only real one.
 
 Not lint-enforced repo-wide yet; the modules that drive git are guarded by

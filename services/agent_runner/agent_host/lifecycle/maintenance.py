@@ -5,8 +5,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from uuid import UUID
 
-import psycopg
-from psycopg_pool import AsyncConnectionPool, PoolTimeout
+from psycopg_pool import AsyncConnectionPool
 
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.deploy.maintenance import admission
@@ -14,27 +13,6 @@ from base.log import logger
 from services.agent_runner.agent_host.dispatcher import PendingInboundWake
 
 FailureFences = dict[int, tuple[str | None, datetime | None]]
-
-# The same database-outage family the turn loop and db_recovery already treat
-# as a recoverable channel break (host.py `_invoke_until_done`, db_recovery).
-# A turn raising one of these during a hold did not provably fail its
-# continuation: the restart pointer and checkpoint survive exactly as after a
-# host crash, and the crash-recovery path re-drives them. Such receipts are
-# graded as crash-equivalent: recorded for audit, never latched as blocking.
-#
-# The bare `TimeoutError` is deliberately NOT in the family (issue #2051):
-# since Python 3.11 `asyncio.TimeoutError` is the builtin, so a plain
-# `TimeoutError` cannot tell a database channel hang from any other bounded
-# await — an LLM TTFT/compact timeout raises exactly this. Grading those as
-# crash-equivalent swallowed them as undelivered: no fence, no failure latch,
-# the held-control path re-drove (including real model calls) forever and the
-# drain could never certify nor be repaired. Every database channel hang
-# already surfaces as a family member: libpq `connect_timeout` and the server
-# `statement_timeout` raise `psycopg.OperationalError`, pool acquisition
-# raises `PoolTimeout`, and the drain path's bounded DB phases
-# (db_recovery.database_phase / _refresh_owner) convert their asyncio
-# timeouts into `PoolTimeout`.
-CRASH_EQUIVALENT_FAILURES = (psycopg.OperationalError, PoolTimeout)
 
 
 async def record_failure(agent_id: int, exc: BaseException, fences: FailureFences) -> None:
@@ -66,15 +44,6 @@ async def record_failure(agent_id: int, exc: BaseException, fences: FailureFence
             phase=hold.phase,
             category=category,
         )
-        return
-    if isinstance(exc, CRASH_EQUIVALENT_FAILURES):
-        # The receipt channel broke, not the continuation: the left-behind
-        # state is crash-equivalent and durable. Record it for audit WITHOUT
-        # latching a blocking failure or a fence — the next wake re-drives the
-        # held-control path, whose explicit re-flush must succeed before the
-        # restart is claimed and the drain can certify.
-        fences.pop(agent_id, None)
-        await asyncio.to_thread(admission.record_undelivered, agent_id, category)
         return
     fences[agent_id] = (current.holder, current.acquired_at)
     await asyncio.to_thread(admission.record_failure, agent_id, category)
@@ -109,10 +78,13 @@ async def run_held(
     control: Callable[[int, str], Awaitable[None]],
 ) -> bool:
     current = admission.snapshot()
-    if current is None:
+    if current is None or current.maintenance is None:
         fences.pop(agent_id, None)
         return False
-    failed = fences.get(agent_id) in ((None, None), (current.holder, current.acquired_at))
+    failed = agent_id in current.maintenance.failures or fences.get(agent_id) in (
+        (None, None),
+        (current.holder, current.acquired_at),
+    )
     if not failed and admission.pending_command(agent_id) is not None:
         await control(agent_id, status)
     return True
@@ -123,11 +95,11 @@ def pending_wakes(fences: FailureFences) -> list[PendingInboundWake] | None:
     if current is None or current.maintenance is None:
         return None
     # A stale-turn cancel could interrupt the action maintenance is draining.
-    # Undelivered receipts carry no fence, so their agents keep waking: the
-    # held-control re-drive is what completes a crash-equivalent receipt.
+    # Persisted failures also fence fresh hosts until an explicit resume.
     return [
         PendingInboundWake(agent_id=agent, stale=False)
         for agent in current.maintenance.commands
-        if admission.pending_command(agent) is not None
+        if agent not in current.maintenance.failures
+        and admission.pending_command(agent) is not None
         and fences.get(agent) not in ((None, None), (current.holder, current.acquired_at))
     ]

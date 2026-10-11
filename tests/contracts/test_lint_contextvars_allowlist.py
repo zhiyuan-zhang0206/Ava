@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_RUFF = Path(sys.executable).parent / ("ruff.exe" if sys.platform == "win32" else "ruff")
+_RUFF = Path(sys.executable).parent / "ruff"
 
 
 def _ruff_check(path: Path) -> subprocess.CompletedProcess[str]:

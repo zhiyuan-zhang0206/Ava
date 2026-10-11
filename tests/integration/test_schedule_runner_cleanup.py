@@ -16,8 +16,6 @@ import pytest
 
 from base.config import settings
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="gateway runner is POSIX-only")
-
 _SCHEDULE_INPUTS = """
 from functools import partial
 from base.config import ConfigBoot

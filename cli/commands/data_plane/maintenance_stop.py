@@ -278,8 +278,6 @@ def stop(
     producer: Callable[[], EventPipeline],
 ) -> list[str]:
     deadline = deadline_after(timeout)
-    if sys.platform == "win32":
-        raise RuntimeError("native maintenance data-plane stop requires POSIX")
     if settings.data_plane.is_remote:
         raise RuntimeError("maintenance cannot verify a remote-managed data-plane stop")
     return asyncio.run(

@@ -43,9 +43,6 @@ def forbidden(*_args: object, **_kwargs: object) -> NoReturn:
     pytest.fail("unexpected force/signal path")
 
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract")
-
-
 def test_a_session_in_the_service_refuses_before_any_signal(
     home: Path, launch: Launcher, pty_service: PtyServiceProcess
 ) -> None:

@@ -73,7 +73,7 @@ def _deliver_telemetry_before_detach(*, clients: ClientSet) -> None:
             "queued records may be lost or land later"
         )
     try:
-        result = telemetry.sync(bounded=True)
+        result = telemetry.sync()
         if result.status is telemetry.DrainStatus.UNFINISHED:
             logger.warning(
                 "external attachment: ordinary telemetry delivery is unfinished; "

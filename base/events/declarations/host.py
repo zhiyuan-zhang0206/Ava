@@ -79,16 +79,6 @@ EVENTS: dict[str, EventSpec] = {
         "hosted dispatcher subscribed to the inbound wake pattern",
         tier="noise",
     ),
-    "host_recovery_wake_started": telemetry_event(
-        "host_recovery_wake_started",
-        "hosted recovery wake started a turn and occupied an in-flight pacing slot",
-        tier="noise",
-    ),
-    "host_recovery_wake_released": telemetry_event(
-        "host_recovery_wake_released",
-        "hosted recovery turn completed and released its in-flight pacing slot",
-        tier="noise",
-    ),
     "host_dispatcher_reconnect": telemetry_event(
         "host_dispatcher_reconnect",
         "hosted dispatcher's wake subscription dropped — reconnecting (wakes published "
@@ -243,28 +233,6 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
     ),
     # Crash-recovery wake (task #4039): reap commits it; service consumes it.
-    "crash_recovery_wake_queued": telemetry_event(
-        "crash_recovery_wake_queued",
-        "the corpse reaper committed a crash death's recovery wake — one "
-        "system-source chat carrying the hosted_turn_recovery marker — inside "
-        "the terminating transaction, so a committed reap always has a wake "
-        "to resume its owner (task #4039)",
-        tier="observation",
-    ),
-    "crash_recovery_wake_attempted": telemetry_event(
-        "crash_recovery_wake_attempted",
-        "the service layer attempted the guarded auto-resurrect for a reaped "
-        "corpse's committed recovery wake; carries the status the attempt "
-        "returned (task #4039)",
-        tier="observation",
-    ),
-    "crash_recovery_wake_deferred": telemetry_event(
-        "crash_recovery_wake_deferred",
-        "a reaped corpse's guarded resurrect attempt failed — the wake row "
-        "stays pending for the delivery watchdog's terminated-owner retry "
-        "until the stale age gate (task #4039)",
-        tier="observation",
-    ),
     "host_recrash_reap_skipped": telemetry_event(
         "host_recrash_reap_skipped",
         "the recrash prompt reap skipped terminating a re-crashed corpse "
@@ -360,24 +328,6 @@ EVENTS: dict[str, EventSpec] = {
         "task is cancelled and the agent rescheduled; a turn that refuses to "
         "unwind instead escalates to a daemon restart",
         tier="anomaly",
-    ),
-    "claim_cas_lost": telemetry_event(
-        "claim_cas_lost",
-        "claim CAS race lost — another lifecycle op owns the row",
-        tier="anomaly",
-        retired=True,
-    ),
-    "claim_cas_lost_exit": telemetry_event(
-        "claim_cas_lost_exit",
-        "claim wait aborted by a lost CAS — process exiting cleanly",
-        tier="anomaly",
-        retired=True,
-    ),
-    "idle_cas_lost": telemetry_event(
-        "idle_cas_lost",
-        "idle-flip CAS race lost — degraded, not fatal",
-        tier="anomaly",
-        retired=True,
     ),
     "inbound_reconcile": telemetry_event(
         "inbound_reconcile", "inbound reconciliation", tier="noise"

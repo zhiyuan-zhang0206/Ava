@@ -113,64 +113,8 @@ EVENTS: dict[str, EventSpec] = {
         "stale exec request evidence preserved under the explicit quarantine",
         payload=ExecRequestQuarantine,
     ),
-    "exec_request_bounded_quarantine": telemetry_event(
-        "exec_request_bounded_quarantine",
-        "an unreadable exec request envelope past the bounded-disposition bound "
-        "(twice the exec node timeout, no live process reference, no live host "
-        "process) was quarantined without review — the bytes are preserved with "
-        "a receipt and the recovery path no longer defers on it; off via "
-        "AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED restores unbounded retention",
-        tier="anomaly",
-    ),
     "exec_cancelled": telemetry_event(
         "exec_cancelled", "execute_code cancelled", tier="anomaly", persist=True
-    ),
-    "exec(timeout)": telemetry_event(
-        "exec(timeout)",
-        "historical parenthesized name (migration target)",
-        tier="anomaly",
-        site=(
-            "Legacy bracketed name: the pre-W8-rename value, still a "
-            "migrate_events.py mapping target and present in existing DB rows. New "
-            "code must not emit it; the registration survives only to backfill the "
-            "metric."
-        ),
-        persist=True,
-    ),
-    "exec(failed)": telemetry_event(
-        "exec(failed)",
-        "historical parenthesized name (migration target)",
-        tier="anomaly",
-        site=(
-            "Legacy bracketed name: the pre-W8-rename value, still a "
-            "migrate_events.py mapping target and present in existing DB rows. New "
-            "code must not emit it; the registration survives only to backfill the "
-            "metric."
-        ),
-        persist=True,
-    ),
-    "exec(cancelled)": telemetry_event(
-        "exec(cancelled)",
-        "historical parenthesized name (migration target)",
-        tier="anomaly",
-        site=(
-            "Legacy bracketed name: the pre-W8-rename value, still a "
-            "migrate_events.py mapping target and present in existing DB rows. New "
-            "code must not emit it; the registration survives only to backfill the "
-            "metric."
-        ),
-        persist=True,
-    ),
-    "exec(thread-stuck)": telemetry_event(
-        "exec(thread-stuck)",
-        "historical parenthesized name (migration target)",
-        tier="anomaly",
-        site=(
-            "Legacy bracketed name: the pre-W8-rename value, still a "
-            "migrate_events.py mapping target and present in existing DB rows. New "
-            "code must not emit it; the registration survives only to backfill the "
-            "metric."
-        ),
     ),
     "exec_timeout": telemetry_event(
         "exec_timeout", "execute_code timed out", tier="anomaly", persist=True
@@ -195,7 +139,6 @@ EVENTS: dict[str, EventSpec] = {
     "code": telemetry_event(
         "code", "LLM generated code block", payload=ExecPayload, tier="noise", persist=True
     ),
-    # label-fallback events kept in the registry
     "text": telemetry_event("text", "LLM text output", tier="noise"),
     "syntax_fix": telemetry_event(
         "syntax_fix",
@@ -215,11 +158,5 @@ EVENTS: dict[str, EventSpec] = {
         "poisoned editable-install direct_url repaired to the prod source root",
         tier="anomaly",
         site="base/deploy/release/editable_install.py:repair_editable_direct_url",
-    ),
-    "exec_editable_install_poisoned": telemetry_event(
-        "exec_editable_install_poisoned",
-        "poisoned editable install repaired before an exec child spawn",
-        tier="anomaly",
-        site="base/deploy/release/editable_install.py:guard_editable_install",
     ),
 }

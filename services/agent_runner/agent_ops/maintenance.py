@@ -20,13 +20,7 @@ def admission(kind: str, *, requests: RequestTokens) -> Generator[None]:
         current is not None
         and kind != "status_probe"
         and current.maintenance is not None
-        and current.maintenance.phase
-        in (
-            MaintenancePhase.STOPPING,
-            MaintenancePhase.STOPPED,
-            MaintenancePhase.STARTING,
-            MaintenancePhase.READY,
-        )
+        and current.maintenance.phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED)
     ):
         raise RuntimeError("unit is stopping or held until `ava start` releases it")
     token = object()

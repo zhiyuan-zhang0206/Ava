@@ -114,7 +114,7 @@ $REMOTE_OTLP_RECEIVER
           static_configs:
             - targets: [localhost:$SELF_METRICS_PORT]
 
-  # ── Session-log tailing (2026-08-23 cutover; replaces promtail) ──────────
+  # ── Session-log tailing ───────────────────────────────────────────────────
   # Agent shell transcripts and service stdout use separate, disjoint
   # receivers. Agent main logs are banner-only here and are deliberately
   # absent: their identical prefixes collide under filelog's content
@@ -180,7 +180,7 @@ processors:
     logs:
       log_record:
         - 'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != "$CLUSTER_LABEL"'
-  # Session-log labeling (filelog receivers; replaces promtail's per-file
+  # Session-log labeling (filelog receivers; per-file
   # service label): service.name <- the file's session name (strip .out.log),
   # guarded so event logs (no log.file.name) pass through untouched.
   transform/filelog_service:
@@ -201,10 +201,9 @@ processors:
   # The infra pipeline's extra processors. host_metrics/postgresql/redis carry
   # no host identity of their own, so detection supplies host.name and the
   # transform puts both identities on every datapoint: `host` is the OS
-  # hostname (physical identity; the fleet's Windows box reports zzy-lenovo
-  # while its Ava name is win), and `machine_name` is the Ava roster identity
+  # hostname (physical identity), and `machine_name` is the Ava roster identity
   # baked from this unit at converge via $MACHINE_NAME (macmini / macbook-air /
-  # win / wsl). One label per meaning; dashboards and alert rules group by
+  # company-mini / ...). One label per meaning; dashboards and alert rules group by
   # `machine_name`. App metrics already carry `machine` / `agent_id`, and this
   # transform cannot touch them because it sits on the infra pipeline only.
   # Datapoint attributes are required: resource attributes land in
@@ -273,7 +272,7 @@ $OTLP_EXPORTERS
   # max_days / max_backups bound the directory. `spans.jsonl` -> rotated
   # `spans-<ISO-timestamp>-size.jsonl` on size rotation (timberjack 1.4.7 in
   # otelcol-contrib 0.162.0 appends the trigger reason to the backup name;
-  # `base/telemetry/trace_mirror.py` parses both suffixed and unsuffixed shapes).
+  # `base/telemetry/trace_mirror.py` parses these names).
   #
   # Segment size is the structural bound on the ACTIVE file (the file
   # exporter exposes no time-based rotation, so size is the only trigger):

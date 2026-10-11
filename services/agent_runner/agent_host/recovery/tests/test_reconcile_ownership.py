@@ -14,7 +14,7 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement as settlement_mod
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import admit_recovery
+from services.agent_runner.agent_host.recovery.tests.helpers import admit
 from services.agent_runner.agent_host.recovery.tests.test_reconcile_after_abort import (
     claimed_row,
     row_statuses,
@@ -35,7 +35,7 @@ async def test_replaced_incarnation_writes_nothing(
 ) -> None:
     """A replacement runtime owns the row now: the stale incarnation's pass is
     refused by the lease fence before any write."""
-    incarnation = await admit_recovery(
+    incarnation = await admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
@@ -79,7 +79,7 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
 ) -> None:
     """At the settlement boundary the same refusal is a logged no-op — the
     abort's settlement must not fail because its reconcile was fenced out."""
-    incarnation = await admit_recovery(
+    incarnation = await admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,

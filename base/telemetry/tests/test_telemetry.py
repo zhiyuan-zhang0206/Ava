@@ -240,7 +240,7 @@ def test_the_mirror_holds_every_event_in_one_file_and_no_filtered_copy(
 ) -> None:
     monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
     now = datetime.now(UTC)
-    event_names = ["llm_usage", "turn_end", "exec", "exec_failed", "exec(timeout)", "fork"]
+    event_names = ["llm_usage", "turn_end", "exec", "exec_failed", "exec_timeout", "fork"]
     events = [
         telemetry.Event(
             ts=now,
@@ -398,11 +398,11 @@ def test_emit_unregistered_name_raises() -> None:
 
 def test_drain_on_exit_lands_queued_events() -> None:
     """The atexit hook must land events still queued (or in the drain thread's
-    in-flight batch) — the `process_exit` event's own survival depends on it.
+    in-flight batch) — the `service_started` event's own survival depends on it.
     This test stops its own writer; the next test owns its own fresh writer."""
-    telemetry.emit("telemetry", "process_exit", agent_id=_AGENT)
+    telemetry.emit("telemetry", "service_started", agent_id=_AGENT)
     telemetry._drain_on_exit()  # flush + stop — no explicit telemetry.flush() here
-    assert _mirror_rows("process_exit", _AGENT), "process_exit must land in the mirror"
+    assert _mirror_rows("service_started", _AGENT), "service_started must land in the mirror"
 
 
 def test_resolve_machine_falls_back_only_on_documented_absence(

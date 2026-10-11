@@ -132,8 +132,6 @@ def test_snapshot_filename_stamps_the_host_clock(
     the host zone is pinned explicitly rather than inherited from the
     environment.
     """
-    if not hasattr(time, "tzset"):
-        pytest.skip("time.tzset is POSIX-only")
 
     original_tz = os.environ.get("TZ")
     try:
@@ -243,7 +241,7 @@ def test_upsert_noop_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     The repeated converge (every `ava start`, every boot-retry attempt) presents
     the same value again and again; before the skip it rewrote the file and
-    appended an `old == new` audit record each time — the WSL noise of #3637.
+    appended an `old == new` audit record each time — the noise of #3637.
     """
     from base.host.env import dotenv_file
 
@@ -384,11 +382,11 @@ def test_upsert_leaves_lookalike_export_keys_alone(tmp_path: Path) -> None:
 
 
 def test_remove_env_drops_export_prefixed_lines(tmp_path: Path) -> None:
-    """A retired key actually leaves the surface even when it was hand-written
+    """A removed key actually leaves the surface even when it was hand-written
     with the export prefix — Settings reads both forms as the same key."""
     f = tmp_path / ".env"
-    f.write_text("export AVA_PGBOUNCER_PORT=6543\nKEEP=1\n")
-    remove_env(f, {"AVA_PGBOUNCER_PORT"})
+    f.write_text("export AVA_OLD_KEY=6543\nKEEP=1\n")
+    remove_env(f, {"AVA_OLD_KEY"})
     assert f.read_text() == "KEEP=1\n"
 
 

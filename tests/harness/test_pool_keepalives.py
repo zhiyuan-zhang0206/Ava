@@ -176,7 +176,7 @@ def test_log_sink_pipeline_drain_thread_stays_alive(
     pipeline = telemetry.build_pipeline(
         database=lambda: database, machine=machine_identity, home=unit_home
     )
-    sink_id = base.log.process.add_postgres_sink(
+    sink_id = base.log.process.add_event_sink(
         producer=lambda: pipeline, machine_reader=machine_identity.name
     )
     try:

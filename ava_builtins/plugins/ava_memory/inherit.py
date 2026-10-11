@@ -87,7 +87,7 @@ def parse_inheritable_blocks(text: str) -> list[str]:
     NOT swept to EOF), and a close without an open or a nested open is
     ignored. An empty (or blank) block declares nothing and is skipped.
     """
-    # CRLF files (a Windows runner writing entries in text mode) must split
+    # CRLF files (an entry written in text mode elsewhere) must split
     # like LF ones: the writer's frontmatter split keys on "---\n", and the
     # fence match on a bare line.
     text = text.replace("\r\n", "\n")

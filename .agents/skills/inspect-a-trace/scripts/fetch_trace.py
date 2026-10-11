@@ -7,7 +7,7 @@ Two modes:
   traces (id, duration, matched span count). Run this first to get trace ids.
 - **Fetch** (`--trace-id <hex-32>`): pull one trace's full span set and write
   `trace_raw.json` for `read_trace.py`. Sources:
-    - `mirror` (default): scan `$AVA_HOME/traces/spans*.jsonl*` (active `spans.jsonl` + rotated `spans-<ISO>(-size|-time)?.jsonl`, gzipped old segments read transparently) — the durable
+    - `mirror` (default): scan `$AVA_HOME/traces/spans*.jsonl*` (active `spans.jsonl` + rotated `spans-<ISO>-(size|time).jsonl`, gzipped old segments read transparently) — the durable
       record, complete, no size cap, no network. Needs filesystem access to
       the machine that recorded the trace. Every file in range is scanned
       and spans are merged (a trace can straddle the sidecar's rotation
@@ -212,15 +212,9 @@ def _trace_id_b64(hex_trace_id: str) -> str:
 
 
 def _mirror_day(fp: Path) -> datetime.date | None:
-    """Day stamp from a mirror filename (legacy `spans-YYYYMMDD-<pid>.jsonl`
-    or the sidecar's rotated `spans-<ISO-timestamp>.jsonl`); None for the
-    unstamped ACTIVE `spans.jsonl`."""
-    m = re.match(r"spans-(\d{8})-", fp.name)
-    if m:
-        try:
-            return datetime.strptime(m.group(1), "%Y%m%d").replace(tzinfo=UTC).date()
-        except ValueError:
-            return None
+    """Day stamp from a mirror filename (the sidecar's rotated
+    `spans-<ISO-timestamp>-(size|time).jsonl`); None for the unstamped ACTIVE
+    `spans.jsonl`."""
     m = re.match(r"spans-(\d{4})-(\d{2})-(\d{2})T", fp.name)
     if m:
         try:
@@ -232,7 +226,7 @@ def _mirror_day(fp: Path) -> datetime.date | None:
 
 def _mirror_files(directory: Path, days: int) -> list[Path]:
     """Mirror files within the last `days` days, newest first: the active
-    `spans.jsonl` (day = mtime) plus rotated/legacy `spans-*.jsonl` and
+    `spans.jsonl` (day = mtime) plus rotated `spans-*.jsonl` and
     gzipped old segments (`*.jsonl.gz`)."""
     cutoff = datetime.now(UTC).date() - timedelta(days=days - 1)
     files = sorted(directory.glob("spans*.jsonl*"), reverse=True)

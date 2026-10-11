@@ -16,20 +16,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
+from base.cluster import session_name
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import service_selection
-from cli.commands._repo import (
-    _repo_root,
-    _services_for_roles_annotated,
-    build_services,
-    session_name,
-)
+from cli.commands._repo import _repo_root
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.cluster_instance import print_data_plane_status
 from cli.commands.lifecycle.hold_report import print_hold_section
 from cli.commands.probe import print_service_row
+from ops.roster import build_services
 from ops.roster.service_spec import ServiceSpec
+from ops.spec import services_for_capabilities_annotated
 
 
 def _root_tree_units() -> dict[str, dict[str, object]]:
@@ -55,7 +53,7 @@ def _status_roster(
     if roles is None:
         services_to_show = tuple((spec, None) for spec in build_services())
     else:
-        services_to_show = _services_for_roles_annotated(roles, machine=machine)
+        services_to_show = services_for_capabilities_annotated(roles, machine=machine)
     selection = service_selection.read_selection()
     return tuple(
         (spec, reason if selection.enabled(spec.session) else "disabled by desired service set")

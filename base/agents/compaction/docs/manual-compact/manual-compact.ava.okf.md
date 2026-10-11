@@ -99,13 +99,10 @@ the serialized continuation finishes its original reset and cold ACK, then the
 existing native cancellation owner writes and proves the exact original work's
 halt. Terminal receipt replay never projects an old marker over later work.
 
-Before the generic cancellation startup gate, an exact typed compact receiver
-with stored original result may resume PREPARED/APPLYING or finish terminal
-closure. PREPARED still checks a prior cancel before permitting application;
-APPLYING preserves its already committed ordering. A certified successor uses
-the public receiver/resource proof and records RECOVERED_STOPPED for the old
-cancel, never a fabricated original application marker. No-result uncertainty
-cannot use this continuation seam.
+Interrupted admitted attempts retain their diagnostic receipt and hold ordinary
+work. A later wake never reuses stored summary output, resumes application or
+certifies predecessor cancellation. Only the live original attempt completes
+its normal application and native closure. See the interruption policy below.
 
 ## Recovery and authority
 

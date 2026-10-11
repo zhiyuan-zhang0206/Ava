@@ -69,15 +69,10 @@ _DEFAULT_COMMAND_TIMEOUT_S = 10.0
 _STATUS_COMMAND = 'cd "$HOME/.ava/source" && .venv/bin/ava status --json'
 _JOURNAL_COMMAND = 'cat "$HOME/.ava/run/deploy-pause-owner.json"'
 
-# The official recovery (spec part 2 v1.1.1 B4): `ava start` ends a hold in any
-# phase before `ready` -- it re-delivers failed continuations, brings the
-# services back and releases the hold.
-_START_PHASES = ("preparing", "draining", "drained", "stopping", "stopped", "starting")
-
 # Vocabulary mirrors base.deploy.maintenance.pause_owner / base.deploy.maintenance.hold_driver /
 # base.deploy.maintenance.state; an unknown value is a structural surprise and the
 # caller falls through to the next source.
-_PHASES = ("preparing", "draining", "drained", "stopping", "stopped", "starting", "ready")
+_PHASES = ("preparing", "draining", "drained", "stopping", "stopped")
 _STATES = ("paused", "resumed")
 _LIVENESS = ("alive", "dead", "missing", "unreadable")
 
@@ -184,13 +179,14 @@ def _age_seconds(acquired_at: str | None, now: float) -> int | None:
 def render_command(host: str, phase: str | None) -> str | None:
     """The one official recovery command for a phase (spec part 2 v1.1.1 B4).
 
-    `ava start` for every phase it ends. An uncovered or unknown phase renders
-    none. An invalid host renders none too (defense in depth; `triage`
+    `ava start` ends a hold in any phase (spec part 2 v1.1.1 B4): it
+    re-delivers failed continuations, brings the services back and releases
+    the hold. An unknown phase renders none. An invalid host renders none too (defense in depth; `triage`
     validates earlier).
     """
     if not _HOST_PATTERN.fullmatch(host):
         return None
-    if phase in _START_PHASES:
+    if phase in _PHASES:
         return f"ssh {host} 'cd ~/.ava/source && .venv/bin/ava start'"
     return None
 

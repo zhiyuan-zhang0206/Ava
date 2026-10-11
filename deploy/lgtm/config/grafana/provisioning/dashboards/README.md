@@ -295,7 +295,7 @@ provisioning cycle when needed.
 [`../alerting/rules.yml`](../alerting/rules.yml) — thirty-eight rules (2026-09-18)
 split between the one-minute `ava-ops` group and five-minute `ava-ops-slow`
 group over Loki and Prometheus: the event-health,
-backlog, restart-spike, LLM-latency, delivery, freshness, trace-watermark,
+backlog, LLM-latency, delivery, freshness, trace-watermark,
 billing, provider stall/pair, host/data-plane, and collector-delivery rules, plus the three
 slow-request rules R17/R18 (gateway fast-route p95 two-tier + turn-duration
 p95, `notify_im: "false"` labels — see the table, threshold calibration,

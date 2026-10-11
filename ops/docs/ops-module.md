@@ -64,7 +64,7 @@ failed notices for the next start and clears only a successfully written batch.
 
 The import boundary is `base < ops < {gateway, cli}`. The supported RPC
 vocabulary lives in the `ops/rpc_schemas/` door; focused agent contracts live in
-its `terminate`, `content`, and `billing_recovery` submodules. Gateway-only
+its `terminate` and `content` submodules. Gateway-only
 schemas stay in `gateway/schemas/`.
 The client and daemon reject unknown kinds before machine lookup, maintenance
 admission, dedupe, or dispatch. Callers import live pause, status and recovery

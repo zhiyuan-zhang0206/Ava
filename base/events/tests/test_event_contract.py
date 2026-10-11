@@ -83,37 +83,6 @@ def test_root_unit_failure_payloads_name_the_evidence() -> None:
     assert payload_keys("root_unit_not_revivable") == ("unit", "detail")
 
 
-def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
-    assert payload_keys("delivery_wake_suppressed") == (
-        "consecutive_failures",
-        "suppress_seconds",
-        "suppress_count",
-        "reason",
-    )
-
-
-def test_delivery_recovery_decision_payload_names_the_verdict() -> None:
-    assert payload_keys("delivery_recovery_decision") == ("inbound_id", "decision", "reason")
-
-
-def test_delivery_outbox_payloads_name_the_evidence() -> None:
-    assert payload_keys("delivery_outbox_flushed") == (
-        "inbound_id",
-        "attempts",
-        "flush_attempts",
-        "age_s",
-        "origin_agent_id",
-    )
-    assert payload_keys("delivery_outbox_abandoned") == (
-        "reason",
-        "detail",
-        "attempts",
-        "flush_attempts",
-        "age_s",
-        "origin_agent_id",
-    )
-
-
 def test_exec_child_boot_payload_exposes_ready_duration() -> None:
     """The exec-child readiness event owns the boot duration measurement."""
     assert payload_keys("exec_child_boot") == ("duration_ms",)
@@ -128,21 +97,6 @@ def test_compaction_completion_payload_exposes_ratio_and_frequency() -> None:
         "summary_chars",
         "summary_history_ratio",
     )
-
-
-def test_stall_wave_mitigation_event_contract() -> None:
-    """Task #3884: the stall-retry event carries the provider-health payload
-    (vendor/model/stage/elapsed_s) and pair terminations register as an
-    anomaly-tier telemetry event of their own; task #3908 declares the pair's
-    typed payload too (vendor/model/stage/timeout_s)."""
-    assert payload_keys("stream_stalled_retry") == ("vendor", "model", "stage", "elapsed_s")
-    assert payload_keys("stream_stall_pair_terminated") == (
-        "vendor",
-        "model",
-        "stage",
-        "timeout_s",
-    )
-    assert tier_for("stream_stall_pair_terminated", "telemetry", "warning") == "anomaly"
 
 
 def test_recovery_drill_failed_payload() -> None:
@@ -165,15 +119,12 @@ def test_node_enter_is_file_destination() -> None:
     assert EVENTS["node_enter"].destination == "file"
 
 
-def test_llm_error_family_is_the_grafana_four() -> None:
-    """The LLM error family is one declaration; the pre-registry hand copies
-    drifted (the retired ops_series/ops_rollup had 3, the Grafana panel had 4)."""
+def test_llm_error_family_covers_provider_failures_and_turn_aborts() -> None:
+    """The current LLM error family comes from its shared declaration."""
     fam = family_events(LLM_ERROR_FAMILY)
     assert fam == (
         "llm_turn_aborted",
         "llm_provider_error",
-        "stream_stalled_retry",
-        "stream_overloaded_retry",
     )
 
 
@@ -198,8 +149,6 @@ _DECLARED_PAYLOAD_KEYS = {
         "unpriced",
         "usage_kind",
         "source",
-        "cache_mechanism",
-        "cache_scope",
     ),
     "sse_drop": ("kind", "n"),
     "spawn": ("machine", "fork_from", "fork_checkpoint"),
@@ -208,8 +157,6 @@ _DECLARED_PAYLOAD_KEYS = {
     "node_exit": ("count", "nodes"),
     "heartbeat_paused": ("duration_s",),
     "task_update": ("status",),
-    "process_exit": ("reason", "pid"),
-    "agent_boot_failed": ("model", "error_type", "error"),
     "recall_filter": ("body", "query_hmac_sha256", "picked_paths"),
     "passive_recall": ("search_ms", "filter_ms"),
     "hook_timing": ("hook_ms",),
@@ -263,19 +210,10 @@ def test_payload_keys_unknown_event_empty() -> None:
     assert payload_keys("no_such_event") == ()
 
 
-def test_registry_covers_all_whitelisted_historical_names() -> None:
-    """The parenthesized historical names (exec(timeout) etc.) stay registered
-    — they are migration targets with live rows."""
-    for name in ("exec(timeout)", "exec(failed)", "exec(cancelled)", "exec(thread-stuck)"):
-        assert name in EVENTS
-        assert EVENTS[name].category == "telemetry"
-
-
 def test_class_resolution_markers_are_telemetry_category() -> None:
     """Class-resolution transitions are telemetry so their state can be observed.
 
-    The resolved pair still declares the legacy target-event keys, while the
-    new class keys make Loki's immutable-state transition explicit.
+    The class keys make Loki's immutable-state transition explicit.
     """
     for name in ("warning_resolved", "error_resolved", "warning_reopened", "error_reopened"):
         spec = EVENTS[name]
@@ -283,8 +221,6 @@ def test_class_resolution_markers_are_telemetry_category() -> None:
         assert spec.destination == "events"
 
     assert payload_keys("warning_resolved") == (
-        "target_event_id",
-        "match",
         "resolved_by",
         "category",
         "level",

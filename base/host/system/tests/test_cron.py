@@ -163,8 +163,7 @@ def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 # The crontab entry
 # ---------------------------------------------------------------------------
-# Its marker names the job, not a home: the host runs one cluster. Migration of
-# lines older versions wrote with a per-home suffix is in test_os_job_markers.py.
+# Its marker names the job, not a home: the host runs one cluster.
 
 
 def _crontab_stub(

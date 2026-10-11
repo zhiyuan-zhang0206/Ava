@@ -92,7 +92,7 @@ gap.
 ### IM notification
 
 Eligible new firing/resolved groups request durable acceptance through authenticated
-`POST /send/alert-outbound-v1`; the existing IM Outbox sends the frozen available
+`POST /send/alert-outbound`; the existing IM Outbox sends the frozen available
 owner subset and retains unavailable channel decisions. Acceptance is separate
 from actual provider delivery; legacy `/send` remains for other immediate callers.
 See [[native-alert-outbox]] for recovery, completion and rollout requirements.

@@ -18,8 +18,8 @@ Every event, metric, and trace Resource carries `cluster`, resolved without the
 data plane from `cluster.home_label(ava_home())`, then the home slug, then
 `.unknown`. Event JSON and log attributes carry the same value. The designated
 LGTM collector drops a record only when its non-null cluster differs from its
-own home label; null Resources remain valid for legacy events and the
-collector's filelog/infra pipelines.
+own home label; null Resources remain valid for the collector's filelog/infra
+pipelines.
 
 ## Lifecycle and producer gates
 
@@ -56,7 +56,6 @@ use the implicit loopback Loki URL and receives a clean HTTP 503 before any
 network request; an explicit `AVA_TELEMETRY_LOKI_URL` is the operator escape
 hatch. Dashboard and fleet callers pass their current cluster label, and the
 production alert rules filter `cluster=".ava"` after JSON parsing.
-That strict filter excludes legacy no-cluster rows for up to Loki retention;
-lower aggregate counts are deliberate in exchange for excluding preview pollution.
+That strict filter excludes preview-cluster pollution.
 
 Parent node: [[telemetry-otlp.ava.okf.md|OTLP export backend & trace ship to Tempo]].

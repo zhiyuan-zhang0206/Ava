@@ -160,9 +160,9 @@ def _hermetic_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _spec(service: str):
-    from cli.commands._repo import ServiceSpec
     from ops.roster.service_spec import (
         _GATEWAY,  # typed frozenset[MachineRole]; capability irrelevant to probe tests
+        ServiceSpec,
     )
 
     return ServiceSpec(

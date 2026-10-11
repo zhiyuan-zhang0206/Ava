@@ -14,7 +14,6 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm._retry import retry_wait
 from agent.graph.llm._stream import _consume_llm, _consume_stream_with_stall_timeout
-from agent.graph.llm_errors import LlmLedger
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.errors import is_retryable_provider_error
@@ -49,9 +48,7 @@ async def test_transport_authority_stays_at_the_model_boundary(
         assert not is_retryable_provider_error(error)
 
 
-@pytest.mark.parametrize(
-    "timeout_origin", ["stream_model", "stream_callback", "fallback_model", "fallback_callback"]
-)
+@pytest.mark.parametrize("timeout_origin", ["stream_model", "stream_callback"])
 async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
     monkeypatch: pytest.MonkeyPatch, timeout_origin: str
 ) -> None:
@@ -99,7 +96,6 @@ async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
             1,
             model=agent.brain.llm_model,
             agent_id=7,
-            ledger=LlmLedger(),
             catalog=build_model_catalog(),
             max_attempts_pin=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
@@ -112,16 +108,14 @@ async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
     assert calls == expected
 
 
-@pytest.mark.parametrize("during_fallback", [False, True])
 async def test_external_cancellation_stays_external_inside_owned_model_deadline(
-    monkeypatch: pytest.MonkeyPatch, during_fallback: bool
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ready = asyncio.Event()
     cancelled: list[str] = []
 
     async def stream() -> AsyncIterator[AIMessage]:
-        if not during_fallback:
-            ready.set()
+        ready.set()
         try:
             await asyncio.Future()
         except asyncio.CancelledError:
@@ -138,9 +132,7 @@ async def test_external_cancellation_stays_external_inside_owned_model_deadline(
             raise
         return AIMessage(content="unreachable")
 
-    monkeypatch.setattr(
-        settings.lm, "llm_stream_ttft_timeout_seconds", 0.01 if during_fallback else 10
-    )
+    monkeypatch.setattr(settings.lm, "llm_stream_ttft_timeout_seconds", 10)
     monkeypatch.setattr(settings.lm, "llm_stream_inter_chunk_timeout_seconds", 10)
     sink = MagicMock(spec=RedisStreamHandler)
     model = MagicMock(spec=BaseChatModel)
@@ -163,5 +155,5 @@ async def test_external_cancellation_stays_external_inside_owned_model_deadline(
     with pytest.raises(asyncio.CancelledError) as raised:
         await task
     assert raised.value.args == ("user cancelled",)
-    assert cancelled == (["stream", "fallback"] if during_fallback else ["stream"])
+    assert cancelled == ["stream"]
     sink.process_chunk.assert_not_called()

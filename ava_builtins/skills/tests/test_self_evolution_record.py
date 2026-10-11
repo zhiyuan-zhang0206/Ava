@@ -62,7 +62,6 @@ def test_count_tool_calls_ignores_syntax_warnings(
 
 def _label_record(*, turns: int, exec_failed: int) -> dict[str, Any]:
     return {
-        "breached": False,
         "tools_called": {},
         "terminated": False,
         "final_output": "delivered",

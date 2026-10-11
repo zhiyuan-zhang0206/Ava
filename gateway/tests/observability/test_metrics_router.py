@@ -280,7 +280,13 @@ def test_metrics_agents_multi_agent(db_conn: psycopg.Connection, stream: Telemet
         stream,
         event="llm_usage",
         agent_id=a1,
-        payload={"in_total": 1000, "out_total": 100, "cache_read": 800, "model": "no-such-model"},
+        payload={
+            "in_total": 1000,
+            "out_total": 100,
+            "cache_read": 800,
+            "model": "no-such-model",
+            "unpriced": 1,
+        },
     )
     _insert_event(
         stream, event="turn_end", agent_id=a1, payload={"duration_seconds": 1, "ok": True}
@@ -296,6 +302,7 @@ def test_metrics_agents_multi_agent(db_conn: psycopg.Connection, stream: Telemet
             "out_total": 1_000_000,
             "cache_read": 0,
             "model": "claude-opus-4-8",
+            "cost_usd": 30.0,
         },
     )
     _insert_event(stream, event="exec", agent_id=a2, payload={"body": "ok"})

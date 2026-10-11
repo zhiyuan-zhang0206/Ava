@@ -58,7 +58,7 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
     monkeypatch.setattr(daemon, "_dispatch_idempotent_pass", _flaky_pass)
     monkeypatch.setattr(daemon, "_sleep", _noop_sleep)
     status, result = await daemon._dispatch_idempotent(
-        "spawn-launch-v2",
+        "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
         "key-1",
         ConnectionPool(open=False),
@@ -113,7 +113,7 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
     monkeypatch.setattr(daemon, "_sleep", _noop_sleep)
     with pytest.raises(psycopg.OperationalError):
         await daemon._dispatch_idempotent(
-            "spawn-launch-v2",
+            "spawn-launch",
             {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
             "key-2",
             ConnectionPool(open=False),
@@ -166,7 +166,7 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
     monkeypatch.setattr(daemon, "_sleep", _noop_sleep)
     with pytest.raises(ValueError):
         await daemon._dispatch_idempotent(
-            "spawn-launch-v2",
+            "spawn-launch",
             {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
             "key-3",
             ConnectionPool(open=False),

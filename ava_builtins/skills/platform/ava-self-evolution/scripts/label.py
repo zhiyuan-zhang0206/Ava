@@ -3,9 +3,8 @@
 Pure function, no LLM and no DB. `label(rec)` reads only fields that
 `collect.py` assembles onto every record and returns one of three tiers:
 
-    failed   the run visibly broke: it breached a delivery obligation, it
-             terminated without producing any output, or its last code
-             execution failed and never recovered.
+    failed   the run visibly broke: it terminated without producing any
+             output, or its last code execution failed and never recovered.
     fumbled  the run got there but messily: the user had to correct or
              re-prompt two or more times, another agent had to step in with
              corrective feedback, some code execution failed mid-run, or the
@@ -64,12 +63,7 @@ def _delivered_via_side_channel(rec: dict[str, Any]) -> bool:
 
 
 def _is_failed(rec: dict[str, Any]) -> bool:
-    # Context breach alone is not failure when the agent delivered results
-    # through side channels or a result file — the breach is a fumble
-    # signal, not a crash.
     delivered = _delivered_via_side_channel(rec)
-    if rec["breached"] and not delivered:
-        return True
     # A 0-turn agent was spawned but never scheduled to run — not a real
     # failure of the agent itself.  Also exempt agents that delivered via
     # side channels or a result file (they completed their task, just
@@ -90,10 +84,6 @@ def _is_fumbled(rec: dict[str, Any]) -> bool:
     # Peer feedback — another agent had to step in and correct.
     # Also a fumble signal: the agent needed external correction.
     if len(rec.get("peer_feedback", [])) > 0:
-        return True
-    # Context breach with side-channel delivery — the agent did deliver
-    # but its context overflowed; this is a fumble, not a full failure.
-    if rec["breached"]:
         return True
     # A few execution failures are normal exploratory work. Keep the
     # three-failure floor for short workers, then require one failure per ten

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -21,7 +22,10 @@ _AGENT_ID = 424242
 
 
 async def _run(
-    tmp_path: Path, *, editable_guard: Callable[[], tuple[str, ...]], database_gate: ProcessDbGate
+    tmp_path: Path,
+    *,
+    editable_guard: Callable[[], tuple[str, ...]] | None,
+    database_gate: ProcessDbGate,
 ) -> object:
     result, _payload = await _run_in_subprocess(
         Database.from_settings(gate=database_gate),
@@ -36,7 +40,7 @@ async def _run(
     return result
 
 
-async def test_poisoned_editable_install_returns_retryable_crash_without_request_file(
+async def test_poisoned_editable_install_refuses_without_request_file(
     tmp_path: Path, database_gate: ProcessDbGate
 ) -> None:
     poisoned_pth = (
@@ -57,12 +61,12 @@ async def test_poisoned_editable_install_returns_retryable_crash_without_request
     assert isinstance(result.exc, ExecChildError)
     assert result.exc.exc_type == "exec_editable_install_poisoned"
     assert violation in result.output
-    assert "auto-repaired" in result.output
-    assert "retry" in result.output.lower()
+    assert "no child was started" in result.output
+    assert "do not retry" in result.output.lower()
     assert not list((tmp_path / "exec").rglob("*.json"))
 
 
-async def test_editable_guard_repair_failure_tells_agent_not_to_retry(
+async def test_editable_guard_inspection_failure_tells_agent_not_to_retry(
     tmp_path: Path, database_gate: ProcessDbGate
 ) -> None:
     failure = PermissionError("site-packages is read-only")
@@ -77,33 +81,6 @@ async def test_editable_guard_repair_failure_tells_agent_not_to_retry(
     assert "site-packages is read-only" in result.output
     assert "do not retry" in result.output.lower()
     assert not list((tmp_path / "exec").rglob("*.json"))
-
-
-async def test_editable_guard_unresolved_records_tell_agent_to_use_operator_recovery(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
-    """An unresolved repair must not promise an execute-code retry will work."""
-
-    source_root = tmp_path / "source"
-
-    def remaining_violations(
-        _root: Path,
-        *,
-        allowed_roots: tuple[Path, ...] = (),
-    ) -> tuple[str, ...]:
-        return ("pointer remains unreadable",)
-
-    monkeypatch.setattr(editable_install, "current_interpreter_source_root", lambda: source_root)
-    monkeypatch.setattr(editable_install, "editable_install_violations", remaining_violations)
-
-    result = await _run(
-        tmp_path, editable_guard=lambda: ("pointer was poisoned",), database_gate=database_gate
-    )
-
-    assert isinstance(result, _ExecCrashed)
-    assert "operator recovery" in result.output
-    assert "ava converge" in result.output
-    assert "do not retry" in result.output.lower()
 
 
 async def test_healthy_editable_guard_preserves_real_child_behavior(
@@ -156,3 +133,29 @@ def test_child_env_drops_foreign_virtual_env_but_preserves_its_own(
     assert "VIRTUAL_ENV" not in sibling_env
     assert "VIRTUAL_ENV" not in claude_sibling_env
     assert no_root_env["VIRTUAL_ENV"] == "/source/.venv"
+
+
+async def test_default_guard_refuses_real_poison_without_repairing_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+) -> None:
+    source = tmp_path / "source"
+    packages = source / ".venv" / "lib" / "python3.12" / "site-packages"
+    packages.mkdir(parents=True)
+    pointer = packages / editable_install.EDITABLE_PTH_NAME
+    pointer.write_text(str(tmp_path / "removed-checkout"))
+    metadata = packages / "ava-0.1.5.dist-info" / "direct_url.json"
+    metadata.parent.mkdir()
+    metadata.write_text(
+        json.dumps(
+            {"url": (tmp_path / "removed-checkout").as_uri(), "dir_info": {"editable": True}}
+        )
+    )
+    before = {path: path.read_bytes() for path in (pointer, metadata)}
+    monkeypatch.setattr(editable_install, "current_interpreter_source_root", lambda: source)
+
+    result = await _run(tmp_path, editable_guard=None, database_gate=database_gate)
+
+    assert isinstance(result, _ExecCrashed)
+    assert "no child was started" in result.output
+    assert {path: path.read_bytes() for path in before} == before
+    assert not list((tmp_path / "exec").rglob("*.json"))

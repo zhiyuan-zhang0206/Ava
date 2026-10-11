@@ -34,8 +34,7 @@ allowlisted. `base/deploy/git/source_tree_guard.py` owns the whitelist and the g
 - **HEAD moves are not tamper** — no current lifecycle records an installed
   commit for a source checkout, and an operator legitimately moves the checkout
   before an `ava restart`. Running-versus-checkout drift is shown, not alerted,
-  by the roster `code` column. A `$AVA_HOME/installed_sha` file left by the
-  retired updater is inert.
+  by the roster `code` column.
 - A checkout the guard cannot evaluate (not a git checkout, or `git status`
   failed) reports a distinct **"guard skipped"** alert instead of a clean
   pass: a broken git is exactly the state in which tampering becomes

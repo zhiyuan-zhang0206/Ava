@@ -231,7 +231,7 @@ def test_register_agent_runner_advertises_ops_url(
 
     rc = _register_machine_or_die(
         Database.from_settings(gate=database_gate),
-        cast(SetupValues, {"machine_name": "wsl"}),
+        cast(SetupValues, {"machine_name": "runner-a"}),
         frozenset({"agent-runner"}),
         command=command_runtime,
     )
@@ -275,7 +275,7 @@ def test_register_agent_runner_loopback_host_exits_nonzero(
 
     rc = _register_machine_or_die(
         Database.from_settings(gate=database_gate),
-        cast(SetupValues, {"machine_name": "wsl"}),
+        cast(SetupValues, {"machine_name": "runner-a"}),
         frozenset({"agent-runner"}),
         command=command_runtime,
     )

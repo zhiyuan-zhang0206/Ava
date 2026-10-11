@@ -10,13 +10,13 @@ from ava import agents
 def test_list_machines_maps_rows(monkeypatch: pytest.MonkeyPatch):
     rows = [
         {"name": "test-host", "description": "voice IO + browser", "live": True},
-        {"name": "wsl", "description": None, "live": False},
+        {"name": "runner-a", "description": None, "live": False},
     ]
     monkeypatch.setattr(agents._client, "list_machines", lambda: rows)  # pyright: ignore[reportUnknownArgumentType]
     result = agents.list_machines()
     assert result == [
         agents.Machine(name="test-host", description="voice IO + browser", live=True),
-        agents.Machine(name="wsl", description=None, live=False),
+        agents.Machine(name="runner-a", description=None, live=False),
     ]
 
 
