@@ -30,7 +30,8 @@ def test_declared_source_is_accepted(
 
 
 @pytest.mark.parametrize(
-    "source", ["external_agent:", "external_agent:a:b:c", "external_agent:bad name"]
+    "source",
+    ["external_agent:", "external_agent:a:b:c", "external_agent:bad name", "unknown:legacy"],
 )
 @pytest.mark.parametrize(("schema", "field", "other"), _SCHEMAS)
 def test_malformed_declaration_is_rejected_before_dispatch(

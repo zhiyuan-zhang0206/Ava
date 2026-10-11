@@ -48,8 +48,8 @@ class CallerIdentity(BaseModel):
 
 
 def is_caller_source(source: str) -> bool:
-    """Whether `source` is in the external-agent namespace (well-formed or not)."""
-    return source.startswith(EXTERNAL_AGENT_PREFIX)
+    """Recognize caller namespaces so malformed and retired kinds reach validation."""
+    return source.startswith((EXTERNAL_AGENT_PREFIX, "unknown:"))
 
 
 def caller_payload(source: str, payload: Mapping[str, object] | None) -> dict[str, object] | None:

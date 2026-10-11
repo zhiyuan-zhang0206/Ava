@@ -9,7 +9,7 @@ credential check; neither declaration grants anything.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Generator
 from typing import Any
 from unittest.mock import Mock
 from uuid import uuid4
@@ -57,7 +57,7 @@ async def _admit(db: psycopg.Connection, pool: AsyncConnectionPool) -> RuntimeIn
 
 
 @contextlib.contextmanager
-def authenticated_gateway(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+def authenticated_gateway(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     """The CLI's `send` posts through a real gateway app with the cluster credential on."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _SECRET)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
@@ -146,7 +146,14 @@ async def test_external_agent_message_is_listed_with_its_source_for_the_timeline
 
 
 @pytest.mark.parametrize(
-    "source", ["claude_code", "external_agent:", "external_agent:a:b:c", "external_agent:bad name"]
+    "source",
+    [
+        "claude_code",
+        "external_agent:",
+        "external_agent:a:b:c",
+        "external_agent:bad name",
+        "unknown:legacy",
+    ],
 )
 def test_gateway_rejects_a_malformed_declaration_before_any_insert(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, source: str

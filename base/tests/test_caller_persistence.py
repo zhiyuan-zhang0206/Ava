@@ -88,11 +88,13 @@ def test_audit_events_carry_structured_identity() -> None:
     assert "auth_principal" not in event.attributes
 
 
-def test_malformed_external_agent_source_is_rejected_before_insert(
+@pytest.mark.parametrize("source", ["external_agent:", "external_agent:a:b:c", "unknown:legacy"])
+def test_invalid_caller_source_is_rejected_before_insert(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
     publish_wake: Callable[[int, str], bool],
+    source: str,
 ) -> None:
     agent_id = create_agent(db_conn)
     with pytest.raises(ValueError):
@@ -100,7 +102,7 @@ def test_malformed_external_agent_source_is_rejected_before_insert(
             db_conn,
             agent_id=agent_id,
             content="hello",
-            source="external_agent:",
+            source=source,
             payload=None,
             client_message_id=str(uuid4()),
             publish_wake=publish_wake,
@@ -110,7 +112,7 @@ def test_malformed_external_agent_source_is_rejected_before_insert(
             db_conn,
             agent_id,
             "",
-            "external_agent:a:b:c",
+            source,
             kind="restart",
             bus=event_bus,
             database=database,
