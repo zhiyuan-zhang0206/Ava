@@ -73,7 +73,6 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     monkeypatch.setattr(authority, "require_ledger", ledger)
     monkeypatch.setattr(authority, "ensure_groups", record("groups"))
     monkeypatch.setattr(authority, "ensure_monitor", record("monitor"))
-    monkeypatch.setattr(authority, "retire_legacy_logins", record("retire-legacy"))
     monkeypatch.setattr(authority, "create_ledger", record("ledger"))
     monkeypatch.setattr(authority, "ensure_pooler_admin", record("pooler-admin"))
     monkeypatch.setattr(authority, "mint_generation", record("mint"))
@@ -128,7 +127,6 @@ def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(plane:
         "memory-vectors",
         "groups",
         "monitor",
-        "retire-legacy",
         "ledger",
         "pooler-admin",
         "mint",
