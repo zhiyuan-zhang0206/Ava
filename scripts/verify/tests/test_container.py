@@ -179,7 +179,7 @@ def test_the_image_tag_follows_what_the_build_can_see(tmp_path: Path) -> None:
     for name in (
         *container.CONTEXT_FILES,
         "scripts/provision/node.sh",
-        "scripts/install-cli-tools.sh",
+        "scripts/provision/install-cli-tools.sh",
     ):
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
