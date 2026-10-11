@@ -418,7 +418,7 @@ def test_register_boot_announces_this_unit_up(
     """
     calls: list[str | None] = []
     home = Path("~/.ava")
-    machine_identity.set(name="wsl", role="agent-runner", host="10.0.0.2", description=None)
+    machine_identity.set(name="runner-a", role="agent-runner", host="10.0.0.2", description=None)
 
     def register(
         _db: object,
@@ -430,7 +430,7 @@ def test_register_boot_announces_this_unit_up(
         home: str,
         gateway: str | None,
     ) -> None:
-        assert name == "wsl"
+        assert name == "runner-a"
         assert roles == frozenset({"agent-runner"})
         assert description is None
         assert home == "~/.ava"
@@ -470,7 +470,7 @@ def test_register_boot_failure_does_not_stop_the_daemon(
         gateway: str | None,
     ) -> None:
         assert url == "http://10.0.0.2:8600"
-        assert name == "wsl"
+        assert name == "runner-a"
         assert roles == frozenset({"agent-runner"})
         raise RuntimeError("central postgres unreachable")
 

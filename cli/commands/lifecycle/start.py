@@ -79,10 +79,12 @@ def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     return 1
 
 
-def _prepare_start_schema(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> int:
+def _prepare_start_schema(
+    *, database_factory: DatabaseFactory, machine_name: Callable[[], str]
+) -> int:
     print("\n→ apply pending migrations")
     try:
-        cmd_migrations_apply(database_factory=database_factory, machine_name=machine.name)
+        cmd_migrations_apply(database_factory=database_factory, machine_name=machine_name)
     except Exception as e:
         print(f"  ✗ migrations apply failed: {e}", file=sys.stderr)
         return 1
@@ -136,7 +138,7 @@ def _prepare_cold_start(
     else:
         print("\n→ local services: skipped (agent-runner uses central node's DB/Redis)")
 
-    rc = _prepare_start_schema(database_factory=database_factory, machine=command.machine)
+    rc = _prepare_start_schema(database_factory=database_factory, machine_name=command.machine.name)
     if rc:
         return rc
 
@@ -163,7 +165,7 @@ def _prepare_cold_start(
     # Adopt first: a name this machine installed before the registry existed is
     # invisible to the materializer until it has a row, and sweeping first means
     # one pass leaves machine and cluster agreeing rather than two.
-    adopt_local_extensions(database_factory=database_factory, machine=command.machine)
+    adopt_local_extensions(database_factory=database_factory, machine_name=command.machine.name)
     materialize_cluster_extensions(database_factory=database_factory)
 
     return 0
