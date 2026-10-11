@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -36,8 +37,6 @@ def test_foreign_label_job_bound_to_our_socket_is_refused(
 
     def fake_run(cmd, **kwargs):
         recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
-        import subprocess
-
         return subprocess.CompletedProcess(cmd, 0, b"", b"")  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(lifecycle, "run_bounded", fake_run)  # pyright: ignore[reportUnknownArgumentType]
@@ -60,13 +59,11 @@ def test_foreign_label_refusal_holds_when_the_job_is_not_loaded(
     sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
 
     _write_agent_plist(agents, "com.ava.permissions-helper.stray", sock)
-    monkeypatch.setattr(
-        lifecycle,
-        "run_bounded",
-        lambda cmd, **_kw: __import__("subprocess").CompletedProcess(  # pyright: ignore[reportUnknownArgumentType]
-            cmd, 78, b"", b""
-        ),  # bootout: job not loaded
-    )
+
+    def bootout_job_not_loaded(cmd: list[str], **_kw: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(cmd, 78, b"", b"")
+
+    monkeypatch.setattr(lifecycle, "run_bounded", bootout_job_not_loaded)
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="reconcile them externally"):
         lifecycle._refuse_foreign_label_jobs()
