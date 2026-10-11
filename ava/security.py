@@ -20,6 +20,9 @@ __all_for_ava__ = [
 # The graph-state channel a finding is appended to (`BaseAgentState.security_findings`).
 _FINDINGS_CHANNEL = "security_findings"
 
+# Trigger label of a finding raised by a model's judgement rather than a pattern.
+_MODEL_TRIGGER = "instructions aimed at an AI reader"
+
 # Structural markup an attacker uses to forge a system message or a tool call.
 # Matched case-insensitively as a plain substring; these strings do not occur in
 # ordinary prose, so the false-positive rate is near zero.
@@ -124,6 +127,30 @@ def _record_finding(source: str, triggers: list[str]) -> None:
         *update.get(_FINDINGS_CHANNEL, []),
         SecurityFindingEntry(source=source, triggers=triggers),
     ]
+
+
+def finding_delivery_active() -> bool:
+    """True when a finding recorded now would reach the agent: scanning is
+    enabled and an exec turn is running.
+
+    Lets a caller skip a paid check whose verdict `_record_finding` would drop.
+    """
+    from ava.sdk_surface.settings import agent_setting
+
+    if not agent_setting("security_scan_enabled"):
+        return False
+    import ava
+
+    return ava.in_exec_turn()
+
+
+def record_model_finding(source: str, score: float) -> None:
+    """Record that a model judged `source`'s content to be aimed at an AI reader.
+
+    `score` is the model's probability for that verdict. Delivered like any rule
+    finding: a SECURITY system note after the tool result, content untouched.
+    """
+    _record_finding(source, [f"{_MODEL_TRIGGER} (model score {score:.2f})"])
 
 
 def scan_content(content: str, source: str = "unknown") -> str:
