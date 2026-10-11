@@ -12,7 +12,7 @@ from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.agents.impersonation.notes import HandoffNotes
 from base.clock import Clock
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -31,14 +31,16 @@ def _handoff_notes() -> HandoffNotes:
 
 
 @pytest.fixture
-def owner(db_conn: psycopg.Connection[Any]) -> RuntimeIncarnation:
+def owner(
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+) -> RuntimeIncarnation:
     agent_id = create_agent(db_conn)
     incarnation = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
         "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
         "clock_timestamp()+interval '10 minutes')",
-        (agent_id, machine_name(), incarnation.generation, incarnation.owner),
+        (agent_id, machine_identity.name(), incarnation.generation, incarnation.owner),
     )
     db_conn.commit()
     return incarnation
@@ -50,6 +52,7 @@ def start(
     active: bool = True,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> dict[str, Any]:
     result = sessions.request(
         Database.from_settings(gate=database_gate),
@@ -61,9 +64,13 @@ def start(
         thread_id=str(uuid4()),
         process_metadata=recorded_tree(),
         authority=config_authority,
+        local_machine=machine_identity.name(),
     )
     lease = history.resolve(
-        Database.from_settings(gate=database_gate), owner.agent_id, result["session_id"]
+        Database.from_settings(gate=database_gate),
+        owner.agent_id,
+        result["session_id"],
+        local_machine=machine_identity.name(),
     )
     if active:
         leases.accept(
@@ -73,6 +80,7 @@ def start(
             owner.agent_id,
             owner,
             "Continue the login fix",
+            local_machine=machine_identity.name(),
         )
         leases.activate(
             Database.from_settings(gate=database_gate),
@@ -81,7 +89,10 @@ def start(
             owner,
         )
         lease = history.resolve(
-            Database.from_settings(gate=database_gate), owner.agent_id, result["session_id"]
+            Database.from_settings(gate=database_gate),
+            owner.agent_id,
+            result["session_id"],
+            local_machine=machine_identity.name(),
         )
     return lease
 
@@ -95,6 +106,8 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     database: Database,
     event_bus: EventBus,
     database_gate: ProcessDbGate,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from psycopg.types.json import Jsonb
 
@@ -103,7 +116,12 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     from base.agents.impersonation.timeline import hydrate
     from base.agents.upload_delivery.paths import upload_url
 
-    lease = start(owner, config_authority=config_authority, database_gate=database_gate)
+    lease = start(
+        owner,
+        config_authority=config_authority,
+        database_gate=database_gate,
+        machine_identity=machine_identity,
+    )
     db_conn.execute(
         "UPDATE agent_impersonations SET automatic=%s WHERE id=%s", (automatic, lease["id"])
     )
@@ -124,8 +142,28 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     ).fetchone()
     assert inserted is not None
     db_conn.commit()
-    leases.inbox(database, str(lease["id"]), attested_caller(lease))
-    leases.ack(database, event_bus, str(lease["id"]), attested_caller(lease), [inserted[0]])
+    leases.inbox(
+        database,
+        str(
+            lease["id"],
+        ),
+        attested_caller(
+            lease,
+        ),
+        local_machine=machine_identity.name(),
+    )
+    leases.ack(
+        database,
+        event_bus,
+        str(
+            lease["id"],
+        ),
+        attested_caller(
+            lease,
+        ),
+        [inserted[0]],
+        local_machine=machine_identity.name(),
+    )
     items, _ = build_timeline_items(
         [start_marker(lease, notes=_handoff_notes())], [], inputs=_TIMELINE_INPUTS
     )

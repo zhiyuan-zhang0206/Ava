@@ -10,6 +10,7 @@ from base import paths, telemetry
 from base.db import Database
 from base.telemetry.metrics import observed_metrics as metrics
 from base.telemetry.otlp import telemetry_otlp
+from base.telemetry.tests.identity_inputs import machine_identity
 
 
 def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
@@ -23,7 +24,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
     emitted = Mock(side_effect=AssertionError("diagnostics must bypass emitter"))
     monkeypatch.setattr(telemetry, "emit", emitted)
     exported = Mock()
-    monkeypatch.setattr(telemetry_otlp, "export_batch", exported)
+    monkeypatch.setattr(telemetry_otlp.OtlpBackend, "export_batch", exported)
     event = telemetry.Event(
         ts=datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC),
         trace_id=None,
@@ -39,7 +40,9 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
         target_agent_id=None,
         attributes={"ok": True, "duration_seconds": 2.5},
     )
-    pipeline = telemetry.build_pipeline(database=lambda: database)
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity(), home=Path(".ava")
+    )
     try:
         telemetry.emit_prepared(event, producer=lambda: pipeline)
         assert pipeline.flush().status is telemetry.DrainStatus.COMPLETED

@@ -23,7 +23,7 @@ from ava.sdk_surface.process_context import process_clients
 from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
 from base.clock import Clock, clock_config_from_boot
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -50,6 +50,7 @@ def native_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
     model_installation: Installation,
+    machine_identity: MachineIdentity,
 ) -> Iterator[tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]]:
     pin_no_identity()
     ava.unbind_exec_turn()
@@ -75,7 +76,7 @@ def native_checkpoint(
         "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
         "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
         "clock_timestamp()+interval '10 minutes')",
-        (agent_id, machine_name(), owner.generation, owner.owner),
+        (agent_id, machine_identity.name(), owner.generation, owner.owner),
     )
     db_conn.commit()
     checkpoint = empty_checkpoint()
@@ -94,11 +95,12 @@ def native_checkpoint(
             versions,
         )
     config = snapshot_process_config()
-    with closing(process_clients(config=config)) as clients:
+    with closing(process_clients(config=config, machine=machine_identity)) as clients:
         pin_agent(
             None,
             owns_loop=False,
             clients=clients,
+            machine=machine_identity,
             clock_factory=lambda: Clock(clock_config_from_boot(config)),
         )
         yield owner, handle
@@ -115,6 +117,8 @@ def test_external_memory_write_uses_borrowed_identity(
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from ava_builtins.plugins.ava_memory import sdk as memory_sdk
     from base import paths
@@ -137,8 +141,17 @@ def test_external_memory_write_uses_borrowed_identity(
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
         authority=config_authority,
+        local_machine=machine_identity.name(),
     )
-    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=machine_identity.name(),
+    )
     leases.activate(database, event_bus, lease["id"], owner)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
 
@@ -154,7 +167,14 @@ def test_external_memory_write_uses_borrowed_identity(
         assert f"ava_agent: {owner.agent_id}\n" in entry.read_text()
     # Memory files are immediate SDK effects, separate from checkpoint deltas.
     assert (
-        leases.get(database, event_bus, lease["id"], attested_caller(lease))["delta_version"] == 0
+        leases.get(
+            database,
+            event_bus,
+            lease["id"],
+            attested_caller(lease),
+            local_machine=machine_identity.name(),
+        )["delta_version"]
+        == 0
     )
 
 
@@ -168,6 +188,8 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from ava_builtins.plugins.ava_memory import notes, sdk
     from base import paths
@@ -189,8 +211,17 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
         authority=config_authority,
+        local_machine=machine_identity.name(),
     )
-    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=machine_identity.name(),
+    )
     leases.activate(database, event_bus, lease["id"], owner)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
     attachment = external.attach(lease["id"])

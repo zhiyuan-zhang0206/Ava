@@ -14,6 +14,7 @@ from ava_builtins.plugins.ava_fleet import task_registry
 from base.agents import GatewayUnavailable
 from base.agents.context.identity import ExternalLease
 from base.agents.tasks.model import Task
+from base.cluster.machine import MachineIdentity
 from gateway.agents import router as agent_router
 from gateway.agents.tests.test_task_assignments import HEADERS, PATH, SECRET
 from gateway.agents.tests.test_task_assignments import body as body
@@ -21,6 +22,7 @@ from gateway.agents.tests.test_task_assignments import client as client
 from gateway.app import app
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.pin_agent import pin_agent
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _response(response: Any) -> httpx.Response:
@@ -76,13 +78,15 @@ def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
     assert db_conn.execute("SELECT count(*) FROM task_assignment_receipts").fetchone() == (1,)
 
 
-def test_unavailable_atomic_route_refuses_without_separate_spawn(body: dict[str, Any]) -> None:
+def test_unavailable_atomic_route_refuses_without_separate_spawn(
+    body: dict[str, Any], *, machine_identity: MachineIdentity
+) -> None:
     unavailable = FastAPI(lifespan=app.router.lifespan_context, middleware=app.user_middleware)
     unavailable.exception_handlers = app.exception_handlers.copy()
     unavailable.include_router(agent_router.router)
     http = MagicMock()
     with gateway_test_client(
-        unavailable, headers={"Authorization": f"Bearer {SECRET}"}
+        unavailable, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
     ) as endpoint:
 
         def submit(path: str, **kwargs: Any) -> httpx.Response:

@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 
 import base.db
 from base.agents.incarnation.resources import IncarnationResources
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -52,6 +52,7 @@ def spawn_agent(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """Test setup helper — mirrors the pre-#1236 `spawn_agent()` contract
     (create row + launch) as the two-phase split: `create_agent_row`
@@ -64,7 +65,7 @@ def spawn_agent(
         spawner=spawner,
         fork_from=fork_from,
         fork_checkpoint=fork_checkpoint,
-        machine=machine_name(),
+        machine=local_machine.name(),
         config=config,
         label=label,
         prompt=prompt,
@@ -94,10 +95,14 @@ def hosted_agent(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """Seed the retained authority of a hosted incarnation for guard tests."""
     agent_id = spawn_agent(
-        config_authority=config_authority, model_catalog=model_catalog, database_gate=database_gate
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+        local_machine=local_machine,
     )
     generation, owner = uuid4(), uuid4()
     resources = IncarnationResources(generation=generation, owner=owner, requests={})
@@ -111,7 +116,11 @@ def hosted_agent(
 
 
 async def settle_hosted_force(
-    db: psycopg.Connection, pool: AsyncConnectionPool, agent_id: int
+    db: psycopg.Connection,
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    *,
+    local_machine: MachineIdentity,
 ) -> None:
     """Complete this inactive fixture through its retained hosted owner."""
     from base.agents.incarnation.hosted_force import original_host_force
@@ -119,7 +128,7 @@ async def settle_hosted_force(
     row = db.execute("SELECT runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     assert row is not None
     db.commit()
-    assert await original_host_force(pool, agent_id, row[0], machine_name(), quiescent=True)
+    assert await original_host_force(pool, agent_id, row[0], local_machine.name(), quiescent=True)
 
 
 __all__ = [

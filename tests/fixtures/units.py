@@ -5,11 +5,14 @@ from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+
+__all__ = ["skip_authority_pass", "spawn_agent", "use_env_files"]
 
 
 def skip_authority_pass(_home: Path) -> None:
@@ -36,6 +39,7 @@ def use_env_files(
 
 def spawn_agent(
     *,
+    machine: MachineIdentity,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
     database_gate: ProcessDbGate,
@@ -44,7 +48,6 @@ def spawn_agent(
     **kw: Any,
 ) -> int:
     """Allocate a real agent row and publish its normal host-dispatch wake."""
-    from base.cluster.machine import machine_name
     from base.db import publish_inbound_wake
     from ops.agents.spawn import create_agent_row
 
@@ -53,7 +56,7 @@ def spawn_agent(
         db,
         bus,
         spawner=spawner,
-        machine=machine_name(),
+        machine=machine.name(),
         config=config,
         catalog=catalog,
         authority=authority,

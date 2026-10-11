@@ -11,12 +11,14 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.plugin_providers import build_model_catalog
 from gateway.app import app
 from gateway.tests.test_agents_endpoints import _inbound_rows
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _assert_failed_birth_visible(client: TestClient, body: dict[str, Any], agent_id: int) -> None:
@@ -158,8 +160,8 @@ def test_first_prompt_insert_failure_rolls_back_agent_row(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
-    from base.cluster.machine import machine_name
     from ops.agents import birth_transaction, spawn
 
     with db_conn.cursor() as cur:
@@ -174,7 +176,7 @@ def test_first_prompt_insert_failure_rolls_back_agent_row(
         spawn.create_agent_row(
             database,
             event_bus,
-            machine=machine_name(),
+            machine=machine_identity.name(),
             prompt="Work",
             prompt_source="user",
             catalog=build_model_catalog(),

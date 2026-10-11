@@ -15,6 +15,7 @@ import pytest
 
 from ava.agents import AgentStatus as S
 from base.config import settings
+from base.cluster.machine import MachineIdentity
 from base.native_process.loaded_commit import LoadedCommit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -66,7 +67,7 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
     monkeypatch.setattr(module.ava.agents, "resurrect", forbidden)
     monkeypatch.setattr(module.ava.agents, "send_message", forbidden)
     monkeypatch.setattr(module.ava, "loaded_code_image", forbidden)
-    monkeypatch.setattr("schedules.entry.Database.from_settings", forbidden)
+    monkeypatch.setattr("schedules.entry.Database", forbidden)
     monkeypatch.setattr(module, "catch_up", forbidden)
     monkeypatch.setattr(module, "fire_slot_once", forbidden)
     monkeypatch.setattr(module, "ava_home", forbidden)
@@ -159,6 +160,7 @@ def test_worker_prompt_names_ledger_scan_artifact_and_one_pr(tmp_path: Path) -> 
 def test_scan_failure_is_passed_to_worker_and_registered(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    machine_identity: MachineIdentity,
 ) -> None:
     module = _load_schedule_module()
     scan = module.ScanReport(
@@ -198,6 +200,7 @@ def test_scan_failure_is_passed_to_worker_and_registered(
         None,
         producer=lambda: None,
         image=LoadedCommit(REPO_ROOT, None),
+        machine_reader=machine_identity.name,
     )
 
     assert len(prompts) == 1

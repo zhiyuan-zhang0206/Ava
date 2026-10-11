@@ -24,7 +24,7 @@ from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -39,11 +39,12 @@ def _default_reader(domain: str, field: str) -> Any:
     return getattr(getattr(settings, domain), field)
 
 
-def _context(agent_id: int | None = 1) -> AvaContext:
+def _context(agent_id: int | None = 1, *, machine_identity: MachineIdentity) -> AvaContext:
     return AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         agent=AgentSlices.resolve(default_reader=_default_reader),
         clock_factory=Clock.from_settings,
+        machine=machine_identity,
     )
 
 
@@ -70,18 +71,22 @@ def _write_entry(agent_id: int, slug: str, body: str) -> Path:
     return path
 
 
-def _local_row(agent_id: int, label: str | None = None, depth: int = 1) -> dict[str, Any]:
+def _local_row(
+    agent_id: int, label: str | None = None, depth: int = 1, *, machine_identity: MachineIdentity
+) -> dict[str, Any]:
     return {
         "agent_id": agent_id,
         "label": label,
         "status": "idling",
-        "machine": machine_name(),
+        "machine": machine_identity.name(),
         "depth": depth,
     }
 
 
-def _remote_row(agent_id: int, depth: int = 1) -> dict[str, Any]:
-    row = _local_row(agent_id, depth=depth)
+def _remote_row(
+    agent_id: int, depth: int = 1, *, machine_identity: MachineIdentity
+) -> dict[str, Any]:
+    row = _local_row(agent_id, depth=depth, machine_identity=machine_identity)
     row["machine"] = "test-elsewhere"
     return row
 
@@ -162,26 +167,32 @@ def test_parser_fails_soft_on_malformed_fences() -> None:
 
 
 def test_disabled_and_empty_chain_yield_no_note(
-    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch
+    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 0)
-    assert inherit.inherited_memory_note(_context()) is None
+    assert inherit.inherited_memory_note(_context(machine_identity=machine_identity)) is None
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 1)
     monkeypatch.setattr(settings.agent, "eval_isolation", True)
-    assert inherit.inherited_memory_note(_context()) is None
+    assert inherit.inherited_memory_note(_context(machine_identity=machine_identity)) is None
     # Nothing read while the layer is off.
     assert chain.calls == []
 
     monkeypatch.setattr(settings.agent, "eval_isolation", False)
-    assert inherit.inherited_memory_note(_context()) is None  # empty chain
-    chain.rows = [_local_row(600301)]
-    assert inherit.inherited_memory_note(_context()) is None  # local ancestor, no store
+    assert (
+        inherit.inherited_memory_note(_context(machine_identity=machine_identity)) is None
+    )  # empty chain
+    chain.rows = [_local_row(600301, machine_identity=machine_identity)]
+    assert (
+        inherit.inherited_memory_note(_context(machine_identity=machine_identity)) is None
+    )  # local ancestor, no store
 
 
-def test_direct_parent_blocks_are_injected(chain: _FakeChain) -> None:
+def test_direct_parent_blocks_are_injected(
+    chain: _FakeChain, *, machine_identity: MachineIdentity
+) -> None:
     _write_entry(600311, "family-rules", f"private\n\n{_wrap('Report in Chinese.')}\n")
-    chain.rows = [_local_row(600311, label="Parent")]
-    note = inherit.inherited_memory_note(_context())
+    chain.rows = [_local_row(600311, label="Parent", machine_identity=machine_identity)]
+    note = inherit.inherited_memory_note(_context(machine_identity=machine_identity))
     assert note is not None
     assert _note_tag(note) == "inherited_memory"
     content = _note_text(note)
@@ -194,14 +205,17 @@ def test_direct_parent_blocks_are_injected(chain: _FakeChain) -> None:
 
 
 def test_blocks_render_nearest_first_with_sorted_entries(
-    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch
+    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     _write_entry(600321, "b-entry", _wrap("b block"))
     _write_entry(600321, "a-entry", _wrap("a block one", "a block two"))
     _write_entry(600322, "grandparent", _wrap("grandparent block"))
-    chain.rows = [_local_row(600321, label="Parent"), _local_row(600322, depth=2)]
+    chain.rows = [
+        _local_row(600321, label="Parent", machine_identity=machine_identity),
+        _local_row(600322, depth=2, machine_identity=machine_identity),
+    ]
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 2)
-    note = inherit.inherited_memory_note(_context())
+    note = inherit.inherited_memory_note(_context(machine_identity=machine_identity))
     assert note is not None
     content = _note_text(note)
     # Nearest ancestor first; within one ancestor, sorted file names; both
@@ -212,31 +226,39 @@ def test_blocks_render_nearest_first_with_sorted_entries(
     assert "grandparent block" in content
 
 
-def test_depth_slices_the_chain(chain: _FakeChain, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_depth_slices_the_chain(
+    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     _write_entry(600331, "parent", _wrap("parent block"))
     _write_entry(600332, "grandparent", _wrap("grandparent block"))
-    chain.rows = [_local_row(600331), _local_row(600332, depth=2)]
+    chain.rows = [
+        _local_row(600331, machine_identity=machine_identity),
+        _local_row(600332, depth=2, machine_identity=machine_identity),
+    ]
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 1)
-    note = inherit.inherited_memory_note(_context())
+    note = inherit.inherited_memory_note(_context(machine_identity=machine_identity))
     assert note is not None
     content = _note_text(note)
     assert "(depth 1," in content
     assert "parent block" in content and "grandparent block" not in content
 
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 2)
-    note = inherit.inherited_memory_note(_context())
+    note = inherit.inherited_memory_note(_context(machine_identity=machine_identity))
     assert note is not None
     content = _note_text(note)
     assert "parent block" in content and "grandparent block" in content
 
 
 def test_remote_ancestors_are_skipped_and_footered(
-    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch
+    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     _write_entry(600341, "local", _wrap("local block"))
-    chain.rows = [_remote_row(600342), _local_row(600341, depth=2)]
+    chain.rows = [
+        _remote_row(600342, machine_identity=machine_identity),
+        _local_row(600341, depth=2, machine_identity=machine_identity),
+    ]
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 2)
-    note = inherit.inherited_memory_note(_context())
+    note = inherit.inherited_memory_note(_context(machine_identity=machine_identity))
     assert note is not None
     content = _note_text(note)
     assert "local block" in content
@@ -246,48 +268,50 @@ def test_remote_ancestors_are_skipped_and_footered(
 
     # Remote-only chain: no content, no note (the footer appears only when
     # there is something to carry it).
-    chain.rows = [_remote_row(600343)]
+    chain.rows = [_remote_row(600343, machine_identity=machine_identity)]
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 1)
-    assert inherit.inherited_memory_note(_context()) is None
+    assert inherit.inherited_memory_note(_context(machine_identity=machine_identity)) is None
 
 
-def test_chain_read_failure_degrades_and_is_not_cached(chain: _FakeChain) -> None:
+def test_chain_read_failure_degrades_and_is_not_cached(
+    chain: _FakeChain, *, machine_identity: MachineIdentity
+) -> None:
     chain.error = GatewayUnavailable("gateway down")
-    assert inherit.inherited_memory_note(_context()) is None
-    assert inherit.inherited_memory_note(_context()) is None
+    assert inherit.inherited_memory_note(_context(machine_identity=machine_identity)) is None
+    assert inherit.inherited_memory_note(_context(machine_identity=machine_identity)) is None
     # A failed read is not a negative cache — the next establishment retries.
     assert len(chain.calls) == 2
 
 
 def test_chain_is_read_at_each_establishment(
-    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch
+    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     pin_agent(1)
     _write_entry(600351, "rules", _wrap("fresh block"))
-    chain.rows = [_local_row(600351)]
-    assert inherit.inherited_memory_note(_context()) is not None
-    assert inherit.inherited_memory_note(_context()) is not None
+    chain.rows = [_local_row(600351, machine_identity=machine_identity)]
+    assert inherit.inherited_memory_note(_context(machine_identity=machine_identity)) is not None
+    assert inherit.inherited_memory_note(_context(machine_identity=machine_identity)) is not None
     assert chain.calls == [1, 1]  # the established agent id; read per establishment
 
 
-def test_content_is_deterministic(chain: _FakeChain) -> None:
+def test_content_is_deterministic(chain: _FakeChain, *, machine_identity: MachineIdentity) -> None:
     """Unchanged state renders byte-identical — the property the fork's
     prefix-cache stability relies on (no timestamps in the content)."""
     _write_entry(600361, "rules", _wrap("stable block"))
-    chain.rows = [_local_row(600361)]
-    first = inherit.inherited_memory_note(_context())
-    second = inherit.inherited_memory_note(_context())
+    chain.rows = [_local_row(600361, machine_identity=machine_identity)]
+    first = inherit.inherited_memory_note(_context(machine_identity=machine_identity))
+    second = inherit.inherited_memory_note(_context(machine_identity=machine_identity))
     assert first is not None and second is not None
     assert _note_text(first) == _note_text(second)
 
 
 def test_block_guardrail_truncates_with_a_visible_marker(
-    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch
+    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     entry = _write_entry(600371, "big", _wrap("x" * 200))
-    chain.rows = [_local_row(600371)]
+    chain.rows = [_local_row(600371, machine_identity=machine_identity)]
     monkeypatch.setattr(settings.agent, "memory_inherit_max_block_chars", 50)
-    note = inherit.inherited_memory_note(_context())
+    note = inherit.inherited_memory_note(_context(machine_identity=machine_identity))
     assert note is not None
     content = _note_text(note)
     assert "[truncated at 50 chars — full entry: " in content
@@ -296,13 +320,13 @@ def test_block_guardrail_truncates_with_a_visible_marker(
 
 
 def test_total_guardrail_clips_and_omits(
-    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch
+    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     _write_entry(600381, "one", _wrap("a" * 40))
     _write_entry(600381, "two", _wrap("b" * 40))
-    chain.rows = [_local_row(600381)]
+    chain.rows = [_local_row(600381, machine_identity=machine_identity)]
     monkeypatch.setattr(settings.agent, "memory_inherit_max_total_chars", 60)
-    note = inherit.inherited_memory_note(_context())
+    note = inherit.inherited_memory_note(_context(machine_identity=machine_identity))
     assert note is not None
     content = _note_text(note)
     assert "a" * 40 in content  # first section enters whole
@@ -315,7 +339,7 @@ def test_total_guardrail_clips_and_omits(
     # whole behind the same marker (no dangling section header).
     monkeypatch.setattr(settings.agent, "memory_inherit_max_total_chars", 40)
     monkeypatch.setattr(settings.agent, "memory_inherit_max_block_chars", 0)
-    note = inherit.inherited_memory_note(_context())
+    note = inherit.inherited_memory_note(_context(machine_identity=machine_identity))
     assert note is not None
     content = _note_text(note)
     assert "a" * 40 in content
@@ -325,30 +349,36 @@ def test_total_guardrail_clips_and_omits(
     assert "[truncated: the 40-char inherited-memory budget is reached" in content
 
 
-def test_guardrails_can_be_disabled(chain: _FakeChain, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_guardrails_can_be_disabled(
+    chain: _FakeChain, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     _write_entry(600391, "big", _wrap("y" * 200))
-    chain.rows = [_local_row(600391)]
+    chain.rows = [_local_row(600391, machine_identity=machine_identity)]
     monkeypatch.setattr(settings.agent, "memory_inherit_max_block_chars", 0)
     monkeypatch.setattr(settings.agent, "memory_inherit_max_total_chars", 0)
-    note = inherit.inherited_memory_note(_context())
+    note = inherit.inherited_memory_note(_context(machine_identity=machine_identity))
     assert note is not None
     content = _note_text(note)
     assert "y" * 200 in content
     assert "truncated" not in content
 
 
-def test_fork_notes_graft_the_new_agent_s_own_chain(chain: _FakeChain, memory_plugin: Any) -> None:
+def test_fork_notes_graft_the_new_agent_s_own_chain(
+    chain: _FakeChain, memory_plugin: Any, *, machine_identity: MachineIdentity
+) -> None:
     """`fork_notes()` builds the on_fork notes in the NEW agent's process — the
     inherited note therefore carries the new agent's chain, not the source's
     (the claim node strips the source's copy; see test_fork_notes.py)."""
     _write_entry(600401, "rules", _wrap("fork chain block"))
-    chain.rows = [_local_row(600401, label="Fork parent")]
+    chain.rows = [_local_row(600401, label="Fork parent", machine_identity=machine_identity)]
     from agent.graph.prompt.context_notes import fork_notes
 
     registry = ExtensionRegistry((("ava_memory", memory_plugin.contribute()),))
     sql = MagicMock()
     sql.cursor.return_value.__enter__.return_value.fetchone.return_value = None
-    ctx = replace(_context(), clients=MagicMock(spec=ClientSet, sql=sql))
+    ctx = replace(
+        _context(machine_identity=machine_identity), clients=MagicMock(spec=ClientSet, sql=sql)
+    )
     notes = fork_notes(registry, ctx)
     inherited = [n for n in notes if _note_tag(n) == "inherited_memory"]
     assert len(inherited) == 1

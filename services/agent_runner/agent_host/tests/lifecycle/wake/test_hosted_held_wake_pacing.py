@@ -12,7 +12,7 @@ from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.lifecycle.wake_recovery_setup import isolated_clocks
 from services.agent_runner.agent_host.tests.test_agent_host import _PendingScanPool
 from services.agent_runner.agent_host.tests.turn_dispatcher.scan_setup import ScanScheduler
@@ -32,7 +32,7 @@ class TestHostedHostWakePacing:
             pool=cast(AsyncConnectionPool[Any], pool),
             checkpointer=object(),  # pyright: ignore[reportArgumentType]
             graph=object(),  # pyright: ignore[reportArgumentType]
-            machine="this-box",
+            machine=configured_machine(name="this-box"),
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,

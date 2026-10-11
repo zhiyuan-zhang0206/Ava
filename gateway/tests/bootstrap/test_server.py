@@ -31,7 +31,7 @@ def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
     monkeypatch.setattr(_server, "assert_schema_current", _ignore)
     monkeypatch.setattr(_server, "raise_fd_limit", _ignore)
     monkeypatch.setattr(_server, "init_gateway_process", _ignore)
-    monkeypatch.setattr(_server, "is_gateway", lambda: False)
+    monkeypatch.setattr(settings.general, "machine_serve_gateway", False)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _record_serve)
 
@@ -86,7 +86,7 @@ def test_gateway_start_raises_the_min_code_version_after_schema_and_logging(
 
     monkeypatch.setattr(_server, "init_gateway_process", logging_initialized)
     monkeypatch.setattr(ProcessDbGate, "raise_min_code_version", _raised)
-    monkeypatch.setattr(_server, "is_gateway", lambda: serves_gateway)
+    monkeypatch.setattr(settings.general, "machine_serve_gateway", serves_gateway)
     monkeypatch.setattr(_server, "verify_transport_encryption", _ignore)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _ignore)

@@ -6,21 +6,23 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from tests.fixtures.configuration import snapshot_process_config
-from tests.fixtures.unit.identity import _machine_identity
 
 
 @pytest.fixture
 def gateway_unit(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> Iterator[TestClient]:
     """The gateway unit (gateway): owns the test DB/config, runs the
     in-process gateway app, role='gateway'.
 
     Yields a FastAPI TestClient bound to the gateway app. Use for tests that
-    exercise gateway endpoints / invariants without hand-patching
-    machine_role at each import site. db_conn gives the per-test TRUNCATE. For a
-    specific machine_name, also take `set_machine_identity` and call it.
+    exercise gateway endpoints with the explicit machine owner borrowed by the
+    actual process root. db_conn gives the per-test TRUNCATE. For a specific
+    name, also take `set_machine_identity` and configure the same fixture owner.
 
     The cluster-secret auth middleware is disabled by the autouse `_clean_state`
     (auth_middleware_enabled=false) so in-process endpoint tests don't need to
@@ -28,12 +30,16 @@ def gateway_unit(
     re-enable it via monkeypatch.
     """
     from gateway import app as gateway_app
+    from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 
     config = snapshot_process_config()
-    monkeypatch.setattr(gateway_app, "ConfigBoot", lambda: config)
+    config.boot()
+    machine_identity.set(role="gateway")
+    process = GatewayProcess(config=config, image=LOADED_IMAGE, machine=machine_identity)
+    monkeypatch.setattr(gateway_app.app.state, "gateway_process_input", process, raising=False)
     _ = db_conn  # per-test truncate side effect
     with (
-        _machine_identity(role="gateway"),
+        process.lifetime(),
         TestClient(gateway_app.app, base_url="http://test-gateway") as client,
     ):
         yield client

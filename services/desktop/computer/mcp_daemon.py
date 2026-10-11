@@ -77,15 +77,15 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from base.cluster.machine import validate_machine_name
-from base.config import settings
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.log import logger
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import computer_mcp_socket
+from base.paths import ava_home, computer_mcp_socket
 from base.telemetry import audit_events, build_pipeline
 
 from ..permissions_helper import client as helper
@@ -632,17 +632,21 @@ async def run(sock: str | None = None, *, database: Callable[[], Database]) -> N
 
 def main() -> None:
     image = LoadedCommit.capture()
+    machine_config = ConfigBoot()
+    machine_config.boot()
+    machine = machine_from_boot(machine_config)
+    process_home = ava_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="computer-mcp")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate)
+        return Database.from_settings(gate=gate, local_host=machine.host)
 
-    pipeline = build_pipeline(database=database)
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
         name="computer-mcp",
         producer=lambda: pipeline,
-        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        machine_reader=machine.name,
         image=image,
     )
     asyncio.run(run(database=database))

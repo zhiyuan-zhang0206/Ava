@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.agents.messages.inbound import InboundKind
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -22,6 +22,7 @@ from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from ops.agents.spawn import create_agent_row
 from ops.lifecycle import terminate_agent_op, termination
 from ops.rpc_schemas import TerminateAgentRequest
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _WAKE = "Continue from the latest checkpoint."
 _MARKED = Jsonb({"hosted_turn_recovery": True})
@@ -54,6 +55,7 @@ def agent_id(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> int:
     """A never-admitted agent: it has no runtime identity, so a force on it
     leaves the unowned-termination receipt that resurrection accepts."""
@@ -61,7 +63,7 @@ def agent_id(
         database,
         event_bus,
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         catalog=build_model_catalog(),
         authority=config_authority,
     )
@@ -113,6 +115,8 @@ def test_the_wake_resurrects_the_agent_through_the_final_cas(
     agent_id: int,
     database: Database,
     event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     termination._force_terminate_transaction(
         agent_id, db_pool, source="system", recovery_wake=_WAKE
@@ -126,6 +130,7 @@ def test_the_wake_resurrects_the_agent_through_the_final_cas(
         resurrected_by="system",
         trigger_inbound_id=wake_id,
         trigger_inbound_kind=InboundKind.CHAT,
+        local_machine=machine_identity.name(),
     )
 
     status = db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
@@ -139,6 +144,8 @@ def test_a_chat_queued_before_the_fence_cannot_resurrect(
     agent_id: int,
     database: Database,
     event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Why the wake follows the terminate command instead of preceding it: work
     older than a force cannot reverse that force."""
@@ -161,6 +168,7 @@ def test_a_chat_queued_before_the_fence_cannot_resurrect(
             resurrected_by="system",
             trigger_inbound_id=row[0],
             trigger_inbound_kind=InboundKind.CHAT,
+            local_machine=machine_identity.name(),
         )
 
 
@@ -270,6 +278,8 @@ def test_a_resurrection_records_its_audit_fact(
     agent_id: int,
     database: Database,
     event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     termination._force_terminate_transaction(
         agent_id, db_pool, source="system", recovery_wake=_WAKE
@@ -283,6 +293,7 @@ def test_a_resurrection_records_its_audit_fact(
         resurrected_by="system",
         trigger_inbound_id=wake_id,
         trigger_inbound_kind=InboundKind.CHAT,
+        local_machine=machine_identity.name(),
     )
 
     assert [source for source, _ in _audit_rows(db_conn, agent_id, "resurrect")] == ["system"]

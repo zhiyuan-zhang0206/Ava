@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from base.telemetry import tracing as tracing_mod
+from base.telemetry.tests.identity_inputs import ignore_arguments, machine_identity
 from base.telemetry.tests.test_tracing import _collector_up as _collector_up
 from base.telemetry.tests.test_tracing import (
     _otlp_with_attrs,
@@ -304,7 +305,7 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
         lambda **kw: init_calls.append(kw),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
 
     # ...but the relief pass still ran: the stale segment is pruned, the gzip
     # and cap legs were invoked, and recording itself was skipped.
@@ -324,7 +325,7 @@ def test_initialize_sets_trace_content_false(monkeypatch: pytest.MonkeyPatch, tm
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
     _wait_init_resolved()
 
     assert os.environ["TRACELOOP_TRACE_CONTENT"] == "false"
@@ -351,7 +352,7 @@ def test_initialize_skips_when_collector_unreachable(
     # This test exercises the skip contract, not the daemon retry loop (that
     # is test_collector_unreachable_retries_once_until_init_succeeds); without
     # the stub the daemon retry thread (300s sleep) leaks across tests.
-    monkeypatch.setattr("base.telemetry.tracing._start_collector_retry", lambda: None)
+    monkeypatch.setattr("base.telemetry.tracing._start_collector_retry", ignore_arguments)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     warned: list[tuple] = []
@@ -360,7 +361,7 @@ def test_initialize_skips_when_collector_unreachable(
         lambda *a, **kw: warned.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
 
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
 
     assert calls == []
     assert tracing_mod._state["initialized"] is False
@@ -384,7 +385,7 @@ def test_initialize_skips_when_disk_over_watermark(monkeypatch: pytest.MonkeyPat
         lambda *a, **kw: warned.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
 
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
 
     assert calls == []
     assert tracing_mod._state["initialized"] is False

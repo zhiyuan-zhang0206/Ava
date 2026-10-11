@@ -86,7 +86,6 @@ def test_public_readers_reject_invalid_raw_status(
     raw: dict[str, Any] = dict.fromkeys(fields)
     raw.update(agent_id=7, session_id=1, machine="local", automatic=False)
     raw.update(row)
-    monkeypatch.setattr(history, "machine_name", lambda: "local")
     cursor = SimpleNamespace(execute=execute, fetchone=lambda: raw, fetchall=lambda: [raw])
 
     def context_cursor(**_kwargs: object) -> nullcontext[SimpleNamespace]:
@@ -101,6 +100,6 @@ def test_public_readers_reject_invalid_raw_status(
         elif reader == "public_session":
             history.public_session(raw)
         elif reader == "resolve":
-            history.resolve(db, 7, 1)
+            history.resolve(db, 7, 1, local_machine="local")
         else:
             sessions.list_sessions(db, 7)

@@ -5,12 +5,28 @@ from __future__ import annotations
 import os
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing
+from base.cluster.machine import (
+    MachineIdentity,
+    MachineRoleInvalid,
+    MachineRoleMissing,
+    MachineRoles,
+)
 from services.supervision.healthchecks import otel_collector as hc
+from tests.fixtures.unit.identity import machine_identity as machine_identity
+
+
+def _role_machine(read_role: Callable[[], MachineRoles]) -> MachineIdentity:
+    return MachineIdentity(
+        name=lambda: "collector",
+        role=read_role,
+        host=lambda: "localhost",
+        description=lambda: None,
+    )
 
 
 @pytest.mark.parametrize("ready", [True, False])
@@ -27,50 +43,64 @@ def test_collector_health_uses_otlp_without_native_inspection(
 
 
 def test_collector_serves_this_home_fails_closed_without_machine_role(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr(hc, "machine_role", lambda: (_ for _ in ()).throw(MachineRoleMissing()))
-    assert hc._collector_serves_this_home() is False
+    def missing() -> MachineRoles:
+        raise MachineRoleMissing
 
-    monkeypatch.setattr(
-        hc, "machine_role", lambda: (_ for _ in ()).throw(MachineRoleInvalid("bad"))
-    )
-    assert hc._collector_serves_this_home() is False
+    def invalid() -> MachineRoles:
+        raise MachineRoleInvalid("bad")
+
+    assert hc._collector_serves_this_home(machine=_role_machine(missing)) is False
+    with pytest.raises(MachineRoleInvalid, match="bad"):
+        hc._collector_serves_this_home(machine=_role_machine(invalid))
 
 
 def test_collector_serves_this_home_keeps_runner_and_unconfigured_behavior(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr(hc, "machine_role", lambda: frozenset({"agent-runner"}))
-    assert hc._collector_serves_this_home() is True
+    machine_identity.set(role=frozenset({"agent-runner"}))
+    assert hc._collector_serves_this_home(machine=machine_identity) is True
 
-    monkeypatch.setattr(hc, "machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(hc, "gateway_observability_home", lambda: None)
-    assert hc._collector_serves_this_home() is True
+    machine_identity.set(role=frozenset({"gateway"}))
+
+    def unconfigured(machine: MachineIdentity, *, home: Path) -> None:
+        assert machine is machine_identity and home.is_dir()
+
+    monkeypatch.setattr(hc, "gateway_observability_home", unconfigured)
+    assert hc._collector_serves_this_home(machine=machine_identity) is True
 
 
 def test_collector_serves_this_home_requires_gateway_lgtm_marker(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr(hc, "machine_role", lambda: frozenset({"gateway", "agent-runner"}))
-    monkeypatch.setattr(hc, "gateway_observability_home", lambda: tmp_path)
+    machine_identity.set(role=frozenset({"gateway", "agent-runner"}))
+
+    def gateway_home(machine: MachineIdentity, *, home: Path) -> Path:
+        assert machine is machine_identity and home.is_dir()
+        return tmp_path
+
+    monkeypatch.setattr(hc, "gateway_observability_home", gateway_home)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    assert hc._collector_serves_this_home() is False
+    assert hc._collector_serves_this_home(machine=machine_identity) is False
     (tmp_path / "lgtm-host").touch()
-    assert hc._collector_serves_this_home() is True
+    assert hc._collector_serves_this_home(machine=machine_identity) is True
 
 
 def test_collector_serves_this_home_with_explicit_endpoint_skips_marker(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """An explicit AVA_TELEMETRY_OTLP_ENDPOINT opens the healthcheck's
     collector responsibility on a non-LGTM gateway (marker OR override)."""
-    monkeypatch.setattr(hc, "machine_role", lambda: frozenset({"gateway", "agent-runner"}))
-    monkeypatch.setattr(hc, "gateway_observability_home", lambda: tmp_path)
+    machine_identity.set(role=frozenset({"gateway", "agent-runner"}))
+
+    def gateway_home(machine: MachineIdentity, *, home: Path) -> Path:
+        assert machine is machine_identity and home.is_dir()
+        return tmp_path
+
+    monkeypatch.setattr(hc, "gateway_observability_home", gateway_home)
     monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
-    assert hc._collector_serves_this_home() is True
+    assert hc._collector_serves_this_home(machine=machine_identity) is True
 
 
 def test_is_alive_rejecting_valid_otlp_is_not_healthy(monkeypatch: pytest.MonkeyPatch) -> None:

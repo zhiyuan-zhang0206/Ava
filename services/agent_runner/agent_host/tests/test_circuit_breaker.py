@@ -34,10 +34,16 @@ from agent.hooks.compact import (
     compose_summary_message,
 )
 from agent.state import AgentState, CircuitState
-from agent.tests.claim.claim_status_support import _compact_tail, _pair_compact_cycles
-from agent.tests.claim.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
+from agent.tests.claim.claim_status_support import _pair_compact_cycles, compact_tail
+from agent.tests.claim.claim_support import (
+    _fake_llm,
+    insert_inbound_kind,
+    make_runtime,
+    thread_config,
+)
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -52,6 +58,7 @@ from services.agent_runner.agent_host.tests.circuit_breaker.provider_failures im
     FakeProviderStatusError,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -195,6 +202,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A blocked descendant reports only metadata through immutable SPAWN lineage.
 
@@ -210,18 +218,21 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
     terminated_parent_id = spawn_agent(
         spawner=f"agent:{ancestor_id}",
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
     child_id = spawn_agent(
         spawner=f"agent:{terminated_parent_id}",
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -294,6 +305,7 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Forced compaction is a healthy recovery path, not an ancestor escalation."""
     ancestor_id = spawn_agent(
@@ -301,12 +313,14 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
     child_id = spawn_agent(
         spawner=f"agent:{ancestor_id}",
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -391,6 +405,7 @@ async def test_heartbeat_while_breaker_open_forces_compact(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Breaker open with context_overflow + heartbeat wake → the check-in note
     is NOT appended (no doomed call), and the wake routes into a compaction
@@ -400,23 +415,27 @@ async def test_heartbeat_while_breaker_open_forces_compact(
     mode=auto, compact_finished success — same compact_id) and the summary
     carries the durable ava_compact_id anchor."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
+    insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="context_overflow")
     fake_llm = _fake_llm(LONG_SUMMARY)
     publisher = MagicMock()
     cmd = await claim_node(
         state,
-        _make_runtime(
+        make_runtime(
             ops_pool=aops_pool, llm=fake_llm, event_publisher=publisher, database_gate=database_gate
         ),
-        _config(tid),
+        thread_config(tid),
     )
 
     fake_llm.bind_tools.return_value.ainvoke.assert_called_once()  # the compaction call
-    tail = _compact_tail(cmd.update)
+    assert cmd.update is not None
+    tail = compact_tail(cmd.update)
     assert len(tail) == 1, "forced compact tail must be the summary alone — no heartbeat note"  # pyright: ignore[reportUnknownArgumentType]
     assert tail[0].content == compose_summary_message(LONG_SUMMARY)  # pyright: ignore[reportUnknownMemberType]
     assert cmd.update["compact"].version == 1  # pyright: ignore[reportOptionalSubscript, reportUnknownArgumentType, reportUnknownMemberType]
@@ -433,14 +452,18 @@ async def test_heartbeat_while_breaker_open_compaction_failure_emits_terminal(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Task #3323: when the overflow rescue itself exhausts its transient
     retries (CompactionFailedError), the run still reaches its terminal
     signal (failure) before the error propagates — no hanging ticking block."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
+    insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="context_overflow")
     llm = MagicMock()
@@ -450,10 +473,10 @@ async def test_heartbeat_while_breaker_open_compaction_failure_emits_terminal(
     with pytest.raises(CompactionFailedError, match="no usable summary"):
         await claim_node(
             state,
-            _make_runtime(
+            make_runtime(
                 ops_pool=aops_pool, llm=llm, event_publisher=publisher, database_gate=database_gate
             ),
-            _config(tid),
+            thread_config(tid),
         )
 
     [(started, finished)] = _pair_compact_cycles(publisher)
@@ -468,14 +491,18 @@ async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The 3962 shape: the compaction request itself is rejected (context over
     the effective input ceiling) — the wake must still be rescued by the
     no-LLM minimal compact instead of looping forever."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
+    insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="context_overflow")
     llm = MagicMock()
@@ -487,11 +514,12 @@ async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
     )
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, llm=llm, database_gate=database_gate),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, llm=llm, database_gate=database_gate),
+        thread_config(tid),
     )
 
-    tail = _compact_tail(cmd.update)
+    assert cmd.update is not None
+    tail = compact_tail(cmd.update)
     assert _EMERGENCY_COMPACT_MARKER in tail[0].content  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -502,21 +530,25 @@ async def test_heartbeat_while_breaker_open_non_overflow_parks(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Breaker open with a non-overflow reason (billing): the heartbeat is
     consumed without a note and parks at claim — no LLM call, no compact, no
     doomed re-fire."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
+    insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="billing")
     fake_llm = _fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
+        thread_config(tid),
     )
 
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
@@ -537,21 +569,25 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A parked heartbeat must not bury a same-batch chat in either FIFO order."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     inbound_ids: dict[str, int] = {}
     for kind in (first_kind, second_kind):
         content = "real user work" if kind == "chat" else "Heartbeat."
-        inbound_ids[kind] = _insert_inbound_kind(db_conn, tid, content, kind, source="user")
+        inbound_ids[kind] = insert_inbound_kind(db_conn, tid, content, kind, source="user")
 
     fake_llm = _fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         _overflow_state(breaker_reason="billing"),
-        _make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
+        thread_config(tid),
     )
 
     assert cmd.goto == "before_llm"
@@ -571,13 +607,17 @@ async def test_claim_parks_idle_while_non_overflow_breaker_open(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The claim no-batch branch parks a non-overflow open breaker: a
     self-initiated continue-loop (the next graph invocation after the turn
     boundary) must not re-fire the doomed call. Hosted mode surfaces the park
     as END+turn_idle without blocking on the inbound wait."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
@@ -586,8 +626,8 @@ async def test_claim_parks_idle_while_non_overflow_breaker_open(
     )
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(tid),
     )
 
     assert cmd.goto == "__end__"
@@ -600,11 +640,15 @@ async def test_claim_does_not_park_while_breaker_closed(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Control: with the breaker closed the same no-batch state routes to the
     LLM as before (the continue-working path)."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
@@ -612,8 +656,8 @@ async def test_claim_does_not_park_while_breaker_closed(
     )
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(tid),
     )
 
     assert cmd.goto == "before_llm"
@@ -626,21 +670,25 @@ async def test_heartbeat_normal_when_breaker_closed(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Breaker closed: the heartbeat check-in note is appended and the wake
     routes to the LLM as before — the gate only exists while the breaker is
     open."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
+    insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state()  # breaker closed
     fake_llm = _fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
+        thread_config(tid),
     )
 
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
@@ -701,6 +749,7 @@ def _spawn_child_under_idling_ancestor(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> tuple[int, int]:
     """A live idling ancestor and its child; returns (ancestor_id, child_id)."""
     ancestor_id = spawn_agent(
@@ -708,12 +757,14 @@ def _spawn_child_under_idling_ancestor(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     child_id = spawn_agent(
         spawner=f"agent:{ancestor_id}",
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     with db_conn.cursor() as cur:
         cur.execute(

@@ -37,7 +37,7 @@ from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
@@ -65,8 +65,14 @@ async def _admitted_descendant(
 ) -> tuple[int, int, RuntimeIncarnation]:
     ancestor = agent_row(conn)
     await _admit(pool, ancestor, database_gate=database_gate)
-    agent = agent_row(conn)
-    conn.execute("UPDATE agents_meta SET spawner=%s WHERE id=%s", (f"agent:{ancestor}", agent))
+    from base.db import create_agent
+
+    agent = create_agent(conn)
+    conn.execute(
+        "INSERT INTO agents_meta(id,status,machine,spawner,born_spawner) "
+        "VALUES(%s,'idling','claim-test',%s,%s)",
+        (agent, f"agent:{ancestor}", f"agent:{ancestor}"),
+    )
     conn.commit()
     return ancestor, agent, await _admit(pool, agent, database_gate=database_gate)
 
@@ -171,6 +177,7 @@ async def test_abort_survives_database_loss_before_halted_state_write(
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
+            machine=configured_machine(),
         )
         publisher = MagicMock()
         ctx = AvaContext(

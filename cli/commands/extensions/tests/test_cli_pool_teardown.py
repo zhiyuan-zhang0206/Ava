@@ -18,6 +18,8 @@ from cli.commands.extensions.materialize import (
     materialize_cluster_extensions,
 )
 from cli.commands.extensions.skill_package import _register_in_cluster
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
@@ -82,7 +84,11 @@ def test_materialize_cluster_extensions_closes_pool_when_materialize_raises(
 
 
 def test_adopt_local_extensions_closes_pool_on_success(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Adoption closes its eagerly opened worker-owning pool after use."""
     spy = _install_pool_spy(monkeypatch)
@@ -93,13 +99,17 @@ def test_adopt_local_extensions_closes_pool_on_success(
 
     monkeypatch.setattr(adopt, "adopt_local_installs", _noop_adopt)
 
-    adopt_local_extensions(database_factory=operator_database)
+    adopt_local_extensions(database_factory=operator_database, machine=command_runtime.machine)
 
     assert spy.closed
 
 
 def test_adopt_local_extensions_closes_pool_when_adopt_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The best-effort adoption failure path still closes the pool."""
     spy = _install_pool_spy(monkeypatch)
@@ -110,19 +120,26 @@ def test_adopt_local_extensions_closes_pool_when_adopt_raises(
 
     monkeypatch.setattr(adopt, "adopt_local_installs", raise_adopt)
 
-    adopt_local_extensions(database_factory=operator_database)
+    adopt_local_extensions(database_factory=operator_database, machine=command_runtime.machine)
 
     assert spy.closed
 
 
 def test_register_in_cluster_closes_pool(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Registration closes its pool even when there are no packages to register."""
     spy = _install_pool_spy(monkeypatch)
 
     _register_in_cluster(
-        [], source="https://example.com/repo.git", ref="main", database_factory=operator_database
+        [],
+        source="https://example.com/repo.git",
+        ref="main",
+        database_factory=operator_database,
+        machine=command_runtime.machine,
     )
 
     assert spy.closed

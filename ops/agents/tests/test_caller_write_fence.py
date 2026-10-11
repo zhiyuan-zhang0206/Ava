@@ -3,6 +3,7 @@
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from base.cluster.machine import MachineIdentity
 from ops.rpc_schemas import (
     LaunchAgentRequest,
     RestartAgentRequest,
@@ -10,6 +11,7 @@ from ops.rpc_schemas import (
     SpawnAgentRequest,
     TerminateAgentRequest,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("source", ["external_agent:codex:run-42", "unknown:cli"])
@@ -32,7 +34,9 @@ def test_manual_new_source_rejected_before_dispatch(
         schema.model_validate(other | {field: source})
 
 
-def test_direct_resurrection_rejects_before_transaction() -> None:
+def test_direct_resurrection_rejects_before_transaction(
+    *, machine_identity: MachineIdentity
+) -> None:
     from unittest.mock import Mock
 
     from base.db import Database
@@ -50,6 +54,7 @@ def test_direct_resurrection_rejects_before_transaction() -> None:
             prompt="hello",
             trigger_inbound_id=None,
             trigger_inbound_kind=None,
+            local_machine=machine_identity.name(),
         )
     db.write_transaction.assert_not_called()
 

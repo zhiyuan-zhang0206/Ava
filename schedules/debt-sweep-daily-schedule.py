@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal, Sequence, cast
@@ -29,10 +30,9 @@ import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from base.native_process.loaded_commit import LoadedCommit
-from base.cluster.machines import machine_name
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.daemon.schedules.inputs import ScheduleInputs
-from schedules.entry import schedule_entry
+from schedules.entry import fresh_schedule_entry, schedule_entry
 from base.log.process import init_gateway_process
 from base.host.env.dotenv_boot import resolve_ava_home
 from base.paths import ava_home
@@ -215,7 +215,12 @@ def _slot_day(slot: datetime) -> str:
 
 
 def _fire(
-    slot: datetime, _payload: None, *, producer: Callable[[], Any], image: LoadedCommit
+    slot: datetime,
+    _payload: None,
+    *,
+    producer: Callable[[], Any],
+    image: LoadedCommit,
+    machine_reader: Callable[[], str],
 ) -> None:
     try:
         day = _slot_day(slot)
@@ -225,7 +230,7 @@ def _fire(
         )
         dispatch = ensure_worker(_worker_label(), worker_prompt(day, scan))
         init_gateway_process(
-            name=_PROCESS_NAME, producer=producer, machine_reader=machine_name, image=image
+            name=_PROCESS_NAME, producer=producer, machine_reader=machine_reader, image=image
         )
         from base import telemetry
 
@@ -273,7 +278,9 @@ def _dry_run(repo: Path) -> None:
 
 def _main_loop(*, inputs: ScheduleInputs) -> None:
     db = inputs.database()
-    fire = partial(_fire, producer=inputs.producer, image=inputs.image)
+    fire = partial(
+        _fire, producer=inputs.producer, image=inputs.image, machine_reader=inputs.machine.name
+    )
     catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=fire)
     last_run_at = datetime.now(UTC)
     while True:
@@ -299,7 +306,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None, *, inputs: ScheduleInputs | None = None) -> None:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    inputs: ScheduleInputs | None = None,
+    entry_factory: Callable[[], AbstractContextManager[ScheduleInputs]] | None = None,
+) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.dry_run and not args.once:
@@ -309,7 +321,15 @@ def main(argv: Sequence[str] | None = None, *, inputs: ScheduleInputs | None = N
             parser.error("--once requires --dry-run")
         _dry_run((args.repo or _REPO_ROOT).resolve())
         return
-    with schedule_entry(inputs) as entry_inputs:
+    if inputs is not None:
+        entry = schedule_entry(inputs)
+    elif entry_factory is not None:
+        entry = entry_factory()
+    else:
+        raise RuntimeError(
+            "schedule execution requires explicit inputs or a fresh executable entry"
+        )
+    with entry as entry_inputs:
         _main_loop(inputs=entry_inputs)
 
 
@@ -324,4 +344,4 @@ if __name__ == "__main__":
         from base.log import prepare_process_logging
 
         prepare_process_logging()
-    main(inputs=entry_inputs)
+    main(inputs=entry_inputs, entry_factory=fresh_schedule_entry)

@@ -10,7 +10,9 @@ import psycopg
 import pytest
 from fastapi import FastAPI
 
+from base.cluster.machine import MachineIdentity
 from tests.fixtures.gateway_config import gateway_test_process
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
@@ -41,16 +43,20 @@ def flusher_tasks(
 
 
 async def test_overlapping_lifespans_join_their_original_flushers(
-    db_conn: psycopg.Connection[Any], flusher_tasks: asyncio.Queue[asyncio.Task[Any]]
+    db_conn: psycopg.Connection[Any],
+    flusher_tasks: asyncio.Queue[asyncio.Task[Any]],
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     del db_conn  # Provision the native, isolated database for the real lifespan.
     gateway_app = importlib.import_module("gateway.app")
     app = FastAPI()
-    with gateway_test_process(app) as process:
+    with gateway_test_process(app, machine=machine_identity) as process:
         async with asyncio.timeout(5), AsyncExitStack() as cleanup:
             async with gateway_app.lifespan(app):
                 pipeline = process.event_pipeline()
                 assert app.state.gateway_process is process
+                assert app.state.machine is machine_identity
                 assert app.state.process_image is process.image
                 original = [await flusher_tasks.get(), await flusher_tasks.get()]
                 # Other app.state resources retain their current nested-lifespan
@@ -77,6 +83,8 @@ async def test_client_close_failure_still_joins_flushers_before_pool_close(
     db_conn: psycopg.Connection[Any],
     flusher_tasks: asyncio.Queue[asyncio.Task[Any]],
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     del db_conn
     gateway_app = importlib.import_module("gateway.app")
@@ -86,7 +94,7 @@ async def test_client_close_failure_still_joins_flushers_before_pool_close(
     tasks: list[asyncio.Task[Any]] = []
     pools: list[Any] = []
 
-    with gateway_test_process(app):
+    with gateway_test_process(app, machine=machine_identity):
         async with asyncio.timeout(5):
             with pytest.raises(ExceptionGroup) as raised:
                 async with gateway_app.lifespan(app):

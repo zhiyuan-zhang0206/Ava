@@ -22,6 +22,7 @@ from agent.ownership import hosted
 from agent.tests.claim.test_inbound_ownership import _insert, agent_row
 from base.agents.context import AvaContext
 from base.agents.incarnation.hosted_force import original_host_force
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -34,11 +35,12 @@ from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.scheduling.health_routes import cancel_turn_route
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.lifecycle.force_host_setup import (
     host_wakes_need_no_provider_credentials,
 )
 from tests.fixtures.pin_agent import exec_context as ctx_of
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _blocking_work(entered: threading.Event, release: threading.Event) -> None:
@@ -59,7 +61,7 @@ def _observed_host(
         pool=pool,
         checkpointer=Mock(),
         graph=graph,
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
@@ -110,6 +112,7 @@ async def _assert_pending_force(
     chat: int,
     *,
     database_gate: ProcessDbGate,
+    local_machine: str,
 ) -> None:
     assert await has_pending_interrupt(pool, agent_id, incarnation=None, work=None)
     assert conn.execute(
@@ -119,7 +122,9 @@ async def _assert_pending_force(
     conn.commit()
     handles = Database.from_settings(gate=database_gate), EventBus.from_settings()
     with pytest.raises(ResurrectSettlementDeferredError):
-        await asyncio.to_thread(resurrect_agent, *handles, agent_id, resurrected_by="user")
+        await asyncio.to_thread(
+            resurrect_agent, *handles, agent_id, resurrected_by="user", local_machine=local_machine
+        )
     assert (
         await hosted.admit_hosted_runtime(
             pool, agent_id, "claim-test", uuid4(), expected_from="terminated", db=handles[0]
@@ -153,7 +158,7 @@ async def _prove_successor_ignores_old_cancel(
         pool=pool,
         checkpointer=Mock(),
         graph=graph,
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
@@ -207,6 +212,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
     *,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = agent_row(db_conn)
     entered, release = threading.Event(), threading.Event()
@@ -264,7 +270,13 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
         assert status == 200 and json.loads(response) == {"cancelled": False}
         assert agent_id in scheduler.active_agents
         await _assert_pending_force(
-            db_conn, aops_pool, agent_id, command, chat, database_gate=database_gate
+            db_conn,
+            aops_pool,
+            agent_id,
+            command,
+            chat,
+            database_gate=database_gate,
+            local_machine=machine_identity.name(),
         )
         release.set()
         release_file.touch()
@@ -308,7 +320,7 @@ async def test_idle_force_only_original_live_host_can_observe(
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,

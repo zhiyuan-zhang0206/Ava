@@ -26,6 +26,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
 
+from base.cluster.machine import MachineIdentity
 from base.config.domains.daemon.settings import DaemonSettings
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import LivenessGroup, LoopProgress
@@ -37,6 +38,7 @@ from services.upkeep.events_maintenance.tests.slices import (
     events_maintenance_config,
     events_maintenance_db,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # The pool is never touched — `_run_maintenance` / `_maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()
@@ -120,7 +122,9 @@ async def test_completed_pass_beats_once_after_worker_finishes(
     assert beat_at[0] >= finished_at
 
 
-async def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_failed_rollup_still_waits_before_retry(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """A maintenance pass that raises a transient (non-ProgrammingError) exception
     beats on completion, records the error, then waits before re-running."""
     failed_at = 0.0
@@ -152,7 +156,11 @@ async def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.Monkey
     async with asyncio.TaskGroup() as tasks:
         with pytest.raises(asyncio.CancelledError):
             await daemon._dispatch_loop(
-                _FAKE_POOL, progress, config, events_maintenance_db(), tasks=tasks
+                _FAKE_POOL,
+                progress,
+                config,
+                events_maintenance_db(local_machine=machine_identity),
+                tasks=tasks,
             )  # pool unused
 
     assert len(beat_at) == 1
@@ -162,7 +170,7 @@ async def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.Monkey
 
 
 async def test_wedged_dispatch_parks_without_entering_retry_sleep(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """A timed-out worker parks by ending its loop without entering either sleep path."""
 
@@ -188,7 +196,7 @@ async def test_wedged_dispatch_parks_without_entering_retry_sleep(
             _FAKE_POOL,
             progress,
             events_maintenance_config(),
-            events_maintenance_db(),
+            events_maintenance_db(local_machine=machine_identity),
             tasks=tasks,
         )
 
@@ -237,7 +245,9 @@ def _instrument_maintenance_slices(
     return rec
 
 
-def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_maintenance_pass_runs_unconditional_slices(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """The hourly pass always runs the metric and telemetry-event recoveries, the cost-ledger
     rollup, the size telemetry sample, and blob vacuum. Checkpoint pruning belongs only
     to the fast loop; the hourly pass must not run a second retention rule."""
@@ -257,7 +267,7 @@ def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPa
         cast(ConnectionPool, _FakePool()),
         progress,
         events_maintenance_config(),
-        events_maintenance_db(),
+        events_maintenance_db(local_machine=machine_identity),
     )  # every slice faked
 
     for name in (

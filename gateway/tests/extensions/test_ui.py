@@ -27,32 +27,34 @@ from fastapi.testclient import TestClient
 import ava
 from ava.gateway_client.transport import use_client
 from ava.ui import InvalidPageName, PageClosed
-from base.cluster.machine import reachable_host, reset_identity, set_identity
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from tests.fixtures.pin_agent import pin_agent
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)
 
 
 @pytest.fixture(autouse=True)
-def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
+def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity):
 
-    set_identity(host=_HOST)
+    machine_identity.set(host=_HOST)
     with TestClient(app, base_url="http://test-gateway") as tc, use_client(tc):
         yield
-    reset_identity()
 
 
-def _use_page_host(monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> None:
+def _use_page_host(
+    monkeypatch: pytest.MonkeyPatch, *, local_machine: MachineIdentity, **overrides: Any
+) -> None:
     """`ava.ui` calls run against a page host with the given probes / ready timeout."""
 
     def build() -> ava.ui.PageHost:
         return ava.ui.PageHost(
-            host=reachable_host(),
+            host=local_machine.host(),
             agent_id=ava.sdk_surface.agent_identity.require_agent_id(),
             **overrides,
         )
@@ -142,10 +144,14 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         page = ava.ui.show("cleanup", 13580, title="Picker")
@@ -168,12 +174,16 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Single page per agent: re-showing auto-closes the old page. The
         agent's own row is never a port conflict for itself, even unchanged."""
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         ava.ui.show("p1", 13581)
@@ -191,11 +201,15 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The caller's explicit port is what lands in the registry and the page."""
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         page = ava.ui.show("custom", 13579, title="Custom")
@@ -215,10 +229,14 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         with pytest.raises(InvalidPageName):
@@ -232,12 +250,16 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """No per-agent reserved port: a missing port is rejected, with the
         rule spelled out, instead of falling back to a computed value."""
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         with pytest.raises(TypeError, match="port"):
@@ -251,11 +273,15 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Privileged and out-of-range ports fail at the SDK boundary."""
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         with pytest.raises(ValueError, match="out of range"):
@@ -270,10 +296,14 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         captured: dict[str, object] = {}
@@ -299,10 +329,14 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         captured: dict[str, object] = {}
@@ -332,9 +366,15 @@ def test_page_apis_reject_invalid_ttl(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     pin_agent(
-        spawn_agent(catalog=model_catalog, authority=config_authority, database_gate=database_gate)
+        spawn_agent(
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
+        )
     )
     call = getattr(ava.ui, api)
     args = (str(tmp_path), "page", 13584)
@@ -352,10 +392,14 @@ class TestClose:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         ava.ui.show("p", 13583)
@@ -369,10 +413,14 @@ class TestClose:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         with pytest.raises(PageClosed):
@@ -385,12 +433,11 @@ class TestServe:
     spawned by the SDK anymore (R3 door ③)."""
 
     @pytest.fixture(autouse=True)
-    def _loopback_identity(self):
+    def _loopback_identity(self, machine_identity: MachineIdentity):
         """serve() polls reachable_host() — pin it to loopback so the stub
         server can actually bind it."""
-        set_identity(host="127.0.0.1")
+        machine_identity.set(host="127.0.0.1")
         yield
-        reset_identity()
 
     def test_serve_registers_serve_dir(
         self,
@@ -400,10 +447,14 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         (tmp_path / "index.html").write_text("<h1>served</h1>", encoding="utf-8")
@@ -424,14 +475,23 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         captured: dict[str, object] = {}
-        _use_page_host(monkeypatch, bindable=lambda *_a: True, health=lambda *_a: "ok:stub")
+        _use_page_host(
+            monkeypatch,
+            bindable=lambda *_a: True,
+            health=lambda *_a: "ok:stub",
+            local_machine=machine_identity,
+        )
 
         def _register(_agent_id: int, **kwargs: object) -> dict[str, object]:
             captured.update(kwargs)
@@ -455,11 +515,15 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """serve() polls until the daemon's server answers (stub starts late)."""
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
@@ -476,6 +540,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A free port the daemon never binds -> serve() raises after the wait
         window (the page row stays registered; the daemon keeps retrying)."""
@@ -483,11 +548,14 @@ class TestServe:
 
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
-        _use_page_host(monkeypatch, ready_timeout_s=0.5)
+        _use_page_host(monkeypatch, ready_timeout_s=0.5, local_machine=machine_identity)
         free = _free_port()
         with pytest.raises(ui_mod.PageError, match="did not come up"):
             ava.ui.serve(str(tmp_path), "nod", port=free)
@@ -504,12 +572,16 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """No per-agent reserved port: a missing port is rejected before any
         gateway or filesystem work, with the rule spelled out."""
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         with pytest.raises(TypeError, match="port"):
@@ -525,6 +597,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A non-page listener on the port fails serve() before anything is
         registered — the daemon can never displace it."""
@@ -532,7 +605,10 @@ class TestServe:
 
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
@@ -552,6 +628,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """An HTTP server that is not a page server (no `ok:` /health) is the
         same foreign occupant — refused, not silently registered."""
@@ -559,7 +636,10 @@ class TestServe:
 
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
@@ -579,19 +659,26 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Registry conflict: another agent's live page owns the port — the
         error names the occupying page, and nothing is registered."""
         import ava.ui as ui_mod
 
         owner = spawn_agent(
-            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
         )
         pin_agent(owner)
         ava.ui.show("held", 13586)
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
@@ -609,16 +696,23 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A refused serve() (port taken by another agent) must not close the
         agent's own current page."""
         import ava.ui as ui_mod
 
         owner = spawn_agent(
-            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
         )
         other = spawn_agent(
-            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
         )
         pin_agent(owner)
         ava.ui.show("mine", 13587)
@@ -641,6 +735,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The agent's own page on the port is not a foreign occupant: even
         with its (wedged) server still bound, serve() replaces it — the
@@ -649,11 +744,14 @@ class TestServe:
 
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
-        _use_page_host(monkeypatch, ready_timeout_s=0.5)
+        _use_page_host(monkeypatch, ready_timeout_s=0.5, local_machine=machine_identity)
         with _SilentServer("127.0.0.1") as silent:
             ava.ui.show("wedged", silent.port)
             with pytest.raises(ui_mod.PageError, match="did not come up"):
@@ -680,10 +778,14 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         pin_agent(
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             )
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")

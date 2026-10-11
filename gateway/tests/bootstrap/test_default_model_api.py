@@ -17,6 +17,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -25,6 +26,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from gateway.app import app
 from tests.fixtures.model_catalog import AddModels
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
@@ -39,19 +41,22 @@ def withdrawn_model(add_models: AddModels, model_catalog: ModelCatalog) -> tuple
 
 
 def _spawn_agent(
-    spawner: str = "test", *, config_authority: ConfigAuthority, database_gate: ProcessDbGate
+    spawner: str = "test",
+    *,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """Setup helper — a row with a stamped birth_config (the #1236 split: the
     row is created by create_agent_row; nothing launches, these tests only read
     the stamp)."""
-    from base.cluster.machine import machine_name
     from ops.agents.spawn import create_agent_row
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner=spawner,
-        machine=machine_name(),
+        machine=local_machine.name(),
         catalog=build_model_catalog(),
         authority=config_authority,
     )
@@ -170,10 +175,14 @@ class TestPut:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The panel control is safe to use on a live cluster."""
         agent_id = _spawn_agent(
-            spawner="test", config_authority=config_authority, database_gate=database_gate
+            spawner="test",
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute("SELECT birth_config FROM agents_meta WHERE id = %s", (agent_id,))

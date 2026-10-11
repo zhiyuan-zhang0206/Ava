@@ -32,6 +32,7 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext
 from base import paths, telemetry
 from base.db import Database
 from base.telemetry import emitter, observability
+from base.telemetry.tests.identity_inputs import machine_identity
 
 _AGENT = 8901
 
@@ -70,7 +71,9 @@ def _mirror_last(event_name: str, agent: int | None = None) -> dict[str, Any]:
 @pytest.fixture(autouse=True)
 def _bind_telemetry(database: Database) -> Iterator[None]:
     """Bind a stable identity to this test's explicit native writer owner."""
-    pipeline = telemetry.build_pipeline(database=lambda: database)
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity(), home=Path(".ava")
+    )
     try:
         telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
         yield
@@ -164,16 +167,31 @@ def test_no_span_means_null_trace() -> None:
 # ── machine / process dimensions ──────────────────────────────────────────────
 
 
-def test_machine_falls_back_to_hostname_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The machine dimension is required: without a configured machine_name the
-    emitter falls back to the hostname so the field is never empty."""
-    import base.cluster.machine as sm
+def test_machine_falls_back_to_hostname_on_explicit_missing_reader() -> None:
+    from base.cluster.machine import MachineNameMissing
 
-    def _raise() -> str:
-        raise sm.MachineNameMissing("no machine name")
+    def missing() -> str:
+        raise MachineNameMissing("unit is not configured")
 
-    monkeypatch.setattr(sm, "machine_name", _raise)
-    assert telemetry._resolve_machine() == socket.gethostname()
+    assert telemetry._resolve_machine(missing) == socket.gethostname()
+
+
+def test_event_machine_reader_does_not_rebind_process_or_other_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(emitter._state, "machine", "process-owner")
+    first = telemetry.prepare_event("log", "log", machine_reader=lambda: "first-context")
+    second = telemetry.prepare_event("log", "log", machine_reader=lambda: "second-context")
+    assert (first.machine, second.machine) == ("first-context", "second-context")
+    assert telemetry.prepare_event("log", "log").machine == "process-owner"
+
+
+def test_explicit_machine_reader_defect_propagates() -> None:
+    def invalid() -> str:
+        raise RuntimeError("invalid machine configuration")
+
+    with pytest.raises(RuntimeError, match="invalid machine configuration"):
+        telemetry.prepare_event("log", "log", machine_reader=invalid)
 
 
 def test_cluster_label_falls_back_without_raising(

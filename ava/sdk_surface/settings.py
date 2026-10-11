@@ -14,6 +14,7 @@ from typing import Any
 from base.agents.context.clients import DatabaseFactory, DatabaseHandle
 from base.agents.messages.delivery_outbox import DeliverySenderConfig
 from base.clock import Clock
+from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, settings
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
@@ -101,7 +102,7 @@ def __getattr__(name: str) -> Any:
 # live-events stacks into every exec child (task #3816).
 
 
-def database_factory(*, config: ConfigBoot) -> DatabaseFactory:
+def database_factory(*, config: ConfigBoot, machine: MachineIdentity) -> DatabaseFactory:
     """Retain one lazy database gate on this client set, without importing its dial stack."""
     from threading import Lock
 
@@ -130,7 +131,7 @@ def database_factory(*, config: ConfigBoot) -> DatabaseFactory:
         return Database(
             db_config_from_boot(config),
             gate=gate,
-            local_host=lambda: config.view.general.machine_host.strip() or "localhost",
+            local_host=machine.host,
         )
 
     return database
@@ -175,12 +176,13 @@ def shell_sessions() -> "ShellSessions":  # noqa: F821  # pyright: ignore[report
 def page_host() -> "PageHost":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """The page host this agent's `ava.ui` calls run against: this machine's reachable host and
     the agent's identity (RuntimeError when the process has none), read per call."""
+    import ava
     import ava.sdk_surface.agent_identity
     from ava.ui import PageHost
-    from base.cluster.machine import reachable_host
 
     return PageHost(
-        host=reachable_host(), agent_id=ava.sdk_surface.agent_identity.require_agent_id()
+        host=ava.context.require_machine().host(),
+        agent_id=ava.sdk_surface.agent_identity.require_agent_id(),
     )
 
 

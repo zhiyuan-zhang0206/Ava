@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from base.cluster.machine import machine_name
 from base.config import env_override_values, field_domain, get_config_metadata
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import coerce_config_scalar, field_editable, split_reducer_patch
@@ -35,7 +34,7 @@ from ops.rpc_schemas import (
 SENSITIVE_MASK = "••••••••"
 
 
-def config_read_op(*, authority: ConfigAuthority) -> ConfigReadResult:
+def config_read_op(*, authority: ConfigAuthority, local_machine: str) -> ConfigReadResult:
     """Read this machine's host-scope config fields and return them with metadata.
 
     Returns a ConfigReadResult with:
@@ -75,17 +74,17 @@ def config_read_op(*, authority: ConfigAuthority) -> ConfigReadResult:
     }
 
     return ConfigReadResult(
-        machine=machine_name(),
+        machine=local_machine,
         host_fields=host_fields,
         raw_overrides=raw_overrides,
     )
 
 
-def config_audit_read_op(last: int) -> ConfigAuditReadResult:
+def config_audit_read_op(last: int, *, local_machine: str) -> ConfigAuditReadResult:
     """Read this machine's most recent `.env`-write audit records (newest first)."""
     from base.host.env.audit import read_env_write_records
 
-    return ConfigAuditReadResult(machine=machine_name(), records=read_env_write_records(last))
+    return ConfigAuditReadResult(machine=local_machine, records=read_env_write_records(last))
 
 
 def _field_verdicts(
@@ -212,6 +211,7 @@ def config_write_op(
     local: bool = False,
     actor: str | None = None,
     trace_id: str | None = None,
+    local_machine: str,
 ) -> ConfigWriteOpResult:
     """Validate and merge this machine's host overrides into its .env (reducer semantics).
 
@@ -238,7 +238,7 @@ def config_write_op(
         owner = patch_owner(set(overrides))
     except InvalidConfigOverlay as exc:
         return ConfigWriteOpResult(
-            machine=machine_name(),
+            machine=local_machine,
             results={f: FieldWriteResult(ok=False, reason=str(exc)) for f in overrides},
             applied=False,
             restart_required=[],
@@ -258,7 +258,7 @@ def config_write_op(
         )
 
     return ConfigWriteOpResult(
-        machine=machine_name(),
+        machine=local_machine,
         results=results,
         applied=applied,
         restart_required=restart_required,

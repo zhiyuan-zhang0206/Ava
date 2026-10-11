@@ -256,6 +256,7 @@ async def post_agent_message(
                 content=normalized_text,
                 source=body.source,
                 payload=normalized_payload,
+                local_machine=request.app.state.machine.name(),
             )
         except ClientMessageConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -288,6 +289,7 @@ async def post_agent_message(
             payload=payload,
             client_message_id=idempotency_key,
             provenance=provenance,
+            local_machine=request.app.state.machine.name(),
         )
     except ClientMessageConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -370,6 +372,7 @@ async def post_agent_system_note(
             agent_id,
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind=note_kind,
+            local_machine=request.app.state.machine.name(),
         )
     else:
         status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
@@ -405,6 +408,7 @@ async def reconcile_agent_message(
             content=text,
             source=body.source,
             payload=payload,
+            local_machine=request.app.state.machine.name(),
         )
     except ClientMessageConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

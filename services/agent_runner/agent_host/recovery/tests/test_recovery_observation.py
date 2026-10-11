@@ -12,6 +12,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from base.agents.observation.db_wait import DatabaseWaits
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -26,6 +27,7 @@ from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery imp
     isolate as isolate,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
@@ -63,6 +65,7 @@ async def test_recovery_budget_abandons_at_attempt_boundary(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     clock, log, backoff = recovery_observation
     monkeypatch.setattr(settings.daemon, "host_db_recovery_budget_seconds", 600.0)
@@ -71,6 +74,7 @@ async def test_recovery_budget_abandons_at_attempt_boundary(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     graph, saver = await _graph(aops_pool, incarnation.agent_id, AsyncMock())
     attempts = 0
@@ -134,6 +138,7 @@ async def test_recovery_prolonged_warns_once_at_first_threshold_crossing(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     clock, log, backoff = recovery_observation
     monkeypatch.setattr(settings.daemon, "host_db_recovery_prolonged_attempts", attempt_limit)
@@ -143,6 +148,7 @@ async def test_recovery_prolonged_warns_once_at_first_threshold_crossing(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     graph, saver = await _graph(aops_pool, incarnation.agent_id, AsyncMock())
     flush = db_recovery.flush_checkpoint
@@ -195,6 +201,7 @@ async def test_recovery_summary_counts_all_attempts_and_backoff_time(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     clock, log, backoff = recovery_observation
     incarnation = await admit_recovery(
@@ -202,6 +209,7 @@ async def test_recovery_summary_counts_all_attempts_and_backoff_time(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     graph, saver = await _graph(aops_pool, incarnation.agent_id, AsyncMock())
     refresh = db_recovery._refresh_owner

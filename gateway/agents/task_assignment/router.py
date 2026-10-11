@@ -11,7 +11,6 @@ from base import telemetry
 from base.agents import AgentLaunchFailed
 from base.agents.tasks.creation import create_task_in_transaction, ensure_parent_exists
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
-from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.transaction import write_transaction
@@ -164,7 +163,11 @@ async def post_task_assignment(
     if result is None:
         from gateway.agents import router as agent_router
 
-        target = body.agent.machine if body.agent.machine is not None else machine_name()
+        target = (
+            body.agent.machine
+            if body.agent.machine is not None
+            else request.app.state.machine.name()
+        )
         spawn = SpawnAgentRequest(
             spawner=f"agent:{body.actor_agent_id}",
             machine=target,

@@ -13,19 +13,20 @@ from functools import partial
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-from unittest.mock import ANY, Mock
+from unittest.mock import ANY, Mock, patch
 
 import psycopg
 import pytest
 
 from base.config import settings
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from schedules.catchup import catch_up, fire_slot_once
 from base.daemon.schedules.inputs import ScheduleInputs
-from schedules.entry import schedule_entry
+from schedules.entry import fresh_schedule_entry
 from schedules import entry as entry_owner
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -51,7 +52,7 @@ class _LoopStoppedError(Exception):
 
 @pytest.mark.parametrize("filename", _DAILY_SCRIPTS)
 def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
-    filename: str, monkeypatch: pytest.MonkeyPatch
+    filename: str, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
 ) -> None:
     module = _load_daily_script(filename)
     host = sys.modules[module.run_daily_loop.__module__]
@@ -77,7 +78,11 @@ def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
     monkeypatch.setattr(host.time, "sleep", sleep)
 
     with pytest.raises(_LoopStoppedError):
-        module._main_loop(inputs=ScheduleInputs(Mock(), Mock(), module.ava.loaded_code_image()))
+        module._main_loop(
+            inputs=ScheduleInputs(
+                Mock(), Mock(), module.ava.loaded_code_image(), machine=machine_identity
+            )
+        )
 
     catch_up_call.assert_called_once_with(
         ANY, [(module.CRON, None)], timezone=settings.general.timezone, fire=ANY
@@ -100,7 +105,7 @@ def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
 
 @pytest.mark.parametrize("filename", _DAILY_SCRIPTS)
 def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
-    filename: str, monkeypatch: pytest.MonkeyPatch
+    filename: str, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
 ) -> None:
     module = _load_daily_script(filename)
     host = sys.modules[module.run_daily_loop.__module__]
@@ -124,7 +129,11 @@ def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
     monkeypatch.setattr(host.time, "sleep", sleep)
 
     with pytest.raises(_LoopStoppedError):
-        module._main_loop(inputs=ScheduleInputs(Mock(), Mock(), module.ava.loaded_code_image()))
+        module._main_loop(
+            inputs=ScheduleInputs(
+                Mock(), Mock(), module.ava.loaded_code_image(), machine=machine_identity
+            )
+        )
 
     claim.assert_called_once_with(ANY, slot, None, fire=ANY)
     fire = claim.call_args.kwargs["fire"]
@@ -446,12 +455,12 @@ def test_schedule_entry_retains_the_loaded_image_gate(
     monkeypatch.setattr(module.ava, "loaded_code_image", capture)
     monkeypatch.setattr(entry_owner, "process_name", lambda: "schedule")
     monkeypatch.setattr(code_version, "first_parent_count", count)
-    monkeypatch.setattr(entry_owner.Database, "from_settings", create)
+    monkeypatch.setattr(entry_owner, "Database", create)
     owner = "run_daily_loop" if filename in _DAILY_SCRIPTS else "catch_up"
     monkeypatch.setattr(module, owner, consumer)
     entry = getattr(module, "_main_loop", None) or module.main
 
-    with pytest.raises(_LoopStoppedError), schedule_entry(None) as inputs:
+    with pytest.raises(_LoopStoppedError), patch.dict(os.environ), fresh_schedule_entry() as inputs:
         entry(inputs=inputs)
 
     capture.assert_called_once_with()

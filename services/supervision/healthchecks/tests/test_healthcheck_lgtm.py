@@ -13,9 +13,11 @@ from typing import Any, cast
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from services.supervision.healthchecks import lgtm as hc
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class _Response:
@@ -219,13 +221,11 @@ def test_write_path_probe_reports_query_request_error(monkeypatch: pytest.Monkey
 
 
 def test_is_lgtm_host_accepts_station_capability(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """The declarative observability-station capability designates the host
     exactly like the marker — the watchdog keepalive and `ava status` gate on
     either form."""
-    from base.cluster.machine import reset_identity, set_identity
-
     home = tmp_path / "station"
     home.mkdir()
     # is_lgtm_host() dials the home twice: the name bound in this module
@@ -235,19 +235,20 @@ def test_is_lgtm_host_accepts_station_capability(
     monkeypatch.setattr("base.paths.ava_home", lambda: home)
 
     # No marker, no capability -> not the station.
-    assert hc.is_lgtm_host() is False
+    assert hc.is_lgtm_host(machine=machine_identity) is False
 
     # Capability form.
-    set_identity(role="observability-station")
+    prior_role = machine_identity.role()
+    machine_identity.set(role="observability-station")
     try:
-        assert hc.is_lgtm_host() is True
+        assert hc.is_lgtm_host(machine=machine_identity) is True
     finally:
-        reset_identity()
-    assert hc.is_lgtm_host() is False
+        machine_identity.set(role=prior_role)
+    assert hc.is_lgtm_host(machine=machine_identity) is False
 
     # Marker form.
     (home / "lgtm-host").touch()
-    assert hc.is_lgtm_host() is True
+    assert hc.is_lgtm_host(machine=machine_identity) is True
 
 
 @pytest.mark.parametrize("status", [301, 401, 500, 503])

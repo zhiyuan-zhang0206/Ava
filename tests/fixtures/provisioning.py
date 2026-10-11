@@ -33,6 +33,7 @@ import pytest_asyncio
 import redis
 from langgraph.checkpoint.postgres import PostgresSaver
 
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.db import Database, insert_inbound_message, publish_inbound_wake
 from base.db.code_version_gate import ProcessDbGate
@@ -78,7 +79,8 @@ def _provisioned_db(
         return
     # Resolve the native process image before test bodies can replace subprocess.run.
     database_version.get()
-    with postgres() as url:
+    machine = machine_from_boot(process_config)
+    with postgres(machine_name=machine.name) as url:
         # Belt: the throwaway provisioning must itself stay on a test database.
         # If the throwaway db name ever changes, this assertion makes the
         # change explicit (update base/db/test_db_guard.py) instead of silently

@@ -13,6 +13,7 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.loop_health import LoopProgress
@@ -23,6 +24,7 @@ from base.lm.catalog import ModelCatalog
 from services.wake.delivery_watchdog import attempts, resurrect_retry, rounds
 from services.wake.delivery_watchdog import daemon as delivery_daemon
 from services.wake.delivery_watchdog import turn_liveness as watchdog
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _THRESHOLD_S = 2400.0
 
@@ -44,6 +46,7 @@ def _make_hosted_running_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     from tests.fixtures.units import spawn_agent
 
@@ -52,6 +55,7 @@ def _make_hosted_running_agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     db.execute(
         "UPDATE agents_meta SET status='running', runtime_kind='hosted', machine=%s, "
@@ -87,12 +91,14 @@ def test_select_hosted_turn_candidates_uses_db_wall_clock_and_exact_runtime_stat
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     stale_hosted = _make_hosted_running_agent(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     fresh_hosted = _make_hosted_running_agent(
         db_conn,
@@ -100,18 +106,21 @@ def test_select_hosted_turn_candidates_uses_db_wall_clock_and_exact_runtime_stat
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     process_agent = _make_hosted_running_agent(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     idling_hosted = _make_hosted_running_agent(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     db_conn.execute("UPDATE agents_meta SET runtime_kind='process' WHERE id=%s", (process_agent,))
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (idling_hosted,))
@@ -132,6 +141,7 @@ async def test_live_progress_prevents_recovery_after_db_age_exceeds_threshold(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A long turn remains healthy beyond 2400s while node/chunk marks stay fresh."""
     agent_id = _make_hosted_running_agent(
@@ -140,6 +150,7 @@ async def test_live_progress_prevents_recovery_after_db_age_exceeds_threshold(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     redis = FakeRedis(
         {
@@ -177,12 +188,14 @@ async def test_missing_or_stale_host_progress_is_a_wedge(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = _make_hosted_running_agent(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     if heartbeat is not None:
         heartbeat = heartbeat.replace("{agent_id}", str(agent_id))
@@ -204,12 +217,14 @@ async def test_invalid_host_progress_cannot_authorize_recovery(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = _make_hosted_running_agent(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     redis = FakeRedis(
         {
@@ -254,7 +269,9 @@ def _stub_resurrect(monkeypatch: pytest.MonkeyPatch) -> list[int]:
         *,
         trigger_inbound_id: int,
         trigger_inbound_kind: str,
+        local_machine: str,
     ) -> str:
+        del local_machine
         triggers.append(trigger_inbound_id)
         return "idling"
 
@@ -288,12 +305,14 @@ async def test_recovery_commits_the_marked_wake_with_the_termination(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = _make_hosted_running_agent(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     _silence_recovery_side_effects(monkeypatch)
     triggers = _stub_resurrect(monkeypatch)
@@ -370,7 +389,9 @@ async def test_recovery_emits_evidence_then_terminates_with_its_wake_and_resurre
         *,
         trigger_inbound_id: int,
         trigger_inbound_kind: str,
+        local_machine: str,
     ) -> str:
+        del local_machine
         calls.append("resurrect")
         assert (agent_id, trigger_inbound_id) == (42, 9001)
         assert trigger_inbound_kind == "chat"
@@ -398,6 +419,7 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """BLOCK regression (Ava #3242): the queued recovery trigger is
     source='system', so the plain notice guard used to cut the chain before
@@ -412,6 +434,7 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     _silence_recovery_side_effects(monkeypatch)
     dispatched: list[dict[str, object]] = []
@@ -462,6 +485,7 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The force terminate used to commit alone and the wake was queued by a
     separate later step; a process death or a failed insert between them left
@@ -478,6 +502,7 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     _silence_recovery_side_effects(monkeypatch)
     triggers = _stub_resurrect(monkeypatch)
@@ -529,6 +554,7 @@ async def test_a_committed_recovery_is_never_recovered_twice(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Idempotency by state: the recovery's terminate takes the row out of the
     `running` set the wedge scan selects from, so a re-scan finds nothing to
@@ -538,6 +564,7 @@ async def test_a_committed_recovery_is_never_recovered_twice(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     _silence_recovery_side_effects(monkeypatch)
     _stub_resurrect(monkeypatch)
@@ -582,6 +609,7 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The clock is a database row, so a watchdog restart resumes the cooldown
     instead of recovering the same agent again at once."""
@@ -590,6 +618,7 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     _wedged_runner_redis(monkeypatch)
     recovered: list[int] = []
@@ -638,12 +667,14 @@ async def test_a_hung_recovery_is_cut_at_the_deadline_and_still_enters_the_coold
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = _make_hosted_running_agent(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     _wedged_runner_redis(monkeypatch)
 
@@ -673,6 +704,7 @@ async def test_a_slow_recovery_is_never_started_twice(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Single flight is the loop's sequencing: while a recovery spans many
     intervals the loop is inside the round, and afterwards inside the cooldown."""
@@ -681,6 +713,7 @@ async def test_a_slow_recovery_is_never_started_twice(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     _wedged_runner_redis(monkeypatch)
     release = asyncio.Event()

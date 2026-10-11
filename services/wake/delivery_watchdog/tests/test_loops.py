@@ -11,6 +11,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.loop_health import LivenessGroup, LoopProgress
@@ -21,6 +22,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster.rpc import worst_case_dispatch_seconds
 from services.wake.delivery_watchdog import attempts, daemon, rounds
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
@@ -42,6 +44,7 @@ def _agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     from tests.fixtures.units import spawn_agent
 
@@ -50,6 +53,7 @@ def _agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
 
 
@@ -145,12 +149,14 @@ def test_claim_hands_an_agent_out_once_per_cooldown(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     aid = _agent(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
 
     assert attempts.claim_attempts(pool, attempts.HARVEST, [aid], 60.0) == ([aid], 0)
@@ -174,6 +180,7 @@ def test_claim_limit_defers_the_ready_agents_it_leaves(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     first, second, third = (
         _agent(
@@ -181,18 +188,21 @@ def test_claim_limit_defers_the_ready_agents_it_leaves(
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         ),
         _agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         ),
         _agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         ),
     )
     assert attempts.claim_attempts(pool, attempts.RESURRECT, [first], 60.0) == ([first], 0)
@@ -216,12 +226,14 @@ def test_finish_restarts_the_cooldown_clock(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     aid = _agent(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     attempts.claim_attempts(pool, attempts.HOSTED_TURN, [aid], 600.0)
     db_conn.execute(

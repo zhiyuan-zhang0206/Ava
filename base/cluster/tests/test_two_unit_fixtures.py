@@ -1,31 +1,31 @@
 """Smoke tests for the two-unit fixtures (gateway_unit / runner_unit).
 
-Proves the fixtures switch machine_role at its source so every call site of
-`machine_role()` agrees, without per-module monkeypatching.
+Proves each fixture supplies its explicit machine owner to the actual unit root.
 """
 
 from __future__ import annotations
 
+from typing import cast
+
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 
-def test_gateway_unit_is_gateway(gateway_unit: TestClient) -> None:
-    from base.cluster.machine import machine_role
 
-    assert machine_role() == frozenset({"gateway"})
+def test_gateway_unit_is_gateway(
+    gateway_unit: TestClient, machine_identity: MachineIdentity
+) -> None:
+    assert machine_identity.role() == frozenset({"gateway"})
+    assert cast(FastAPI, gateway_unit.app).state.machine is machine_identity
     # the yielded value is a usable gateway TestClient
     assert isinstance(gateway_unit, TestClient)
 
 
-def test_runner_unit_is_agent_runner(runner_unit: None) -> None:
-    from base.cluster.machine import machine_role
-
-    assert machine_role() == frozenset({"agent-runner"})
+def test_runner_unit_is_agent_runner(runner_unit: MachineIdentity) -> None:
+    assert runner_unit.role() == frozenset({"agent-runner"})
 
 
-def test_role_restored_after_gateway_unit() -> None:
-    # session default is agent-runner; after a gateway_unit test tore down,
-    # the cache was cleared so the default resolves again.
-    from base.cluster.machine import machine_role
-
-    assert machine_role() == frozenset({"agent-runner"})
+def test_role_restored_after_gateway_unit(machine_identity: MachineIdentity) -> None:
+    # The next test owns a fresh cache, so the prepared runner default remains.
+    assert machine_identity.role() == frozenset({"agent-runner"})

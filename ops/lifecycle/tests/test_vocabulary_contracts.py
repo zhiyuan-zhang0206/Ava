@@ -3,6 +3,8 @@
 import pytest
 
 from base.agents.messages.inbound import InboundKind
+from base.cluster.machine import MachineIdentity
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("kind", list(InboundKind))
@@ -26,7 +28,9 @@ def test_wake_trigger_wire_accepts_exact_pending_work_subset(kind: InboundKind) 
             validate_wake_trigger_kind(kind.value)
 
 
-def test_direct_wake_rejects_control_kind_before_db_access() -> None:
+def test_direct_wake_rejects_control_kind_before_db_access(
+    *, machine_identity: MachineIdentity
+) -> None:
     from unittest.mock import MagicMock
 
     from ops.agents.wake import resurrect_agent
@@ -40,6 +44,7 @@ def test_direct_wake_rejects_control_kind_before_db_access() -> None:
             resurrected_by="system",
             trigger_inbound_id=1,
             trigger_inbound_kind=InboundKind.RESTART,  # type: ignore[arg-type] -- exercise raw boundary
+            local_machine=machine_identity.name(),
         )
     assert db.mock_calls == []
     assert bus.mock_calls == []

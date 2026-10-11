@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -30,6 +32,7 @@ from services.wake.heartbeat.daemon import (
     _select_idle_agents_needing_heartbeat,
     _sweep_backoff_resets,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 # Explicit threshold so the assertions do not ride on the configured default.
@@ -37,11 +40,17 @@ _THRESHOLD_S = 300.0
 
 
 @pytest.fixture
-def event_pipeline(database: Database) -> Iterator[telemetry.EventPipeline]:
+def event_pipeline(
+    database: Database, machine_identity: MachineIdentity, unit_home: Path
+) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the service operation and mirror barrier."""
-    pipeline = telemetry.build_pipeline(database=lambda: database)
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity, home=unit_home
+    )
     try:
-        telemetry.init_telemetry(process="test-wake-service", pipeline=pipeline)
+        telemetry.init_telemetry(
+            process="test-wake-service", pipeline=pipeline, machine_reader=machine_identity.name
+        )
         yield pipeline
     finally:
         pipeline.stop(timeout=2)
@@ -66,6 +75,7 @@ def _make_idle(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """Spawn an agent and park it. `status_changed_s_ago` backdates
     status_changed_at via a timestamp-only UPDATE (the BEFORE-UPDATE-OF-status
@@ -84,6 +94,7 @@ def _make_idle(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     with db.cursor() as cur:
         cur.execute(
@@ -195,6 +206,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """last_heartbeat_at 10 min ago is due at the default 5 min cadence
         but not at level 2 (5 min * 4 = 20 min)."""
@@ -204,6 +216,7 @@ class TestNudgeBackoffB7:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -225,6 +238,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -232,6 +246,7 @@ class TestNudgeBackoffB7:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         noop: dict[int, int] = {aid: 2}
 
@@ -264,6 +279,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -271,6 +287,7 @@ class TestNudgeBackoffB7:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -306,6 +323,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -314,6 +332,7 @@ class TestNudgeBackoffB7:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         noop: dict[int, int] = {aid: 2}
 
@@ -337,6 +356,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.heartbeat.daemon import _backoff_max_level
 
@@ -346,6 +366,7 @@ class TestNudgeBackoffB7:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         max_level = _backoff_max_level(_THRESHOLD_S)
         self._set_level(db_conn, aid, max_level)
@@ -376,6 +397,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -383,6 +405,7 @@ class TestNudgeBackoffB7:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -418,6 +441,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -425,6 +449,7 @@ class TestNudgeBackoffB7:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute(

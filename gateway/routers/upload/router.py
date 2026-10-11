@@ -45,7 +45,6 @@ from base.agents.upload_delivery.paths import (
     sanitize_upload_name,
     upload_url,
 )
-from base.cluster.machine import machine_name
 from base.db import agent_exists
 from base.db.transaction import write_transaction
 from base.host.private_storage import ensure_private_dir, write_private_bytes
@@ -202,6 +201,8 @@ def _save_legacy_batch(
     directory: Path,
     batch: list[_UploadBatchItem],
     batch_bytes: int,
+    *,
+    local_machine: str,
 ) -> None:
     with write_transaction(pool) as conn:
         lock_agent(conn, agent_id)
@@ -215,6 +216,7 @@ def _save_legacy_batch(
             len(batch),
             MAX_AGENT_UPLOAD_BYTES,
             MAX_AGENT_UPLOAD_FILES,
+            local_machine=local_machine,
         )
         _commit_upload_batch(directory, temp_dir, batch)
 
@@ -257,6 +259,7 @@ async def upload_files(
             deliver=deliver,
             max_bytes=MAX_AGENT_UPLOAD_BYTES,
             max_files=MAX_AGENT_UPLOAD_FILES,
+            local_machine=request.app.state.machine.name(),
         )
     if any(is_reserved_upload_name(name) for name, _, _ in batch):
         raise HTTPException(
@@ -272,6 +275,7 @@ async def upload_files(
             dest_dir,
             batch,
             batch_bytes,
+            local_machine=request.app.state.machine.name(),
         )
     saved = [
         UploadedFile(
@@ -295,7 +299,13 @@ async def upload_files(
             request, agent_id, [f.filename for f in saved]
         )
         locations = [
-            _upload_location(f, target_machine, local_paths.get(f.filename)) for f in saved
+            _upload_location(
+                f,
+                target_machine,
+                local_paths.get(f.filename),
+                local_machine=request.app.state.machine.name(),
+            )
+            for f in saved
         ]
         if len(saved) == 1:
             message = f"File uploaded: {locations[0]}"
@@ -310,17 +320,20 @@ async def upload_files(
             agent_id,
             prepare=lambda _conn: message,
             provenance=request_inbound_provenance(request),
+            local_machine=request.app.state.machine.name(),
         )
 
     return UploadedBatch(files=saved)
 
 
-def _upload_location(file: UploadedFile, target_machine: str, local_path: str | None) -> str:
+def _upload_location(
+    file: UploadedFile, target_machine: str, local_path: str | None, *, local_machine: str
+) -> str:
     """Describe one file's actual location and the gateway route without a confirmed local copy."""
     if local_path is not None:
         return f"{local_path} (machine: {target_machine}, {file.size} bytes)"
     return (
-        f"{file.path} (machine: {machine_name()}, {file.size} bytes; "
+        f"{file.path} (machine: {local_machine}, {file.size} bytes; "
         f"local copy unconfirmed on {target_machine or 'unknown machine'}; gateway download: {file.url})"
     )
 
@@ -376,7 +389,7 @@ async def _pull_uploads_to_agent_machine(
     if not machine or machine == "unknown":
         return machine, {}
 
-    if machine == machine_name():
+    if machine == request.app.state.machine.name():
         # Same host — the gateway path IS the agent's local path.
         return machine, {name: str(agent_upload_dir(agent_id) / name) for name in names}
 

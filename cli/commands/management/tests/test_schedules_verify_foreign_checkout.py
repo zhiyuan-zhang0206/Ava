@@ -25,15 +25,19 @@ _ENDPOINT = "postgresql://ava@127.0.0.1:6433/ava"
 _READ_TABLE = (
     "import json, sys; from cli.database import operator_database_factory; "
     "from cli.commands.management.schedules_verify import _read_schedule_rows as rows; "
-    "database = operator_database_factory(); "
+    "from cli.database.runtime import CommandRuntime; command = CommandRuntime.create(); "
+    "database = operator_database_factory(local_host=command.machine.host); "
     "json.dump(rows(database_factory=database), open(sys.argv[1], 'w'))"
 )
 _CHECK_ROWS = """import sys
 from cli.database import operator_database_factory, operator_event_pipeline
+from cli.database.runtime import CommandRuntime
+from base.paths import ava_home
 from cli.commands.management.schedules_verify import cmd_schedules_verify
 
-database = operator_database_factory()
-producer = operator_event_pipeline(database)
+command = CommandRuntime.create()
+database = operator_database_factory(local_host=command.machine.host)
+producer = operator_event_pipeline(database, machine=command.machine, home=ava_home())
 try:
     sys.exit(cmd_schedules_verify(
         notify=False, rows_file=sys.argv[1], database_factory=database, producer=producer

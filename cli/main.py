@@ -1,6 +1,6 @@
 """`ava` CLI entry — argparse dispatch to the `cmd_*` implementations in `cli.commands`.
 
-Registered in `pyproject.toml [project.scripts] ava = "cli.main:main"`; after
+Registered in `pyproject.toml [project.scripts] ava = "cli.main:entry"`; after
 `uv sync`, `.venv/bin/ava` is callable. Ops layer only, decoupled from the
 `ava.*` SDK — agent should not see cron / infra plumbing.
 
@@ -32,14 +32,12 @@ from base.native_process.os_platform import (
     LockTimeoutError,
     ensure_line_buffered_stdio,
 )
-from base.telemetry import EventPipeline
 
 # Only the settings-free parser composition entry is imported here. Domain
 # adapters lazy-import runtime commands when their bound handler is dispatched.
 from cli import parsers
-from cli.database import OperatorEventPipeline
 
-__all__ = ["main"]
+__all__ = ["entry", "main"]
 
 # The verbs that bring this unit up (every in-process `cmd_start`) open the
 # loguru sinks a service process has, under these names. Importing `base.log`
@@ -57,7 +55,7 @@ _CLI_LOG_NAMES: dict[tuple[str, ...], str] = {
 }
 
 
-def _init_cli_logging(args_in: list[str], *, producer: Callable[[], EventPipeline]) -> None:
+def _init_cli_logging(args_in: list[str], *, initialize: Callable[[str], None]) -> None:
     """Open this verb's sinks, once its Settings may be built.
 
     Building them builds Settings, so `ava start` calls this only after the home
@@ -67,14 +65,7 @@ def _init_cli_logging(args_in: list[str], *, producer: Callable[[], EventPipelin
     """
     name = _CLI_LOG_NAMES.get(tuple(args_in[:1])) or _CLI_LOG_NAMES.get(tuple(args_in[:2]))
     if name is not None:
-        from base.log.process import init_cli_process
-        from cli.database import operator_machine_name
-
-        init_cli_process(
-            name=name,
-            producer=producer,
-            machine_reader=operator_machine_name,
-        )
+        initialize(name)
 
 
 # Settings-lite verbs — they must construct Settings while the gateway is down
@@ -210,22 +201,6 @@ def _deliver_lite_api_token() -> None:
         os.environ[API_TOKEN_ENV] = capability.api.token
 
 
-def _close_command_pipeline(
-    producer: OperatorEventPipeline, *, primary: BaseException | None
-) -> None:
-    try:
-        result = producer.close(timeout=5.0)
-        if result is not None:
-            from base.telemetry import DrainStatus
-
-            if result.status is DrainStatus.UNFINISHED:
-                print("ava: command telemetry writer did not finish before exit", file=sys.stderr)
-    except BaseException as cleanup:
-        if primary is None:
-            raise
-        primary.add_note(f"command telemetry shutdown failed: {cleanup!r}")
-
-
 def main(
     argv: list[str] | None = None,
     *,
@@ -259,16 +234,31 @@ def main(
 
     children = [] if retained_children is None else retained_children
     args = parsers.parse_args(argv, retained_children=children)
-    from cli.database import operator_database_factory, operator_event_pipeline
+    if args_in[:1] == ["init"]:
+        return args.func(args)
+    if args_in[:1] == ["start"]:
+        from base.host.env.dotenv_boot import resolve_ava_home
+        from cli.start_identity import require_initialized
 
-    database_factory = operator_database_factory()
+        try:
+            require_initialized(resolve_ava_home().resolve())
+        except (ValueError, TypeError, RuntimeError, OSError) as exc:
+            print(f"ava start: {exc}", file=sys.stderr)
+            return 1
+    from base.paths import ava_home
+    from cli.database import operator_database_factory, operator_event_pipeline
+    from cli.database.runtime import CommandRuntime
+
+    command = CommandRuntime.create()
+    args.runtime = command
+    database_factory = operator_database_factory(local_host=command.machine.host)
     args.database_factory = database_factory
     args.database_for_url = database_factory.for_url
-    producer = operator_event_pipeline(database_factory)
+    producer = operator_event_pipeline(database_factory, machine=command.machine, home=ava_home())
     args.producer = producer
     try:
         if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission
-            _init_cli_logging(args_in, producer=producer)
+            _init_cli_logging(args_in, initialize=producer.initialize_logging)
         return args.func(args)
     except LockTimeoutError as exc:
         print(
@@ -292,7 +282,7 @@ def main(
         if telemetry is not None:
             with telemetry.failure_isolated("CLI telemetry drain"):
                 telemetry.sync(timeout=5.0, bounded=True)
-        _close_command_pipeline(producer, primary=sys.exception())
+        producer.close_command(primary=sys.exception())
 
 
 def entry() -> int:

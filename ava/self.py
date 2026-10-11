@@ -39,7 +39,7 @@ __all_for_ava__ = [
 AGENT_ID: int
 
 MACHINE_SPEC: tuple[str, str]
-"""(name, description) of the machine this agent runs on."""
+"""(name, description) from the bound context; no context is an error."""
 
 SELF_MACHINE_NAME: str
 """Name of the machine this agent runs on — the default target for
@@ -59,10 +59,11 @@ def __getattr__(name: str) -> object:
         return ava.sdk_surface.agent_identity.agent_id()
     if name == "MACHINE_SPEC":
         import ava
-        from base.cluster.machine import machine_description, machine_name
+
+        machine = ava.context.require_machine()
 
         return ava.const(
-            (machine_name(), machine_description() or ""),
+            (machine.name(), machine.description() or ""),
             doc=(
                 "(name, description) of the machine this agent runs on; "
                 "description is free prose, empty if unset."
@@ -70,10 +71,11 @@ def __getattr__(name: str) -> object:
         )
     if name == "SELF_MACHINE_NAME":
         import ava
-        from base.cluster.machine import machine_name
+
+        machine = ava.context.require_machine()
 
         return ava.const(
-            machine_name(),
+            machine.name(),
             doc=(
                 "Name of the machine this agent runs on; the default target "
                 "for `ava.agents.spawn` when `machine` is omitted."

@@ -11,13 +11,14 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import delivery as delivery
 from base.agents.messages.caller_identity import CallerIdentity
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent, insert_inbound_message
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import recording
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.impersonation_support import attested_caller, recorded_tree
 
 type ActiveSession = tuple[dict[str, Any], RuntimeIncarnation, int]
@@ -33,6 +34,7 @@ def active(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> ActiveSession:
     from base.host.env import runtime_config
 
@@ -48,7 +50,7 @@ def active(
         "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
         "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
         "clock_timestamp()+interval '1 hour')",
-        (agent_id, machine_name(), owner.generation, owner.owner),
+        (agent_id, machine_identity.name(), owner.generation, owner.owner),
     )
     db_conn.commit()
     lease = leases.request(

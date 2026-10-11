@@ -22,6 +22,7 @@ from base.agents.incarnation.hosted_force import original_host_force
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.messages.native_cancel import accept_native_cancel
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -34,9 +35,10 @@ from services.agent_runner.agent_host.invocation.native_work import recover_nati
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _CHILD = """
 import asyncio, json, os, sys
@@ -204,9 +206,10 @@ async def test_actual_force_observation_then_admission_recovered_stop(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     target, successor, force = await _force_successor(
-        db_conn, aops_pool, database_gate=database_gate
+        db_conn, aops_pool, database_gate=database_gate, local_machine=machine_identity.name()
     )
     proof = db_conn.execute(
         "SELECT transfer_chain FROM native_graph_work WHERE id=%s", (target.work_id,)
@@ -265,7 +268,7 @@ async def _assert_successor_turns(
             pool=aops_pool,
             checkpointer=saver,
             graph=graph,
-            machine="claim-test",
+            machine=configured_machine(name="claim-test"),
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
@@ -314,7 +317,11 @@ async def _assert_successor_turns(
 
 
 async def _force_successor(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    local_machine: str,
 ) -> tuple[NativeWorkTarget, Any, int]:
     pool: ConnectionPool
     original, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
@@ -332,6 +339,7 @@ async def _force_successor(
         EventBus.from_settings(),
         target.agent_id,
         resurrected_by="user",
+        local_machine=local_machine,
     )
     successor = await admit_hosted_runtime(
         aops_pool,

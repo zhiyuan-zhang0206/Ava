@@ -17,7 +17,7 @@ aliases. Parsing preserves caller-owned children. Agents/notices
 and impersonation builders live in `cli.commands.agents`, extensions in
 `cli.commands.extensions.parsers`, others in `cli/parsers/`. Adapters lazy-import
 `cmd_*` at dispatch; `pyproject.toml` installs `.venv/bin/ava` via `uv sync`.
-Operator inputs are described in [[cli/docs/database.ava.okf.md]].
+Operator inputs are described in [[cli/database/docs/database.ava.okf.md]].
 
 ## Top-Level Commands
 

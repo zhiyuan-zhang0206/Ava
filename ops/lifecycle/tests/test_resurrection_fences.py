@@ -8,6 +8,7 @@ from psycopg_pool import AsyncConnectionPool
 
 import base.db
 from base.agents.messages.inbound import InboundKind
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -24,6 +25,7 @@ from ops.lifecycle.tests.resurrection_setup import (
     settle_hosted_force,
 )
 from ops.tests.pool_support import make_test_pool
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestResurrectAgent:
@@ -38,6 +40,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A repeated force creates a newer intent fence without changing the
         real status-transition epoch used to reopen pages on manual resurrect."""
@@ -46,6 +49,7 @@ class TestResurrectAgent:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", noop)
         with db_conn.cursor() as cur:
@@ -91,9 +95,15 @@ class TestResurrectAgent:
         assert repeated_agent_row[1] > first_agent_row[1]
         assert repeated_page_row[0] == first_page_row[0]
 
-        await settle_hosted_force(db_conn, aops_pool, agent_id)
+        await settle_hosted_force(db_conn, aops_pool, agent_id, local_machine=machine_identity)
 
-        resurrect_agent(database, event_bus, agent_id, resurrected_by="user")
+        resurrect_agent(
+            database,
+            event_bus,
+            agent_id,
+            resurrected_by="user",
+            local_machine=machine_identity.name(),
+        )
 
         with db_conn.cursor() as cur:
             cur.execute(
@@ -114,6 +124,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Even without a real status transition, a repeated explicit force
         fences every chat inbound that existed before that latest intent."""
@@ -122,6 +133,7 @@ class TestResurrectAgent:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", noop)
         with db_conn.cursor() as cur:
@@ -138,7 +150,7 @@ class TestResurrectAgent:
         with make_test_pool() as pool:
             force_mark_terminated(database, event_bus, agent_id, pool)
 
-        await settle_hosted_force(db_conn, aops_pool, agent_id)
+        await settle_hosted_force(db_conn, aops_pool, agent_id, local_machine=machine_identity)
 
         with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
             resurrect_agent(
@@ -148,6 +160,7 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine_identity.name(),
             )
 
         row = agents_row(db_conn, agent_id)
@@ -163,6 +176,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A watchdog task selected for one death must not revive a later
         explicit kill while its RPC was in flight."""
@@ -171,6 +185,7 @@ class TestResurrectAgent:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -208,6 +223,7 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine_identity.name(),
             )
 
         row = agents_row(db_conn, agent_id)
@@ -224,6 +240,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A trigger claimed while the RPC is in flight no longer justifies
         launching the terminated owner."""
@@ -232,6 +249,7 @@ class TestResurrectAgent:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -254,6 +272,7 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine_identity.name(),
             )
 
         row = agents_row(db_conn, agent_id)
@@ -270,6 +289,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A pending chat created after the current death still auto-wakes the
         agent, preserving the post-termination delivery contract."""
@@ -278,6 +298,7 @@ class TestResurrectAgent:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -297,6 +318,7 @@ class TestResurrectAgent:
             resurrected_by="system",
             trigger_inbound_id=trigger_id,
             trigger_inbound_kind=InboundKind.CHAT,
+            local_machine=machine_identity.name(),
         )
 
         assert returned == agent_id
@@ -317,6 +339,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """UI compact is guarded work too: its exact durable id and expected
         kind qualify only while pending after the current death."""
@@ -325,6 +348,7 @@ class TestResurrectAgent:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -345,6 +369,7 @@ class TestResurrectAgent:
             resurrected_by="system",
             trigger_inbound_id=compact_id,
             trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
+            local_machine=machine_identity.name(),
         )
 
         assert returned == agent_id
@@ -364,6 +389,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The caller's expected kind is part of the CAS, and a compact that
         has already been claimed no longer licenses a new process."""
@@ -372,6 +398,7 @@ class TestResurrectAgent:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -394,6 +421,7 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
                 trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine_identity.name(),
             )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -409,6 +437,7 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
                 trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
+                local_machine=machine_identity.name(),
             )
 
         assert agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]
@@ -424,6 +453,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A force after compact enqueue fences that older work exactly like
         chat, even though no second status transition occurs."""
@@ -432,6 +462,7 @@ class TestResurrectAgent:
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", noop)
         with db_conn.cursor() as cur:
@@ -449,7 +480,7 @@ class TestResurrectAgent:
         with make_test_pool() as pool:
             force_mark_terminated(database, event_bus, agent_id, pool)
 
-        await settle_hosted_force(db_conn, aops_pool, agent_id)
+        await settle_hosted_force(db_conn, aops_pool, agent_id, local_machine=machine_identity)
 
         with pytest.raises(ResurrectTriggerStaleError):
             resurrect_agent(
@@ -459,5 +490,6 @@ class TestResurrectAgent:
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
                 trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
+                local_machine=machine_identity.name(),
             )
         assert agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]

@@ -55,7 +55,6 @@ import psycopg
 from psycopg import sql
 
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.cluster.machine import machine_name
 from base.db import Database, insert_inbound_message_in_transaction, publish_inbound_wake
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -211,9 +210,10 @@ def notices_for(
     reason: str,
     operation: str | None = None,
     acquired_at: datetime | None = None,
+    local_machine: str,
 ) -> list[ClosureNotice]:
     """One notice per closed busy session that is an agent shell, from this machine."""
-    machine = machine_name()
+    machine = local_machine
     built = (
         closure_notice(
             machine=machine,
@@ -287,7 +287,9 @@ def _one_per_key(notices: Sequence[ClosureNotice]) -> list[ClosureNotice]:
     return unique
 
 
-def stage_crash_notices(swept: closure.Outcome, path: Path) -> list[ClosureNotice]:
+def stage_crash_notices(
+    swept: closure.Outcome, path: Path, *, local_machine: str
+) -> list[ClosureNotice]:
     """Stage the sweep's closure notices beside any already waiting; return the whole batch.
 
     The service calls this before its one-shot child runs: everything the child
@@ -296,7 +298,12 @@ def stage_crash_notices(swept: closure.Outcome, path: Path) -> list[ClosureNotic
     start instead. What was already staged stays first (a re-sent notice keeps
     its earlier record); an empty batch leaves the file untouched.
     """
-    staged = _one_per_key((*read_pending(path), *notices_for(swept.closed, reason=CRASH_REASON)))
+    staged = _one_per_key(
+        (
+            *read_pending(path),
+            *notices_for(swept.closed, reason=CRASH_REASON, local_machine=local_machine),
+        )
+    )
     if staged:
         write_pending(path, staged)
     return staged
@@ -471,11 +478,20 @@ def main() -> int:
     if not notices:
         return 0
     try:
+        from base.cluster.machine.boot import machine_from_boot
+        from base.config import ConfigBoot
+
+        config = ConfigBoot()
+        config.boot()
+        machine = machine_from_boot(config)
         image = LoadedCommit.capture()
         version = CodeVersion(image)
         gate = ProcessDbGate(version=version.get, process=process_name(), exempt=False)
         failed = write_notices(
-            Database.from_settings(gate=gate), EventBus.from_settings(), notices, direct=False
+            Database.from_settings(gate=gate, local_host=machine.host),
+            EventBus.from_settings(),
+            notices,
+            direct=False,
         )
     except Exception as exc:  # no database settings: a failed child, not a service failure
         logger.error(

@@ -42,6 +42,8 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     _hermetic_start as _base_start,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
 from cli.commands.probe import ReadinessWait
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from ops.roster.service_spec import _AGENT_RUNNER, _GATEWAY, ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
@@ -226,12 +228,17 @@ def test_start_refuses_and_launches_nothing(
     _hermetic_start: None,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("agent-host", 8113),))
     _verdicts(monkeypatch, {"agent-host": DaemonProbe.port_taken(_FOREIGN)})
     assert (
         _start_commands.cmd_start(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 1
     )
@@ -247,12 +254,17 @@ def test_a_clear_roster_starts_normally(
     _hermetic_start: None,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("ops", 8113),))
     _verdicts(monkeypatch, {"ops": DaemonProbe.down("cold")})
     assert (
         _start_commands.cmd_start(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )
@@ -264,6 +276,8 @@ def test_a_disabled_service_cannot_block_start(
     _hermetic_start: None,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103), _healthz_spec("ops", 8113)))
     _verdicts(
@@ -275,6 +289,7 @@ def test_a_disabled_service_cannot_block_start(
             retained_children=[],
             database_factory=operator_database,
             producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )
@@ -286,12 +301,17 @@ def test_optional_port_conflict_does_not_block_core_start(
     _hermetic_start: None,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103),))
     _verdicts(monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN)})
     assert (
         _start_commands.cmd_start(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )

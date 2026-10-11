@@ -9,6 +9,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.db.code_version_gate import ProcessDbGate
@@ -42,6 +43,7 @@ from services.wake.delivery_watchdog.tests.test_delivery_watchdog import (
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog import (
     pool as pool,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestDispatchBackoffAndPoison:
@@ -77,12 +79,14 @@ class TestDispatchBackoffAndPoison:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -115,12 +119,14 @@ class TestDispatchBackoffAndPoison:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -179,12 +185,14 @@ class TestDispatchBackoffAndPoison:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -212,12 +220,14 @@ class TestDispatchBackoffAndPoison:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -252,12 +262,14 @@ class TestDispatchBackoffAndPoison:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -315,12 +327,14 @@ class TestDispatchBackoffAndPoison:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -355,12 +369,14 @@ class TestDispatchBackoffAndPoison:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -405,12 +421,14 @@ class TestDispatchBackoffAndPoison:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -449,12 +467,14 @@ class TestSelectPendingIds:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = insert_inbound_message(
             db_conn, aid, "hi", source="user", bus=event_bus, database=database
@@ -474,9 +494,7 @@ class TestSelectPendingIds:
 
 
 class TestDeadLetterStaleClaimed:
-    """Stale 'claimed' rows of terminated owners are dead-lettered (flipped to
-    'done') so a later resurrect cannot re-deliver them as fresh messages
-    (Task #654)."""
+    """Terminated owners' stale claims become done so resurrection cannot redeliver them (#654)."""
 
     def test_old_claimed_of_terminated_owner_dead_lettered(
         self,
@@ -486,6 +504,7 @@ class TestDeadLetterStaleClaimed:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_claimed
 
@@ -494,6 +513,7 @@ class TestDeadLetterStaleClaimed:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_claimed_row(db_conn, aid, claim_age_s=2 * 86400)
 
@@ -510,6 +530,7 @@ class TestDeadLetterStaleClaimed:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A young claim keeps the two-phase guarantee: if the agent is
         resurrected, boot reconcile still resets it to 'pending' for
@@ -521,6 +542,7 @@ class TestDeadLetterStaleClaimed:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_claimed_row(db_conn, aid, claim_age_s=60)
 
@@ -537,6 +559,7 @@ class TestDeadLetterStaleClaimed:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Idling claims age out, while fresh idling and running claims stay."""
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_claimed
@@ -546,6 +569,7 @@ class TestDeadLetterStaleClaimed:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         stale_idling_row = _insert_claimed_row(db_conn, stale_idling, claim_age_s=7201)
         fresh_idling = idling_agent(
@@ -553,6 +577,7 @@ class TestDeadLetterStaleClaimed:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         fresh_idling_row = _insert_claimed_row(db_conn, fresh_idling, claim_age_s=3600)
         running = _make_running_agent(
@@ -560,6 +585,7 @@ class TestDeadLetterStaleClaimed:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         running_row = _insert_claimed_row(db_conn, running, claim_age_s=10 * 86400)
 
@@ -585,6 +611,7 @@ class TestDeadLetterStalePendingResurrects:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_resurrects
 
@@ -593,6 +620,7 @@ class TestDeadLetterStalePendingResurrects:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         old = pending_resurrect_row(db_conn, aid, age_s=2 * 86400)
         fresh = pending_resurrect_row(db_conn, aid, age_s=60)
@@ -625,6 +653,7 @@ class TestDeadLetterStalePendingTerminated:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
 
@@ -633,6 +662,7 @@ class TestDeadLetterStalePendingTerminated:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         rows = {
             pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind=kind)
@@ -658,6 +688,7 @@ class TestDeadLetterStalePendingTerminated:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
 
@@ -666,6 +697,7 @@ class TestDeadLetterStalePendingTerminated:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         row = pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="chat")
 
@@ -682,6 +714,7 @@ class TestDeadLetterStalePendingTerminated:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
 
@@ -690,6 +723,7 @@ class TestDeadLetterStalePendingTerminated:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         rows = [
             pending_resurrect_row(db_conn, aid, age_s=60, kind=kind)
@@ -712,6 +746,7 @@ class TestDeadLetterStalePendingTerminated:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
 
@@ -720,6 +755,7 @@ class TestDeadLetterStalePendingTerminated:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         rows = [
             pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind=kind)

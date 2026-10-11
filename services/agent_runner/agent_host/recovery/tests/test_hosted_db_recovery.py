@@ -28,7 +28,7 @@ from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.agents.incarnation.hosted_force import install_hosted_force
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.observation.db_wait import DatabaseWaits
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
@@ -42,8 +42,9 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import db_recovery
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture(autouse=True)
@@ -64,12 +65,13 @@ async def admit_recovery(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> RuntimeIncarnation:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
-        machine=machine_name(),
+        machine=local_machine.name(),
         catalog=model_catalog,
         authority=config_authority,
     )
@@ -81,7 +83,7 @@ async def admit_recovery(
     incarnation = await admit_hosted_runtime(
         pool,
         agent,
-        machine_name(),
+        local_machine.name(),
         uuid4(),
         expected_from="idling",
         db=Database.from_settings(gate=database_gate),
@@ -130,12 +132,14 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     recovering = asyncio.Event()
@@ -180,6 +184,7 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
+            machine=configured_machine(),
         )
         original = asyncio.create_task(
             host._invoke_until_done(
@@ -245,12 +250,14 @@ async def test_recovery_never_repairs_or_renews_a_lost_or_forced_incarnation(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
 
@@ -295,12 +302,14 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
 
@@ -312,7 +321,7 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
     pause_owner.begin_maintenance("outage", acquired)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=incarnation.owner,
         holder="outage",
         acquired_at=acquired,
@@ -375,12 +384,14 @@ async def test_decision_committed_during_outage_prevents_old_continuation(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
 
@@ -445,12 +456,14 @@ async def test_repair_timeout_retries_and_remains_cancellable(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
 
     async def never(_state: states.AgentState) -> dict[str, Any]:
@@ -532,6 +545,7 @@ async def _seed_stalled_repair_scenario(
     incarnation: RuntimeIncarnation,
     *,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> tuple[AsyncPostgresSaver, Any, RunnableConfig, int, MaintenanceHold, list[int], datetime]:
     """The issue #1972 repro state: a claimed inbound whose turn left a
     dangling private tool call in the retained checkpoint, an unacked
@@ -595,7 +609,7 @@ async def _seed_stalled_repair_scenario(
     pause_owner.begin_maintenance("private-slow-recovery", at)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=local_machine.name(),
         host_owner=incarnation.owner,
         holder="private-slow-recovery",
         acquired_at=at,
@@ -613,6 +627,7 @@ async def test_healthy_stages_each_get_their_own_deadline(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Issue #1972: stages that each fit the old 5s aggregate but not together
     must still complete — the chain is bounded per stage, not per attempt."""
@@ -623,9 +638,10 @@ async def test_healthy_stages_each_get_their_own_deadline(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     saver, graph, config, inbound, hold, graph_calls, at = await _seed_stalled_repair_scenario(
-        db_conn, aops_pool, incarnation, database_gate=database_gate
+        db_conn, aops_pool, incarnation, database_gate=database_gate, local_machine=machine_identity
     )
     reader = AsyncPostgresSaver(aops_pool)  # type: ignore[arg-type]
     wrap_saver_reads_with_delta_reconstruction(reader)

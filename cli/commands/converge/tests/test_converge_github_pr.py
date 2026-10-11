@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 import cli.commands.converge.host as cv
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -16,13 +17,15 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 def _ctx(
     home: Path, *, operator_database: Callable[[], Any], producer: Callable[[], EventPipeline]
 ) -> cv.ConvergeCtx:
+    machine_config = ConfigBoot()
     return cv.ConvergeCtx(
         repo=Path("/repo"),
         ava_home=home,
         roles=frozenset({"agent-runner"}),
-        config=ConfigBoot(),
+        config=machine_config,
         database_factory=operator_database,
         producer=producer,
+        machine=machine_from_boot(machine_config),
     )
 
 
@@ -65,13 +68,15 @@ def test_skips_on_single_box(
     import base.deploy.git.github_pr as gp
 
     monkeypatch.setattr(gp, "github_pr_blocker", lambda: "gh CLI not installed")
+    machine_config = ConfigBoot()
     ctx = cv.ConvergeCtx(
         repo=Path("/repo"),
         ava_home=tmp_path,
         roles=frozenset({"gateway", "agent-runner"}),
-        config=ConfigBoot(),
+        config=machine_config,
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=machine_from_boot(machine_config),
     )
     cv._ensure_github_pr(ctx)  # no raise
 

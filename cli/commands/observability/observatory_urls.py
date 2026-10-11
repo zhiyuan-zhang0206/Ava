@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host.atomic_io import write_text_atomic
 from base.telemetry.station_endpoint import validated_observability_base
@@ -83,7 +84,7 @@ def _pg_datasource_host_port(*, remote_observatory: bool, database_factory: Data
     return _host_port(host, port)
 
 
-def _alerts_webhook_url() -> str:
+def _alerts_webhook_url(*, machine: MachineIdentity) -> str:
     """The Grafana alert webhook target — the GATEWAY's own reachable address.
 
     Deliberately NOT derived from observability_url: the alert ingest endpoint
@@ -95,7 +96,6 @@ def _alerts_webhook_url() -> str:
     from the gateway host can hit VPN hairpin filtering (pgbouncer probe incident), which is
     exactly why the loopback form is kept when no remote observatory is set.
     """
-    from base.cluster.machine import reachable_host
 
     port = settings.gateway.gateway_port
     if settings.observability.observability_url:
@@ -114,7 +114,7 @@ def _alerts_webhook_url() -> str:
                     "Grafana alert webhook requires a credential-free gateway base URL"
                 )
         else:
-            base = f"http://{_host_port(reachable_host(), port)}"
+            base = f"http://{_host_port(machine.host(), port)}"
         print(
             "lgtm native: alert webhook will point at the gateway's reachable "
             f"address {base} — this presumes a REMOTE observatory "

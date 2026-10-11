@@ -18,7 +18,6 @@ from typing import cast
 import yaml
 
 import ava as _ava
-import base.cluster.machine
 import base.paths
 from ava import gateway_client as _client
 from ava.sdk_surface.validation import coerce_str, coerce_typed
@@ -634,7 +633,7 @@ def write(
 
     now = datetime.now(UTC).replace(microsecond=0)
     if is_shared:
-        machine = base.cluster.machine.machine_name()
+        machine = _ava.context.require_machine().name()
         generated = [
             ("type", "Memory"),
             ("ava_agent", str(agent_id)),

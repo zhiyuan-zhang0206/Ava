@@ -17,6 +17,7 @@ from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -27,6 +28,7 @@ from tests.components.cli.test_pgbouncer_wire import (
     _pgbouncer_available,
     _pgbouncer_in_front,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 pytestmark = pytest.mark.skipif(
     not _pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"
@@ -146,12 +148,16 @@ async def test_more_than_twenty_workload_leases_share_bounded_backends(
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The default 64 leases fit; the 65th waits without blocking control.
 
     The old 20-client workload pool cannot reach this borrower barrier.
     """
-    with postgres() as direct, _pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled:
+    with (
+        postgres(machine_name=machine_identity.name) as direct,
+        _pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
+    ):
         # The host pools dial the cluster's access URL, which is this pooler.
         monkeypatch.setattr(settings.data_plane, "db_url", pooled)
         async with (
@@ -305,6 +311,7 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Exercise six pool pairs without claiming a thousand full agent turns.
 
@@ -314,7 +321,10 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
     Six requests are cancelled in PostgreSQL; all other IDs must commit once.
     """
     started = time.monotonic()
-    with postgres() as direct, _pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled:
+    with (
+        postgres(machine_name=machine_identity.name) as direct,
+        _pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
+    ):
         # The host pools dial the cluster's access URL, which is this pooler.
         monkeypatch.setattr(settings.data_plane, "db_url", pooled)
         async with AsyncExitStack() as stack:

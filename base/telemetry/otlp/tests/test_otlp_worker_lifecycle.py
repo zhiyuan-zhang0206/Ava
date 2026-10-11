@@ -31,7 +31,7 @@ class _Provider:
 
 def _backend(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, _Provider, _Provider]:
     logs, metrics = _Provider(), _Provider()
-    backend = telemetry_otlp._OtlpBackend(providers=(logs, metrics))
+    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True, providers=(logs, metrics))
     monkeypatch.setattr(backend, "_enabled", lambda: True)
 
     def ignore(_event: Event) -> None:
@@ -167,7 +167,7 @@ def test_unknown_error_after_stop_is_immediate_and_same_owner_raises(
 def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    backend = telemetry_otlp._OtlpBackend()
+    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
     logs, reader = _Provider(), _Provider()
     cleaning, release = threading.Event(), threading.Event()
 
@@ -429,7 +429,7 @@ def test_real_sdk_partial_build_threads_are_owned_and_closed(
 ) -> None:
     from base.telemetry.otlp import telemetry_otlp_metrics
 
-    backend = telemetry_otlp._OtlpBackend()
+    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
 
     def reachable(_endpoint: str) -> bool:
         return True
@@ -454,7 +454,7 @@ def test_real_sdk_partial_build_threads_are_owned_and_closed(
 def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    backend = telemetry_otlp._OtlpBackend()
+    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
     logs = _Provider()
     attempts: list[str] = []
 
@@ -508,3 +508,82 @@ def test_unknown_failed_attempt_still_closes_deferred_admission_and_clock(
         assert backend._deferral.stop(timeout=5)
         worker._thread.join(timeout=5)
         assert not worker._thread.is_alive()
+
+
+def test_empty_exporting_pipeline_stops_without_reading_identity() -> None:
+    def reject() -> bool:
+        raise AssertionError("empty close must not read identity")
+
+    pipeline = telemetry_otlp.ExportingEventPipeline(
+        writer=lambda _events, _exporter: None, export_allowed=reject
+    )
+    assert pipeline.stop(timeout=1).status is DrainStatus.COMPLETED
+    assert pipeline.stopped
+    assert pipeline._exporter._worker is None
+    assert pipeline._exporter._export_decision is None
+
+
+def test_unfinished_ordinary_writer_keeps_its_exporter_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, logs, metrics = _backend(monkeypatch)
+
+    def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
+        return backend
+
+    monkeypatch.setattr(telemetry_otlp, "OtlpBackend", build_backend)
+    entered, release = threading.Event(), threading.Event()
+
+    def write(_events: list[Event], _exporter: Any) -> None:
+        entered.set()
+        assert release.wait(5)
+
+    pipeline = telemetry_otlp.ExportingEventPipeline(writer=write, export_allowed=lambda: True)
+    assert backend._ensure()
+    pipeline.enqueue(_event())
+    assert entered.wait(2)
+    try:
+        assert pipeline.stop(timeout=0.01).status is DrainStatus.UNFINISHED
+        assert not pipeline.stopped
+        assert not backend._closed.is_set()
+        assert not logs.closed.is_set()
+        assert not metrics.closed.is_set()
+    finally:
+        release.set()
+        assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED
+    assert pipeline.stopped
+    assert logs.closed.is_set() and metrics.closed.is_set()
+
+
+def test_unfinished_exporter_keeps_pipeline_for_later_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, logs, metrics = _backend(monkeypatch)
+
+    def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
+        return backend
+
+    monkeypatch.setattr(telemetry_otlp, "OtlpBackend", build_backend)
+    entered, release = threading.Event(), threading.Event()
+    original = logs.shutdown
+
+    def close() -> None:
+        entered.set()
+        assert release.wait(5)
+        original()
+
+    monkeypatch.setattr(logs, "shutdown", close)
+    pipeline = telemetry_otlp.ExportingEventPipeline(
+        writer=lambda _events, _exporter: None, export_allowed=lambda: True
+    )
+    assert backend._ensure()
+    try:
+        assert pipeline.stop(timeout=0.1).status is DrainStatus.UNFINISHED
+        assert entered.wait(2)
+        assert not pipeline.stopped
+        assert backend._worker is not None
+    finally:
+        release.set()
+        assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED
+    assert pipeline.stopped
+    assert logs.closed.is_set() and metrics.closed.is_set()

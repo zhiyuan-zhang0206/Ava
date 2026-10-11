@@ -26,7 +26,10 @@ import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
 from base.agents.context.clients import DatabaseFactory
 from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
+from base.cluster.machine import MachineIdentity
 from base.telemetry import EventPipeline
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -56,23 +59,35 @@ def test_declined_restart_reports_its_own_exit_code(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A preflight refusal stops nothing, so the host is still serving. It must be
     distinguishable from a failure after the stop — the updater shell branches on
     exactly this code to decide whether to run `ava start`."""
 
     stopped: list[bool] = []
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 1)  # pyright: ignore[reportUnknownArgumentType]
+
+    def preflight(_db: object, *, command: CommandRuntime) -> int:
+        assert command is command_runtime
+        del _db
+        return 1
+
+    monkeypatch.setattr(_repo_commands, "_preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # type: ignore[func-returns-value]
 
-    def _release_pause(*, database_factory: DatabaseFactory) -> None:
+    def release_pause(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
         assert database_factory is operator_database
+        assert machine is command_runtime.machine
 
-    monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", _release_pause)
+    monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", release_pause)
 
     assert (
         _stop_commands.cmd_restart(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == RESTART_DECLINED_EXIT_CODE
     )
@@ -83,10 +98,18 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Once the stop has happened the host may be DOWN, so its code must NOT be the
     one the updater treats as "still serving"."""
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 0)  # pyright: ignore[reportUnknownArgumentType]
+
+    def preflight(_db: object, *, command: CommandRuntime) -> int:
+        assert command is command_runtime
+        del _db
+        return 0
+
+    monkeypatch.setattr(_repo_commands, "_preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _start_readiness_preflight_commands,
         "preflight_start_readiness",
@@ -104,7 +127,10 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
     monkeypatch.setattr(_start_commands, "_cmd_start_body", start_result)
 
     rc = _stop_commands.cmd_restart(
-        retained_children=[], database_factory=operator_database, producer=operator_pipeline
+        retained_children=[],
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        command=command_runtime,
     )
     assert rc != 0
     assert rc != RESTART_DECLINED_EXIT_CODE
@@ -127,7 +153,11 @@ def _paused_posture(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_declined_restart_releases_a_pause_nothing_else_owns(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A locally spawned self-heal pauses this host before running `ava restart`. If
     that restart declines, nothing else clears the pause — so a healthy host would
@@ -141,12 +171,18 @@ def test_declined_restart_releases_a_pause_nothing_else_owns(
         lambda _db, _bus: unpaused.append(True),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    _stop_commands._release_self_heal_pause(database_factory=operator_database)
+    _stop_commands._release_self_heal_pause(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert unpaused == [True]
 
 
 def test_declined_restart_leaves_a_stop_holds_pause_alone(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A maintenance hold that has entered its stop window owns this pause and
     `ava start` releases it after readiness; unpausing now would reopen the host
@@ -168,5 +204,7 @@ def test_declined_restart_leaves_a_stop_holds_pause_alone(
         lambda _db, _bus: unpaused.append(True),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    _stop_commands._release_self_heal_pause(database_factory=operator_database)
+    _stop_commands._release_self_heal_pause(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
     assert unpaused == []

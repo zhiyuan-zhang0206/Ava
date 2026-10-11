@@ -66,13 +66,13 @@ from __future__ import annotations
 import contextlib
 import re as re
 import subprocess as subprocess
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from collections.abc import Iterable as Iterable
 from pathlib import Path
 
 import psycopg
 
-from base.cluster.machine import MachineNameMissing, machine_name
+from base.cluster.machine import MachineNameMissing
 from base.db import connect_url
 from base.deploy.schema.migration_errors import CodeBehindSchema as CodeBehindSchema
 from base.deploy.schema.migration_errors import (
@@ -282,7 +282,9 @@ def _gateway_units(conn: psycopg.Connection) -> list[tuple[str, str]]:
         return [(name, home) for name, home in cur.fetchall()]
 
 
-def _assert_migration_authority(conn: psycopg.Connection) -> None:
+def _assert_migration_authority(
+    conn: psycopg.Connection, *, machine_name: Callable[[], str]
+) -> None:
     """Refuse unless this checkout is the gateway unit of the cluster it is about
     to migrate. Raises MigrationAuthorityMismatch naming both identities.
 
@@ -325,7 +327,9 @@ def _squash_history(conn: psycopg.Connection, names: set[str]) -> None:
         cur.execute("DELETE FROM schema_migrations WHERE name = ANY(%s)", (sorted(names),))
 
 
-def apply_pending_migrations(conn: psycopg.Connection) -> list[str]:
+def apply_pending_migrations(
+    conn: psycopg.Connection, *, machine_name: Callable[[], str]
+) -> list[str]:
     """Apply every git-tracked migration file whose name is not yet in the DB's
     applied set, in name (≈ chronological) order; return the list of names
     actually applied. Untracked files in migrations/ are warned about and
@@ -372,7 +376,7 @@ def apply_pending_migrations(conn: psycopg.Connection) -> list[str]:
         # schema (a squash is a mutation too).
         pending = [(name, path) for name, path in files if name not in applied]
         if pending or squash:
-            _assert_migration_authority(conn)
+            _assert_migration_authority(conn, machine_name=machine_name)
 
         resetting = _RESET_ANCHOR in required - applied
         if squash and not resetting:

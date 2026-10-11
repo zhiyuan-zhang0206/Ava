@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -40,13 +41,17 @@ def test_entry_keeps_the_config_owner_and_captured_image(
     gates: list[ProcessDbGate] = []
     slices: list[DbConfig] = []
     reads: list[tuple[Path, str]] = []
-    factories: list[Callable[[], Database]] = []
+    factories: list[tuple[Callable[[], Database], MachineIdentity]] = []
+    readers: list[Callable[[], str]] = []
     pipeline = object()
 
     class Store:
-        def __init__(self, config: DbConfig, *, gate: ProcessDbGate) -> None:
+        def __init__(
+            self, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+        ) -> None:
             slices.append(config)
             gates.append(gate)
+            readers.append(local_host)
 
     def capture() -> LoadedCommit:
         stages.append("capture")
@@ -60,10 +65,10 @@ def test_entry_keeps_the_config_owner_and_captured_image(
         assert self is boot
         stages.append("boot")
 
-    def build(*, database: Callable[[], Database]) -> object:
+    def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
         stages.append("producer")
         assert gates == []  # Pipeline construction must not dial or resolve the image.
-        factories.append(database)
+        factories.append((database, machine))
         return pipeline
 
     def initialize(**inputs: Any) -> None:
@@ -72,7 +77,7 @@ def test_entry_keeps_the_config_owner_and_captured_image(
         assert inputs["image"] is image
         assert inputs["producer"]() is pipeline
         assert inputs["machine_reader"]() == "browser-entry"
-        factories[0]()
+        factories[0][0]()
 
     async def work(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], float]) -> None:
         stages.append("run")
@@ -80,7 +85,7 @@ def test_entry_keeps_the_config_owner_and_captured_image(
         boot.set_field("mcp_connect_timeout_seconds", 17.0)
         assert connect_timeout_reader() == 17.0
         boot.set_field("db_pool_max_size", 37)
-        factories[0]()
+        factories[0][0]()
 
     monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
     monkeypatch.setattr(code_version, "first_parent_count", count)
@@ -91,6 +96,7 @@ def test_entry_keeps_the_config_owner_and_captured_image(
     monkeypatch.setattr(daemon, "init_gateway_process", initialize)
     monkeypatch.setattr(daemon, "run", work)
     daemon.main()
+    assert readers == [factories[0][1].host, factories[0][1].host]
     assert stages == ["capture", "boot", "producer", "logging", "run"]
     assert slices[1].db_pool_max_size == 37
     _assert_gate_matches_image(gates, reads, image)

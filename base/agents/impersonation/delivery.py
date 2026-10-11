@@ -23,7 +23,13 @@ from base.events.live.bus import EventBus
 
 
 def reserve_delivery(
-    db: Database, bus: EventBus, lease_id: str, relay_token: str, message_ids: list[int]
+    db: Database,
+    bus: EventBus,
+    lease_id: str,
+    relay_token: str,
+    message_ids: list[int],
+    *,
+    local_machine: str,
 ) -> frozenset[int]:
     """Claim due, previously read pending rows before one host submission.
 
@@ -35,13 +41,22 @@ def reserve_delivery(
     """
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        authenticate_relay(lease, relay_token)
+        authenticate_relay(
+            lease,
+            relay_token,
+            local_machine=local_machine,
+        )
         was_open = lease["status"] in OPEN
         lease = expire(conn, lease)
         if lease["status"] != ImpersonationStatus.ACTIVE:
             rows = []
         else:
-            require_relay_active_locked(conn, lease, relay_token)
+            require_relay_active_locked(
+                conn,
+                lease,
+                relay_token,
+                local_machine=local_machine,
+            )
             rows = conn.execute(
                 "UPDATE agent_impersonation_messages m "
                 "SET delivery_attempts=m.delivery_attempts+1,last_delivery_at=clock_timestamp() "

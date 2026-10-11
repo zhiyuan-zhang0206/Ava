@@ -17,8 +17,7 @@ from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import is_default_home
-from base.cluster.machine import MachineRoles
-from base.config import ConfigBoot
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.host.converge.accessibility import (
     clear_status as clear_accessibility_status,
@@ -66,16 +65,17 @@ from cli.commands.converge.health_preflight import (
     ensure_health_preflight as _ensure_health_preflight,
 )
 from cli.commands.converge.redis_bridge import ensure_redis_bridge
-
-# The step contract lives in spec.py so step implementations can span
-# modules without an import cycle; re-exported here because every caller and
-# test reaches for `cli.commands.converge.host.ConvergeCtx` / `ALL_ROLES`.
 from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx, ConvergeStep
 from cli.commands.converge.walg import converge_walg
 from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
 from cli.commands.extensions.external_skills import converge_external_agent_skill
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step
 from cli.commands.observability.otel_collector import ensure_otel_collector_step
+
+# The step contract lives in spec.py so step implementations can span
+# modules without an import cycle; re-exported here because every caller and
+# test reaches for `cli.commands.converge.host.ConvergeCtx` / `ALL_ROLES`.
+from cli.database.runtime import CommandRuntime
 
 __all__ = [
     "ALL_ROLES",
@@ -504,6 +504,7 @@ def converge_host(
     services: frozenset[str] | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
+    command: CommandRuntime,
 ) -> None:
     """Run the applicable converge steps in order; idempotent, fail-fast.
 
@@ -514,12 +515,15 @@ def converge_host(
     both the gateway and agent-runner steps.
     """
     resolved_home = ava_home if ava_home is not None else resolve_ava_home()
-    selected = _desired_service_names(roles) if services is None else services
+    selected = (
+        _desired_service_names(roles, machine=command.machine) if services is None else services
+    )
     ctx = ConvergeCtx(
         repo=repo,
         ava_home=resolved_home,
         roles=roles,
-        config=ConfigBoot(),
+        config=command.config,
+        machine=command.machine,
         database_factory=database_factory,
         services=selected,
         producer=producer,
@@ -564,7 +568,9 @@ def _skip_reason(ctx: ConvergeCtx, step: ConvergeStep, *, is_prod_install: bool)
     return None
 
 
-def _desired_service_names(roles: MachineRoles | None) -> frozenset[str]:
+def _desired_service_names(
+    roles: MachineRoles | None, *, machine: MachineIdentity
+) -> frozenset[str]:
     from base.deploy.lifecycle.service_selection import read_selection
     from cli.commands._repo import _services_for_roles_annotated
 
@@ -573,7 +579,7 @@ def _desired_service_names(roles: MachineRoles | None) -> frozenset[str]:
     selection = read_selection()
     return frozenset(
         spec.session
-        for spec, gate in _services_for_roles_annotated(roles)
+        for spec, gate in _services_for_roles_annotated(roles, machine=machine)
         if gate is None and selection.enabled(spec.session)
     )
 
@@ -583,6 +589,7 @@ def cmd_converge(
     operation: PauseOwnerSnapshot | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
+    command: CommandRuntime,
 ) -> int:
     """`ava converge` — bring this host to the state the current code expects (idempotent)."""
     from base.deploy.maintenance import admission
@@ -592,10 +599,12 @@ def cmd_converge(
     admission.require_start_allowed(operation)
     raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit
     repo = _repo._repo_root()
-    roles = _repo._roles_or_none()
+    roles = _repo._roles_or_none(machine=command.machine)
     print(f"[ava converge] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}")
 
-    converge_host(repo, roles, database_factory=database_factory, producer=producer)
+    converge_host(
+        repo, roles, database_factory=database_factory, producer=producer, command=command
+    )
     # After the steps, not inside them: standalone converge runs against a
     # cluster that is already up, which is the precondition this needs and which
     # a CONVERGE_STEPS entry would not have on the `ava start` path.
@@ -604,6 +613,6 @@ def cmd_converge(
         materialize_cluster_extensions,
     )
 
-    adopt_local_extensions(database_factory=database_factory)
+    adopt_local_extensions(database_factory=database_factory, machine=command.machine)
     materialize_cluster_extensions(database_factory=database_factory)
     return 0

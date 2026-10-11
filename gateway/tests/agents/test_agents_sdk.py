@@ -18,11 +18,13 @@ from ava import gateway_client
 from ava.agents import AgentNotFound, ForkSourceEmpty, TerminateResult
 from ava.sdk_surface.install import Installation
 from base.agents import ShellSessionKillTiming
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from gateway.tests.agents.sdk_support import inbound_rows, spawn_agent
 from gateway.tests.agents.sdk_support import sdk_via_gateway as sdk_via_gateway
 from tests.fixtures.pin_agent import pin_agent
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _agent_spawner(db: psycopg.Connection, agent_id: int) -> str:
@@ -40,8 +42,15 @@ class TestSpawn:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         first = ava.agents.spawn(prompt="one goal", idempotency_key="public-create-a")
         assert ava.agents.spawn(prompt="one goal", idempotency_key="public-create-a") == first
         assert inbound_rows(db_conn, first) == [("one goal", "chat", f"agent:{ava.self.AGENT_ID}")]
@@ -57,10 +66,15 @@ class TestSpawn:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """ava.agents.spawn() without prompt — only starts lifecycle, no inbound posted."""
         pin_agent(
-            spawn_agent(config_authority=config_authority, database_gate=database_gate)
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
         )  # self identity
 
         child_id = ava.agents.spawn(idempotency_key=str(uuid4()))
@@ -74,10 +88,15 @@ class TestSpawn:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """spawn(prompt=...) together INSERT chat inbound (source='agent:{ava.self.AGENT_ID}')."""
         pin_agent(
-            spawn_agent(config_authority=config_authority, database_gate=database_gate)
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
         )  # self identity
 
         child_id = ava.agents.spawn(prompt="\u53bb\u67e5 X", idempotency_key=str(uuid4()))
@@ -86,9 +105,10 @@ class TestSpawn:
             ("\u53bb\u67e5 X", "chat", f"agent:{ava.self.AGENT_ID}"),
         ]
 
-    def test_spawn_defaults_machine_to_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_spawn_defaults_machine_to_local(
+        self, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    ) -> None:
         """When machine omitted, SDK defaults to local machine (ava.self.MACHINE_SPEC), gateway receives explicit target, no longer falls back to gateway's own machine."""
-        from base.cluster.machine import machine_name
 
         captured: dict[str, Any] = {}
 
@@ -109,7 +129,7 @@ class TestSpawn:
         monkeypatch.setattr(ava.gateway_client, "spawn", _fake_spawn)
 
         assert ava.agents.spawn(idempotency_key=str(uuid4())) == 999
-        assert captured["machine"] == machine_name()
+        assert captured["machine"] == machine_identity.name()
 
     def test_spawn_explicit_machine_passthrough(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Explicit machine passthrough unchanged, not overridden by local default."""
@@ -179,11 +199,16 @@ class TestSpawnFork:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """ava.agents.spawn(fork_from=N) internally resolves latest checkpoint
         (done by gateway, SDK unaware of ckpt id)."""
         pin_agent(
-            spawn_agent(config_authority=config_authority, database_gate=database_gate)
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
         )  # self identity
         source = ava.agents.spawn(idempotency_key=str(uuid4()))
         # construct chain a < b < c (lex order corresponds to time order)
@@ -213,6 +238,7 @@ class TestSpawnFork:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """fork_from source has no checkpoint → ForkSourceEmpty.
 
@@ -221,7 +247,11 @@ class TestSpawnFork:
         `raise_from_response` reverse lookup rebuild.
         """
         pin_agent(
-            spawn_agent(config_authority=config_authority, database_gate=database_gate)
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
         )  # self identity
         empty_source = ava.agents.spawn(idempotency_key=str(uuid4()))  # spawn without checkpoint
         _ = db_conn  # truncate side-effect via fixture
@@ -235,12 +265,17 @@ class TestSpawnFork:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """ava.agents.spawn(prompt=..., fork_from=source) first posts fork identity inbound
         (kind='fork', source=f"agent:{source}"), then prompt's chat inbound —
         claim side first dispatches identity marker to fix "who am I", then processes prompt."""
         pin_agent(
-            spawn_agent(config_authority=config_authority, database_gate=database_gate)
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
         )  # self identity
         source = ava.agents.spawn(idempotency_key=str(uuid4()))
         # give source a checkpoint
@@ -271,8 +306,15 @@ class TestTerminate:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         result = ava.agents.terminate(peer_id, message="record the partial result")
@@ -294,9 +336,16 @@ class TestTerminate:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """On a live peer the graceful terminate records the kill for its exit."""
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         result = ava.agents.terminate(peer_id, kill_all_shell_sessions=True)
         assert result.shell_sessions == ava.agents.ShellSessionsKill(
@@ -313,10 +362,17 @@ class TestTerminate:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """`open_tasks` rides the SDK result: the agent's open tasks (newest
         first), truncated to five rows plus `more`; done/cancelled excluded."""
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute(
@@ -420,10 +476,17 @@ class TestSendMessage:
         monkeypatch: pytest.MonkeyPatch,
         model_installation: Installation,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """send_message purely INSERT inbound — no status check, no wait, no SendResult return."""
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         result = ava.agents.send_message(peer_id, "you got mail")
@@ -441,11 +504,18 @@ class TestSendMessage:
         monkeypatch: pytest.MonkeyPatch,
         model_installation: Installation,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """send_message to terminated agent also INSERT inbound.
         SDK doesn't care about target state — purely send message, auto-resurrect is gateway-side detail."""
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
@@ -475,10 +545,17 @@ class TestSendMessage:
         monkeypatch: pytest.MonkeyPatch,
         model_installation: Installation,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """send_message only INSERT inbound, doesn't modify agents.status."""
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         ava.agents.send_message(peer_id, "hi")
 
@@ -571,11 +648,18 @@ class TestSendMessage:
         monkeypatch: pytest.MonkeyPatch,
         model_installation: Installation,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """End-to-end: the trailing-comma tuple lands as the string it wraps,
         never as a JSON array (which the gateway would reject 422)."""
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         # Runtime value of `("you got " "mail",)`: implicit concatenation plus

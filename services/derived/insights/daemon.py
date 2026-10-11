@@ -31,7 +31,7 @@ import uvicorn
 
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import Clock, clock_config_from_boot
-from base.cluster.machine import validate_machine_name
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
@@ -42,7 +42,7 @@ from base.lm.plugin_providers import build_model_catalog
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import insights_pidfile, insights_socket
+from base.paths import ava_home, insights_pidfile, insights_socket
 from base.telemetry import build_pipeline
 from services.derived.insights.app import build_app
 from services.derived.insights.config import InsightsConfig
@@ -129,18 +129,20 @@ def main() -> None:
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     config = ConfigBoot()
     config.boot()
+    machine = machine_from_boot(config)
+    process_home = ava_home().resolve()
     assert_schema_current(config.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="insights")
 
     def database() -> Database:
-        return Database(db_config_from_boot(config), gate=gate)
+        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
 
-    pipeline = build_pipeline(database=database)
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
         name="insights",
         producer=lambda: pipeline,
-        machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+        machine_reader=machine.name,
         image=image,
     )
     install_graceful_shutdown("insights")

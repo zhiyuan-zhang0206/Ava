@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
@@ -27,6 +29,7 @@ from services.wake.delivery_watchdog.daemon import (
     scan_once,
     select_stale_pending,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _THRESHOLD_S = 30.0
 _DISPATCH_THRESHOLD_S = 1.0
@@ -36,11 +39,17 @@ _HOST_STALENESS_S = 120.0
 
 
 @pytest.fixture
-def event_pipeline(database: Database) -> Iterator[telemetry.EventPipeline]:
+def event_pipeline(
+    database: Database, machine_identity: MachineIdentity, unit_home: Path
+) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the service operation and mirror barrier."""
-    pipeline = telemetry.build_pipeline(database=lambda: database)
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity, home=unit_home
+    )
     try:
-        telemetry.init_telemetry(process="test-wake-service", pipeline=pipeline)
+        telemetry.init_telemetry(
+            process="test-wake-service", pipeline=pipeline, machine_reader=machine_identity.name
+        )
         yield pipeline
     finally:
         pipeline.stop(timeout=2)
@@ -61,6 +70,7 @@ def idling_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """spawn_agent creates the agents_meta row (create_agent does not — that
     is the spawn path's job); the alert filter reads owner status, so tests
@@ -73,6 +83,7 @@ def idling_agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (aid,))
@@ -86,6 +97,7 @@ def _make_running_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     from tests.fixtures.units import spawn_agent
 
@@ -94,6 +106,7 @@ def _make_running_agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (aid,))
@@ -131,11 +144,11 @@ def _set_host_verdict(
     agent_host: bool = True,
     age_s: float = 0.0,
     machine: str | None = None,
+    local_machine: MachineIdentity,
 ) -> None:
     """Upsert the `machine_probe` verdict the dispatch host gate reads."""
-    from base.cluster.machine import machine_name
 
-    name = machine or machine_name()
+    name = machine or local_machine.name()
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_probe (machine_name, online, agent_host_online, "
@@ -151,11 +164,11 @@ def _set_host_verdict(
 
 
 @pytest.fixture(autouse=True)
-def healthy_host_verdict(db_conn: psycopg.Connection) -> None:
+def healthy_host_verdict(db_conn: psycopg.Connection, *, machine_identity: MachineIdentity) -> None:
     """Normal dispatch condition: a fresh reachable machine with a live host.
 
     Host-gate tests override the verdict inside the test body."""
-    _set_host_verdict(db_conn)
+    _set_host_verdict(db_conn, local_machine=machine_identity)
 
 
 class TestSelectStalePending:
@@ -167,12 +180,14 @@ class TestSelectStalePending:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         old = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         _insert_old_inbound(
@@ -200,12 +215,14 @@ class TestSelectStalePending:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         with db_conn.cursor() as cur:
@@ -221,12 +238,14 @@ class TestSelectStalePending:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S - 1, database_gate=database_gate)
         assert select_stale_pending(pool, _THRESHOLD_S) == []
@@ -239,6 +258,7 @@ class TestSelectStalePending:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A chat inbound queued behind a long in-flight turn (owner
         status='running') is normal, not a delivery stall — the turn-end SELECT
@@ -248,6 +268,7 @@ class TestSelectStalePending:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         with db_conn.cursor() as cur:
@@ -265,12 +286,14 @@ class TestScanOnce:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
 
@@ -291,12 +314,14 @@ class TestScanOnce:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         _, alerted = scan_once(pool, _THRESHOLD_S, set())
@@ -323,6 +348,7 @@ class TestScanOnce:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The alert emits through the unified emitter: the canonical
         `events` row (telemetry/delivery_stalled). The legacy agent_events
@@ -332,6 +358,7 @@ class TestScanOnce:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         scan_once(pool, _THRESHOLD_S, set())
@@ -393,6 +420,7 @@ class TestDispatchWakes:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """dispatch_wakes re-publishes one wake (payload = inbound id) per
         stale pending row of an idling owner — the lost-wake recovery."""
@@ -403,6 +431,7 @@ class TestDispatchWakes:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5, database_gate=database_gate
@@ -437,6 +466,7 @@ class TestDispatchWakes:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A failing publish is logged, not raised — the alert path and the
         claim loop's 30s recheck remain as backstops."""
@@ -447,6 +477,7 @@ class TestDispatchWakes:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5, database_gate=database_gate
@@ -480,6 +511,7 @@ class TestDispatchWakes:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """End-to-end: dispatch_wakes publishes on the agent's Redis channel,
         so a listener subscribed to it wakes immediately — the lost-wake window
@@ -491,6 +523,7 @@ class TestDispatchWakes:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5, database_gate=database_gate
@@ -563,6 +596,7 @@ def terminated_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     from tests.fixtures.units import spawn_agent
 
@@ -571,6 +605,7 @@ def terminated_agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     with db.cursor() as cur:
         cur.execute(
@@ -588,6 +623,7 @@ def _make_reaped_crash_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """A `terminated` row the SYSTEM reaped after a crash: reaper source plus
     the retained crash marker (task #3617's relaxed-trigger population)."""
@@ -596,6 +632,7 @@ def _make_reaped_crash_agent(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=local_machine,
     )
     with db.cursor() as cur:
         cur.execute(
@@ -670,6 +707,7 @@ def _make_crash_marked_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """An idling row with the corpse marker set — the corpse reaper's own
     predicate (`last_turn_fatal_at IS NOT NULL` on an idling row).
@@ -681,6 +719,7 @@ def _make_crash_marked_agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     with db.cursor() as cur:
         cur.execute(

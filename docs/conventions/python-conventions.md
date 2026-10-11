@@ -20,8 +20,8 @@ Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
 A `.py` file may contain at most 800 lines (`len(text.splitlines())`). Split
 larger files into focused modules. The budget covers the eight governed
 packages (`agent`, `ava`, `ava_builtins`, `gateway`, `base`, `services`, `ops`,
-`cli`) plus `tests/` and `scripts/`. The TYPE_CHECKING ban and machine_role()
-allowlist still apply only to the eight packages.
+`cli`) plus `tests/` and `scripts/`. The TYPE_CHECKING ban and retired ambient machine_role()
+call rejection apply only to the eight packages.
 
 A script shipped with a skill or plugin gets no exemption. When one outgrows
 the budget, its logic moves into a governed package the script imports
@@ -532,7 +532,7 @@ data, classify the surface and scope it:
 
 - **role-neutral** — applies to every host; no filter.
 - **agent-runner-only** — filter `'agent-runner' = ANY(role)`, guard host-side op.
-- **gateway-only** — guard `is_gateway()` (`'gateway' in machine_role()`).
+- **gateway-only** — guard `'gateway' in machine.role()` using the explicit root-owned `MachineIdentity`.
 
 The roster (`/api/cluster/roster`) legitimately lists every host — it shows
 `role` as a column, not agent-runner-only data.

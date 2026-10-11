@@ -9,13 +9,16 @@ from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from gateway.agents import router as agent_router
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS
 from gateway.agents.tests.creation.test_guarded_creation import client as client
+from gateway.app import app
 from gateway.extensions import packages
 from gateway.routers import guide
 from gateway.schedules import router as schedules
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 CASES = [
@@ -41,8 +44,7 @@ def test_raw_intent_replay_survives_defaults_and_prompt_changes(
         "SELECT launch_attempt_id, prompt_inbound_id, prompt_content FROM agent_creation_snapshots"
     ).fetchone()
     assert stored is not None
-    for module in (guide, schedules, packages):
-        monkeypatch.setattr(module, "machine_name", lambda: "no-longer-registered")
+    app.state.machine.set(name="no-longer-registered")
     replay = client.post(path, json=body, headers=HEADERS)
     assert replay.status_code == 200, replay.text
     assert replay.json() == first.json()
@@ -238,6 +240,8 @@ def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
     client: TestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from gateway.app import app
     from ops.agents.creation_identity import find_creation
@@ -272,7 +276,9 @@ def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
     assert legacy is not None and str(legacy.launch_attempt_id) == replacement
     with pytest.raises(ValueError, match="launch"):
         _validate_launch_row(
-            app.state.db_pool, LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=attempt)
+            app.state.db_pool,
+            LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=attempt),
+            local_machine=machine_identity.name(),
         )
 
     async def unexpected(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:

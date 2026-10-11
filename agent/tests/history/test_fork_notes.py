@@ -32,11 +32,13 @@ from agent.graph.claim._dispatch import (
 from agent.graph.claim.node import claim_node
 from agent.messages import NoteTag
 from agent.state import AgentState
-from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
+from agent.tests.claim.claim_support import insert_inbound_kind, make_runtime, thread_config
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.paths import skills_dir
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -129,6 +131,7 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Scenario 2b: a skill the fork's config added (source never had it) rides
     the fork inbound payload and lands as a full-body note at the TAIL — after
@@ -150,7 +153,10 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
     )
 
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -162,8 +168,8 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="inherited tail")]),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(tid),
     )
     msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])
     tail_note = msgs[-1]
@@ -192,17 +198,21 @@ async def test_fork_without_payload_grafts_nothing(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Legacy fork rows (payload NULL) keep the pre-ruling behavior: no delta
     note."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
+    insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(tid),
     )
     msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])
     tags = [

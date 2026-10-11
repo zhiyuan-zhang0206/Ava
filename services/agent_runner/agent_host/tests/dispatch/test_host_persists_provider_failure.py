@@ -13,6 +13,7 @@ from agent.graph.llm_errors import FatalProviderError
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.state import AgentState, CircuitState
 from base.agents.context import AvaContext
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -20,8 +21,9 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -48,6 +50,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A real graph failure is flushed to PG; a fresh reader sees its breaker."""
     async with hosted_scope(expected_error=FatalProviderError) as resources:
@@ -59,7 +62,10 @@ async def test_host_persists_provider_failure_before_releasing_turn(
         from services.agent_runner.agent_host.host import AgentHost
 
         agent_id = spawn_agent(
-            catalog=model_catalog, authority=config_authority, database_gate=database_gate
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
         )
         row = db_conn.execute("SELECT machine FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
         assert row is not None
@@ -98,7 +104,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
                 pool=aops_pool,
                 checkpointer=saver,
                 graph=graph,
-                machine="test",
+                machine=configured_machine(name="test"),
                 catalog=model_catalog,
                 bus=EventBus.from_settings(),
                 db=Database.from_settings(gate=database_gate),

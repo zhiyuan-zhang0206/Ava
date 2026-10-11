@@ -15,6 +15,7 @@ from __future__ import annotations
 import sys
 
 from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 
 
 def materialize_cluster_extensions(*, database_factory: DatabaseFactory) -> None:
@@ -72,7 +73,7 @@ def materialize_cluster_extensions(*, database_factory: DatabaseFactory) -> None
         print(f"  ! extensions: {name} has no stored content — reinstall it", file=sys.stderr)
 
 
-def adopt_local_extensions(*, database_factory: DatabaseFactory) -> None:
+def adopt_local_extensions(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
     """Upload this machine's pre-registry skill installs into the cluster.
 
     Runs BEFORE `materialize_cluster_extensions` on the same converge. Either
@@ -91,7 +92,9 @@ def adopt_local_extensions(*, database_factory: DatabaseFactory) -> None:
 
     try:
         with database_factory().pool() as pool:
-            result = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
+            result = adopt.adopt_local_installs(
+                pool, skills_root=paths.skills_dir(), machine_name=machine.name()
+            )
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: could not adopt local installs ({exc}); skipping", file=sys.stderr)
         return

@@ -10,7 +10,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (
     current_default_completion_notice_policy,
@@ -19,9 +19,12 @@ from base.daemon.schedules.completion_notices import (
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from tests.fixtures.model_catalog import AddModels
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
-def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
+def _seed_agent(
+    db_conn: psycopg.Connection, status: str = "idling", *, local_machine: MachineIdentity
+) -> int:
     """Insert agents + agents_meta rows directly in DB without triggering a session launch.
     Writes the local machine name, close to the real spawn path (auto-resurrect uses
     machine to decide local execution vs forward; default 'unknown' would be treated
@@ -33,7 +36,7 @@ def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
         new_id = row[0]
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, status, machine) VALUES (%s, 'test', %s, %s)",
-            (new_id, status, machine_name()),
+            (new_id, status, local_machine.name()),
         )
     db_conn.commit()
     return new_id
@@ -48,8 +51,10 @@ def _pending_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, st
         return cur.fetchall()
 
 
-def test_post_message_inserts_chat_pending(db_conn: psycopg.Connection) -> None:
-    tid = _seed_agent(db_conn)
+def test_post_message_inserts_chat_pending(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     with TestClient(app) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages", json={"content": "hi agent", "source": "user"}
@@ -60,10 +65,13 @@ def test_post_message_inserts_chat_pending(db_conn: psycopg.Connection) -> None:
 
 
 def test_hourly_completion_policy_buffers_every_notice(
-    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+    db_conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The canary assertion path reads the active policy and the durable count."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
@@ -102,9 +110,11 @@ def test_hourly_completion_policy_buffers_every_notice(
         assert cur.fetchone() == (2,)
 
 
-def test_default_completion_policy_preserves_every_completion(db_conn: psycopg.Connection) -> None:
+def test_default_completion_policy_preserves_every_completion(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """No overlay retains the pre-policy one-completion-message behavior."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     with TestClient(app) as client:
         response = client.post(
             f"/api/agents/{tid}/messages",
@@ -118,18 +128,22 @@ def test_default_completion_policy_preserves_every_completion(db_conn: psycopg.C
     assert len(_pending_rows(db_conn, tid)) == 1
 
 
-def test_post_message_empty_content_422(db_conn: psycopg.Connection) -> None:
+def test_post_message_empty_content_422(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """Blank / oversized rejected by schema layer (pydantic 422), not stuffed into pending."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     with TestClient(app) as client:
         resp = client.post(f"/api/agents/{tid}/messages", json={"content": "   ", "source": "user"})
     assert resp.status_code == 422
     assert _pending_rows(db_conn, tid) == []
 
 
-def test_post_message_large_content_is_accepted(db_conn: psycopg.Connection) -> None:
+def test_post_message_large_content_is_accepted(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """A handoff-sized message remains a normal durable chat inbound."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "a" * 100_000
     with TestClient(app) as client:
         resp = client.post(
@@ -139,9 +153,11 @@ def test_post_message_large_content_is_accepted(db_conn: psycopg.Connection) -> 
     assert _pending_rows(db_conn, tid) == [("chat", "pending", content)]
 
 
-def test_post_message_content_at_one_mib_is_accepted(db_conn: psycopg.Connection) -> None:
+def test_post_message_content_at_one_mib_is_accepted(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """The byte cap is inclusive: exactly 1 MiB remains deliverable."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "a" * 1_048_576
     with TestClient(app) as client:
         resp = client.post(
@@ -151,9 +167,11 @@ def test_post_message_content_at_one_mib_is_accepted(db_conn: psycopg.Connection
     assert _pending_rows(db_conn, tid) == [("chat", "pending", content)]
 
 
-def test_post_message_content_over_one_mib_is_413(db_conn: psycopg.Connection) -> None:
+def test_post_message_content_over_one_mib_is_413(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """The limit counts UTF-8 bytes and tells callers how to deliver large content."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "é" * 524_289
     assert len(content.encode("utf-8")) > 1_048_576
     with TestClient(app) as client:
@@ -166,9 +184,11 @@ def test_post_message_content_over_one_mib_is_413(db_conn: psycopg.Connection) -
     assert _pending_rows(db_conn, tid) == []
 
 
-def test_post_message_block_list_over_one_mib_is_413(db_conn: psycopg.Connection) -> None:
+def test_post_message_block_list_over_one_mib_is_413(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """The limit also counts serialized content-block lists, not only strings."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     blocks = [{"type": "text", "text": "a" * 1_100_000}]
     with TestClient(app) as client:
         resp = client.post(
@@ -179,9 +199,11 @@ def test_post_message_block_list_over_one_mib_is_413(db_conn: psycopg.Connection
     assert _pending_rows(db_conn, tid) == []
 
 
-def test_reconcile_rejects_over_limit_after_timeout(db_conn: psycopg.Connection) -> None:
+def test_reconcile_rejects_over_limit_after_timeout(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """The idempotency reconcile route carries the same byte gate as the POST."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "é" * 524_289
     with TestClient(app) as client:
         resp = client.post(
@@ -200,12 +222,14 @@ def test_post_message_404_when_agent_missing(db_conn: psycopg.Connection) -> Non
     assert _pending_rows(db_conn, 9999) == []
 
 
-def test_post_message_terminated_agent_allows_insert(db_conn: psycopg.Connection) -> None:
+def test_post_message_terminated_agent_allows_insert(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """Terminated agent receives message: SDK path does not block — auto-resurrect
     triggers automatically, delivering chat inbound + resurrect lifecycle inbound.
     The row carries the hosted identity a terminated agent keeps; resurrection
     resumes only that retained authority."""
-    tid = _seed_agent(db_conn, status="terminated")
+    tid = _seed_agent(db_conn, status="terminated", local_machine=machine_identity)
     db_conn.execute(
         "UPDATE agents_meta SET runtime_kind = 'hosted', runtime_generation = gen_random_uuid(), "
         "runtime_owner = gen_random_uuid() WHERE id = %s",
@@ -222,11 +246,13 @@ def test_post_message_terminated_agent_allows_insert(db_conn: psycopg.Connection
     assert rows[1] == ("resurrect", "pending", "")
 
 
-def test_post_message_command_chain_is_one_inbound(db_conn: psycopg.Connection) -> None:
+def test_post_message_command_chain_is_one_inbound(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """Several commands in one send stay one inbound, stored verbatim — the
     expansion happens in the agent's claim node, not here, so the agent reads
     the chain as a single composite instruction."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     with TestClient(app) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages",
@@ -236,12 +262,14 @@ def test_post_message_command_chain_is_one_inbound(db_conn: psycopg.Connection) 
     assert _pending_rows(db_conn, tid) == [("chat", "pending", "/recap the week /compact")]
 
 
-def test_post_message_does_not_inspect_the_command_chain(db_conn: psycopg.Connection) -> None:
+def test_post_message_does_not_inspect_the_command_chain(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """The endpoint stores command text without reading it. Even `/compact`
     chained with another command — the combination most likely to read oddly —
     is queued verbatim: the gateway has no opinion about which prompts belong
     together, and adding one would put prompt semantics in the transport."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     with TestClient(app) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages",
@@ -251,14 +279,16 @@ def test_post_message_does_not_inspect_the_command_chain(db_conn: psycopg.Connec
     assert _pending_rows(db_conn, tid) == [("chat", "pending", "/compact /recap the week")]
 
 
-def test_post_message_invalid_source_422(db_conn: psycopg.Connection) -> None:
+def test_post_message_invalid_source_422(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """Source not in envelope whitelist (system / agent:N / user / watcher:N)
     must be rejected at HTTP layer with 422; never written to inbound_messages.
     Prevents a buggy client from writing an invalid source into DB, causing the
     agent claim node to hit ValueError and kill the process. The old `ui:web`
     channel prefix has been removed and is the canonical example of this rejected
     source (see envelope.validate_source)."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
     with TestClient(app) as client:
         resp = client.post(f"/api/agents/{tid}/messages", json={"content": "x", "source": "ui:web"})
     assert resp.status_code == 422
@@ -266,10 +296,12 @@ def test_post_message_invalid_source_422(db_conn: psycopg.Connection) -> None:
     assert _pending_rows(db_conn, tid) == []
 
 
-def _seed_vision_agent(db_conn: psycopg.Connection, model: str = "claude-opus-4-8") -> int:
+def _seed_vision_agent(
+    db_conn: psycopg.Connection, model: str = "claude-opus-4-8", *, local_machine: MachineIdentity
+) -> int:
     """Seed an agent whose per-agent overlay pins a vision-capable model, so the
     capability gate lets image messages through."""
-    tid = _seed_agent(db_conn)
+    tid = _seed_agent(db_conn, local_machine=local_machine)
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
@@ -291,10 +323,14 @@ def _payload_row(conn: psycopg.Connection, agent_id: int) -> tuple[str, dict | N
 
 
 class TestMultimodalMessage:
-    def test_image_to_non_vision_model_422(self, db_conn: psycopg.Connection) -> None:
+    def test_image_to_non_vision_model_422(
+        self, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    ) -> None:
         """The default model is deepseek-flash (text-only) → an image message
         is gated 422 up front, nothing queued."""
-        tid = _seed_agent(db_conn)  # no overlay → default (deepseek-flash)
+        tid = _seed_agent(
+            db_conn, local_machine=machine_identity
+        )  # no overlay → default (deepseek-flash)
         with TestClient(app) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",
@@ -314,14 +350,19 @@ class TestMultimodalMessage:
         assert _pending_rows(db_conn, tid) == []
 
     def test_image_to_vision_model_stores_blocks(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A vision agent: upload silently (deliver=false), then a multimodal
         message stores the text part in content + the blocks in payload."""
         from pathlib import Path
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        tid = _seed_vision_agent(db_conn)
+        tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with TestClient(app) as client:
             up = client.post(
                 f"/api/agents/{tid}/uploads?deliver=false",
@@ -359,6 +400,8 @@ class TestMultimodalMessage:
         monkeypatch: pytest.MonkeyPatch,
         add_models: AddModels,
         model_catalog: ModelCatalog,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The image gate resolves a withdrawn vision pin to its text-only fallback."""
         from dataclasses import replace
@@ -383,7 +426,7 @@ class TestMultimodalMessage:
 
         monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        tid = _seed_vision_agent(db_conn, model=model)
+        tid = _seed_vision_agent(db_conn, model=model, local_machine=machine_identity)
         with TestClient(app) as client:
             up = client.post(
                 f"/api/agents/{tid}/uploads?deliver=false",
@@ -407,13 +450,18 @@ class TestMultimodalMessage:
         assert _pending_rows(db_conn, tid) == []
 
     def test_image_ref_wrong_agent_422(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """An image_url pointing at another agent's upload is rejected."""
         from pathlib import Path
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        tid = _seed_vision_agent(db_conn)
+        tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with TestClient(app) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",
@@ -432,13 +480,18 @@ class TestMultimodalMessage:
         assert _pending_rows(db_conn, tid) == []
 
     def test_image_ref_missing_file_404(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A well-formed ref to a file that was never uploaded → 404."""
         from pathlib import Path
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        tid = _seed_vision_agent(db_conn)
+        tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with TestClient(app) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",
@@ -455,9 +508,11 @@ class TestMultimodalMessage:
         assert resp.status_code == 404
         assert _pending_rows(db_conn, tid) == []
 
-    def test_plain_string_still_works(self, db_conn: psycopg.Connection) -> None:
+    def test_plain_string_still_works(
+        self, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    ) -> None:
         """The string content path is unchanged (no payload written)."""
-        tid = _seed_agent(db_conn)
+        tid = _seed_agent(db_conn, local_machine=machine_identity)
         with TestClient(app) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages", json={"content": "hi", "source": "user"}

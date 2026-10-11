@@ -53,6 +53,7 @@ def _h_stop(
         retained_children=retained_children,
         database_factory=args.database_factory,
         producer=args.producer,
+        machine=args.runtime.machine,
     )
 
 
@@ -70,6 +71,7 @@ def _h_restart(
         retained_children=retained_children,
         database_factory=args.database_factory,
         producer=args.producer,
+        command=args.runtime,
     )
 
 
@@ -80,31 +82,35 @@ def _h_status(args: argparse.Namespace) -> int:
         return cmd_status_json()
     from cli.commands.lifecycle.status import cmd_status
 
-    return cmd_status(database_factory=args.database_factory)
+    return cmd_status(database_factory=args.database_factory, machine=args.runtime.machine)
 
 
-def _h_converge(_args: argparse.Namespace) -> int:
+def _h_converge(args: argparse.Namespace) -> int:
     from cli.commands.converge.host import cmd_converge
 
-    return cmd_converge(database_factory=_args.database_factory, producer=_args.producer)
+    return cmd_converge(
+        database_factory=args.database_factory, producer=args.producer, command=args.runtime
+    )
 
 
-def _h_firewall_status(_args: argparse.Namespace) -> int:
+def _h_firewall_status(args: argparse.Namespace) -> int:
     from cli.commands.converge.firewall_command import cmd_firewall_status
 
-    return cmd_firewall_status()
+    return cmd_firewall_status(machine=args.runtime.machine)
 
 
-def _h_firewall_sync(_args: argparse.Namespace) -> int:
+def _h_firewall_sync(args: argparse.Namespace) -> int:
     from cli.commands.converge.firewall_command import cmd_firewall_sync
 
-    return cmd_firewall_sync()
+    return cmd_firewall_sync(machine=args.runtime.machine)
 
 
 def _h_trace_ship(args: argparse.Namespace) -> int:
     from cli.commands.observability.trace import cmd_trace_ship
 
-    return cmd_trace_ship(since=args.since, until=args.until, dry_run=args.dry_run)
+    return cmd_trace_ship(
+        since=args.since, until=args.until, dry_run=args.dry_run, machine=args.runtime.machine
+    )
 
 
 def _add_init_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -359,12 +365,14 @@ def _h_lgtm(
             retained_children=retained_children,
             database_factory=args.database_factory,
             producer=args.producer,
+            command=args.runtime,
         )
     if args.lgtm_cmd == "off":
         return cmd_lgtm_off(
             retained_children=retained_children,
             database_factory=args.database_factory,
             producer=args.producer,
+            command=args.runtime,
         )
     if args.lgtm_cmd == "render":
         from cli.commands.observability.grafana_render import cmd_grafana_render
@@ -372,7 +380,7 @@ def _h_lgtm(
         return cmd_grafana_render(
             force=args.force, repo_only=args.repo_only, database_factory=args.database_factory
         )
-    return cmd_lgtm_status()
+    return cmd_lgtm_status(machine=args.runtime.machine)
 
 
 def _add_lgtm_parser(

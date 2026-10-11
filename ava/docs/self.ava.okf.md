@@ -21,6 +21,12 @@ tags:
 - `MACHINE_SPEC: tuple[str, str]` — `(machine_name, description)` current machine name and description.
 - `SELF_MACHINE_NAME: str` — Current machine name, also the default value for `ava.agents.spawn(machine=...)`.
 
+Both machine values resolve lazily from the bound `AvaContext.machine`. A bare SDK
+process without a context rejects these reads. An explicitly bound context can
+supply a machine without an agent, plugins, a database or execution state; a
+context without its machine owner fails at first machine use. Attachments either
+own an independent identity or borrow and restore the prior context's exact one.
+
 ### Lifecycle
 - `attach(path, label=None)` — Register a local media file for the next turn. The file is read when the current turn ends and reaches the configured model natively. Gated by the model's media capability (ruling 2026-08-28): a text-only model has no attach contract at all (SDK docs omit the member, the call raises), and a file whose modality the model's attach set excludes is rejected at registration with the allowed set — never a silent text-note delivery. Limits are 20 MiB per file, 8 files, and 48 MiB per turn.
 - `pause_heartbeat(duration: float)` — Pause idle heartbeat for `duration` seconds (0, 86400]. For waiting on a known external event only (watcher / peer reply / scheduled callback / user answer), never as a substitute for terminating when the work is done. Only suppresses heartbeats, real wake-ups still arrive; a later call replaces the window. Prefer the longest window that fits the wait.

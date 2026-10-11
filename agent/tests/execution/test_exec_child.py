@@ -495,7 +495,9 @@ def test_child_boot_timing_emits_ready_duration(
 
     monkeypatch.setattr(exec_child.time, "perf_counter", lambda: 100.25)
 
-    exec_child._emit_child_boot_timing(exec_child._import_runtime(100.0))
+    from base.agents.context.clients import ClientSet
+
+    exec_child._emit_child_boot_timing(exec_child._import_runtime(100.0), clients=ClientSet())
 
     [record] = [
         record for record in loguru_records if record["extra"].get("event") == "exec_child_boot"

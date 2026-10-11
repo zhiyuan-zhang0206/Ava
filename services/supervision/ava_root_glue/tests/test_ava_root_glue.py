@@ -13,9 +13,11 @@ from typing import Any, cast
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import DbConfig
 from services.supervision.ava_root.health import HealthMonitor
 from services.supervision.ava_root.manifest import (
     ROOT_ID,
@@ -28,6 +30,7 @@ from services.supervision.ava_root.supervisor import Supervisor
 from services.supervision.ava_root.wiring import WiringContext
 from services.supervision.ava_root_glue import drill, glue
 from services.supervision.ava_root_glue.diagnostics import Diagnostic, RootHealthRounds
+from tests.fixtures.configuration import snapshot_process_config
 
 _SLEEPER = [sys.executable, "-u", "-c", "import time; time.sleep(60)"]
 
@@ -64,10 +67,13 @@ def _context(tmp_path: Path, registry: UnitRegistry) -> WiringContext:
 
 @pytest.fixture(autouse=True)
 def _no_host_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
-    def empty(_requested: set[str], *, database: Callable[[], Database]) -> list[Diagnostic]:
+    def empty(
+        _requested: set[str], *, database: Callable[[], Database], machine: MachineIdentity
+    ) -> list[Diagnostic]:
         return []
 
     monkeypatch.setattr(glue, "build_diagnostics", empty)
+    monkeypatch.setattr(glue, "ConfigBoot", snapshot_process_config)
 
 
 async def test_reference_wiring_registers_gated_specs(
@@ -283,20 +289,31 @@ async def test_reference_station_and_writer_share_one_entry_gate(
 ) -> None:
     gates: list[ProcessDbGate] = []
 
-    def make_database(*, gate: ProcessDbGate) -> Database:
+    readers: list[Callable[[], str]] = []
+    machines: list[MachineIdentity] = []
+
+    def make_database(
+        config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+    ) -> Database:
         gates.append(gate)
+        readers.append(local_host)
         return database
 
-    def diagnostics(_requested: set[str], *, database: Callable[[], Database]) -> list[Diagnostic]:
+    def diagnostics(
+        _requested: set[str], *, database: Callable[[], Database], machine: MachineIdentity
+    ) -> list[Diagnostic]:
+        machines.append(machine)
         assert database() is database_handle
         assert database() is database_handle
         return []
 
     database_handle = database
-    monkeypatch.setattr(Database, "from_settings", staticmethod(make_database))
+    monkeypatch.setattr(glue, "Database", make_database)
     monkeypatch.setattr(glue, "build_diagnostics", diagnostics)
     monkeypatch.setattr(glue, "build_services", lambda: ())
     rounds = glue.build_wiring(_context(tmp_path, _registry(())))[0]
     assert isinstance(rounds, RootHealthRounds)
     assert len(gates) == 2 and gates[0] is gates[1]
+    assert len(machines) == 1
+    assert readers == [machines[0].host, machines[0].host]
     await rounds.stop()

@@ -153,14 +153,13 @@ def _collect_blocks(
     is skipped silently, like an empty entry.
 
     Returns (blocks, remote_ancestors)."""
-    from base.cluster import machine as host_machine
     from base.cluster.machine import MachineNameMissing
 
     chain = _ancestor_chain(agent_id, ctx)
     if chain is None:
         return [], []
     try:
-        this_machine = host_machine.machine_name()
+        this_machine = ctx.require_machine().name()
     except MachineNameMissing:
         logger.warning("[inherited-memory] this host has no machine name — inheritance skipped")
         return [], []

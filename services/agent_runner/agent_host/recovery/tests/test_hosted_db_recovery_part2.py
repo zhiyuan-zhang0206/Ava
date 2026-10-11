@@ -26,7 +26,7 @@ from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_re
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.observation import db_wait
 from base.agents.observation.db_wait import DatabaseWaits
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
@@ -39,6 +39,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import db_recovery
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture(autouse=True)
@@ -59,12 +60,13 @@ async def _admit(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> RuntimeIncarnation:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
-        machine=machine_name(),
+        machine=local_machine.name(),
         catalog=model_catalog,
         authority=config_authority,
     )
@@ -76,7 +78,7 @@ async def _admit(
     incarnation = await admit_hosted_runtime(
         pool,
         agent,
-        machine_name(),
+        local_machine.name(),
         uuid4(),
         expected_from="idling",
         db=Database.from_settings(gate=database_gate),
@@ -111,6 +113,7 @@ async def _seed_stalled_repair_scenario(
     incarnation: RuntimeIncarnation,
     *,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> tuple[AsyncPostgresSaver, Any, RunnableConfig, int, MaintenanceHold, list[int], datetime]:
     """The issue #1972 repro state: a claimed inbound whose turn left a
     dangling private tool call in the retained checkpoint, an unacked
@@ -174,7 +177,7 @@ async def _seed_stalled_repair_scenario(
     pause_owner.begin_maintenance("private-slow-recovery", at)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=local_machine.name(),
         host_owner=incarnation.owner,
         holder="private-slow-recovery",
         acquired_at=at,
@@ -209,12 +212,14 @@ async def test_recovery_reuses_unchanged_checkpoint_across_retry(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
 
     async def never(_state: states.AgentState) -> dict[str, Any]:

@@ -22,7 +22,6 @@ import pytest
 
 from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_metrics
 from base.telemetry.otlp.tests.test_telemetry_otlp import (
-    _fresh_observability_export_gate,  # noqa: F401 — shared autouse fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
     _production_process_by_default,  # noqa: F401 — shared autouse fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
 
@@ -56,7 +55,7 @@ def test_endpoint_reachable_accepts_any_http_status(
 ):
     port = probe_server.server_address[1]
     endpoint = f"http://127.0.0.1:{port}"
-    reachable = telemetry_otlp._OtlpBackend._endpoint_reachable
+    reachable = telemetry_otlp.OtlpBackend._endpoint_reachable
 
     _ProbeHandler.status = 200
     assert reachable(endpoint) is True
@@ -74,11 +73,11 @@ def test_endpoint_reachable_connection_refused_is_false():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    assert telemetry_otlp._OtlpBackend._endpoint_reachable(f"http://127.0.0.1:{port}") is False
+    assert telemetry_otlp.OtlpBackend._endpoint_reachable(f"http://127.0.0.1:{port}") is False
 
 
 def test_endpoint_reachable_non_http_scheme_skips_probe():
-    assert telemetry_otlp._OtlpBackend._endpoint_reachable("file:///tmp/x") is True
+    assert telemetry_otlp.OtlpBackend._endpoint_reachable("file:///tmp/x") is True
 
 
 def test_production_otlp_provider_construction_contract(

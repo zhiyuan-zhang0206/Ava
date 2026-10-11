@@ -6,6 +6,7 @@ from functools import wraps
 from typing import Concatenate
 
 from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
@@ -36,13 +37,14 @@ def resume_after_start[**P](
     start: Callable[
         Concatenate[PauseOwnerSnapshot | None, DatabaseFactory, P], int | StartDelegation
     ],
-) -> Callable[Concatenate[PauseOwnerSnapshot | None, DatabaseFactory, P], int]:
+) -> Callable[Concatenate[PauseOwnerSnapshot | None, DatabaseFactory, MachineIdentity, P], int]:
     """Keep admission closed until a real start passes its serving gate."""
 
     @exclusive_resources
     def start_locked(
         operation: PauseOwnerSnapshot | None,
         database_factory: DatabaseFactory,
+        machine: MachineIdentity,
         /,
         *args: P.args,
         **kwargs: P.kwargs,
@@ -63,7 +65,12 @@ def resume_after_start[**P](
             admission.require_start_allowed(operation)
             settle_failed_receipts(database_factory=database_factory)
 
-            unpause_local_cluster(database_factory(), EventBus.from_settings(), operation=operation)
+            unpause_local_cluster(
+                database_factory(),
+                EventBus.from_settings(),
+                operation=operation,
+                local_machine=machine,
+            )
             # start()'s status snapshot was taken under the hold, so it read paused.
             print(
                 "\n→ maintenance hold released: admission reopened, the cluster is serving "
@@ -75,11 +82,12 @@ def resume_after_start[**P](
     def wrapped(
         operation: PauseOwnerSnapshot | None,
         database_factory: DatabaseFactory,
+        machine: MachineIdentity,
         /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> int:
-        result = start_locked(operation, database_factory, *args, **kwargs)
+        result = start_locked(operation, database_factory, machine, *args, **kwargs)
         # The GUI child takes this same lock. The observer releases it before
         # kicking/waiting; the child owns its own explicit start authorization.
         return result.run() if isinstance(result, StartDelegation) else result

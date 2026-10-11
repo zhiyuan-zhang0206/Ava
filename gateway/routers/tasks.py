@@ -442,5 +442,6 @@ async def patch_task(
                 note.agent_id,
                 trigger_inbound_id=note.inbound_id,
                 trigger_inbound_kind=InboundKind.SYSTEM_NOTE,
+                local_machine=request.app.state.machine.name(),
             )
     return task

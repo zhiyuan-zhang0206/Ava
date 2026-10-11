@@ -196,7 +196,7 @@ class _SdkModule(_ModuleType):
     def context(self) -> None:
         if is_host_process():
             raise RuntimeError("the shared agent host cannot release its startup posture")
-        self.__dict__[_CONTEXT_KEY] = None
+        self.__dict__.pop(_CONTEXT_KEY, None)
 
     @property
     def DB(self) -> Any:  # noqa: N802 — the SDK's name for the SQL connection

@@ -131,6 +131,16 @@ def test_a_client_that_cannot_be_built_raises_at_the_call() -> None:
         ClientSet().get(refuses)
 
 
+def test_cold_export_observation_and_finalization_build_nothing() -> None:
+    def forbidden() -> object:
+        pytest.fail("a cold ClientSet must not construct an exporter for cleanup or diagnostics")
+
+    clients = ClientSet(pipeline_factory=forbidden)
+    assert clients.exports_deferred() is None
+    clients.finalize_events()
+    clients.close()
+
+
 def test_description_carries_the_gateway_endpoint_and_no_secret() -> None:
     from base.agents.context.identity import AgentIdentity
 
@@ -142,9 +152,19 @@ def test_description_carries_the_gateway_endpoint_and_no_secret() -> None:
     assert description["gateway_url"] == "http://gateway.test:8000"
     assert "secret" not in repr(description).lower()
 
-    child = AvaContext.from_description(
-        description, clients=ClientSet(gateway_url=description["gateway_url"])
+    from base.cluster.machine import MachineIdentity
+
+    machine = MachineIdentity(
+        name=lambda: "child",
+        role=lambda: frozenset({"agent-runner"}),
+        host=lambda: "localhost",
+        description=lambda: None,
     )
+    child = AvaContext.from_description(
+        description, clients=ClientSet(gateway_url=description["gateway_url"]), machine=machine
+    )
+    assert child.require_machine() is machine
+    assert "machine" not in description
     assert child.identity == host.identity
     assert child.clients.gateway_url == "http://gateway.test:8000"
 

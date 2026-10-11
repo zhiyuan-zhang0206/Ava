@@ -41,7 +41,6 @@ import httpx
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
 from ops.cluster import rpc as _cluster_rpc
@@ -242,7 +241,7 @@ def fetch_provider_balance() -> BillingBalanceReport:
 
 
 async def run_billing_recovery(
-    *, execute: bool, pool: ConnectionPool, db: Database, bus: EventBus
+    *, execute: bool, pool: ConnectionPool, db: Database, bus: EventBus, local_machine: str
 ) -> BillingResurrectResponse:
     """Preview (``execute=False``, read-only) or run the batch rescue."""
     candidates = await asyncio.to_thread(_enumerate_blocking, pool)
@@ -283,7 +282,7 @@ async def run_billing_recovery(
         # Re-enumerate under the lock: a concurrent runner (or an operator)
         # may have changed the set since the preflight read.
         candidates = await asyncio.to_thread(_enumerate_blocking, pool)
-        outcomes = await _dispatch_all(db, bus, candidates)
+        outcomes = await _dispatch_all(db, bus, candidates, local_machine=local_machine)
     finally:
         await asyncio.to_thread(_release_run_lock, pool, lock_conn)
     await asyncio.to_thread(_record_run_event, db, balance, outcomes)
@@ -297,7 +296,7 @@ async def run_billing_recovery(
 
 
 async def resurrect_billing_agent_op(
-    db: Database, bus: EventBus, agent_id: int
+    db: Database, bus: EventBus, agent_id: int, *, local_machine: str
 ) -> BillingResurrectAgentResponse:
     """The versioned ``resurrect-billing-v1`` action (home runner), also used
     as the in-process fallback when the local ops server is unreachable."""
@@ -307,7 +306,13 @@ async def resurrect_billing_agent_op(
 
     try:
         await asyncio.to_thread(
-            resurrect_agent, db, bus, agent_id, resurrected_by="user", billing_recovery=True
+            resurrect_agent,
+            db,
+            bus,
+            agent_id,
+            resurrected_by="user",
+            billing_recovery=True,
+            local_machine=local_machine,
         )
     except ResurrectAlreadyAlive:
         return BillingResurrectAgentResponse(status=BillingRecoveryHomeResult.ALREADY_ALIVE)
@@ -327,7 +332,7 @@ async def resurrect_billing_agent_op(
 
 
 async def _dispatch_all(
-    db: Database, bus: EventBus, candidates: list[BillingCandidate]
+    db: Database, bus: EventBus, candidates: list[BillingCandidate], *, local_machine: str
 ) -> list[BillingResurrectAgentOutcome]:
     from base.config import settings
 
@@ -335,13 +340,13 @@ async def _dispatch_all(
 
     async def _guarded(candidate: BillingCandidate) -> BillingResurrectAgentOutcome:
         async with sem:
-            return await _dispatch_one(db, bus, candidate)
+            return await _dispatch_one(db, bus, candidate, local_machine=local_machine)
 
     return await asyncio.gather(*(_guarded(c) for c in candidates))
 
 
 async def _dispatch_one(
-    db: Database, bus: EventBus, candidate: BillingCandidate
+    db: Database, bus: EventBus, candidate: BillingCandidate, *, local_machine: str
 ) -> BillingResurrectAgentOutcome:
     path = f"/api/agents/{candidate.agent_id}/resurrect-billing-v1"
     try:
@@ -353,12 +358,14 @@ async def _dispatch_one(
         )
         response = BillingResurrectAgentResponse.model_validate(forwarded)
     except _cluster_rpc.ClusterOpUnreachable:
-        if candidate.machine != machine_name():
+        if candidate.machine != local_machine:
             return _outcome(candidate, BillingRecoveryOutcome.FAILED, "home machine unreachable")
         # Local ops server unreachable (test / single-process): mirror
         # `resurrect_if_terminated` and fall back to the in-process op.
         try:
-            response = await resurrect_billing_agent_op(db, bus, candidate.agent_id)
+            response = await resurrect_billing_agent_op(
+                db, bus, candidate.agent_id, local_machine=local_machine
+            )
         except Exception as exc:
             return _outcome(
                 candidate, BillingRecoveryOutcome.FAILED, f"{type(exc).__name__}: {exc}"

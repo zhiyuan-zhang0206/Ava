@@ -25,6 +25,7 @@ from base.agents.incarnation.resources import (
     ResourceProcess,
     decode_resources,
 )
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -39,8 +40,9 @@ from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import admit_recovery
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from tests.components.base.poll_until import poll_until_async
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _accept_model(**_kwargs: object) -> None:
@@ -138,12 +140,14 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     row = db_conn.execute(
@@ -185,6 +189,7 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        machine=configured_machine(),
     )
     scheduler = TurnScheduler(host.run_turn)
     dispatcher = InboundWakeDispatcher(
@@ -211,12 +216,14 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     db_conn.execute(
@@ -232,6 +239,7 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        machine=configured_machine(),
     )
     assert [wake.agent_id for wake in await host.pending_inbound_wakes(60)] == [agent]
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()

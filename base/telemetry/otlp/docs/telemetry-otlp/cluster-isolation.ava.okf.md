@@ -33,8 +33,14 @@ into a caller-managed collector before the production-identity check.
 `$AVA_HOME/lgtm-host` names the production gateway home that owns the host's
 LGTM stack and local collector. A production gateway without the marker neither
 installs that collector nor exports logs, metrics, or traces to the implicit
-loopback endpoint. The cached producer verdict warns once per process when this
-marker gate declines export and applies at restart.
+loopback endpoint. Each explicitly owned backend freezes its producer verdict on first enabled
+use and warns when this marker gate declines export. Roots supply their own
+`MachineIdentity` and unit home; trace retry/arm callbacks retain those same
+inputs. A station capability counts only for the supplied unit home, while a
+foreign home needs its own marker. Missing names decline implicit export and
+missing roles preserve bootstrap/runner and marker-only behavior. Invalid roles
+and unexpected identity defects propagate outside transport failure isolation;
+they never become a cached disabled verdict.
 
 Production-identity pure agent-runner homes retain their authenticated relay
 collector regardless of the marker: they are transport participants, not

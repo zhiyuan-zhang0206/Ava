@@ -1,170 +1,148 @@
-"""The OTLP export gate: which identities, roles and endpoints enable export."""
-
-from __future__ import annotations
+"""OTLP eligibility is supplied by a concrete machine owner, never global identity."""
 
 import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineNameMissing, MachineRoleInvalid, MachineRoleMissing
 from base.telemetry import observability
 from base.telemetry.otlp import telemetry_otlp
+from base.telemetry.tests.identity_inputs import machine_identity
 
 
-@pytest.fixture(autouse=True)
-def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Most cases exercise an allowed production backend; gate tests override it."""
-    monkeypatch.delenv("AVA_EXEC_REQUEST_FILE", raising=False)
-    monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: True, raising=False)
-
-
-@pytest.fixture(autouse=True)
-def _fresh_observability_export_gate() -> Any:
-    """The production gate is process-cached; tests model fresh processes."""
-    gate = telemetry_otlp.observability_export_allowed
-    gate.cache_clear()
-    yield
-    gate.cache_clear()
+def _production_label(_home: Path | None = None) -> str:
+    return ".ava"
 
 
 @pytest.mark.parametrize(
-    ("machine_registered", "cluster", "expected"),
-    [
-        (True, ".ava", True),
-        (True, "home", False),
-        (True, ".unknown", False),
-        (True, "ava_test_home_123", False),
-        (False, ".ava", False),
-    ],
+    ("name", "cluster", "expected"),
+    [("runner", ".ava", True), ("runner", "other", False), ("", ".ava", False)],
 )
-def test_production_identity_requires_registered_machine_and_production_cluster(
-    monkeypatch: pytest.MonkeyPatch,
-    machine_registered: bool,
-    cluster: str,
-    expected: bool,
+def test_production_identity_requires_name_and_production_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str, cluster: str, expected: bool
 ) -> None:
-    from base.cluster import machine
+    def label(_home: Path | None = None) -> str:
+        return cluster
 
-    if machine_registered:
-        monkeypatch.setattr(machine, "machine_name", lambda: "registered-runner")
-    else:
-
-        def missing_machine_name() -> str:
-            raise machine.MachineNameMissing("machine name unavailable")
-
-        monkeypatch.setattr(machine, "machine_name", missing_machine_name)
-    monkeypatch.setattr(observability, "cluster_label", lambda: cluster)
-
-    assert observability.production_identity() is expected
-
-
-@pytest.mark.parametrize("configured", [False, True])
-def test_enabled_follows_setting_outside_exec_child(
-    monkeypatch: pytest.MonkeyPatch, configured: bool
-) -> None:
-    monkeypatch.delenv("AVA_EXEC_REQUEST_FILE", raising=False)
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", configured)
-
-    assert telemetry_otlp._OtlpBackend._enabled() is configured
+    monkeypatch.setattr(observability, "cluster_label", label)
+    assert observability.production_identity(machine_identity(name=name), home=tmp_path) is expected
 
 
 @pytest.mark.parametrize(
-    ("marker", "endpoint_override", "expected"),
+    ("roles", "marker", "override", "expected"),
     [
-        (False, False, False),
-        (True, False, True),
-        (False, True, True),
+        (frozenset({"agent-runner"}), False, False, True),
+        (frozenset({"gateway"}), False, False, False),
+        (frozenset({"gateway"}), True, False, True),
+        (frozenset({"gateway"}), False, True, True),
+        (frozenset({"gateway", "observability-station"}), False, False, True),
+        (None, False, False, True),
     ],
 )
-def test_gateway_export_gate_requires_lgtm_marker_or_explicit_endpoint(
+def test_export_gate_roles_marker_and_override(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    roles: frozenset[str] | None,
     marker: bool,
-    endpoint_override: bool,
+    override: bool,
     expected: bool,
 ) -> None:
-    home = tmp_path / ".ava"
-    home.mkdir()
+    monkeypatch.setattr(observability, "cluster_label", _production_label)
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    if override:
+        monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://explicit:4318")
     if marker:
-        (home / "lgtm-host").touch()
-    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "macmini")
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
-    if endpoint_override:
-        monkeypatch.setitem(
-            os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318"
-        )
-    else:
-        monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    telemetry_otlp.observability_export_allowed.cache_clear()
-
-    assert telemetry_otlp._OtlpBackend._enabled() is expected
-
-    # The isolation verdict is frozen once per process, even if the marker
-    # changes later; a restart is the apply boundary.
-    if not marker and not endpoint_override:
-        (home / "lgtm-host").touch()
-        assert telemetry_otlp._OtlpBackend._enabled() is False
+        (tmp_path / "lgtm-host").touch()
+    assert (
+        telemetry_otlp.observability_export_allowed(machine_identity(roles=roles), home=tmp_path)
+        is expected
+    )
 
 
-def test_registered_production_identity_with_lgtm_marker_enables_export(
+def test_explicit_endpoint_does_not_read_machine(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    home = tmp_path / ".ava"
-    home.mkdir()
-    (home / "lgtm-host").touch()
-    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "macmini")
-    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
-    monkeypatch.setattr(telemetry_otlp, "production_identity", observability.production_identity)
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    machine = machine_identity()
 
-    assert telemetry_otlp._OtlpBackend._enabled() is True
+    def reject() -> str:
+        raise AssertionError("explicit endpoints need no production identity")
+
+    monkeypatch.setattr(machine, "name", reject)
+    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://explicit:4318")
+    assert telemetry_otlp.observability_export_allowed(machine, home=tmp_path)
 
 
-def test_explicit_endpoint_override_allows_non_production_identity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: False)
-    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
-
-    assert telemetry_otlp._OtlpBackend._enabled() is True
-
-
-def test_pure_runner_export_relay_is_not_gated(
+def test_missing_role_preserves_runner_bootstrap_gate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    home = tmp_path / ".ava"
-    home.mkdir()
-    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "macmini")
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
+    machine = machine_identity()
+
+    def missing() -> frozenset[str]:
+        raise MachineRoleMissing("not configured")
+
+    monkeypatch.setattr(machine, "role", missing)
+    monkeypatch.setattr(observability, "cluster_label", _production_label)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
-    telemetry_otlp.observability_export_allowed.cache_clear()
-
-    assert telemetry_otlp._OtlpBackend._enabled() is True
+    assert telemetry_otlp.observability_export_allowed(machine, home=tmp_path)
 
 
-@pytest.mark.parametrize("exception_name", ["MachineRoleMissing", "MachineRoleInvalid"])
-def test_unconfigured_machine_role_does_not_disable_export(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exception_name: str
+@pytest.mark.parametrize("operation", ["gateway", "station", "export"])
+def test_invalid_roles_propagate_outside_transport_isolation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operation: str
 ) -> None:
-    from base.cluster import machine
+    machine = machine_identity(roles=frozenset({"unknown"}))
+    monkeypatch.setattr(observability, "cluster_label", _production_label)
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    with pytest.raises(MachineRoleInvalid):
+        if operation == "gateway":
+            observability.gateway_observability_home(machine, home=tmp_path)
+        elif operation == "station":
+            observability.home_is_observability_station(
+                tmp_path, machine=machine, unit_home=tmp_path
+            )
+        else:
+            telemetry_otlp.observability_export_allowed(machine, home=tmp_path)
 
-    exception_type = getattr(machine, exception_name)
 
-    def missing_role() -> frozenset[str]:
-        raise exception_type("role unavailable")
-
-    monkeypatch.setattr(machine, "machine_role", missing_role)
-    monkeypatch.setattr(machine, "machine_name", lambda: "macmini")
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava")
+def test_each_backend_freezes_only_its_own_eligibility(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
-    telemetry_otlp.observability_export_allowed.cache_clear()
+    decision = False
+    calls: list[bool] = []
 
-    assert telemetry_otlp._OtlpBackend._enabled() is True
+    def read() -> bool:
+        calls.append(decision)
+        return decision
+
+    first = telemetry_otlp.OtlpBackend(export_allowed=read)
+    assert first._enabled() is False
+    decision = True
+    assert first._enabled() is False
+    second = telemetry_otlp.OtlpBackend(export_allowed=read)
+    assert second._enabled() is True
+    assert calls == [False, True]
+
+
+@pytest.mark.parametrize("error", [MachineRoleInvalid, RuntimeError])
+def test_backend_does_not_cache_identity_defects_as_disabled(
+    monkeypatch: pytest.MonkeyPatch, error: type[Exception]
+) -> None:
+    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+
+    def invalid() -> bool:
+        raise error("bad identity")
+
+    backend = telemetry_otlp.OtlpBackend(export_allowed=invalid)
+    with pytest.raises(error, match="bad identity"):
+        backend.warmup()
+    assert backend._export_decision is None
+    assert backend._worker is None
+
+
+def test_disabled_backend_does_not_read_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", False)
+
+    def reject() -> bool:
+        raise MachineNameMissing("identity remains cold")
+
+    assert telemetry_otlp.OtlpBackend(export_allowed=reject)._enabled() is False

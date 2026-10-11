@@ -24,10 +24,14 @@ import pytest
 import cli.commands.converge.firewall as cfw
 import cli.commands.converge.firewall_command as firewall_cmd
 import cli.commands.converge.host as cv
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host import macos_firewall as fw
 from base.host.macos_firewall import FirewallAudit, FirewallVerdict
 from base.telemetry import EventPipeline
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -39,13 +43,15 @@ def _ctx(
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
 ) -> cv.ConvergeCtx:
+    machine_config = ConfigBoot()
     return cv.ConvergeCtx(
         repo=Path("/repo"),
         ava_home=home,
         roles=roles,
-        config=ConfigBoot(),
+        config=machine_config,
         database_factory=operator_database,
         producer=producer,
+        machine=machine_from_boot(machine_config),
     )  # type: ignore[arg-type]
 
 
@@ -381,11 +387,18 @@ def test_unconfigured_unit_audits_the_interpreter(
 
 
 def test_firewall_status_renders_manifest_details(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import cli.commands._repo as _repo_commands
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: {"gateway"})
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(
         firewall_cmd,
         "audit_this_host",
@@ -399,7 +412,7 @@ def test_firewall_status_renders_manifest_details(
     )
     monkeypatch.setattr(fw, "stale_manifest_rules", lambda _rules: ())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(fw, "sudo_grant_installed", lambda: False)
-    assert firewall_cmd.cmd_firewall_status() == 0
+    assert firewall_cmd.cmd_firewall_status(machine=command_runtime.machine) == 0
     output = capsys.readouterr().out
     assert "rendered manifest with 1 rule" in output
     assert "sudo fallback grant" in output

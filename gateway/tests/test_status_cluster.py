@@ -15,6 +15,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from gateway.app import app
 from gateway.cluster import roster_probe
@@ -23,6 +24,7 @@ from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import StatusCache
 from ops.cluster import rpc as cluster_rpc
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _OPS_URL = "http://wsl:18121"
 
@@ -50,7 +52,7 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     pause with a file."""
     flag = tmp_path / "cluster_paused"
 
-    def paused(_db: Database) -> bool:
+    def paused(_db: Database, *, local_machine: MachineIdentity) -> bool:
         return flag.exists()
 
     monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", paused)
@@ -168,6 +170,8 @@ class TestClusterPanel:
         stub_machine_identity: None,
         stub_remote_probe: dict[str, tuple[bool, bool | None]],
         database: Database,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """During a pause /api/status is short-circuited to 503 by middleware; call the
         helper directly to verify the cluster sub-section correctly reflects the paused flag."""
@@ -176,7 +180,11 @@ class TestClusterPanel:
         fake_flag.write_text("")
         with db_conn.cursor() as cur:
             panel = status_router._get_cluster_status(
-                database, cur, IdentityMismatchLog(), image=LOADED_IMAGE
+                database,
+                cur,
+                IdentityMismatchLog(),
+                image=LOADED_IMAGE,
+                local_machine=machine_identity,
             )
         assert panel.current_paused is True
 
@@ -576,6 +584,8 @@ class TestPanelCarriesNoFrozenPin:
         stub_machine_identity: None,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
+        *,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The panel reports each node's checkout and carries no cluster target or
         known-good verdict."""
@@ -585,7 +595,11 @@ class TestPanelCarriesNoFrozenPin:
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:
             panel = status_router._get_cluster_status(
-                database, cur, IdentityMismatchLog(), image=LOADED_IMAGE
+                database,
+                cur,
+                IdentityMismatchLog(),
+                image=LOADED_IMAGE,
+                local_machine=machine_identity,
             )
         body = panel.model_dump()
         assert "cluster_target_sha" not in body

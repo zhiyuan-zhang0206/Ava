@@ -28,14 +28,17 @@ from typing import Any, cast
 import pytest
 
 from base.cluster import machines as _machines
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from gateway.agents import forward as _agents_forward_router
 from gateway.agents import router as _agents_router
 from gateway.app import app
+from gateway.cluster.process_boot import GatewayProcess
 from ops.lifecycle import launch_agent_op, lifecycle_op
 from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
 from tests.fixtures.configuration import snapshot_process_config
@@ -46,7 +49,9 @@ from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys
 
 
 @pytest.fixture(autouse=True)
-def gateway_config_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+def gateway_config_owner(
+    monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
+) -> None:
     """Give each in-process gateway the inputs its test explicitly configured.
 
     Bare unit homes have no delivery file. Preparing their gateway owner is a
@@ -55,7 +60,15 @@ def gateway_config_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     gateway_app = importlib.import_module("gateway.app")
 
+    def build_process(
+        *, config: ConfigBoot, image: LoadedCommit, machine: MachineIdentity
+    ) -> GatewayProcess:
+        return GatewayProcess(config=config, image=image, machine=machine_identity)
+
+    # Capture configuration at each real lifespan entry, after the test's pins.
+    # Borrowed process inputs bypass this constructor and keep their writer.
     monkeypatch.setattr(gateway_app, "ConfigBoot", snapshot_process_config)
+    monkeypatch.setattr(gateway_app, "GatewayProcess", build_process)
 
 
 @pytest.fixture(autouse=True)
@@ -63,6 +76,7 @@ def _local_spawn_in_process(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    machine_identity: MachineIdentity,
 ) -> None:
     # The integration tests take this fixture from here (imported into their module).
     async def _in_process_forward(
@@ -77,6 +91,7 @@ def _local_spawn_in_process(
             body,
             app.state.db_pool,
             catalog=cast(ModelCatalog, app.state.catalog),
+            local_machine=machine_identity.name(),
         )
 
     monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _in_process_forward)
@@ -92,7 +107,7 @@ def _local_spawn_in_process(
     real_lookup_role = _machines.lookup_role
 
     def _lookup_role(_db: Database, name: str) -> list[str]:
-        if name == machine_name():
+        if name == machine_identity.name():
             return ["gateway", "agent-runner"]
         return real_lookup_role(_db, name)
 
@@ -105,7 +120,7 @@ def _local_spawn_in_process(
     real_is_paused = _machines.is_paused
 
     def _is_paused(_db: Database, name: str) -> bool:
-        if name == machine_name():
+        if name == machine_identity.name():
             return False
         return real_is_paused(_db, name)
 
@@ -117,6 +132,7 @@ def _local_lifecycle_in_process(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    machine_identity: MachineIdentity,
 ) -> None:
     async def _in_process_lifecycle(
         _db: object, target: str, path: str, json_body: dict[str, Any]
@@ -134,6 +150,7 @@ def _local_lifecycle_in_process(
                 json_body,
                 app.state.db_pool,
                 catalog=cast(ModelCatalog, app.state.catalog),
+                local_machine=machine_identity.name(),
             )  # pyright: ignore[reportUnknownArgumentType]
         ).model_dump(mode="json")  # pyright: ignore[reportUnknownArgumentType]
 
@@ -142,7 +159,9 @@ def _local_lifecycle_in_process(
 
 @pytest.fixture(autouse=True)
 def _local_config_in_process(
-    monkeypatch: pytest.MonkeyPatch, config_authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Same stand-in for the config router: a config_read / config_write op
     addressed to the LOCAL machine runs in-process (exactly what the co-located
@@ -171,17 +190,18 @@ def _local_config_in_process(
         # to the real dispatch, which resolves AVA_CLUSTER_RPC_TIMEOUT_SECONDS
         # and the retry budget (task #961).
         if kind in ("config_read", "config_write"):
-            assert target_machine == machine_name(), (
+            assert target_machine == machine_identity.name(), (
                 "only the local machine is simulated in-process"
             )
             if kind == "config_read":
-                return host_config.config_read_op(authority=config_authority).model_dump(
-                    mode="json"
-                )
+                return host_config.config_read_op(
+                    authority=config_authority, local_machine=machine_identity.name()
+                ).model_dump(mode="json")
             return host_config.config_write_op(
                 cast("dict[str, Any]", payload["overrides"]),
                 local=bool(payload.get("local", False)),
                 authority=config_authority,
+                local_machine=machine_identity.name(),
             ).model_dump(mode="json")
         # Not a config op — fall through to the real dispatch (other routers
         # share this module object and must keep their own behavior).

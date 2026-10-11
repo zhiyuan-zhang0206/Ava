@@ -9,15 +9,19 @@ import pytest
 import ava
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
+from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from tests.fixtures.configuration import snapshot_process_config
 
 
 @pytest.fixture(autouse=True)
-def client_config() -> Iterator[ConfigBoot]:
+def client_config(machine_identity: MachineIdentity) -> Iterator[ConfigBoot]:
     """Each test builds the gateway client itself: a context with a clean `ClientSet`."""
     config = snapshot_process_config()
-    context = AvaContext(clients=process_clients(config=config))
+    context = AvaContext(
+        machine=machine_identity,
+        clients=process_clients(config=config, machine=machine_identity),
+    )
     ava.context = context
     try:
         yield config
@@ -29,18 +33,13 @@ def client_config() -> Iterator[ConfigBoot]:
 def test_gateway_client_base_url_is_gateway_url(
     monkeypatch: pytest.MonkeyPatch, client_config: ConfigBoot
 ) -> None:
-    from base.cluster.machine import reset_identity, set_identity
-
-    set_identity(role="agent-runner")
+    ava.context.require_machine().set(role="agent-runner")
     client_config.set_field("gateway_url", "https://cp.example.com")
 
     import ava.gateway_client.transport as gc
 
-    try:
-        client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
-        assert str(client.base_url).rstrip("/") == "https://cp.example.com"
-    finally:
-        reset_identity()
+    client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
+    assert str(client.base_url).rstrip("/") == "https://cp.example.com"
 
 
 def test_gateway_client_sends_cluster_secret_bearer(

@@ -10,7 +10,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.incarnation.native_work_models import NativeWorkTarget
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
@@ -20,6 +20,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host.recovery import interrupt as recovery_interrupt
 from services.agent_runner.agent_host.recovery.interrupt import RecoveryInterrupt
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("kind", ["cancel", "terminate"])
@@ -31,12 +32,14 @@ async def test_pending_external_interrupt_shortens_backoff_without_claiming(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
         database,
         event_bus,
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         catalog=model_catalog,
         authority=config_authority,
     )
@@ -68,12 +71,14 @@ async def test_interrupt_arriving_during_backoff_is_observed(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
         database,
         event_bus,
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         catalog=model_catalog,
         authority=config_authority,
     )
@@ -121,12 +126,14 @@ async def test_self_control_does_not_shorten_backoff(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
         database,
         event_bus,
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         catalog=model_catalog,
         authority=config_authority,
     )

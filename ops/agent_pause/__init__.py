@@ -17,7 +17,7 @@ from typing import NamedTuple
 from uuid import UUID, uuid4
 
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
-from base.cluster.machine import machine_name, machine_role
+from base.cluster.machine import MachineIdentity
 from base.db import Database, publish_inbound_wake
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.hold_driver import HoldDriver
@@ -73,7 +73,13 @@ def _emit_lifecycle_wait(waited: float, outcome: str, agents: tuple[int, ...]) -
 
 
 def prepare(
-    db: Database, bus: EventBus, holder: str, at: datetime, *, driver: HoldDriver | None = None
+    db: Database,
+    bus: EventBus,
+    holder: str,
+    at: datetime,
+    *,
+    driver: HoldDriver | None = None,
+    local_machine: MachineIdentity,
 ) -> None:
     """Publish the hold and enqueue restarts.
 
@@ -88,7 +94,7 @@ def prepare(
     and only then aborts with the wait result in the message. A
     maintenance-authored command still refuses immediately.
     """
-    roles = machine_role()
+    roles = local_machine.role()
     identity = host_identity() if "agent-runner" in roles and host_running() else None
     # The actual running daemon, not the checked-out source, must support the
     # admission fence. First deployment of this protocol needs separate proof.
@@ -97,7 +103,7 @@ def prepare(
         with db.connect() as conn:
             row = conn.execute(
                 "SELECT 1 FROM agents_meta WHERE machine=%s AND status<>'terminated' LIMIT 1",
-                (machine_name(),),
+                (local_machine.name(),),
             ).fetchone()
         if row is not None:
             raise RuntimeError("unit has native agents but no running hosted owner")
@@ -111,7 +117,7 @@ def prepare(
                 refresh_driver=driver is not None,
             )
         return
-    hold = _prepare_cohort(db, holder, at, identity, driver=driver)
+    hold = _prepare_cohort(db, holder, at, identity, driver=driver, local_machine=local_machine)
     if identity is not None and host_identity().owner != identity.owner:
         raise RuntimeError("agent-host changed boot during preparation; hold retained")
     _wake(db, bus, hold)
@@ -124,6 +130,7 @@ def _prepare_cohort(
     identity: HostIdentity | None,
     *,
     driver: HoldDriver | None,
+    local_machine: MachineIdentity,
 ) -> MaintenanceHold:
     """Prepare the cohort, bounded-waiting out in-flight work it did not author.
 
@@ -143,7 +150,7 @@ def _prepare_cohort(
             with db.connect() as conn:
                 hold = cohort.prepare(
                     conn,
-                    machine=machine_name(),
+                    machine=local_machine.name(),
                     host_owner=identity.owner if identity is not None else None,
                     holder=holder,
                     acquired_at=at,
@@ -175,7 +182,9 @@ def _prepare_cohort(
         return hold
 
 
-def drain(db: Database, holder: str, at: datetime, timeout: float) -> None:
+def drain(
+    db: Database, holder: str, at: datetime, timeout: float, *, local_machine: MachineIdentity
+) -> None:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("drain timeout must be finite and positive")
     deadline = time.monotonic() + timeout
@@ -195,7 +204,7 @@ def drain(db: Database, holder: str, at: datetime, timeout: float) -> None:
             with db.connect() as conn:
                 cohort.verify_drained(conn, hold)
             # Wait out the host's still-registering turns.
-            if "agent-runner" in machine_role() and host_running() and host_identity().active:
+            if "agent-runner" in local_machine.role() and host_running() and host_identity().active:
                 budget = deadline - time.monotonic()
                 if budget <= 0:
                     raise TimeoutError("agent-host continuations did not finish before deadline")
@@ -211,12 +220,14 @@ def drain(db: Database, holder: str, at: datetime, timeout: float) -> None:
         if remaining <= 0:
             raise TimeoutError(
                 "drain timed out without force; hold retained for agents "
-                f"{pending}\n{_stall_report(db, hold, pending)}"
+                f"{pending}\n{_stall_report(db, hold, pending, local_machine=local_machine)}"
             )
         time.sleep(min(0.2, remaining))
 
 
-def _stall_report(db: Database, hold: MaintenanceHold, pending: list[int]) -> str:
+def _stall_report(
+    db: Database, hold: MaintenanceHold, pending: list[int], *, local_machine: MachineIdentity
+) -> str:
     """One line per unfinished agent: delivery state, row fences and host view.
 
     A bare agent list leaves a consuming agent indistinguishable from one
@@ -230,7 +241,7 @@ def _stall_report(db: Database, hold: MaintenanceHold, pending: list[int]) -> st
     host_active: frozenset[int] = frozenset()
     notes: list[str] = []
     try:
-        if "agent-runner" in machine_role() and host_running():
+        if "agent-runner" in local_machine.role() and host_running():
             identity = host_identity()
             host_owner, host_active = identity.owner, identity.active
         else:
@@ -312,6 +323,7 @@ def pause_agents(
     timeout: float = PAUSE_TIMEOUT_SECONDS,
     *,
     driver: HoldDriver | None = None,
+    local_machine: MachineIdentity,
 ) -> None:
     """Idempotently drain this unit, leaving persistent terminals untouched.
 
@@ -329,21 +341,21 @@ def pause_agents(
         if driver is not None:
             pause_owner.refresh_driver(holder, at, driver=driver)
     else:
-        holder = f"{STOP_HOLDER_PREFIX}{machine_name()}:{os.getpid()}:{uuid4()}"
+        holder = f"{STOP_HOLDER_PREFIX}{local_machine.name()}:{os.getpid()}:{uuid4()}"
         at = datetime.now(UTC)
     if (
         current.status != "paused"
         or current.maintenance is None
         or current.maintenance.phase == MaintenancePhase.PREPARING
     ):
-        prepare(db, bus, holder, at, driver=driver)
+        prepare(db, bus, holder, at, driver=driver, local_machine=local_machine)
     hold = _hold(holder, at)
     if hold.phase in (
         MaintenancePhase.PREPARING,
         MaintenancePhase.DRAINING,
         MaintenancePhase.DRAINED,
     ):
-        drain(db, holder, at, timeout)
+        drain(db, holder, at, timeout, local_machine=local_machine)
 
 
 def resume_agents(db: Database, bus: EventBus) -> None:

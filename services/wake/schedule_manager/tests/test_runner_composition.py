@@ -141,6 +141,7 @@ def test_process_owns_one_gate_and_closes_its_pipeline(
         assert inputs.database is database
         assert inputs.producer == context.clients.event_pipeline
         assert inputs.image is image
+        assert inputs.machine is context.require_machine()
         with runner_inputs_entry(inputs) as borrowed:
             assert borrowed is inputs
             borrowed.database()
@@ -212,7 +213,7 @@ def test_runpy_script_receives_the_same_entry_builders(
         "with schedule_entry(AVA_SCHEDULE_INPUTS) as inputs:\n"
         "    assert inputs is AVA_SCHEDULE_INPUTS\n"
         "    assert inputs.producer == ava.context.clients.event_pipeline\n"
-        "    assert inputs.image is ava.loaded_code_image()\n"
+        "    assert inputs.image is ava.loaded_code_image()\n    assert inputs.machine is ava.context.require_machine()\n"
         f"    Path({str(marker)!r}).write_text('borrowed')\n"
     )
     db_conn.execute("UPDATE schedules SET script = %s WHERE id = %s", (script, sid))

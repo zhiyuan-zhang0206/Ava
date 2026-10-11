@@ -29,6 +29,7 @@ from base.api_contracts.config import (
     ConfigView,
     ConfigWriteResult,
 )
+from base.cluster.machine import MachineIdentity
 
 _HTTP_TIMEOUT_S = 15.0
 
@@ -397,7 +398,9 @@ def _print_audit_record(record: dict[str, object]) -> None:
             )
 
 
-def cmd_config_audit(last: int, key: str | None, machine: str | None) -> int:
+def cmd_config_audit(
+    last: int, key: str | None, machine: str | None, *, identity: MachineIdentity
+) -> int:
     """`ava config audit [--last N] [--key K] [--machine M]` — the `.env` write trail.
 
     Reads this unit's own audit history by default (no gateway round-trip);
@@ -409,11 +412,12 @@ def cmd_config_audit(last: int, key: str | None, machine: str | None) -> int:
     if not 1 <= last <= 200:
         print("[ava config audit] --last must be between 1 and 200", file=sys.stderr)
         return 1
-    from base.cluster.machine import machine_name
     from base.host.env.audit import read_env_write_records
 
     if machine is None:
-        records = [{**record, "machine": machine_name()} for record in read_env_write_records(last)]
+        records = [
+            {**record, "machine": identity.name()} for record in read_env_write_records(last)
+        ]
     else:
         import httpx
 
@@ -658,4 +662,6 @@ def h_config_unset(args: argparse.Namespace) -> int:
 
 
 def h_config_audit(args: argparse.Namespace) -> int:
-    return cmd_config_audit(last=args.last, key=args.key, machine=args.machine)
+    return cmd_config_audit(
+        last=args.last, key=args.key, machine=args.machine, identity=args.runtime.machine
+    )

@@ -16,6 +16,7 @@ import os
 import shutil
 
 import base.host.proc
+from base.cluster.machine import MachineIdentity
 
 
 class ListenerDiscoveryError(RuntimeError):
@@ -202,7 +203,7 @@ def _lsof_listener_name_addrs(port: int) -> set[str]:
 LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
 
 
-def bind_addrs(cluster_secret: str) -> list[str]:
+def bind_addrs(cluster_secret: str, *, machine: MachineIdentity) -> list[str]:
     """Loopback plus this host's reachable address, de-duplicated (loopback alone
     when reachable resolves to localhost — the single-box default).
 
@@ -221,9 +222,7 @@ def bind_addrs(cluster_secret: str) -> list[str]:
     cluster's own secret from its authority-passed `.env` value."""
     if not cluster_secret:
         return ["127.0.0.1"]
-    from base.cluster import machine
-
-    host = machine.reachable_host()
+    host = machine.host()
     out = ["127.0.0.1"]
     if host not in LOOPBACK_ALIASES:
         out.append(host)

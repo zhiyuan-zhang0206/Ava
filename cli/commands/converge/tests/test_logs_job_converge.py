@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system import logs_job as job
 from base.telemetry import EventPipeline
@@ -31,13 +32,15 @@ def test_converge_registers_logs_maintenance(
 
     monkeypatch.setattr(job, "register_logs_job", register)
 
+    machine_config = ConfigBoot()
     ctx = ConvergeCtx(
         repo=tmp_path,
         ava_home=tmp_path,
         roles=None,
-        config=ConfigBoot(),
+        config=machine_config,
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=machine_from_boot(machine_config),
     )
     ensure_logs_maintenance(ctx)
     assert calls == ["register"]

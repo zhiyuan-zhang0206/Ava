@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from base.telemetry import tracing as tracing_mod
+from base.telemetry.tests.identity_inputs import ignore_arguments, machine_identity
 from base.telemetry.tests.test_tracing import (
     _assert_root_once_with_child_parented_under_it,
     _assert_turn_root_exported_at_start,
@@ -43,7 +44,7 @@ def test_arm_thread_base_exception_marks_attempt_spent(
     """The one-attempt contract holds for ANY arm-thread death: a
     BaseException escape (SystemExit/GeneratorExit from inside the SDK — not
     expected, but not impossible) must still set arm_failed, so a later
-    initialize_tracing() cannot re-spawn the arm thread past the dead
+    initialize_tracing(machine=machine_identity(), home=Path(".ava")) cannot re-spawn the arm thread past the dead
     is_alive() guard (the QA #1060 corner: with `except Exception` only, a
     dead arm thread carrying no flag left one-attempt-per-process bypassable).
     """
@@ -58,13 +59,15 @@ def test_arm_thread_base_exception_marks_attempt_spent(
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _exit_sdk)
 
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
     _wait_init_resolved()
 
     assert tracing_mod._state["arm_failed"] is True
     assert tracing_mod._state["initialized"] is False
 
-    initialize_tracing()  # must be a no-op: the attempt was spent
+    initialize_tracing(
+        machine=machine_identity(), home=Path(".ava")
+    )  # must be a no-op: the attempt was spent
     assert calls == [1]
 
 
@@ -99,7 +102,7 @@ def test_timeout_then_late_arm_recording_comes_up_midlife(
 
     monkeypatch.setattr("base.telemetry.tracing.logger.warning", _capture_warning)
 
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
     assert entered.wait(timeout=5.0), "arm thread must reach Traceloop.init"
 
     # The arm is still in flight: the bounded wait gives up (one warning),
@@ -140,9 +143,11 @@ def test_ensure_init_resolved_instant_without_arming(
     )
     # Skip the daemon collector retry loop: this test asserts the instant
     # no-wait contract, not the loop (that is the retry-loop test above).
-    monkeypatch.setattr("base.telemetry.tracing._start_collector_retry", lambda: None)
+    monkeypatch.setattr("base.telemetry.tracing._start_collector_retry", ignore_arguments)
 
-    initialize_tracing()  # declined: collector unreachable, no arm thread
+    initialize_tracing(
+        machine=machine_identity(), home=Path(".ava")
+    )  # declined: collector unreachable, no arm thread
     ensure_init_resolved()  # must return at once, not hang on an unset event
 
     assert tracing_mod._state["arm_thread"] is None

@@ -70,6 +70,7 @@ from base import paths, telemetry
 from base.agents import AvaAgentError
 from base.cluster.auth import cookie_name
 from base.cluster.authority.api import AcceptanceCache
+from base.cluster.machine.boot import machine_from_boot
 from base.cluster.rate_limit import LoginRateLimiter
 from base.config import ConfigBoot, Settings, settings
 from base.config.service_read import ConfigAuthority
@@ -231,15 +232,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if owned:
         config = ConfigBoot()
         config.boot()
-        process = GatewayProcess(config=config, image=LOADED_IMAGE)
+        process = GatewayProcess(
+            config=config, image=LOADED_IMAGE, machine=machine_from_boot(config)
+        )
     app.state.gateway_process = process
+    app.state.machine = process.machine
     with process.lifetime() if owned else nullcontext(process):
         config = process.config
         app.state.process_image = process.image
         telemetry.init_telemetry(
             process="gateway",
             pipeline=process.event_pipeline(),
-            machine_reader=lambda: config.view.general.machine_name,
+            machine_reader=process.machine.name,
         )
         app.state.catalog = build_model_catalog()
         app.state.config_authority = ConfigAuthority(
@@ -299,7 +303,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # drains its accumulator or DB sample once per 60s and emits ONE bounded
         # event; the lifespan owns and stops every task or scheduled callback.
         app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
-        upload_recovery = UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
+        upload_recovery = UploadRecovery(
+            app.state.db_pool, app.state.db, app.state.bus, machine=process.machine
+        )
         # The lifespan owns this handle; app.state is only the HTTP exposure and
         # can be replaced by a nested lifespan on the same app.
         app.state.upload_recovery = upload_recovery
@@ -327,6 +333,7 @@ async def _background_lifetime(
             catalog=app.state.catalog,
             authority=app.state.config_authority,
             image=app.state.process_image,
+            local_machine=app.state.machine,
         )
         app.state.mcp_manager = mcp_manager
 

@@ -7,6 +7,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.invocation import native_work as owner
@@ -17,6 +18,7 @@ from services.agent_runner.agent_host.tests.native_cancel.test_transfer import (
     _assert_successor_turns,
     _force_successor,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize(
@@ -30,9 +32,10 @@ async def test_pause_fault_cannot_ack_then_resume_original_conversation(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     target, successor, _force = await _force_successor(
-        db_conn, aops_pool, database_gate=database_gate
+        db_conn, aops_pool, database_gate=database_gate, local_machine=machine_identity.name()
     )
     replies: list[str] = []
     graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 100, replies)

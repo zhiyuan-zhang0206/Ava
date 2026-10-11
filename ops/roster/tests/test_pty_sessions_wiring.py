@@ -11,20 +11,27 @@ from __future__ import annotations
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from ops import roster, spec
 from ops.roster import service_spec
 from services.agent_runner.pty_sessions import shutdown_budget
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _spec() -> service_spec.ServiceSpec:
     return next(s for s in roster.build_services() if s.session == "pty-sessions")
 
 
-def test_both_a_gateway_host_and_a_runner_host_run_the_service() -> None:
+def test_both_a_gateway_host_and_a_runner_host_run_the_service(
+    *, machine_identity: MachineIdentity
+) -> None:
     declared = _spec()
     assert declared.capabilities == frozenset({"gateway", "agent-runner"})
     for role in ("gateway", "agent-runner"):
-        started = {s.session for s in spec.services_for_capabilities(frozenset({role}))}
+        started = {
+            s.session
+            for s in spec.services_for_capabilities(frozenset({role}), machine=machine_identity)
+        }
         assert "pty-sessions" in started, role
 
 
@@ -54,12 +61,18 @@ def test_the_stop_window_covers_the_services_own_closure() -> None:
 
 @pytest.mark.parametrize(("sockets", "gated"), [(False, True), (True, False)])
 def test_the_service_is_gated_out_where_there_are_no_unix_sockets(
-    monkeypatch: pytest.MonkeyPatch, sockets: bool, gated: bool
+    monkeypatch: pytest.MonkeyPatch,
+    sockets: bool,
+    gated: bool,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr("ops.spec.unix_sockets_available", lambda: sockets)
     reason = {
         s.session: why
-        for s, why in spec.services_for_capabilities_annotated(frozenset({"agent-runner"}))
+        for s, why in spec.services_for_capabilities_annotated(
+            frozenset({"agent-runner"}), machine=machine_identity
+        )
     }["pty-sessions"]
     assert (reason is not None) is gated
     if gated:

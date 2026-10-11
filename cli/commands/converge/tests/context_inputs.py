@@ -10,21 +10,42 @@ from typing import Any, cast
 import pytest
 
 from base.cluster.machine import MachineRoles
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
+
+__all__ = [
+    "Converge",
+    "accessibility_environment",
+    "capable_helper_context",
+    "converge",
+    "converge_context",
+    "default_home",
+    "home",
+    "other_home",
+    "pgbouncer_context",
+    "screen_capture_environment",
+]
 
 Converge = Callable[..., None]
 
 
 @pytest.fixture
 def converge(
-    operator_database: Callable[[], Any], operator_pipeline: Callable[[], EventPipeline]
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    command_runtime: CommandRuntime,
 ) -> Converge:
     return partial(
-        converge_host.converge_host, database_factory=operator_database, producer=operator_pipeline
+        converge_host.converge_host,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        command=command_runtime,
     )
 
 
@@ -36,11 +57,16 @@ def converge_context(
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
 ) -> converge_host.ConvergeCtx:
+    config = ConfigBoot()
+    machine = machine_from_boot(config)
+    if roles is not None:
+        machine.set(role=roles)
     return converge_host.ConvergeCtx(
         repo=repo,
         ava_home=ava_home,
         roles=roles,
-        config=ConfigBoot(),
+        config=config,
+        machine=machine,
         database_factory=operator_database,
         producer=producer,
     )

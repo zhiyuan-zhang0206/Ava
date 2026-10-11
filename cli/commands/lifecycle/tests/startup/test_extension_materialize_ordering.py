@@ -30,6 +30,8 @@ from typing import Any
 import pytest
 
 from base.telemetry import EventPipeline
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -102,6 +104,8 @@ def test_start_materializes_after_the_schema_check(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The ordering inside `_prepare_cold_start`, asserted via monkeypatched seams.
 
@@ -123,6 +127,7 @@ def test_start_materializes_after_the_schema_check(
         (),
         database_factory=operator_database,
         producer=operator_pipeline,
+        command=command_runtime,
     )
 
     assert rc == 0
@@ -161,6 +166,8 @@ def test_start_adopts_before_it_materializes(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Both orders are correct, and one of them is tidier.
 
@@ -181,6 +188,7 @@ def test_start_adopts_before_it_materializes(
         (),
         database_factory=operator_database,
         producer=operator_pipeline,
+        command=command_runtime,
     )
 
     assert rc == 0

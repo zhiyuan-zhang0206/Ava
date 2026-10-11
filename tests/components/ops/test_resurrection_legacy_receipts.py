@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 from base.agents import ResurrectRefused
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -33,6 +33,7 @@ class _LegacyArrange(Protocol):
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> int: ...
 
 
@@ -42,6 +43,7 @@ def _legacy_unowned_forced(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     """Unowned, but no lifecycle of this runtime left it so."""
     aid = legacy_row(
@@ -49,6 +51,7 @@ def _legacy_unowned_forced(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     force(aid)
     return aid
@@ -60,6 +63,7 @@ def _legacy_forced_beside_a_marked_neighbour(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     """As above while another agent carries both facts: a lifecycle release
     (its resurrection) and an unowned termination receipt (the force before
@@ -68,7 +72,7 @@ def _legacy_forced_beside_a_marked_neighbour(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         authority=config_authority,
         catalog=model_catalog,
     )
@@ -79,6 +83,7 @@ def _legacy_forced_beside_a_marked_neighbour(
         EventBus.from_settings(),
         other,
         resurrected_by="user",
+        local_machine=machine_identity.name(),
     )
     released = db.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect' "
@@ -92,6 +97,7 @@ def _legacy_forced_beside_a_marked_neighbour(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
 
 
@@ -101,6 +107,7 @@ def _legacy_termination_swept(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     """Terminated with no identity and no receipt, as every row the cutover
     inherits: a later force (a machine-pause sweep) finds it terminated already
@@ -111,6 +118,7 @@ def _legacy_termination_swept(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     force(aid)
     return aid
@@ -122,13 +130,14 @@ def _partial_identity_forced(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     """A born row whose identity is not empty: a historical process kind."""
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         authority=config_authority,
         catalog=model_catalog,
     )
@@ -144,13 +153,14 @@ def _earlier_life_receipt(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     """A receipt ended an earlier life; this life ended without one."""
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         authority=config_authority,
         catalog=model_catalog,
     )
@@ -160,6 +170,7 @@ def _earlier_life_receipt(
         EventBus.from_settings(),
         aid,
         resurrected_by="user",
+        local_machine=machine_identity.name(),
     )
     # This later life has an unknown allocation; its earlier force receipt cannot close it.
     db.execute(
@@ -191,12 +202,14 @@ def test_an_unowned_end_without_this_lifes_receipt_still_refuses(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     aid = arrange(
         db_conn,
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     receipts = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='terminate' "
@@ -209,7 +222,9 @@ def test_an_unowned_end_without_this_lifes_receipt_still_refuses(
     wakes.clear()
 
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
-        wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
+        wake.resurrect_agent(
+            database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+        )
 
     assert status(db_conn, aid)[0] == "terminated"
     assert wakes == []

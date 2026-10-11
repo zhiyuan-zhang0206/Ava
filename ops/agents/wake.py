@@ -22,7 +22,6 @@ from base.agents.incarnation.lifecycle_acceptance import (
     UNOWNED_TERMINATION_RECORDED,
 )
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
-from base.cluster.machine import machine_name
 from base.config import field_alias, get_field, settings
 from base.db import Database, fetch_one, publish_inbound_wake
 from base.events.live.announce import publish_agent_updated_sync
@@ -193,6 +192,7 @@ def _prepare_resurrect_attempt(
     trigger_inbound_id: int | None,
     trigger_inbound_kind: WakeTriggerKind | None,
     billing_recovery: bool = False,
+    local_machine: str,
 ) -> telemetry.Event:
     """Commit resurrection and its optional prompt before waking the host.
 
@@ -207,7 +207,7 @@ def _prepare_resurrect_attempt(
     from base.agents.messages.envelope import reject_unnegotiated_caller
 
     reject_unnegotiated_caller(resurrected_by)
-    recover_local_resources(db, agent_id, machine_name())
+    recover_local_resources(db, agent_id, local_machine)
     with db.write_transaction() as conn, conn.cursor() as cur:
         # Task before agent: producers hold the task while inserting an inbound
         # whose foreign key can lock agents_meta. Keep the same lock order.
@@ -346,6 +346,7 @@ def resurrect_agent(
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
     billing_recovery: bool = False,
+    local_machine: str,
 ) -> int:
     """Resume a terminated hosted incarnation and enqueue lifecycle plus optional chat.
 
@@ -379,6 +380,7 @@ def resurrect_agent(
         trigger_inbound_id=trigger_inbound_id,
         trigger_inbound_kind=trigger_inbound_kind,
         billing_recovery=billing_recovery,
+        local_machine=local_machine,
     )
     telemetry.emit_prepared(prepared_event)
     logger.info(

@@ -8,19 +8,24 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from tests.components.agent.test_maintenance import WHEN, _agent
 from tests.components.agent.test_maintenance import isolate as isolate
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("observed", [False, True])
 def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
-    db_conn: psycopg.Connection[Any], observed: bool, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection[Any],
+    observed: bool,
+    database: Database,
+    event_bus: EventBus,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn)
+    agent = _agent(db_conn, machine_name=machine_identity.name())
     owner, generation = uuid4(), uuid4()
     chat = insert_inbound_message(
         db_conn, agent, "unfinished action", "user", bus=event_bus, database=database
@@ -52,7 +57,7 @@ def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
     with pytest.raises(RuntimeError):
         cohort.prepare(
             db_conn,
-            machine=machine_name(),
+            machine=machine_identity.name(),
             host_owner=None,
             holder="cold",
             acquired_at=WHEN,
@@ -60,7 +65,7 @@ def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
     db_conn.rollback()
     held = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=None,
         holder="cold",
         acquired_at=WHEN,
@@ -76,8 +81,9 @@ def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
 
 def test_expired_host_lease_does_not_prove_normal_shutdown(
     db_conn: psycopg.Connection[Any],
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn)
+    agent = _agent(db_conn, machine_name=machine_identity.name())
     db_conn.execute(
         "UPDATE agents_meta SET runtime_kind='hosted',runtime_owner=%s,runtime_generation=%s,"
         "lease_expires_at=%s WHERE id=%s",
@@ -88,7 +94,7 @@ def test_expired_host_lease_does_not_prove_normal_shutdown(
     with pytest.raises(RuntimeError, match="live original native"):
         cohort.prepare(
             db_conn,
-            machine=machine_name(),
+            machine=machine_identity.name(),
             host_owner=None,
             holder="cold",
             acquired_at=WHEN,

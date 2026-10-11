@@ -1,24 +1,31 @@
 """Claim-node test support shared by the topic files: agent status writes and waits, the hosted-owner fixture, the committed-publish filter and the compact-tail reader."""
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 from unittest.mock import MagicMock
 
 import psycopg
 import pytest
+from langchain_core.messages import AnyMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
 import ava
+from agent.state import ContextReset
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
+__all__ = ["committed_publishes", "compact_tail", "running_agent"]
 
-def _committed_publishes(pub: MagicMock) -> list[dict]:
+
+def committed_publishes(pub: MagicMock) -> list[dict[str, Any]]:
     """Filter event_publisher.emit call_args to the InboundCommitted payload list.
 
     node_lifecycle emits a timeline_snapshot on every enter; we only want the
@@ -87,20 +94,23 @@ async def running_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Admit a real hosted owner and bind it throughout each dispatch test."""
     from uuid import uuid4
 
     from agent.ownership.hosted import admit_hosted_runtime
-    from base.cluster.machine import machine_name
 
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     incarnation = await admit_hosted_runtime(
         aops_pool,
         agent_id,
-        machine_name(),
+        machine_identity.name(),
         uuid4(),
         expected_from="idling",
         db=database,
@@ -110,17 +120,20 @@ async def running_agent(
     yield lambda: agent_id
 
 
-def _compact_tail(update):
+def compact_tail(update: Mapping[str, Any] | None) -> list[AnyMessage]:
     """Assert the transport a compaction now uses — the window is cleared and
     rebuilding the standing head is handed to `init_context` — and return the
     parked tail, which is what this claim batch decided belongs behind it."""
     from langchain_core.messages.modifier import RemoveMessage as _Rm
 
+    assert update is not None
     msgs = update["messages"]
     assert len(msgs) == 1, f"expected the sentinel alone, got {len(msgs)} messages"  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], _Rm)
     assert msgs[0].id == REMOVE_ALL_MESSAGES  # pyright: ignore[reportUnknownMemberType]
-    return update["context_reset"].tail  # pyright: ignore[reportUnknownMemberType]
+    reset = update["context_reset"]
+    assert isinstance(reset, ContextReset)
+    return reset.tail
 
 
 def _events_with_role(pub: MagicMock, role: str) -> list[dict[str, Any]]:

@@ -9,6 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from agent.startup import reconcile_claimed_inbounds_at_startup
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -21,6 +22,7 @@ from services.agent_runner.agent_host.recovery.tests.test_reconcile_after_abort 
     row_statuses,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_checkpoint_clock_skew_scans_settled_history(
@@ -30,6 +32,7 @@ async def test_checkpoint_clock_skew_scans_settled_history(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A checkpoint clock over 300 seconds behind DB time cannot bound writes."""
     incarnation = await admit_recovery(
@@ -37,6 +40,7 @@ async def test_checkpoint_clock_skew_scans_settled_history(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "skewed")
@@ -67,6 +71,7 @@ async def test_historical_clock_skew_cannot_hide_a_fresh_commit(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A later clock-correct checkpoint must not make an old skewed write disappear."""
     incarnation = await admit_recovery(
@@ -74,6 +79,7 @@ async def test_historical_clock_skew_cannot_hide_a_fresh_commit(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "historically skewed")
@@ -109,6 +115,7 @@ async def test_incomplete_full_write_scan_preserves_claimed_row(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A failed history scan cannot turn missing proof into a reset."""
     incarnation = await admit_recovery(
@@ -116,6 +123,7 @@ async def test_incomplete_full_write_scan_preserves_claimed_row(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     claimed = claimed_row(db_conn, agent, "unresolved")

@@ -23,8 +23,9 @@ from typing import Any
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import PoolTimeout
 
-from base.cluster.machine import daemon_acceptance, gateway_auth_headers, validate_machine_name
-from base.config import settings
+from base.cluster.machine import daemon_acceptance, gateway_auth_headers
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
@@ -35,6 +36,7 @@ from base.deploy.maintenance import admission
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import ava_home
 from base.telemetry.emitter import build_pipeline
 from services.entrypoints.im_bridge.alert_outbound import AlertOutboundBridge
 from services.entrypoints.im_bridge.config import (
@@ -363,17 +365,21 @@ def _gate_httpx_info_logs() -> None:
 
 def main() -> None:
     image = LoadedCommit.capture()
+    machine_config = ConfigBoot()
+    machine_config.boot()
+    machine = machine_from_boot(machine_config)
+    process_home = ava_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="im_bridge")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate)
+        return Database.from_settings(gate=gate, local_host=machine.host)
 
-    pipeline = build_pipeline(database=database)
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
         name="im_bridge",
         producer=lambda: pipeline,
-        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        machine_reader=machine.name,
         image=image,
     )
     _gate_httpx_info_logs()

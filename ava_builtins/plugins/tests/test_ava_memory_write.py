@@ -16,14 +16,16 @@ import yaml
 import ava
 from agent.state import build_agent_state
 from ava.sdk_surface import install
+from base.cluster.machine import MachineIdentity
 from base.packages.plugins.extensions import ExtensionRegistry
 from tests.fixtures.pin_agent import pin_agent
 
 
 @pytest.fixture
-def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Any]:
+def memory_plugin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine_identity: MachineIdentity
+) -> Iterator[Any]:
     """Install the ava_memory SDK surface against isolated stores."""
-    import base.cluster.machine
     import base.paths
     from base.agents.sdk import call_policy
 
@@ -44,14 +46,11 @@ def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[A
     def isolated_pool() -> Path:
         return pool
 
-    def isolated_machine_name() -> str:
-        return "memory-host"
-
     monkeypatch.setattr(base.paths, "ava_home", isolated_home)
     monkeypatch.setattr(base.paths, "workspace_dir", isolated_workspace)
     monkeypatch.setattr(base.paths, "memory_dir", isolated_pool)
-    monkeypatch.setattr(base.cluster.machine, "machine_name", isolated_machine_name)
-    pin_agent(17)
+    machine_identity.set(name="memory-host")
+    pin_agent(17, machine=machine_identity)
     from ava_builtins.plugins.ava_memory import plugin
 
     install.install(ExtensionRegistry((("ava_memory", plugin.contribute()),)))
@@ -499,7 +498,7 @@ def test_personal_write_is_immune_to_ava_cwd_drift(memory_plugin: Any, tmp_path:
 
 
 def test_plugin_loads_and_writes_without_fcntl(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine_identity: MachineIdentity
 ) -> None:
     """Windows smoke: plugin import + index update with no fcntl module.
 
@@ -530,7 +529,6 @@ def test_plugin_loads_and_writes_without_fcntl(
 
     monkeypatch.setattr(builtins, "__import__", no_fcntl)
 
-    import base.cluster.machine
     import base.paths
     from base.agents.sdk import call_policy
 
@@ -554,8 +552,8 @@ def test_plugin_loads_and_writes_without_fcntl(
     monkeypatch.setattr(base.paths, "ava_home", isolated_home)
     monkeypatch.setattr(base.paths, "workspace_dir", isolated_workspace)
     monkeypatch.setattr(base.paths, "memory_dir", isolated_pool)
-    monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: "memory-host")
-    pin_agent(17)
+    machine_identity.set(name="memory-host")
+    pin_agent(17, machine=machine_identity)
     # The guard is import-time: re-import the plugin face and its sdk while `import fcntl` raises.
     for name in list(sys.modules):
         if name.startswith("ava_builtins.plugins.ava_memory"):

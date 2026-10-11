@@ -5,15 +5,19 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.db import create_agent
 from gateway.app import app
 from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize(
     "route", ["/api/cancel", "/api/agents/{agent}/compact", "/api/agents/{agent}/retry-launch"]
 )
-def test_retired_route_has_no_effect(db_conn: psycopg.Connection, route: str) -> None:
+def test_retired_route_has_no_effect(
+    db_conn: psycopg.Connection, route: str, *, machine_identity: MachineIdentity
+) -> None:
     agent = create_agent(db_conn)
     attempt = uuid4()
     db_conn.execute(
@@ -21,7 +25,7 @@ def test_retired_route_has_no_effect(db_conn: psycopg.Connection, route: str) ->
         (agent, attempt),
     )
     db_conn.commit()
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine_identity) as client:
         response = client.post(
             route.format(agent=agent),
             json={"agent_id": agent},

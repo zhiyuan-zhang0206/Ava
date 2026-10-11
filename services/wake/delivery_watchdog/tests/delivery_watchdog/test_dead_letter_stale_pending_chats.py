@@ -5,6 +5,7 @@ from __future__ import annotations
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -17,6 +18,7 @@ from services.wake.delivery_watchdog.tests.test_delivery_watchdog import (
     terminated_agent,
 )
 from services.wake.delivery_watchdog.tests.test_delivery_watchdog import pool as pool
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestDeadLetterStalePendingChats:
@@ -28,6 +30,7 @@ class TestDeadLetterStalePendingChats:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Issue #2049: a chat that never claimed its terminated owner is
         archived once past the threshold instead of resurrecting it forever."""
@@ -38,6 +41,7 @@ class TestDeadLetterStalePendingChats:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         row = pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="chat")
 
@@ -57,6 +61,7 @@ class TestDeadLetterStalePendingChats:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A recent pending chat is still a live resurrect candidate — the G4
         retry window must stay open until the threshold closes it."""
@@ -67,6 +72,7 @@ class TestDeadLetterStalePendingChats:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         row = pending_resurrect_row(db_conn, aid, age_s=60, kind="chat")
 
@@ -83,6 +89,7 @@ class TestDeadLetterStalePendingChats:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Live owners keep their pending chats: only terminated owners have no
         consumer, so the sweep never touches idling/running queues."""
@@ -93,6 +100,7 @@ class TestDeadLetterStalePendingChats:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         row = pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="chat")
 
@@ -109,6 +117,7 @@ class TestDeadLetterStalePendingChats:
         config_authority: ConfigAuthority,
         *,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Lifecycle kinds keep their own sweep; this one is chat-only."""
         from services.wake.delivery_watchdog.daemon import dead_letter_stale_pending_chats
@@ -118,6 +127,7 @@ class TestDeadLetterStalePendingChats:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         row = pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="terminate")
 

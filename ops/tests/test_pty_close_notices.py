@@ -21,6 +21,7 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -30,6 +31,7 @@ from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.telemetry import Event
 from ops import pty_close_notices as notices
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _WHEN = datetime(2026, 9, 10, 1, 2, 3, tzinfo=UTC)
 
@@ -360,12 +362,18 @@ def _ended(agent_id: int, session_id: int = 11, starttime: int = 4242) -> closur
 
 
 def test_a_crash_notice_names_the_crash_and_no_operation(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A sweep has no stop and no maintenance hold: the notice says the service ended
     uncleanly and carries neither an operation nor a hold time."""
     aid = _agent(db_conn, "running")
-    (built,) = notices.notices_for([_ended(aid)], reason=notices.CRASH_REASON)
+    (built,) = notices.notices_for(
+        [_ended(aid)], reason=notices.CRASH_REASON, local_machine=machine_identity.name()
+    )
 
     assert notices.write_notices(database, event_bus, [built], direct=False) == []
 
@@ -377,13 +385,17 @@ def test_a_crash_notice_names_the_crash_and_no_operation(
     assert record["shell_birth"] == "starttime:4242" and record["shell_pid"] == 9090
 
 
-def test_notices_for_skips_a_session_that_is_not_an_agent_shell() -> None:
+def test_notices_for_skips_a_session_that_is_not_an_agent_shell(
+    *, machine_identity: MachineIdentity
+) -> None:
     sessions = [
         closure.ClosedSession("ava-gateway", OwnedProcess(1, 1.0, 1)),
         _ended(5),
     ]
 
-    built = notices.notices_for(sessions, reason=notices.CRASH_REASON)
+    built = notices.notices_for(
+        sessions, reason=notices.CRASH_REASON, local_machine=machine_identity.name()
+    )
 
     assert [notice.agent_id for notice in built] == [5]
 
@@ -403,17 +415,22 @@ def test_a_staged_batch_round_trips_through_the_file(tmp_path: Path) -> None:
     assert notices._content(read_back) == notices._content(stopped)
 
 
-def test_staging_merges_beside_what_already_waits(tmp_path: Path) -> None:
+def test_staging_merges_beside_what_already_waits(
+    tmp_path: Path, *, machine_identity: MachineIdentity
+) -> None:
     """A next start stages its sweep beside the batch still waiting: the record
     already on disk stays (same key, first one wins) and the new session appends."""
     path = tmp_path / "pty-close-notices.json"
     (waiting,) = notices.stage_crash_notices(
-        closure.Outcome(closed=(_ended(5, session_id=7),)), path
+        closure.Outcome(closed=(_ended(5, session_id=7),)),
+        path,
+        local_machine=machine_identity.name(),
     )
 
     staged = notices.stage_crash_notices(
         closure.Outcome(closed=(_ended(5, session_id=7), _ended(5, session_id=8, starttime=9999))),
         path,
+        local_machine=machine_identity.name(),
     )
 
     assert [notice.session_id for notice in staged] == [7, 8]
@@ -422,7 +439,7 @@ def test_staging_merges_beside_what_already_waits(tmp_path: Path) -> None:
 
 
 def test_the_crash_child_writes_the_staged_batch_once_and_never_resurrects(
-    db_conn: psycopg.Connection, staged_path: Path
+    db_conn: psycopg.Connection, staged_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """The one-shot child (`python -m ops.pty_close_notices`) end to end: it writes
     the staged notices — a live owner gets one inbound, a terminated owner none — and
@@ -430,7 +447,9 @@ def test_the_crash_child_writes_the_staged_batch_once_and_never_resurrects(
     delivers nothing new."""
     live, dead = _agent(db_conn, "running"), _agent(db_conn, "terminated")
     staged = notices.notices_for(
-        [_ended(live), _ended(dead, session_id=12)], reason=notices.CRASH_REASON
+        [_ended(live), _ended(dead, session_id=12)],
+        reason=notices.CRASH_REASON,
+        local_machine=machine_identity.name(),
     )
     notices.write_pending(staged_path, staged)
 

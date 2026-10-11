@@ -256,19 +256,16 @@ def _init_logger(
             agent_id=agent_id,
         )
         return
-    from base.telemetry.otlp import telemetry_otlp
-
-    telemetry_otlp.defer_until_exit()
+    producer().defer_exports()
 
 
-def _emit_child_boot_timing(child: _ChildContext) -> None:
+def _emit_child_boot_timing(child: _ChildContext, *, clients: Any) -> None:
     """Record the child-ready boundary before executing agent-authored code."""
     duration_ms = (time.perf_counter() - child.boot_started_at) * 1000
     extra: dict[str, object] = {}
-    module = sys.modules.get("base.telemetry.otlp.telemetry_otlp")
-    if module is not None and hasattr(module, "deferred_state"):
-        # Diagnostic marker (task #3816 M4b): held for deferred export?
-        extra["otlp_deferred"] = module.deferred_state()
+    deferred = clients.exports_deferred()
+    if deferred is not None:
+        extra["otlp_deferred"] = deferred
     logger.info(
         "exec child boot completed in {duration_ms:.1f}ms",
         event="exec_child_boot",
@@ -460,10 +457,8 @@ def _finalize_telemetry(*, clients: Any = None) -> None:
             "exec child: ordinary telemetry delivery is unfinished; "
             "queued records may be lost or land later"
         )
-    if "base.telemetry.otlp.telemetry_otlp" in sys.modules:
-        from base.telemetry.otlp import telemetry_otlp
-
-        telemetry_otlp.finalize()
+    if owned is not None:
+        owned.finalize_events()
 
 
 def _deliver_envelope_telemetry(*, clients: Any = None) -> None:
@@ -506,14 +501,17 @@ def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
             _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
 
-def _bind_identity(request: RequestPayload, *, clients: Any) -> None:
+def _bind_identity(request: RequestPayload, *, context: Any) -> None:
     """Bind this child's `AvaContext` and the incarnation from its validated request."""
     import ava
     from base.agents.context import AvaContext
 
     ava.bind_context(
         AvaContext.from_description(
-            request.context, original_incarnation=request.incarnation, clients=clients
+            request.context,
+            original_incarnation=request.incarnation,
+            clients=context.clients,
+            machine=context.require_machine(),
         )
     )
     # No eager OTLP warmup: the backend comes up lazily on the first export
@@ -522,7 +520,7 @@ def _bind_identity(request: RequestPayload, *, clients: Any) -> None:
 
 
 def _run(
-    request_path: str, result_path: str, boot_started_at: float, *, config: Any, clients: Any
+    request_path: str, result_path: str, boot_started_at: float, *, config: Any, context: Any
 ) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
@@ -531,13 +529,11 @@ def _run(
 
     _line_buffered_output()
     _install_signal_handlers()
-    from base.cluster.machine import validate_machine_name
-
     raw_agent_id = os.environ.get("AVA_AGENT_ID")
     _init_logger(
         None if raw_agent_id is None else int(raw_agent_id),
-        producer=clients.event_pipeline,
-        machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+        producer=context.clients.event_pipeline,
+        machine_reader=context.require_machine().name,
     )
     request = read_request(Path(request_path))
     payload = ResultPayload(kind="done")
@@ -545,7 +541,7 @@ def _run(
     birth, overlay = _pop_overlay_env()
     from base.clock import Clock, clock_config_from_boot
 
-    _bind_identity(request, clients=clients)
+    _bind_identity(request, context=context)
 
     def clock_factory() -> Clock:
         return Clock(clock_config_from_boot(config))
@@ -561,7 +557,7 @@ def _run(
     _init_logger(
         request.agent_id,
         producer=ava.context.clients.event_pipeline,
-        machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+        machine_reader=context.require_machine().name,
     )
     # Load plugin namespaces (ava.tasks etc.) + wraps into this process — the
     # same explicit load a watcher child runs. Idempotent, surface-only: a
@@ -604,7 +600,7 @@ def _run(
         _arm_watchdog(request.timeout_s)
 
     try:
-        _emit_child_boot_timing(child)
+        _emit_child_boot_timing(child, clients=context.clients)
     except BaseException as exc:
         # Boot-timing failure: the code never ran.
         _write_crashed_result(result_path, exc, code_reached=False)
@@ -653,12 +649,16 @@ def main() -> None:
         _line_buffered_output()
         _install_signal_handlers()
         from ava.sdk_surface.process_context import process_clients
+        from base.agents.context import AvaContext
+        from base.cluster.machine.boot import machine_from_boot
         from base.config import ConfigBoot
 
         config = ConfigBoot()
         config.boot()
-        clients = process_clients(config=config)
-        _run(request_path, result_path, boot_started_at, config=config, clients=clients)
+        machine = machine_from_boot(config)
+        clients = process_clients(config=config, machine=machine)
+        context = AvaContext(clients=clients, machine=machine)
+        _run(request_path, result_path, boot_started_at, config=config, context=context)
     except BaseException as exc:
         _write_crashed_result(result_path, exc)
         # The crash envelope's record needs the same last-mile delivery (task

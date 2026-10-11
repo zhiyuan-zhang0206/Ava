@@ -9,17 +9,38 @@ from typing import Any, cast
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
 from services.agent_runner.agent_ops import daemon
+from tests.fixtures.configuration import snapshot_process_config
 
 
 class _ExitError(Exception):
     def __init__(self, code: int) -> None:
         self.code = code
+
+
+def _assert_run_owner(
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    captures: list[object],
+    roots: list[tuple[Callable[[], Database], MachineIdentity]],
+    gates: list[ProcessDbGate],
+    readers: list[Callable[[], str]],
+    machine: MachineIdentity,
+) -> None:
+    """The run borrows exactly the entry's image, database factory and identity."""
+    assert image is captures[0]
+    assert len(roots) == 1 and roots[0][0] is database
+    assert roots[0][1] is machine
+    assert database() is database()
+    assert gates[0] is gates[1]
+    assert readers == [machine.host, machine.host]
 
 
 @pytest.mark.parametrize("sha", ["captured-image", None])
@@ -35,7 +56,8 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
     captures: list[object] = []
     gates: list[ProcessDbGate] = []
     events: list[object] = []
-    roots: list[Callable[[], Database]] = []
+    roots: list[tuple[Callable[[], Database], MachineIdentity]] = []
+    readers: list[Callable[[], str]] = []
     runner = asyncio.Runner()
 
     class Pipeline:
@@ -49,27 +71,33 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
         captures.append(image)
         return image
 
-    def from_settings(*, gate: ProcessDbGate) -> Database:
+    def from_settings(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> Database:
         gates.append(gate)
+        readers.append(local_host)
         return database
 
-    def build_pipeline(*, database: Callable[[], Database]) -> EventPipeline:
-        roots.append(database)
+    def build_pipeline(
+        *, database: Callable[[], Database], machine: MachineIdentity, home: Path
+    ) -> EventPipeline:
+        roots.append((database, machine))
         return cast(EventPipeline, pipeline)
 
     def init(**kwargs: Any) -> None:
         assert kwargs["name"] == "ops"
         assert kwargs["image"] is image
-        assert kwargs["machine_reader"] is daemon.machine_name
         assert kwargs["producer"]() is pipeline
         assert kwargs["producer"]() is pipeline
+        assert kwargs["machine_reader"] == roots[0][1].name
         events.append("logging")
 
-    async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
-        assert image is captures[0]
-        assert roots == [database]
-        assert database() is database()
-        assert gates[0] is gates[1]
+    async def run(
+        *,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+        local_machine: MachineIdentity,
+        config: ConfigBoot,
+    ) -> None:
+        _assert_run_owner(database, image, captures, roots, gates, readers, local_machine)
         events.append("run")
         if failure is not None:
             raise failure
@@ -79,7 +107,7 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
 
     monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
     monkeypatch.setattr(daemon.Database, "from_settings", from_settings)
-    monkeypatch.setattr("base.config.ensure_eager", lambda: None)
+    monkeypatch.setattr(daemon, "ConfigBoot", snapshot_process_config)
     monkeypatch.setattr(daemon, "build_pipeline", build_pipeline)
     monkeypatch.setattr(daemon, "init_gateway_process", init)
 
@@ -103,6 +131,7 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
 def test_entry_keeps_startup_failure_when_writer_close_also_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(daemon, "ConfigBoot", snapshot_process_config)
     primary = RuntimeError("logging startup refused")
     closed: list[float] = []
 
@@ -116,7 +145,7 @@ def test_entry_keeps_startup_failure_when_writer_close_also_fails(
     monkeypatch.setattr(
         daemon.LoadedCommit, "capture", lambda: LoadedCommit(source_root=tmp_path, sha=None)
     )
-    monkeypatch.setattr("base.config.ensure_eager", lambda: None)
+    monkeypatch.setattr(daemon, "ConfigBoot", snapshot_process_config)
     monkeypatch.setattr(daemon, "init_gateway_process", init)
     monkeypatch.setattr(daemon.ClientSet, "close", close)
     with pytest.raises(RuntimeError) as raised:

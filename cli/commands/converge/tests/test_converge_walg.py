@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
@@ -46,6 +47,7 @@ def _ctx(
         config=config,
         database_factory=operator_database,
         producer=producer,
+        machine=machine_from_boot(config),
     )
 
 

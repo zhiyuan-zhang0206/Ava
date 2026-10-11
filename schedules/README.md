@@ -208,7 +208,11 @@ installing scripts that require the new callback contract. Finish the normal
 whole-cluster update to the approved target before admission resumes.
 
 Runner-hosted templates receive immutable `ScheduleInputs` through `runpy.init_globals`:
-one loaded image and the entry's database/pipeline builders. Templates borrow these
-resources without closing them. Direct Python execution uses `schedule_entry(None)`
-to own its gate and cold writer, closed within two seconds while preserving an original
-loop failure. C9/debt callbacks initialize logging at the original reporting point.
+one loaded image, the entry's database/pipeline builders and its `MachineIdentity`.
+Templates use `schedule_entry(inputs)` to borrow these resources without closing
+them or changing the shared SDK context. A fresh executable shell explicitly uses
+`fresh_schedule_entry()` to own its lazy machine, SDK context, gate and cold writer.
+Exit restores the prior SDK context and closes constructed clients within two
+seconds while preserving an original loop failure. Callable entry helpers require
+explicit inputs or an explicitly supplied fresh-entry factory. C9/debt callbacks
+initialize logging at the original reporting point; debt dry runs assemble no root.

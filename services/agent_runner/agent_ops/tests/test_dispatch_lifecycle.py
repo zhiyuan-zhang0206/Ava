@@ -11,12 +11,14 @@ from psycopg_pool import ConnectionPool
 
 from base.agents import TerminateResult
 from base.agents.messages.inbound import WakeTriggerKind
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_daemon import _stub_pool
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.asyncio
@@ -27,6 +29,8 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """lifecycle kind -> ops.lifecycle_op with parsed path."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -68,6 +72,7 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )
     assert status == "completed"
     # _dispatch serializes the lifecycle response model to a JSON dict for the wire.
@@ -86,6 +91,8 @@ async def test_dispatch_lifecycle_missing_path_fails(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """lifecycle payload without 'path' returns failed without invoking ops."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -105,6 +112,7 @@ async def test_dispatch_lifecycle_missing_path_fails(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )
     assert status == "failed"
     # LifecyclePayload validation rejects a missing 'path' before lifecycle_op runs.
@@ -119,6 +127,8 @@ async def test_dispatch_unparseable_lifecycle_path(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """ops.lifecycle_op raising ValueError lands as failed result, not a crash."""
     dispatch_pool: ConnectionPool = _stub_pool()
@@ -148,6 +158,7 @@ async def test_dispatch_unparseable_lifecycle_path(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )
     assert status == "failed"
     assert "not recognized" in str(result["error"])
@@ -161,6 +172,8 @@ async def test_dispatch_resurrect_refusal_fails_with_its_reason(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A resurrection refusal is a durable verdict, returned in the wire form
     the caller classifies (`ResurrectRefused: <reason>`), not a dispatch crash."""
@@ -193,6 +206,7 @@ async def test_dispatch_resurrect_refusal_fails_with_its_reason(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )
     assert (status, result) == ("failed", {"error": "ResurrectRefused: runtime_cutover_required"})
 
@@ -205,6 +219,8 @@ async def test_dispatch_wire_error_carries_reason(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """AvaAgentError raised by an op is converted to a failed result with reason field
     so the gateway's _raise_proxied_wire_error_from_payload can re-emit."""
@@ -237,6 +253,7 @@ async def test_dispatch_wire_error_carries_reason(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )
     assert status == "failed"
     assert "AgentNotFound" in str(result["error"])

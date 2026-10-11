@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from base.agents.messages import delivery_outbox as outbox
+from base.cluster.machine import MachineIdentity
 from base.config import Settings
 from base.config.service_read import ConfigAuthority
 from base.daemon import round_loop
@@ -27,6 +28,8 @@ from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import boot, daemon, outbox_flusher
+from tests.fixtures.configuration import snapshot_process_config
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture()
@@ -281,7 +284,11 @@ async def test_an_unreadable_config_ends_the_loop(
 
 
 async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
-    monkeypatch: pytest.MonkeyPatch, ops_database: Callable[[], Database], ops_image: LoadedCommit
+    monkeypatch: pytest.MonkeyPatch,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The ops server and the outbox loop share one TaskGroup: when the loop raises,
     the server stops serving, `_main` leaves with the error (the supervisor restarts
@@ -363,7 +370,12 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
     )  # the port table still names the ops slot
 
     with pytest.raises(ExceptionGroup) as raised:
-        await daemon._main(database=ops_database, image=ops_image)
+        await daemon._main(
+            database=ops_database,
+            image=ops_image,
+            local_machine=machine_identity,
+            config=snapshot_process_config(),
+        )
 
     assert [str(exc) for exc in raised.value.exceptions] == ["outbox loop crashed"]
     assert served_cancelled.is_set()

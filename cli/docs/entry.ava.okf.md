@@ -19,3 +19,13 @@ It calls `base.log.prepare_process_logging()` before dispatch loads configuratio
 That operation deliberately removes sinks only for a fresh executable process.
 Ordinary imports and embedded `main()` calls preserve caller logging; repeated
 concrete logger initialization retains its original first-role guard.
+
+`init` dispatches without configuration imports. `start` checks
+`require_initialized` before constructing its root, then checks the admitted home
+again under its lifecycle lock. Other parsed runtime commands create one
+`cli.database.runtime.CommandRuntime` with a zero-read `ConfigBoot` and its lazy
+`MachineIdentity`. Dispatch, embedded
+lifecycle legs, logging, database host resolution and telemetry borrow that same
+identity. Successful setup resets only this owner before role and intent checks;
+failed setup preserves its cached inputs. Help exits before constructing the root,
+and lightweight status/stop paths do not force identity or configuration fetches.

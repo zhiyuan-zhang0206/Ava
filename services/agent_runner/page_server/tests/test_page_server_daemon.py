@@ -14,64 +14,26 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import services.agent_runner.page_server.daemon as psd
-from base.cluster.machine import reset_identity, set_identity
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from services.agent_runner.page_server.tests.page_shell import PageShellBackend
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 _HOST = "127.0.0.1"
 
 
 @pytest.fixture(autouse=True)
-def _identity() -> Iterator[None]:
-    set_identity(host=_HOST)
-    yield
-    reset_identity()
-
-
-class _FakeShellBackend:
-    def __init__(self) -> None:
-        self.sessions: set[str] = set()
-        self.new_calls: list[tuple[str, str, Path, dict[str, str]]] = []
-        self.sent: list[tuple[str, str]] = []
-        self.keys: list[tuple[str, tuple[str, ...]]] = []
-        self.killed: list[str] = []
-        self.new_result = True
-        self.supports_send = True
-        self.send_error: Exception | None = None
-
-    def has_session(self, name: str) -> bool:
-        return name in self.sessions
-
-    def new_session(
-        self, name: str, command: str, cwd: Path, *, env: dict[str, str], **_kwargs: object
-    ) -> bool:
-        self.new_calls.append((name, command, cwd, env))
-        if self.new_result:
-            self.sessions.add(name)
-        return self.new_result
-
-    def send(self, name: str, text: str) -> None:
-        if not self.supports_send:
-            raise NotImplementedError
-        if self.send_error is not None:
-            raise self.send_error
-        self.sent.append((name, text))
-
-    def send_keys(self, name: str, *keys: str) -> None:
-        self.keys.append((name, keys))
-
-    def kill_session(self, name: str, **_kwargs: object) -> tuple[bool, str]:
-        self.killed.append(name)
-        self.sessions.discard(name)
-        return True, "forced"
+def _identity(machine_identity: MachineIdentity) -> None:
+    machine_identity.set(host=_HOST)
 
 
 @pytest.fixture
-def backend(monkeypatch: pytest.MonkeyPatch) -> _FakeShellBackend:
-    fake = _FakeShellBackend()
+def backend(monkeypatch: pytest.MonkeyPatch) -> PageShellBackend:
+    fake = PageShellBackend()
     monkeypatch.setattr(psd, "get_shell_backend", lambda: fake)
     monkeypatch.setattr(psd, "_page_server_occupants", dict)
     monkeypatch.setattr(
@@ -144,15 +106,19 @@ def _token_and_session(conn: psycopg.Connection, agent_id: int, name: str) -> tu
 def test_open_row_creates_persistent_page_session_and_persists_token(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     _insert_page_row(db_conn, agent_id, "My_Page", 12001, tmp_path)
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
@@ -181,13 +147,14 @@ def test_open_row_creates_persistent_page_session_and_persists_token(
 def test_new_row_session_created_before_slow_housekeeping(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A freshly registered row's session is created BEFORE the pass's slow
     housekeeping (the process scan) — serve()'s wait is one poll, not one
@@ -196,7 +163,10 @@ def test_new_row_session_created_before_slow_housekeeping(
     from types import SimpleNamespace
 
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     key = (agent_id, "fast-lane")
     _insert_page_row(db_conn, agent_id, key[1], 12030, tmp_path)
@@ -234,13 +204,14 @@ def test_new_row_session_created_before_slow_housekeeping(
 def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Managed-row liveness comes from the pass's in-process pty record scan,
     not the backend's per-name has_session — a subprocess round-trip (~0.25s)
@@ -248,7 +219,10 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
     from types import SimpleNamespace
 
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     key = (agent_id, "scan-live")
     page_session = f"ava-agent-{agent_id}-shell-9-page-scan-live"
@@ -287,16 +261,20 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
 def test_healthy_page_is_not_resent(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     page_session = f"ava-agent-{agent_id}-shell-3-page-live"
     backend.sessions.add(page_session)
@@ -322,16 +300,20 @@ def test_healthy_page_is_not_resent(
 def test_crashed_server_is_relaunched_in_same_session(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     page_session = f"ava-agent-{agent_id}-shell-3-page-crashed"
     backend.sessions.add(page_session)
@@ -363,20 +345,24 @@ def test_crashed_server_is_relaunched_in_same_session(
 def test_wedged_session_relaunch_failure_kills_and_recreates_the_session(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A session whose shell cannot run the server command — its host gone
     or wedged while the record still reads alive — is torn down and rebuilt
     fresh instead of backing off against the dead transport forever
     (task #2670: the page-server ghost record class)."""
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     page_session = f"ava-agent-{agent_id}-shell-3-page-wedged"
     backend.sessions.add(page_session)
@@ -408,16 +394,20 @@ def test_wedged_session_relaunch_failure_kills_and_recreates_the_session(
 def test_windows_style_backend_recreates_the_session_when_it_cannot_send(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     page_session = f"ava-agent-{agent_id}-shell-3-page-windows"
     backend.sessions.add(page_session)
@@ -443,16 +433,20 @@ def test_windows_style_backend_recreates_the_session_when_it_cannot_send(
 def test_stale_server_in_its_page_session_replaces_that_session(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     key = (agent_id, "stale")
     page_session = f"ava-agent-{agent_id}-shell-3-page-stale"
@@ -481,16 +475,20 @@ def test_stale_server_in_its_page_session_replaces_that_session(
 def test_foreign_port_occupant_is_left_alone_and_backed_off(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     page_session = f"ava-agent-{agent_id}-shell-3-page-foreign"
     backend.sessions.add(page_session)
@@ -519,15 +517,19 @@ def test_foreign_port_occupant_is_left_alone_and_backed_off(
 def test_closed_row_kills_its_page_session(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     _insert_page_row(db_conn, agent_id, "closed", 12006, tmp_path)
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
@@ -544,20 +546,24 @@ def test_closed_row_kills_its_page_session(
 def test_stale_snapshot_never_creates_session_for_closed_row(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The pass snapshot can be seconds stale (process scans, session spawns
     happen after the row read). A row closed after the snapshot must not get a
     session created for it — the next pass would reap the fresh session as an
     orphan, the user-visible serve 502 race (rows 1643/1667 incidents)."""
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     key = (agent_id, "stale-race")
     _insert_page_row(db_conn, agent_id, key[1], 12020, tmp_path)
@@ -586,19 +592,23 @@ def test_stale_snapshot_never_creates_session_for_closed_row(
 def test_stale_snapshot_skips_row_re_registered_mid_pass(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A row re-registered (port/serve_dir changed) after the snapshot must
     not be created from the obsolete state either — the new registration is
     adopted on the next pass instead."""
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     key = (agent_id, "re-registered")
     _insert_page_row(db_conn, agent_id, key[1], 12021, tmp_path)
@@ -628,19 +638,23 @@ def test_stale_snapshot_skips_row_re_registered_mid_pass(
 def test_session_rolled_back_when_row_expires_during_create(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A row that expires in the window between the liveness re-check and the
     session_name write is rolled back too — the UPDATE's liveness condition
     matches the re-check, so an expired row never keeps a ghost session."""
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     key = (agent_id, "mid-create-expire")
     _insert_page_row(db_conn, agent_id, key[1], 12024, tmp_path)
@@ -668,20 +682,24 @@ def test_session_rolled_back_when_row_expires_during_create(
 def test_session_created_for_row_closed_during_create_is_rolled_back(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The row can still close in the narrow window between the liveness
     re-check and the session_name write. The just-created session is rolled
     back (killed) instead of lingering as a recordless ghost the next pass
     would reap as an orphan."""
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     key = (agent_id, "mid-create-close")
     _insert_page_row(db_conn, agent_id, key[1], 12023, tmp_path)
@@ -704,16 +722,20 @@ def test_session_created_for_row_closed_during_create_is_rolled_back(
 def test_terminated_agent_keeps_daemon_page_session(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Agent termination does not close a daemon-supervised page row or shell."""
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     key = (agent_id, "persistent")
     _insert_page_row(db_conn, agent_id, key[1], 12016, tmp_path)
@@ -736,15 +758,19 @@ def test_terminated_agent_keeps_daemon_page_session(
 def test_daemon_restart_kills_the_persisted_session_of_a_closed_row(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
+    backend: PageShellBackend,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     page_session = f"ava-agent-{agent_id}-shell-4-page-closed-after-restart"
     backend.sessions.add(page_session)

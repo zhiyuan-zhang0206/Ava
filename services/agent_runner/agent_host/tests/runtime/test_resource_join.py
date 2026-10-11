@@ -23,7 +23,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 from ... import daemon
 from ...host import AgentHost
@@ -81,7 +81,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
         pool=cast(Any, MagicMock()),
         checkpointer=cast(Any, object()),
         graph=cast(Any, object()),
-        machine="test-box",
+        machine=configured_machine(name="test-box"),
         catalog=model_catalog,
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
@@ -128,7 +128,7 @@ def _exercise_unfinished_main() -> None:
             pool=cast(Any, MagicMock()),
             checkpointer=cast(Any, object()),
             graph=cast(Any, object()),
-            machine="resource-join-test",
+            machine=configured_machine(name="resource-join-test"),
             catalog=cast(ModelCatalog, MagicMock()),
             bus=EventBus.from_settings(),
             db=database(),

@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from base.agents.upload_delivery.paths import MAX_UPLOAD_BYTES
 from base.cluster.authority.unit import UnitIdentity
-from base.cluster.machine import machine_name
 from base.paths import ava_home
 
 NAMESPACE = ".delivered-v1"
@@ -121,8 +120,11 @@ class DeliveryStatus(Record):
     next_attempt_at: datetime | None
 
 
-def current_unit() -> UnitIdentity:
-    return UnitIdentity(machine=machine_name(), home=str(ava_home().resolve()))
+def current_unit(
+    *,
+    local_machine: str,
+) -> UnitIdentity:
+    return UnitIdentity(machine=local_machine, home=str(ava_home().resolve()))
 
 
 def make_manifest(agent_id: int, names: list[str], batch: list[tuple[str, bytes, str]]) -> Manifest:

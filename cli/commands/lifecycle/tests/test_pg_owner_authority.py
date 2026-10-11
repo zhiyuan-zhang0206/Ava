@@ -44,6 +44,8 @@ from base.host.env.dotenv_boot import resolve_ava_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.derived.memory_indexer.backends.pgvector import prepare_table
 from services.derived.memory_indexer.embeddings.factory import get_descriptor
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -125,7 +127,9 @@ def _free_port() -> int:
 
 
 @pytest.fixture()
-def owned_pg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
+def owned_pg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, command_runtime: CommandRuntime
+) -> Iterator[int]:
     """A home-owned Postgres (native launch receipt, owner-only socket) whose
     cluster record `local_owner_authority` resolves; yields its port."""
     home = tmp_path / "home"
@@ -144,7 +148,10 @@ def owned_pg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
     monkeypatch.setattr(cluster, "get_record", _record)
     children: list[subprocess.Popen[bytes]] = []
     try:
-        assert ci._start_pg(pg_port, "", retained_children=children) == 0
+        assert (
+            ci._start_pg(pg_port, "", retained_children=children, machine=command_runtime.machine)
+            == 0
+        )
         yield pg_port
     finally:
         # Re-pin the temp home: teardown must never resolve the operator's home.
@@ -241,7 +248,7 @@ def _provision_by_owner_login(pg_port: int, identity: str, dim: int) -> None:
     with PostgresSaver.from_conn_string(login) as saver:
         saver.setup()
     with psycopg.connect(login) as conn:
-        apply_pending_migrations(conn)
+        apply_pending_migrations(conn, machine_name=lambda: "owner-procedure-test")
     _grant_groups(pg_port, identity)
     with psycopg.connect(login) as conn:
         prepare_table(conn, dim)
@@ -253,19 +260,32 @@ def _grant_groups(pg_port: int, identity: str) -> None:
 
 
 def _provision_by_authority(
-    pg_port: int, identity: str, *, operator_database: Callable[[], Any]
+    pg_port: int,
+    identity: str,
+    *,
+    operator_database: Callable[[], Any],
+    command_runtime: CommandRuntime,
 ) -> bool:
     """Today's start order through the admin authority; returns database creation."""
     admin = ci.pg_admin_url(pg_port)
     created = provision_database(identity, base_admin_url=admin, expected_data_dir=_data_dir())
     _prepare_by_authority(
-        pg_port, identity, database_created=created, operator_database=operator_database
+        pg_port,
+        identity,
+        database_created=created,
+        operator_database=operator_database,
+        command_runtime=command_runtime,
     )
     return created
 
 
 def _prepare_by_authority(
-    pg_port: int, identity: str, *, database_created: bool, operator_database: Callable[[], Any]
+    pg_port: int,
+    identity: str,
+    *,
+    database_created: bool,
+    operator_database: Callable[[], Any],
+    command_runtime: CommandRuntime,
 ) -> None:
     admin = ci.pg_admin_url(pg_port)
     ensure_pgvector_extension(identity, base_admin_url=admin, expected_data_dir=_data_dir())
@@ -275,14 +295,20 @@ def _prepare_by_authority(
         database_created=database_created,
         expected_data_dir=_data_dir(),
     )
-    cmd_migrations_apply(database_factory=operator_database)
+    cmd_migrations_apply(
+        database_factory=operator_database, machine_name=command_runtime.machine.name
+    )
     ensure_pgvector_extension(identity, base_admin_url=admin, expected_data_dir=_data_dir())
     prepare_memory_vectors(database_factory=operator_database)
     _grant_groups(pg_port, identity)
 
 
 def test_authority_matches_owner_login_privileges_and_is_idempotent(
-    owned_pg: int, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+    owned_pg: int,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Same catalog, same application privileges, only the dial changed."""
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
@@ -292,7 +318,12 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
     )
     _bind_cluster_url(monkeypatch, owned_pg, current)
 
-    assert _provision_by_authority(owned_pg, current, operator_database=operator_database) is True
+    assert (
+        _provision_by_authority(
+            owned_pg, current, operator_database=operator_database, command_runtime=command_runtime
+        )
+        is True
+    )
 
     after_birth = _snapshot(_admin_on(owned_pg, current), current)
     assert after_birth == _snapshot(_admin_on(owned_pg, legacy), legacy)
@@ -303,8 +334,18 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
     )
 
     # A second start over the same home changes nothing.
-    assert _provision_by_authority(owned_pg, current, operator_database=operator_database) is False
-    assert cmd_migrations_apply(database_factory=operator_database) == []
+    assert (
+        _provision_by_authority(
+            owned_pg, current, operator_database=operator_database, command_runtime=command_runtime
+        )
+        is False
+    )
+    assert (
+        cmd_migrations_apply(
+            database_factory=operator_database, machine_name=command_runtime.machine.name
+        )
+        == []
+    )
     assert _snapshot(_admin_on(owned_pg, current), current) == after_birth
 
 
@@ -313,6 +354,8 @@ def test_owner_without_login_keeps_every_admin_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The owner is born NOLOGIN; it still migrates, provisions and dumps."""
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
@@ -331,7 +374,11 @@ def test_owner_without_login_keeps_every_admin_path(
         )
 
     _prepare_by_authority(
-        owned_pg, identity, database_created=created, operator_database=operator_database
+        owned_pg,
+        identity,
+        database_created=created,
+        operator_database=operator_database,
+        command_runtime=command_runtime,
     )
 
     authority = local_owner_authority()

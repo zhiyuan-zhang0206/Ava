@@ -18,6 +18,8 @@ from base.agents.context.clients import DatabaseFactory
 from cli.commands.data_plane import bringup as dp
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.lifecycle import start as start_mod
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.factories.data_plane import remote_cluster_record
 from tests.factories.data_plane import remote_urls as remote_urls
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -41,6 +43,8 @@ def test_start_remote_skips_local_instance_and_probes(
     capsys: pytest.CaptureFixture[str],
     _fake_record: None,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     calls: list[str] = []
 
@@ -57,7 +61,9 @@ def test_start_remote_skips_local_instance_and_probes(
     monkeypatch.setattr(dp, "remote_pg_reachable", _remote_postgres)
     monkeypatch.setattr(dp, "remote_redis_reachable", lambda: (True, "redis (10.9.8.7:6380)"))
 
-    rc = start_mod._ensure_gateway_data_plane(database_factory=operator_database)
+    rc = start_mod._ensure_gateway_data_plane(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
 
     assert rc == 0
     assert calls == [], "local instance bring-up must not run against a remote data plane"
@@ -71,6 +77,8 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
     capsys: pytest.CaptureFixture[str],
     _fake_record: None,
     operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
 
     def _no_local_instance(*_args: object, **_kwargs: object) -> int:
@@ -88,7 +96,9 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
         _remote_postgres,
     )
 
-    rc = start_mod._ensure_gateway_data_plane(database_factory=operator_database)
+    rc = start_mod._ensure_gateway_data_plane(
+        database_factory=operator_database, machine=command_runtime.machine
+    )
 
     assert rc == 1
     err = capsys.readouterr().err

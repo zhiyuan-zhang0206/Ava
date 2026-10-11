@@ -10,12 +10,14 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_daemon import _noop_sleep
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.asyncio
@@ -26,6 +28,8 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A pass that dies on a closed connection is re-run; the outcome is returned."""
     calls: list[int] = []
@@ -43,7 +47,9 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
         authority: ConfigAuthority,
         database: Callable[[], Database],
         image: LoadedCommit,
+        local_machine: MachineIdentity,
     ) -> tuple[str, dict[str, object]]:
+        del local_machine
         calls.append(1)
         if len(calls) < 3:
             raise psycopg.OperationalError("the connection is closed")
@@ -63,6 +69,7 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )
     assert status == "completed"
     assert result == {"ok": True}
@@ -77,6 +84,8 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A persistently dying connection raises after the bounded attempts."""
     calls: list[int] = []
@@ -94,7 +103,9 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
         authority: ConfigAuthority,
         database: Callable[[], Database],
         image: LoadedCommit,
+        local_machine: MachineIdentity,
     ) -> tuple[str, dict[str, object]]:
+        del local_machine
         calls.append(1)
         raise psycopg.OperationalError("the connection is closed")
 
@@ -113,6 +124,7 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
             authority=config_authority,
             database=ops_database,
             image=ops_image,
+            local_machine=machine_identity,
         )
     assert len(calls) == daemon._DISPATCH_RETRY_ATTEMPTS
 
@@ -125,6 +137,8 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Any non-OperationalError propagates on the first pass — no retry."""
     calls: list[int] = []
@@ -142,7 +156,9 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
         authority: ConfigAuthority,
         database: Callable[[], Database],
         image: LoadedCommit,
+        local_machine: MachineIdentity,
     ) -> tuple[str, dict[str, object]]:
+        del local_machine
         calls.append(1)
         raise ValueError("not a connection problem")
 
@@ -161,5 +177,6 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
             authority=config_authority,
             database=ops_database,
             image=ops_image,
+            local_machine=machine_identity,
         )
     assert len(calls) == 1

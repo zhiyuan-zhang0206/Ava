@@ -12,6 +12,7 @@ from psycopg_pool import ConnectionPool
 
 import ops.lifecycle as ol
 from base.agents import CrashRecoveryResult
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.loop_health import LoopProgress
@@ -21,6 +22,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.lifecycle import CrashRecoveryRequestFailure
 from services.wake.delivery_watchdog import attempts, rounds, stall_recovery
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _THRESHOLD_S = 30.0
 
@@ -46,6 +48,7 @@ def _crash_marked_agent_with_stalled_chats(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> tuple[int, int]:
     """An idling corpse (`last_turn_fatal_at` set) holding `chats` stalled chats;
     returns the agent id and its OLDEST stalled inbound id."""
@@ -56,6 +59,7 @@ def _crash_marked_agent_with_stalled_chats(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     db.execute(
         "UPDATE agents_meta SET status = 'idling', last_turn_fatal_at = now() WHERE id = %s",
@@ -101,8 +105,9 @@ def _stub_requester(
     calls: list[tuple[int, int]] = []
 
     async def requester(
-        _db: object, _bus: EventBus, agent_id: int, *, stalled_inbound_id: int
+        _db: object, _bus: EventBus, agent_id: int, *, stalled_inbound_id: int, local_machine: str
     ) -> tuple[CrashRecoveryResult | CrashRecoveryRequestFailure, str | None]:
+        del local_machine
         calls.append((agent_id, stalled_inbound_id))
         return decision
 
@@ -122,12 +127,14 @@ async def test_request_runs_once_and_emits_the_decision(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     zombie, inbound_id = _crash_marked_agent_with_stalled_chats(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     calls = _stub_requester(monkeypatch, (decision, None))
     emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
@@ -170,6 +177,7 @@ async def test_one_request_per_owner_for_the_oldest_stalled_chat(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     zombie, oldest = _crash_marked_agent_with_stalled_chats(
         db_conn,
@@ -177,6 +185,7 @@ async def test_one_request_per_owner_for_the_oldest_stalled_chat(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     calls = _stub_requester(monkeypatch, (CrashRecoveryResult.REFUSED, "not_settled:running"))
     monkeypatch.setattr(stall_recovery.telemetry, "emit", _ignore_emit)
@@ -198,12 +207,14 @@ async def test_cooldown_lives_in_the_database_and_suppresses_repeat_requests(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     zombie, _ = _crash_marked_agent_with_stalled_chats(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     calls = _stub_requester(monkeypatch, (CrashRecoveryResult.REFUSED, "not_settled:running"))
     monkeypatch.setattr(stall_recovery.telemetry, "emit", _ignore_emit)
@@ -233,12 +244,14 @@ async def test_disabled_knob_skips_the_round(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     _crash_marked_agent_with_stalled_chats(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     calls = _stub_requester(monkeypatch, (CrashRecoveryResult.HARVESTED, None))
     monkeypatch.setattr(settings.daemon, "delivery_stalled_recovery_enabled", False)
@@ -260,18 +273,21 @@ async def test_hung_request_is_cut_at_the_deadline_and_reported_as_an_error(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     zombie, inbound_id = _crash_marked_agent_with_stalled_chats(
         db_conn,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     emitted: list[dict[str, object]] = []
 
     async def hang(
-        _db: object, _bus: EventBus, agent_id: int, *, stalled_inbound_id: int
+        _db: object, _bus: EventBus, agent_id: int, *, stalled_inbound_id: int, local_machine: str
     ) -> tuple[CrashRecoveryResult | CrashRecoveryRequestFailure, str | None]:
+        del local_machine
         await asyncio.Event().wait()
         return CrashRecoveryResult.HARVESTED, None
 

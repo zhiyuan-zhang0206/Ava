@@ -12,6 +12,7 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -28,6 +29,7 @@ from services.entrypoints.im_bridge.tests.slices import im_bridge_config, telegr
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import FakeGateway
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as pool
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -85,6 +87,7 @@ async def test_new_install_accepts_atomically_and_worker_sends_frozen_target_but
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.initialize_poll()  # The daemon initializes before readiness, not a user command.
@@ -92,7 +95,10 @@ async def test_new_install_accepts_atomically_and_worker_sends_frozen_target_but
         notice = insert_notice(
             conn,
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             ),
             0,
         )
@@ -119,11 +125,15 @@ async def test_two_connections_reverse_commit_do_not_skip_late_lower_id(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll(0)
     agent = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     with pool.connection() as low:
         low_id = insert_notice(low, agent, 0, "low")
@@ -150,12 +160,16 @@ async def test_missing_or_corrupt_legacy_cursor_retains_old_range_only(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     with pool.connection() as conn:
         old = insert_notice(
             conn,
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             ),
             0,
             "old history",
@@ -173,7 +187,10 @@ async def test_missing_or_corrupt_legacy_cursor_retains_old_range_only(
         new = insert_notice(
             conn,
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             ),
             0,
             "new range",
@@ -193,9 +210,13 @@ async def test_valid_legacy_cursor_imports_once_preserving_skip(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     with pool.connection() as conn:
         old = insert_notice(conn, agent, 0, "old")
@@ -219,6 +240,7 @@ async def test_filtered_decision_commits_without_owner_and_does_not_later_replay
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll(0)
@@ -226,7 +248,10 @@ async def test_filtered_decision_commits_without_owner_and_does_not_later_replay
         notice = insert_notice(
             conn,
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             ),
             0,
         )
@@ -248,6 +273,7 @@ async def test_no_owner_holds_without_fake_receipt_then_accepts_when_available(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll(0)
@@ -255,7 +281,10 @@ async def test_no_owner_holds_without_fake_receipt_then_accepts_when_available(
         insert_notice(
             conn,
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             ),
             0,
         )
@@ -276,6 +305,7 @@ async def test_acceptance_rollback_then_lost_response_converge_without_inline_se
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll(0)
@@ -283,7 +313,10 @@ async def test_acceptance_rollback_then_lost_response_converge_without_inline_se
         insert_notice(
             conn,
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             ),
             0,
         )
@@ -325,6 +358,7 @@ async def test_concurrent_normal_acceptances_freeze_first_target_without_duplica
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll(0)
@@ -332,7 +366,10 @@ async def test_concurrent_normal_acceptances_freeze_first_target_without_duplica
         notice = insert_notice(
             conn,
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             ),
             0,
         )
@@ -414,12 +451,16 @@ async def test_unreadable_legacy_payload_uses_only_the_declared_historical_cutov
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     with pool.connection() as conn:
         old = insert_notice(
             conn,
             spawn_agent(
-                catalog=model_catalog, authority=config_authority, database_gate=database_gate
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
             ),
             0,
             "possibly already sent",

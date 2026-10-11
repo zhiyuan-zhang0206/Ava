@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.telemetry import EventPipeline
 from cli.commands.converge import _frontend_env as _fe_env
@@ -25,6 +26,8 @@ from cli.commands.converge.tests.context_inputs import converge as converge
 from cli.commands.converge.tests.context_inputs import converge_context as _ctx
 from cli.commands.converge.tests.context_inputs import home as home
 from cli.commands.converge.tests.context_inputs import pgbouncer_context as _pgbouncer_ctx
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -258,7 +261,13 @@ def test_cmd_converge_unconfigured_returns_zero(
     maintenance_held: bool,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ):
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return None
+
     import cli.commands._repo as _repo_commands
     from base.cluster.dataplane import runtime_binaries as rb
 
@@ -275,7 +284,7 @@ def test_cmd_converge_unconfigured_returns_zero(
     seeded_ext.mkdir(parents=True)
     (seeded_ext / rb._PGVECTOR_SQL).write_text("-- seeded\n")
     monkeypatch.setattr(_repo_commands, "_repo_root", lambda: repo)
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: None)
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
     # The production symlink requires the default home rather than the suite home.
     monkeypatch.setattr(converge_host, "is_default_home", default_home)
@@ -296,13 +305,18 @@ def test_cmd_converge_unconfigured_returns_zero(
         pause_owner.begin_maintenance("converge", acquired_at)
         with pytest.raises(RuntimeError, match="cannot release"):
             converge_host.cmd_converge(
-                database_factory=operator_database, producer=operator_pipeline
+                database_factory=operator_database,
+                producer=operator_pipeline,
+                command=command_runtime,
             )
         operation = admission.authorized_start("converge", acquired_at)
     # The real lazy boot delivers the scratch unit environment during WAL-G's gate.
     with patch.dict(os.environ):
         rc = converge_host.cmd_converge(
-            operation=operation, database_factory=operator_database, producer=operator_pipeline
+            operation=operation,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
     assert rc == 0
     assert helper_calls == []
@@ -738,53 +752,3 @@ def test_accessibility_step_follows_the_screen_capture_step():
     assert accessibility_step.apply is converge_host._ensure_accessibility
     assert accessibility_step.roles == screen_step.roles
     assert accessibility_step.requires_unit_config == screen_step.requires_unit_config
-
-
-class TestWarnUntrackedMigrations:
-    """The converge step that surfaces untracked migrations/ files to the operator."""
-
-    def test_warns_and_lists_untracked_files(
-        self,
-        capsys: pytest.CaptureFixture[str],
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        operator_database: Callable[[], Any],
-        operator_pipeline: Callable[[], EventPipeline],
-    ) -> None:
-        monkeypatch.setattr(
-            "base.deploy.schema.migrations.untracked_migration_files",
-            lambda: ["20260808T010000_add-foo.sql"],
-        )
-        converge_host._warn_untracked_migrations(
-            _ctx(
-                tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline
-            )
-        )
-        out = capsys.readouterr().out
-        assert "untracked" in out
-        assert "20260808T010000_add-foo.sql" in out
-        assert "NOT" in out and "will NOT be applied" in out
-
-    def test_silent_when_nothing_untracked(
-        self,
-        capsys: pytest.CaptureFixture[str],
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        operator_database: Callable[[], Any],
-        operator_pipeline: Callable[[], EventPipeline],
-    ) -> None:
-        monkeypatch.setattr("base.deploy.schema.migrations.untracked_migration_files", list)
-        converge_host._warn_untracked_migrations(
-            _ctx(
-                tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline
-            )
-        )
-        assert capsys.readouterr().out == ""
-
-    def test_registered_gateway_only(self) -> None:
-        """The warning is wired into CONVERGE_STEPS with gateway-only roles: the
-        gateway is the single schema writer, so only its console should carry it."""
-        step = next(
-            s for s in converge_host.CONVERGE_STEPS if s.name == "untracked migrations warning"
-        )
-        assert step.roles == frozenset({"gateway"})

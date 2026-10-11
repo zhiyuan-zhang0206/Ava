@@ -12,8 +12,10 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from ops.rpc_schemas import UploadReceivePayload
 from ops.uploads import upload_receive_op
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _stub_gateway(monkeypatch: pytest.MonkeyPatch, raw: bytes) -> dict[str, list[str]]:
@@ -42,7 +44,7 @@ def _stub_gateway(monkeypatch: pytest.MonkeyPatch, raw: bytes) -> dict[str, list
 
 class TestUploadReceiveOp:
     def test_pulls_upload_into_local_uploads_dir(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
     ) -> None:
         """Happy path: fetches the file from the gateway and writes it into
         ~/Downloads/AvaAgent-<id>/ on this runner; returns the local path."""
@@ -53,7 +55,10 @@ class TestUploadReceiveOp:
         directory.mkdir(parents=True)
         directory.chmod(0o755)
 
-        result = upload_receive_op(UploadReceivePayload(agent_id=7, name="report.pdf"))
+        result = upload_receive_op(
+            UploadReceivePayload(agent_id=7, name="report.pdf"),
+            local_machine=machine_identity.name(),
+        )
 
         assert seen["urls"] == ["http://gw.test:8000/api/agents/7/uploads/report.pdf"]
         dest = tmp_path / "Downloads" / "AvaAgent-7" / "report.pdf"
@@ -62,19 +67,23 @@ class TestUploadReceiveOp:
         assert dest.stat().st_mode & 0o777 == 0o600
         assert result.path == str(dest)
 
-    def test_sanitizes_filename(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_sanitizes_filename(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
+    ) -> None:
         """A name with separators is sanitized before it hits the disk."""
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         _stub_gateway(monkeypatch, b"data")
 
-        result = upload_receive_op(UploadReceivePayload(agent_id=7, name="a/b.txt"))
+        result = upload_receive_op(
+            UploadReceivePayload(agent_id=7, name="a/b.txt"), local_machine=machine_identity.name()
+        )
 
         dest = tmp_path / "Downloads" / "AvaAgent-7" / "a_b.txt"
         assert dest.read_bytes() == b"data"
         assert result.path == str(dest)
 
     def test_gateway_unreachable_raises_oserror(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
     ) -> None:
         """A failed fetch raises OSError — the daemon surfaces it as a 'failed'
         op result and the gateway degrades to the URL-only message."""
@@ -90,10 +99,13 @@ class TestUploadReceiveOp:
         monkeypatch.setattr(mod, "gateway_api_base", lambda: "http://gw.test:8000")
 
         with pytest.raises(OSError):
-            upload_receive_op(UploadReceivePayload(agent_id=7, name="report.pdf"))
+            upload_receive_op(
+                UploadReceivePayload(agent_id=7, name="report.pdf"),
+                local_machine=machine_identity.name(),
+            )
 
     def test_gateway_404_raises_oserror(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
     ) -> None:
         """A 404 (file gone on the gateway) raises OSError, not a silent
         partial write."""
@@ -119,6 +131,9 @@ class TestUploadReceiveOp:
         monkeypatch.setattr(mod, "gateway_api_base", lambda: "http://gw.test:8000")
 
         with pytest.raises(OSError):
-            upload_receive_op(UploadReceivePayload(agent_id=7, name="report.pdf"))
+            upload_receive_op(
+                UploadReceivePayload(agent_id=7, name="report.pdf"),
+                local_machine=machine_identity.name(),
+            )
         # Nothing was written.
         assert not (tmp_path / "Downloads" / "AvaAgent-7" / "report.pdf").exists()

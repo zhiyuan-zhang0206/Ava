@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import service_selection
 from cli.commands._repo import (
@@ -42,7 +42,9 @@ def _root_tree_units() -> dict[str, dict[str, object]]:
     return root_driver._root_units(status)
 
 
-def _status_roster(roles: MachineRoles | None) -> tuple[tuple[ServiceSpec, str | None], ...]:
+def _status_roster(
+    roles: MachineRoles | None, *, machine: MachineIdentity
+) -> tuple[tuple[ServiceSpec, str | None], ...]:
     """Explain every service excluded by capabilities or the durable desired set."""
     # Show this host's role roster WITH each gated-out service's reason, so a
     # service the start path drops (ava-browser with no display) is visible +
@@ -53,7 +55,7 @@ def _status_roster(roles: MachineRoles | None) -> tuple[tuple[ServiceSpec, str |
     if roles is None:
         services_to_show = tuple((spec, None) for spec in build_services())
     else:
-        services_to_show = _services_for_roles_annotated(roles)
+        services_to_show = _services_for_roles_annotated(roles, machine=machine)
     selection = service_selection.read_selection()
     return tuple(
         (spec, reason if selection.enabled(spec.session) else "disabled by desired service set")
@@ -61,16 +63,16 @@ def _status_roster(roles: MachineRoles | None) -> tuple[tuple[ServiceSpec, str |
     )
 
 
-def cmd_status(*, database_factory: DatabaseFactory) -> int:
+def cmd_status(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> int:
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands._repo as _repo_commands
 
     repo = _repo_root()
-    roles = _repo_commands._roles_or_none()
+    roles = _repo_commands._roles_or_none(machine=machine)
     print(f"[ava status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n")
     print_hold_section()
     print()
-    services_to_show = _status_roster(roles)
+    services_to_show = _status_roster(roles, machine=machine)
     name_w = max((len(session_name(spec.session)) for spec, _reason in services_to_show), default=7)
     # The root is the only service owner. Do not infer liveness from old records.
     root_units = _root_tree_units()
@@ -102,14 +104,14 @@ def cmd_status(*, database_factory: DatabaseFactory) -> int:
     # the role — decides).
     from cli.commands.observability.lgtm import is_lgtm_host, print_lgtm_status
 
-    if is_lgtm_host():
+    if is_lgtm_host(machine=machine):
         print("\nlgtm (observability backend):")
         print_lgtm_status()
 
     # The private-network relay is a host data-plane resource.
     if not runner_only:
         print("\nredis bridge (private-network ingress):")
-        print_redis_bridge_status()
+        print_redis_bridge_status(machine=machine)
 
     # any installed host: surface the prod source ($AVA_HOME/source) branch state.
     # A source-run home executes that checkout. Source-mode releases materialize

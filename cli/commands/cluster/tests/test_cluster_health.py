@@ -8,12 +8,11 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
-import psycopg
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 from base.db.tests.fakes import patch_database
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster.tests.health_probe_inputs import (
@@ -36,6 +35,8 @@ from cli.commands.cluster.tests.health_probe_inputs import (
 from cli.commands.cluster.tests.health_probe_inputs import (
     signals as signals,
 )
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
@@ -457,8 +458,15 @@ def test_signal_names_the_failed_check(
 
 def test_service_probes_skips_gated_but_rejects_unknown_specs(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Every intended service needs positive evidence; disabled services do not."""
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
     from ops.roster.service_spec import (
@@ -475,7 +483,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
     gated = _spec("browser")
     probeless = _spec("browser-mcp")
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(
         _repo_commands,
         "_services_for_roles_annotated",
@@ -493,12 +501,22 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
 
     monkeypatch.setattr(_probe_commands, "probe_service", _probe)
 
-    assert cluster_health._service_probes() == ["frontend", "browser-mcp"]
+    assert cluster_health._service_probes(machine=command_runtime.machine) == [
+        "frontend",
+        "browser-mcp",
+    ]
 
 
 def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
     import ops.roster.service_spec as _service_spec
@@ -508,7 +526,7 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
     recorded_sessions: list[str] = []
 
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
 
     def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
@@ -517,13 +535,20 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
 
     monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
-    assert cluster_health._service_probes() == []
+    assert cluster_health._service_probes(machine=command_runtime.machine) == []
     assert "otel-collector" not in recorded_sessions
 
 
 def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_endpoint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
     import ops.roster.service_spec as _service_spec
@@ -533,7 +558,7 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
     recorded_sessions: list[str] = []
 
     monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
 
     def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
@@ -542,13 +567,20 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
 
     monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
-    assert cluster_health._service_probes() == []
+    assert cluster_health._service_probes(machine=command_runtime.machine) == []
     assert "otel-collector" in recorded_sessions
 
 
 def test_service_probes_checks_otel_collector_on_lgtm_gateway(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
     import ops.roster.service_spec as _service_spec
@@ -558,7 +590,7 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
     (tmp_home / "lgtm-host").touch()
     recorded_sessions: list[str] = []
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
 
     def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
@@ -567,18 +599,25 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
 
     monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
-    assert cluster_health._service_probes() == []
+    assert cluster_health._service_probes(machine=command_runtime.machine) == []
     assert "otel-collector" in recorded_sessions
 
 
-def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_probes_carry_the_failing_fact(
+    monkeypatch: pytest.MonkeyPatch, *, command_runtime: CommandRuntime
+) -> None:
     """A wrong-home listener must be diagnosed distinctly from an absent listener."""
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
     from ops.roster.service_spec import _GATEWAY, ServiceSpec
 
     spec = ServiceSpec(session="ops", cmd="x", capabilities=_GATEWAY, requires_db=True)
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(
         _repo_commands,
         "_services_for_roles_annotated",
@@ -592,21 +631,40 @@ def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) 
         ),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert cluster_health._service_probes() == ["ops (home='/home/ava/.ava' != '/u/.ava')"]
+    assert cluster_health._service_probes(machine=command_runtime.machine) == [
+        "ops (home='/home/ava/.ava' != '/u/.ava')"
+    ]
 
 
-def test_service_probes_unknown_roster_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_probes_unknown_roster_is_unhealthy(
+    monkeypatch: pytest.MonkeyPatch, *, command_runtime: CommandRuntime
+) -> None:
     """A responding gateway cannot replace the missing service inventory."""
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return None
+
     import cli.commands._repo as _repo_commands
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: None)
-    assert cluster_health._service_probes() == ["service roster unavailable"]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    assert cluster_health._service_probes(machine=command_runtime.machine) == [
+        "service roster unavailable"
+    ]
 
 
 @pytest.mark.parametrize("mode,names", [("only", ["gateway"]), ("except", ["frontend"])])
 def test_service_probes_respect_durable_service_intent(
-    monkeypatch: pytest.MonkeyPatch, mode: str, names: list[str]
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    names: list[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
     import ops.roster.service_spec as _service_spec
@@ -622,7 +680,7 @@ def test_service_probes_respect_durable_service_intent(
         assert spec is wanted
         return _probe_commands.ServiceProbe(True, "owned", "ready")
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(_repo_commands, "_services_for_roles_annotated", roster)
     monkeypatch.setattr(_probe_commands, "probe_service", probe)
     monkeypatch.setattr(
@@ -630,18 +688,26 @@ def test_service_probes_respect_durable_service_intent(
         "read_selection",
         lambda: service_selection.ServiceSelection(mode, frozenset(names)),
     )
-    assert cluster_health._service_probes() == []
+    assert cluster_health._service_probes(machine=command_runtime.machine) == []
 
 
-def test_service_probes_unreadable_selection_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_probes_unreadable_selection_is_unhealthy(
+    monkeypatch: pytest.MonkeyPatch, *, command_runtime: CommandRuntime
+) -> None:
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import cli.commands._repo as _repo_commands
 
     def unreadable() -> None:
         raise ValueError("corrupt selection")
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr("base.deploy.lifecycle.service_selection.read_selection", unreadable)
-    assert cluster_health._service_probes() == ["service selection unavailable (corrupt selection)"]
+    assert cluster_health._service_probes(machine=command_runtime.machine) == [
+        "service selection unavailable (corrupt selection)"
+    ]
 
 
 # ── the gate's entry port rides in check 5 (alert-only) ───────────────────────
@@ -684,19 +750,26 @@ def _redis_bridge(**kw: object) -> object:
 
 def test_redis_bridge_probe_reports_running_but_dead_listener(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A loaded launchd job cannot hide a relay whose PING path is dead."""
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"gateway"})
+
     import cli.commands._repo as _repo_commands
     import cli.commands.converge.redis_bridge as bridge
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(
         bridge,
         "probe_redis_bridge",
         lambda *_a: _redis_bridge(serving=False, detail="connection refused"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    failure = cluster_health._redis_bridge_probe()
+    failure = cluster_health._redis_bridge_probe(machine=command_runtime.machine)
 
     assert failure is not None
     assert "failed authenticated PING" in failure
@@ -718,80 +791,3 @@ def test_redis_bridge_failure_signals_without_arming_rollback(
 
 
 # ── crash-loop detection: category=audit only (W9 fix) ──────────────────────
-
-
-def _record_resurrect(
-    db: psycopg.Connection, agent_id: int, *, minutes_ago: float, table: str = "audit_events"
-) -> None:
-    if table == "audit_events":
-        db.execute(
-            "INSERT INTO audit_events (event_uid, ts, agent_id, machine, process, event_name, "
-            "level, source) VALUES (%s, now() - (%s * interval '1 minute'), %s, 'm', 'p', "
-            "'resurrect', 'info', 'test')",
-            (uuid4().int % (1 << 62), minutes_ago, agent_id),
-        )
-    else:  # the telemetry mirror of the same fact must not count
-        db.execute(
-            "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
-            "category, event_name, level, source) VALUES (%s, now() - (%s * interval '1 minute'), "
-            "%s, 'm', 'c', 'p', 'telemetry', 'resurrect', 'info', 'test')",
-            (uuid4().int % (1 << 62), minutes_ago, agent_id),
-        )
-    db.commit()
-
-
-def test_crash_loop_counts_the_audit_resurrect_rows_of_the_window(
-    db_conn: psycopg.Connection, operator_database: Callable[[], Any]
-) -> None:
-    """Only audit resurrects in the window count; telemetry mirrors and old rows do not."""
-    for _ in range(2):
-        _record_resurrect(db_conn, 1, minutes_ago=10)
-    _record_resurrect(db_conn, 1, minutes_ago=300)  # outside the window
-    _record_resurrect(db_conn, 1, minutes_ago=5, table="telemetry_events")
-
-    assert (
-        cluster_health._crash_loop_detection(
-            max_restarts=2, window_minutes=60, database_factory=operator_database
-        )
-        is True
-    )
-
-    _record_resurrect(db_conn, 1, minutes_ago=3)
-    assert (
-        cluster_health._crash_loop_detection(
-            max_restarts=2, window_minutes=60, database_factory=operator_database
-        )
-        is False
-    )
-
-
-def test_crash_loop_is_judged_per_agent(
-    db_conn: psycopg.Connection, operator_database: Callable[[], Any]
-) -> None:
-    for agent_id in (1, 2, 3):
-        for _ in range(2):
-            _record_resurrect(db_conn, agent_id, minutes_ago=10)
-
-    assert (
-        cluster_health._crash_loop_detection(
-            max_restarts=2, window_minutes=60, database_factory=operator_database
-        )
-        is True
-    )
-
-
-def test_crash_loop_is_healthy_when_the_database_cannot_be_read(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
-) -> None:
-
-    def unreachable(**_kwargs: object) -> object:
-        raise OSError("database unreachable")
-
-    patch_database(monkeypatch, connect=unreachable)
-
-    assert (
-        cluster_health._crash_loop_detection(
-            max_restarts=0, window_minutes=60, database_factory=operator_database
-        )
-        is True
-    )

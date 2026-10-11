@@ -10,6 +10,7 @@ propagate to the caller.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -244,8 +245,16 @@ def test_unset_machine_name_drops_only_the_machine_clause(monkeypatch: pytest.Mo
     def _broken() -> str:
         raise RuntimeError("settings unreadable")
 
-    monkeypatch.setattr(machine, "machine_name", _unset)
-    assert _machine_clause() is None
-    monkeypatch.setattr(machine, "machine_name", _broken)
+    def context(reader: Callable[[], str]) -> AvaContext:
+        return AvaContext(
+            machine=machine.MachineIdentity(
+                name=reader,
+                role=lambda: frozenset({"agent-runner"}),
+                host=lambda: "localhost",
+                description=lambda: None,
+            )
+        )
+
+    assert _machine_clause(context(_unset)) is None
     with pytest.raises(RuntimeError, match="settings unreadable"):
-        _machine_clause()
+        _machine_clause(context(_broken))

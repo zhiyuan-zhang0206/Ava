@@ -30,6 +30,7 @@ from agent.hooks.compact import (
     emergency_compact_summary,
 )
 from base.agents.context import AvaContext
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -52,6 +53,7 @@ from services.agent_runner.agent_host.tests.test_circuit_breaker import (
     _spawn_child_under_idling_ancestor,
 )
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -152,6 +154,7 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Two consecutive permanent rejections with no successful turn between
     them halt automatic recovery: the durable streak reaches the threshold,
@@ -163,6 +166,7 @@ async def test_two_permanent_rejections_trip_the_recovery_breaker(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     publisher = _RecordingPublisher()
 
@@ -206,6 +210,7 @@ async def test_transient_rejection_does_not_count_or_trip(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Only the PERMANENT class counts: a configured-fatal/transient rejection
     aborts the turn but never arms the recovery breaker."""
@@ -214,6 +219,7 @@ async def test_transient_rejection_does_not_count_or_trip(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
     exc = FatalProviderError(
         "rate limited", error_class="transient", provider="deepseek", status=429
@@ -240,6 +246,7 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The completed-turn UPDATE is the single reset: it clears the corpse
     marker, the recovery-breaker streak, and the recorded reject reason
@@ -251,6 +258,7 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
     db_conn.execute(
         "UPDATE agents_meta SET permanent_reject_streak = 2, "

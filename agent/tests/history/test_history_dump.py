@@ -47,6 +47,7 @@ from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.clock import Clock
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.domains.agent.compaction import AgentCompactionSettings
 from base.config.service_read import ConfigAuthority
@@ -57,6 +58,7 @@ from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import ContextBudget
 from base.lm.plugin_providers import build_model_catalog
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 # ── helpers ──
@@ -489,6 +491,7 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Enabled → the claim-node compact path (agent-written summary) dumps the
     pre-compact state.messages and parks the note after the summary in the
@@ -497,7 +500,10 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     tool_result on the wire."""
     _patch_dump_enabled(monkeypatch, tmp_path)
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     _insert_inbound_kind(db_conn, tid, "agent-written summary", "compact_summary")
     state = AgentState(
@@ -540,11 +546,15 @@ async def test_claim_compact_summary_no_note_when_disabled(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Config off → claim-path compact tail is exactly today's (summary only)."""
     _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     _insert_inbound_kind(db_conn, tid, "agent-written summary", "compact_summary")
     state = AgentState(

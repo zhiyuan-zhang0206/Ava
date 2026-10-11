@@ -15,6 +15,7 @@ from agent.state import CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
 from base import telemetry
 from base.agents.context import AvaContext
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -23,6 +24,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -43,12 +45,14 @@ async def test_the_breaker_open_event_is_recorded_in_audit_events(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = spawn_agent(
         spawner="user",
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
 
     await _handle_fatal_llm_error(
@@ -82,12 +86,14 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = spawn_agent(
         spawner="user",
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
     reported: list[str] = []
 

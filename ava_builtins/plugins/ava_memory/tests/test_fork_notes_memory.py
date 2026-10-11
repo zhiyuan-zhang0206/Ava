@@ -23,13 +23,15 @@ from agent.graph.prompt.context_notes import FRAMEWORK_NOTES
 from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from agent.messages import NoteTag
 from agent.state import AgentState
-from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
+from agent.tests.claim.claim_support import insert_inbound_kind, make_runtime, thread_config
 from ava.sdk_surface.process_context import process_clients
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -80,6 +82,7 @@ async def test_fork_end_to_end_single_copy_each_note(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The full fork claim with the real registry: the inherited head carries a
     source-id note, a source-memory note, a source-preloads note and the
@@ -87,9 +90,12 @@ async def test_fork_end_to_end_single_copy_each_note(
     remains (the grafted, new-agent copies), and the cluster index survives
     exactly once — no second copy grafted."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
+    insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
 
     def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:
         return HumanMessage(
@@ -110,7 +116,7 @@ async def test_fork_end_to_end_single_copy_each_note(
     with closing(
         process_clients(database=lambda: Database.from_settings(gate=database_gate))
     ) as clients:
-        runtime = _make_runtime(
+        runtime = make_runtime(
             ops_pool=aops_pool,
             extensions=_registry(memory_plugin),
             agent_id=tid,
@@ -119,7 +125,7 @@ async def test_fork_end_to_end_single_copy_each_note(
         cmd = await claim_node(
             AgentState(messages=list(inherited)),
             Runtime(context=replace(runtime.context, clients=clients)),
-            _config(tid),
+            thread_config(tid),
         )
 
     assert cmd.goto == "before_llm"
@@ -165,6 +171,7 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The cache contract (task #2694): everything in front of the first
     source-identity note survives the fork rebuild byte-identical — same
@@ -172,9 +179,12 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
     source-identity notes drop, and the conversation tail follows the grafted
     sequence."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
+    insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
     inherited: list[AnyMessage] = [
         SystemMessage(content="sys"),
         _fake_note(NoteTag.MEMORY, "shared pool index (kept)", "note-cluster"),
@@ -186,7 +196,7 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
     with closing(
         process_clients(database=lambda: Database.from_settings(gate=database_gate))
     ) as clients:
-        runtime = _make_runtime(
+        runtime = make_runtime(
             ops_pool=aops_pool,
             extensions=_registry(memory_plugin),
             agent_id=tid,
@@ -195,7 +205,7 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
         cmd = await claim_node(
             AgentState(messages=list(inherited)),
             Runtime(context=replace(runtime.context, clients=clients)),
-            _config(tid),
+            thread_config(tid),
         )
     msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])
     assert isinstance(msgs[0], RemoveMessage)

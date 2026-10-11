@@ -20,7 +20,6 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
 from base.agents.impersonation.status import ImpersonationStatus, parse_lease
-from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.private_storage import write_private_bytes
@@ -109,7 +108,13 @@ def public_session(lease: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def resolve(db: Database, agent_id: int, session_id: int) -> dict[str, Any]:
+def resolve(
+    db: Database,
+    agent_id: int,
+    session_id: int,
+    *,
+    local_machine: str,
+) -> dict[str, Any]:
     if isinstance(session_id, bool) or not isinstance(session_id, int) or session_id < 0:
         raise ValueError("session_id must be a nonnegative integer")
     with db.connect() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -121,7 +126,7 @@ def resolve(db: Database, agent_id: int, session_id: int) -> dict[str, Any]:
     if lease is None:
         raise ValueError(f"Agent {agent_id} has no impersonation session {session_id}")
     parse_lease(lease)
-    if lease["machine"] != machine_name():
+    if lease["machine"] != local_machine:
         raise ValueError("Impersonation operations must run on the agent's machine")
     return lease
 
@@ -213,6 +218,7 @@ def say(
     *,
     phase: str = "commentary",
     message_key: str,
+    local_machine: str,
 ) -> int:
     """Commit a user-visible reply before publishing its refresh notification."""
     from base.agents.impersonation._store import lock_lease, require_active_locked
@@ -222,7 +228,12 @@ def say(
         raise ValueError("A message needs nonempty content/key and commentary or final phase")
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        require_active_locked(conn, lease, caller)
+        require_active_locked(
+            conn,
+            lease,
+            caller,
+            local_machine=local_machine,
+        )
         seq = append(
             conn,
             lease_id,

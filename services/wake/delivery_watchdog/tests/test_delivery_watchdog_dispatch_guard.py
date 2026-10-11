@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
@@ -30,6 +32,7 @@ from services.wake.delivery_watchdog.daemon import (
     dispatch_wakes,
     select_pending_for_dispatch,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _DISPATCH_THRESHOLD_S = 1.0
 _MAX_DISPATCH_COUNT = 5
@@ -38,11 +41,17 @@ _HOST_STALENESS_S = 120.0
 
 
 @pytest.fixture
-def event_pipeline(database: Database) -> Iterator[telemetry.EventPipeline]:
+def event_pipeline(
+    database: Database, machine_identity: MachineIdentity, unit_home: Path
+) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the service operation and mirror barrier."""
-    pipeline = telemetry.build_pipeline(database=lambda: database)
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity, home=unit_home
+    )
     try:
-        telemetry.init_telemetry(process="test-wake-service", pipeline=pipeline)
+        telemetry.init_telemetry(
+            process="test-wake-service", pipeline=pipeline, machine_reader=machine_identity.name
+        )
         yield pipeline
     finally:
         pipeline.stop(timeout=2)
@@ -63,6 +72,7 @@ def _make_idling_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """spawn_agent creates the agents_meta row (create_agent does not — that
     is the spawn path's job); the dispatch filter reads owner status, so tests
@@ -74,6 +84,7 @@ def _make_idling_agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (aid,))
@@ -112,11 +123,11 @@ def _set_host_verdict(
     consecutive_failures: int = 0,
     age_s: float = 0.0,
     machine: str | None = None,
+    local_machine: MachineIdentity,
 ) -> None:
     """Upsert the `machine_probe` verdict the dispatch host gate reads."""
-    from base.cluster.machine import machine_name
 
-    name = machine or machine_name()
+    name = machine or local_machine.name()
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_probe (machine_name, online, agent_host_online, "
@@ -140,6 +151,7 @@ class TestSelectPendingForDispatch:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """All kinds count (a lost wake strands terminate/restart too), any
         kind of stale pending of an idling owner is dispatched."""
@@ -148,6 +160,7 @@ class TestSelectPendingForDispatch:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         old_chat = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5, database_gate=database_gate
@@ -185,6 +198,7 @@ class TestSelectPendingForDispatch:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Fresh rows (still within the dispatch threshold) and owners not in
         'idling' (running = mid-turn queue, terminated = its own controller)
@@ -194,6 +208,7 @@ class TestSelectPendingForDispatch:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S - 0.3, database_gate=database_gate
@@ -229,12 +244,14 @@ class TestSelectPendingForDispatch:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = _make_idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -307,12 +324,14 @@ class TestSelectPendingForDispatch:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = _make_idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -324,7 +343,13 @@ class TestSelectPendingForDispatch:
             return True
 
         monkeypatch.setattr("base.db.publish_inbound_wake", record_publish)
-        _set_host_verdict(db_conn, online=False, agent_host=None, consecutive_failures=2)
+        _set_host_verdict(
+            db_conn,
+            online=False,
+            agent_host=None,
+            consecutive_failures=2,
+            local_machine=machine_identity,
+        )
         assert self._dispatch(pool, database_gate=database_gate) == 0
         assert publishes == []
         with db_conn.cursor() as cur:
@@ -335,7 +360,9 @@ class TestSelectPendingForDispatch:
             )
             assert cur.fetchone() == (0, None, None)
 
-        _set_host_verdict(db_conn)  # host recovers: fresh healthy verdict
+        _set_host_verdict(
+            db_conn, local_machine=machine_identity
+        )  # host recovers: fresh healthy verdict
         assert self._dispatch(pool, database_gate=database_gate) == 1
         assert publishes == [(aid, str(iid))]
 
@@ -348,6 +375,7 @@ class TestSelectPendingForDispatch:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Real writer shape for a lone failed probe — online=false,
         consecutive_failures=1, agent_host_online NULL (a failed probe nulls
@@ -358,6 +386,7 @@ class TestSelectPendingForDispatch:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -369,7 +398,13 @@ class TestSelectPendingForDispatch:
             return True
 
         monkeypatch.setattr("base.db.publish_inbound_wake", record_publish)
-        _set_host_verdict(db_conn, online=False, agent_host=None, consecutive_failures=1)
+        _set_host_verdict(
+            db_conn,
+            online=False,
+            agent_host=None,
+            consecutive_failures=1,
+            local_machine=machine_identity,
+        )
         assert self._dispatch(pool, database_gate=database_gate) == 1
         assert publishes == [(aid, str(iid))]
 
@@ -381,6 +416,7 @@ class TestSelectPendingForDispatch:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A NULL host verdict with no failed probe yet (cf=0) sits outside
         the grace window: an absent verdict freezes."""
@@ -389,11 +425,12 @@ class TestSelectPendingForDispatch:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
         )
-        _set_host_verdict(db_conn, agent_host=None)
+        _set_host_verdict(db_conn, agent_host=None, local_machine=machine_identity)
         assert self._select(pool) == []
 
     def test_hostless_machine_freezes_dispatch(
@@ -404,17 +441,19 @@ class TestSelectPendingForDispatch:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         aid = _make_idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
         )
-        _set_host_verdict(db_conn, agent_host=False)
+        _set_host_verdict(db_conn, agent_host=False, local_machine=machine_identity)
         assert self._select(pool) == []
 
     def test_stale_and_missing_verdicts_freeze_dispatch(
@@ -425,24 +464,25 @@ class TestSelectPendingForDispatch:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
-        from base.cluster.machine import machine_name
 
         aid = _make_idling_agent(
             db_conn,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
         )
-        _set_host_verdict(db_conn, age_s=_HOST_STALENESS_S + 1)
+        _set_host_verdict(db_conn, age_s=_HOST_STALENESS_S + 1, local_machine=machine_identity)
         assert self._select(pool) == []
         with db_conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM machine_probe WHERE machine_name = %s",
-                (machine_name(),),
+                (machine_identity.name(),),
             )
         db_conn.commit()
         assert self._select(pool) == []
@@ -456,6 +496,7 @@ class TestSelectPendingForDispatch:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         import json
         from datetime import UTC, datetime
@@ -467,6 +508,7 @@ class TestSelectPendingForDispatch:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         iid = _insert_old_inbound(
             db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1, database_gate=database_gate
@@ -498,7 +540,7 @@ class TestSelectPendingForDispatch:
                     events.append(event)
             return events
 
-        _set_host_verdict(db_conn, agent_host=False)
+        _set_host_verdict(db_conn, agent_host=False, local_machine=machine_identity)
         assert self._dispatch(pool, database_gate=database_gate) == 0
         with db_conn.cursor() as cur:
             cur.execute(
@@ -512,7 +554,7 @@ class TestSelectPendingForDispatch:
             time.sleep(0.05)
         assert poisoned_events() == []
 
-        _set_host_verdict(db_conn)
+        _set_host_verdict(db_conn, local_machine=machine_identity)
         # At the cap there is nothing left to dispatch; the poison pass fires now.
         assert self._dispatch(pool, database_gate=database_gate) == 0
         events: list[dict[str, object]] = []
@@ -532,8 +574,10 @@ class TestSelectPendingForDispatch:
 
 
 @pytest.fixture(autouse=True)
-def _healthy_host_verdict(db_conn: psycopg.Connection) -> None:
+def _healthy_host_verdict(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
     """Normal dispatch condition: a fresh reachable machine with a live host.
 
     Host-gate tests override the verdict inside the test body."""
-    _set_host_verdict(db_conn)
+    _set_host_verdict(db_conn, local_machine=machine_identity)

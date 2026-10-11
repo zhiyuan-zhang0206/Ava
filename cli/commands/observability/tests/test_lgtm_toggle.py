@@ -9,6 +9,8 @@ import pytest
 from base.deploy.lifecycle.service_selection import ServiceSelection
 from base.telemetry import EventPipeline
 from cli.commands.observability import lgtm
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -34,11 +36,16 @@ def test_on_preserves_explicit_other_service_choices(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     marker, calls = _wire(monkeypatch, tmp_path, ServiceSelection("only", frozenset({"ops"})))
     assert (
         lgtm.cmd_lgtm_on(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )
@@ -58,6 +65,8 @@ def test_off_disables_backends_even_on_role_declared_station(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     marker, calls = _wire(monkeypatch, tmp_path, ServiceSelection("except", frozenset({"browser"})))
     marker.touch()
@@ -65,7 +74,10 @@ def test_off_disables_backends_even_on_role_declared_station(
     data.write_bytes(b"durable history")
     assert (
         lgtm.cmd_lgtm_off(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )
@@ -87,6 +99,8 @@ def test_off_only_backend_allowlist_does_not_enable_all_services(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from types import SimpleNamespace
 
@@ -101,7 +115,10 @@ def test_off_only_backend_allowlist_does_not_enable_all_services(
     )
     assert (
         lgtm.cmd_lgtm_off(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 0
     )
@@ -120,6 +137,8 @@ def test_normal_start_refusal_is_not_reported_as_toggle_success(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     _wire(monkeypatch, tmp_path, ServiceSelection("except", frozenset()))
 
@@ -129,7 +148,10 @@ def test_normal_start_refusal_is_not_reported_as_toggle_success(
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", refuse)
     assert (
         lgtm.cmd_lgtm_on(
-            retained_children=[], database_factory=operator_database, producer=operator_pipeline
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
         )
         == 1
     )

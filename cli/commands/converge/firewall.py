@@ -29,6 +29,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from base.cluster.machine import MachineIdentity
 from base.host import macos_firewall as fw
 from base.host.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
 from cli.commands.converge.spec import ConvergeCtx
@@ -70,21 +71,20 @@ def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
     return tuple(p for p in candidates if p.exists())
 
 
-def audit_this_host(roles: frozenset[str]) -> FirewallAudit:
+def audit_this_host(roles: frozenset[str], *, machine: MachineIdentity) -> FirewallAudit:
     """Audit this host's own serving binaries. The one entry point every caller shares.
 
     Converge calls it to report proactively; `ava firewall status` / `sync` call
     it on demand. Same detector, so they can never disagree about whether the
     firewall is the cause.
     """
-    from base.cluster.machine import reachable_host
 
     required = serving_binaries(roles)
     if not required:
         return FirewallAudit(
             FirewallVerdict.ALLOWED, "no serving binary resolved on this host to audit"
         )
-    return audit_allowlist(required, machine_host=reachable_host())
+    return audit_allowlist(required, machine_host=machine.host())
 
 
 def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
@@ -102,7 +102,7 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
     install, unit not yet configured) is treated as no capabilities and audits
     the interpreter alone.
     """
-    audit = audit_this_host(frozenset(ctx.roles or ()))
+    audit = audit_this_host(frozenset(ctx.roles or ()), machine=ctx.machine)
     if audit.verdict is FirewallVerdict.UNREADABLE:
         # Not the defect, and not provably not-the-defect either. Say so once
         # rather than claiming a clean bill of health this step did not establish.
@@ -123,7 +123,7 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
     # running interpreter through the launch helpers (catching a venv the globs
     # do not name), the manifest carries the whole declarative whitelist.
     required = {p.resolve() for p in audit.missing}
-    required.update(fw.manifest_paths())
+    required.update(fw.manifest_paths(machine=ctx.machine))
     required = tuple(sorted(required, key=str))
 
     # Prune before adding: a stale rule still holds its bundle identifier, and

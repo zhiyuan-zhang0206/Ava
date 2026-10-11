@@ -30,7 +30,7 @@ from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import _AgentRuntime
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 
 class SummaryModel(FakeListChatModel):
@@ -100,7 +100,7 @@ async def make_host(
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=catalog,

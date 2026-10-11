@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+
 # Explicit shared surface: every name the split test modules import from here.
 __all__ = [
     "_FakeResponse",
@@ -134,12 +137,12 @@ def _fake_session_backends(
 
 
 @pytest.fixture(autouse=True)
-def _gateway_role_pinned(monkeypatch: pytest.MonkeyPatch) -> None:
+def _gateway_role_pinned(command_runtime: CommandRuntime) -> None:
     """Pin the machine's capability set to gateway, whatever the dev host's environment says.
 
     The cluster-status commands read it through `_roles_or_none`; the tests assert the
     full-service gateway view, so the host's own `AVA_MACHINE_SERVE_*` flags must not decide."""
-    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
+    command_runtime.machine.set(role="gateway")
 
 
 @pytest.fixture(autouse=True)

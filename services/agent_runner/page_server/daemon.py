@@ -32,8 +32,9 @@ import psutil
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import machine_name, reachable_host, validate_machine_name
-from base.config import settings
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
@@ -652,17 +653,22 @@ def _reconcile_once(
 
 
 async def _reconcile_loop(
-    pool: ConnectionPool, liveness: LoopProgress, config: PageServerConfig, bus: EventBus
+    pool: ConnectionPool,
+    liveness: LoopProgress,
+    config: PageServerConfig,
+    bus: EventBus,
+    *,
+    local_machine: MachineIdentity,
 ) -> None:
     """Run page-shell reconciliation at the configured poll interval."""
-    host = reachable_host()
+    host = local_machine.host()
     managed: dict[tuple[int, str], _ServerHandle] = {}
     backoff: dict[tuple[int, str], float] = {}
     degraded: dict[tuple[int, str], _DegradedServeDir] = {}
     _log.info(
         "[page-server] daemon started, pid=%s, machine=%s, host=%s",
         os.getpid(),
-        machine_name(),
+        local_machine.name(),
         host,
     )
     while True:
@@ -684,7 +690,9 @@ async def _reconcile_loop(
             _log.exception("[page-server] poll iteration failed")
 
 
-async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
+async def run(
+    *, database: Callable[[], Database], image: LoadedCommit, local_machine: MachineIdentity
+) -> None:
     """Start the daemon and keep its health endpoint alive while it reconciles."""
     if _is_running():
         _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
@@ -704,10 +712,12 @@ async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
         # a stalled loop cannot be masked by a busy sibling: a loop that raises cancels
         # its sibling and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(_reconcile_loop(pool, reconcile_progress, config, bus))
+            loops.create_task(
+                _reconcile_loop(pool, reconcile_progress, config, bus, local_machine=local_machine)
+            )
             loops.create_task(
                 dead_pages.dead_pages_loop(
-                    pool, db, reachable_host(), dead_pages_progress, config, bus
+                    pool, db, local_machine.host(), dead_pages_progress, config, bus
                 )
             )
     finally:
@@ -721,18 +731,22 @@ def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     image = LoadedCommit.capture()
+    machine_config = ConfigBoot()
+    machine_config.boot()
+    machine = machine_from_boot(machine_config)
+    process_home = ava_home().resolve()
     assert_schema_current(settings.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="page_server", exempt=False)
 
     def database() -> Database:
-        return Database.from_settings(gate=gate)
+        return Database.from_settings(gate=gate, local_host=machine.host)
 
-    pipeline = build_pipeline(database=database)
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
         name="page_server",
         producer=lambda: pipeline,
-        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        machine_reader=machine.name,
         image=image,
     )
     install_graceful_shutdown("page_server")
@@ -745,7 +759,7 @@ def main() -> None:
     # hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run(database=database, image=image))
+        runner.run(run(database=database, image=image, local_machine=machine))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[page-server] interrupted, shutting down")

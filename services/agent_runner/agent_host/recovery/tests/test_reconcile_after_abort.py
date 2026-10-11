@@ -9,7 +9,6 @@ explicit fallback behavior.
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import uuid4
@@ -33,12 +32,18 @@ from base.agents.history.inbound_sideload import (
     sideload_committed_ids,
 )
 from base.agents.history.tests.test_inbound_sideload_failures import _read_inputs
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement as settlement_mod
+from services.agent_runner.agent_host.recovery.tests.checkpoint_inputs import (
+    insert_checkpoint,
+    insert_write,
+)
 from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import admit_recovery
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def claimed_row(
@@ -119,6 +124,7 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The abort settlement's reconcile finalizes the turn's rows at once:
     committed to the flushed checkpoint -> done, fresh orphans -> pending for
@@ -128,6 +134,7 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "committed")
@@ -158,6 +165,7 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A kill after the abort leaves the rows already final: the boot pass
     (the same helper) is idempotent and silent on the second run."""
@@ -166,6 +174,7 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "committed")
@@ -197,6 +206,7 @@ async def test_next_claim_does_not_re_deliver_the_committed_row(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """At-least-once delivery still permits duplicates, but a row the
     checkpoint committed is not re-delivered by the next claim cycle — only
@@ -206,6 +216,7 @@ async def test_next_claim_does_not_re_deliver_the_committed_row(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "committed")
@@ -280,43 +291,6 @@ async def _seed_delta_written_checkpoint(
     return saver
 
 
-def _insert_checkpoint(
-    db_conn: psycopg.Connection[Any],
-    agent: int,
-    checkpoint_id: str,
-    ts: str,
-    *,
-    parent_id: str | None = None,
-    messages_version: str | None = None,
-) -> None:
-    checkpoint: dict[str, Any] = {"id": checkpoint_id, "ts": ts}
-    if messages_version is not None:
-        checkpoint["channel_versions"] = {"messages": messages_version}
-    db_conn.execute(
-        "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, "
-        "checkpoint, metadata) VALUES (%s, '', %s, %s, %s::jsonb, '{}'::jsonb)",
-        (str(agent), checkpoint_id, parent_id, json.dumps(checkpoint)),
-    )
-    db_conn.commit()
-
-
-def _insert_write(
-    db_conn: psycopg.Connection[Any],
-    agent: int,
-    checkpoint_id: str,
-    *,
-    idx: int,
-    type_tag: str,
-    blob: bytes,
-) -> None:
-    db_conn.execute(
-        "INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, channel, checkpoint_id, "
-        "task_id, idx, type, blob) VALUES (%s, '', 'messages', %s, %s, %s, %s, %s)",
-        (str(agent), checkpoint_id, str(uuid4()), idx, type_tag, blob),
-    )
-    db_conn.commit()
-
-
 async def test_no_claimed_rows_never_reads_the_checkpoint(
     aops_pool: AsyncConnectionPool[Any],
     loguru_records: list[dict[str, Any]],
@@ -324,12 +298,14 @@ async def test_no_claimed_rows_never_reads_the_checkpoint(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     saver = _CountingSaver(aops_pool)
@@ -353,12 +329,14 @@ async def test_only_stale_claims_skip_the_read_and_dead_letter(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     stale = claimed_row(db_conn, agent, "stale", age=timedelta(days=2))
@@ -386,12 +364,14 @@ async def test_mixed_claims_fall_back_for_unproven_orphan(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "committed")
@@ -419,6 +399,7 @@ async def test_committed_and_later_removed_is_finalized_not_reset(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The window proof finalizes a commit the list-presence check would reset."""
     incarnation = await admit_recovery(
@@ -426,6 +407,7 @@ async def test_committed_and_later_removed_is_finalized_not_reset(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "committed")
@@ -449,6 +431,7 @@ async def test_pending_write_without_successor_is_reset(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A durable pending write alone is not a settled message commit."""
     incarnation = await admit_recovery(
@@ -456,6 +439,7 @@ async def test_pending_write_without_successor_is_reset(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     claimed = claimed_row(db_conn, agent, "pending write")
@@ -493,6 +477,7 @@ async def test_pending_write_with_unrelated_successor_is_reset(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A child checkpoint that did not advance messages cannot commit a write."""
     incarnation = await admit_recovery(
@@ -500,6 +485,7 @@ async def test_pending_write_with_unrelated_successor_is_reset(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     claimed = claimed_row(db_conn, agent, "unapplied write")
@@ -538,12 +524,14 @@ async def test_unresolved_window_falls_back_to_the_full_read(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "committed")
@@ -575,6 +563,7 @@ async def test_thread_without_messages_writes_falls_back_to_the_full_read(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A materialized thread (no write rows) must not read as "nothing committed"."""
     incarnation = await admit_recovery(
@@ -582,6 +571,7 @@ async def test_thread_without_messages_writes_falls_back_to_the_full_read(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "committed")
@@ -606,6 +596,7 @@ async def test_materialized_thread_with_only_pending_write_falls_back(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A pending write does not prove the thread uses settled message deltas."""
     incarnation = await admit_recovery(
@@ -613,6 +604,7 @@ async def test_materialized_thread_with_only_pending_write_falls_back(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     committed = claimed_row(db_conn, agent, "materialized")
@@ -642,19 +634,19 @@ async def test_boundary_scan_resolves_the_first_older_checkpoint(
 ) -> None:
     agent = 879000001
     cutoff = datetime.now(UTC) - timedelta(seconds=2)
-    _insert_checkpoint(
+    insert_checkpoint(
         db_conn,
         agent,
         "ffffffff-0000-6000-8000-000000000001",
         (cutoff + timedelta(seconds=5)).isoformat(),
     )
-    _insert_checkpoint(
+    insert_checkpoint(
         db_conn,
         agent,
         "eeeeeeee-0000-6000-8000-000000000002",
         (cutoff + timedelta(seconds=1)).isoformat(),
     )
-    _insert_checkpoint(
+    insert_checkpoint(
         db_conn,
         agent,
         "dddddddd-0000-6000-8000-000000000003",
@@ -673,7 +665,7 @@ async def test_boundary_scan_gives_up_past_its_limit(
     agent = 879000002
     cutoff = datetime.now(UTC) - timedelta(seconds=5)
     for i in range(3):
-        _insert_checkpoint(
+        insert_checkpoint(
             db_conn,
             agent,
             f"f0000000-0000-6000-8000-00000000000{i}",
@@ -690,10 +682,10 @@ async def test_window_fetch_cap_never_truncates(
 ) -> None:
     agent = 879000003
     checkpoint_id = "e0000000-0000-6000-8000-000000000009"
-    _insert_checkpoint(
+    insert_checkpoint(
         db_conn, agent, checkpoint_id, datetime.now(UTC).isoformat(), messages_version="v0"
     )
-    _insert_checkpoint(
+    insert_checkpoint(
         db_conn,
         agent,
         "f0000000-0000-6000-8000-000000000009",
@@ -702,7 +694,7 @@ async def test_window_fetch_cap_never_truncates(
         messages_version="v1",
     )
     for idx in range(3):
-        _insert_write(db_conn, agent, checkpoint_id, idx=idx, type_tag="msgpack", blob=b"\x80")
+        insert_write(db_conn, agent, checkpoint_id, idx=idx, type_tag="msgpack", blob=b"\x80")
 
     assert await _messages_writes_in_window(aops_pool, agent, None, row_cap=2) is None
     rows = await _messages_writes_in_window(aops_pool, agent, None, row_cap=3)
@@ -719,10 +711,10 @@ async def test_sideload_decodes_inbound_ids_from_write_rows(
         [HumanMessage(content="x", additional_kwargs={"ava_inbound_id": 7})]
     )
     checkpoint_id = "e0000000-0000-6000-8000-00000000000a"
-    _insert_checkpoint(
+    insert_checkpoint(
         db_conn, agent, checkpoint_id, datetime.now(UTC).isoformat(), messages_version="v0"
     )
-    _insert_checkpoint(
+    insert_checkpoint(
         db_conn,
         agent,
         "f0000000-0000-6000-8000-00000000000a",
@@ -730,7 +722,7 @@ async def test_sideload_decodes_inbound_ids_from_write_rows(
         parent_id=checkpoint_id,
         messages_version="v1",
     )
-    _insert_write(
+    insert_write(
         db_conn,
         agent,
         checkpoint_id,
@@ -752,6 +744,7 @@ async def test_reclaimed_row_keeps_its_first_claim_window(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A new claimed_at must not hide a commit from an earlier claim."""
     incarnation = await admit_recovery(
@@ -759,6 +752,7 @@ async def test_reclaimed_row_keeps_its_first_claim_window(
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     claimed = claimed_row(db_conn, agent, "reclaimed")
@@ -769,14 +763,14 @@ async def test_reclaimed_row_keeps_its_first_claim_window(
     db_conn.commit()
     saver = AsyncPostgresSaver(aops_pool)
     parent_id = "e0000000-0000-6000-8000-00000000000b"
-    _insert_checkpoint(
+    insert_checkpoint(
         db_conn,
         agent,
         parent_id,
         (datetime.now(UTC) - timedelta(minutes=10)).isoformat(),
         messages_version="v0",
     )
-    _insert_checkpoint(
+    insert_checkpoint(
         db_conn,
         agent,
         "f0000000-0000-6000-8000-00000000000b",
@@ -787,7 +781,7 @@ async def test_reclaimed_row_keeps_its_first_claim_window(
     type_tag, blob = saver.serde.dumps_typed(
         [HumanMessage(content="reclaimed", additional_kwargs={"ava_inbound_id": claimed})]
     )
-    _insert_write(db_conn, agent, parent_id, idx=0, type_tag=str(type_tag), blob=bytes(blob))
+    insert_write(db_conn, agent, parent_id, idx=0, type_tag=str(type_tag), blob=bytes(blob))
 
     assert await committed_ids_for_reconcile(aops_pool, saver, agent, inputs=_read_inputs()) == {
         claimed

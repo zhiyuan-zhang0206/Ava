@@ -31,8 +31,9 @@ import redis.exceptions
 
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
-from base.config import ConfigBoot
+from base.cluster.machine import MachineIdentity
 from cli.commands.cluster._provider_guard import run_provider_guard
+from cli.database.runtime import CommandRuntime
 
 # Default thresholds. Overridable via CLI flags; the cron wrapper's
 # defaults are set at registration time.
@@ -267,7 +268,7 @@ def _schema_health(*, database_factory: DatabaseFactory) -> bool:
         return True
 
 
-def _service_probes() -> list[str]:
+def _service_probes(*, machine: MachineIdentity) -> list[str]:
     """Probe every service this host's roles should be running; return the failing
     services, each annotated with why (empty = all responding).
 
@@ -285,7 +286,7 @@ def _service_probes() -> list[str]:
     import cli.commands.probe as _probe_commands
     from base.deploy.lifecycle.service_selection import read_selection
 
-    roles = _repo_commands._roles_or_none()
+    roles = _repo_commands._roles_or_none(machine=machine)
     if roles is None:
         return ["service roster unavailable"]
     try:
@@ -293,7 +294,7 @@ def _service_probes() -> list[str]:
     except (OSError, ValueError, RuntimeError, TypeError) as exc:
         return [f"service selection unavailable ({exc})"]
     failing: list[str] = []
-    for spec, gate_reason in _repo_commands._services_for_roles_annotated(roles):
+    for spec, gate_reason in _repo_commands._services_for_roles_annotated(roles, machine=machine):
         if gate_reason is not None or not selection.enabled(spec.session):
             continue
         probe = _probe_commands.probe_service(spec)
@@ -302,7 +303,7 @@ def _service_probes() -> list[str]:
     return failing
 
 
-def _redis_bridge_probe() -> str | None:
+def _redis_bridge_probe(*, machine: MachineIdentity) -> str | None:
     """End-to-end Redis relay failure text, or None when healthy/not required.
 
     Gateway-only and alert-only: a failed host listener is an
@@ -313,12 +314,12 @@ def _redis_bridge_probe() -> str | None:
     """
     import cli.commands._repo as _repo_commands
 
-    roles = _repo_commands._roles_or_none()
+    roles = _repo_commands._roles_or_none(machine=machine)
     if roles is None or "gateway" not in roles:
         return None
     from cli.commands.converge.redis_bridge import probe_redis_bridge
 
-    status = probe_redis_bridge()
+    status = probe_redis_bridge(machine=machine)
     if not status.required:
         return None
     if not status.serving:
@@ -447,6 +448,7 @@ def run_health_probe(
     check_schema: bool = True,
     database_factory: DatabaseFactory,
     producer: Callable[[], Any],
+    command: CommandRuntime,
 ) -> int:
     """Return 0 for healthy, 1 for unhealthy, and 2 for a checkout refusal.
 
@@ -464,10 +466,8 @@ def run_health_probe(
         print(f"health-probe refused: {refusal}", file=sys.stderr)
         return 2
 
-    from cli.database import operator_machine_name
-
     telemetry.init_telemetry(
-        process="cli-health-probe", pipeline=producer(), machine_reader=operator_machine_name
+        process="cli-health-probe", pipeline=producer(), machine_reader=command.machine.name
     )
     rc = _observe_cluster_health(
         agent_min=agent_min,
@@ -476,6 +476,7 @@ def run_health_probe(
         check_crash_loops=check_crash_loops,
         check_schema=check_schema,
         database_factory=database_factory,
+        command=command,
     )
     _report_ran(unhealthy_checks=rc)
     return rc
@@ -489,6 +490,7 @@ def _observe_cluster_health(
     check_crash_loops: bool,
     check_schema: bool,
     database_factory: DatabaseFactory,
+    command: CommandRuntime,
 ) -> int:
     """Observe one health round and report the first failed check."""
     # Check disk before gateway liveness: a full data volume can keep the
@@ -553,15 +555,17 @@ def _observe_cluster_health(
             )
         print("  ✓ schema health")
 
-    return _check_alert_only_health(database_factory=database_factory)
+    return _check_alert_only_health(database_factory=database_factory, command=command)
 
 
-def _check_alert_only_health(*, database_factory: DatabaseFactory) -> int:
+def _check_alert_only_health(*, database_factory: DatabaseFactory, command: CommandRuntime) -> int:
     """Observe the remaining service, host, and provider health signals."""
 
     # 5. Per-service health and the host-level Redis bridge.
-    failing = _service_probes() + [
-        failure for failure in (_redis_bridge_probe(),) if failure is not None
+    failing = _service_probes(machine=command.machine) + [
+        failure
+        for failure in (_redis_bridge_probe(machine=command.machine),)
+        if failure is not None
     ]
     if failing:
         return _alert_only_failure(
@@ -576,7 +580,7 @@ def _check_alert_only_health(*, database_factory: DatabaseFactory) -> int:
     # 6b. WAL archiving — alert-only, same class as checks 5 and 6: a stuck or
     # misconfigured archiver is fixed by repairing the archive path, not by rolling
     # code back. Silent unless AVA_WALG_CONFIG_FILE switches WAL-G on.
-    config = ConfigBoot()
+    config = command.config
 
     def path_reader() -> Path | None:
         if not config.prepared:
@@ -632,6 +636,7 @@ def cmd_health_probe(
     check_schema: bool = True,
     database_factory: DatabaseFactory,
     producer: Callable[[], Any],
+    command: CommandRuntime,
 ) -> int:
     """Report cluster health through exit status, diagnostics, and `health_probe_failing` events."""
     return run_health_probe(
@@ -642,4 +647,5 @@ def cmd_health_probe(
         check_schema=check_schema,
         database_factory=database_factory,
         producer=producer,
+        command=command,
     )

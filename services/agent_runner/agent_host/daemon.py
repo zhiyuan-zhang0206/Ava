@@ -614,7 +614,7 @@ async def run(
         local_machine = machine.name()
         await _open_host_pools(workload_pool, control_pool, local_machine)
         if clients is None:
-            clients = process_clients(database=lambda: db, config=config)
+            clients = process_clients(database=lambda: db, config=config, machine=machine)
         from agent.extensions import load_extensions
 
         installation = load_installation(
@@ -631,7 +631,7 @@ async def run(
             control_pool=control_pool,
             checkpointer=checkpointer,
             graph=build_graph(checkpointer, installation.registry),
-            machine=local_machine,
+            machine=machine,
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
@@ -746,7 +746,7 @@ def main() -> None:
     def database() -> Database:
         return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
 
-    clients = process_clients(database=database, config=config)
+    clients = process_clients(database=database, config=config, machine=machine)
     clients_handed_off = False
 
     def hand_off_clients() -> None:

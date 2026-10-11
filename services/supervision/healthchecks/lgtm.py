@@ -17,6 +17,7 @@ from http.client import HTTPException
 from pathlib import Path
 from typing import Any
 
+from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
 from base.paths import ava_home
 
@@ -52,12 +53,13 @@ def lgtm_host_marker() -> Path:
     return ava_home() / "lgtm-host"
 
 
-def is_lgtm_host() -> bool:
+def is_lgtm_host(*, machine: MachineIdentity) -> bool:
     """Whether this host is the observability station: the `lgtm-host` marker
     OR the declarative `observability-station` unit capability."""
     from base.telemetry.observability import home_is_observability_station
 
-    return home_is_observability_station(ava_home())
+    home = ava_home()
+    return home_is_observability_station(home, machine=machine, unit_home=home)
 
 
 def _protocol_readiness(name: str) -> DaemonProbe:

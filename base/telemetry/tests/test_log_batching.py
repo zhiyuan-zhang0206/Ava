@@ -172,9 +172,11 @@ def test_queue_is_bounded_and_counts_what_it_sheds(monkeypatch: pytest.MonkeyPat
     reports: list[dict[str, Any]] = []
     original_report = loss.report_loss
 
-    def report(event: telemetry.Event, count: int, queue_name: str) -> telemetry.Event:
+    def report(
+        event: telemetry.Event, count: int, queue_name: str, **kwargs: Any
+    ) -> telemetry.Event:
         reports.append({"event": "event_log_drop", "n": count})
-        return original_report(event, count, queue_name)
+        return original_report(event, count, queue_name, **kwargs)
 
     monkeypatch.setattr(loss, "report_loss", report)
     sink = _make_sink(_stalled, batch=10, interval=0.05, maxsize=20)

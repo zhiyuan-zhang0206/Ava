@@ -20,6 +20,8 @@ from cli.commands.data_plane import bringup
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.tests import test_single_box as _single_box
 from cli.commands.tests.test_single_box import Born, _refused
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 configured = _single_box.configured
@@ -61,7 +63,11 @@ def test_a_bearer_only_runner_receives_no_database_login(
 
 
 def test_a_bundle_whose_login_cannot_be_proven_never_installs(
-    born: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    born: Born,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     bootstrap_authority = _serve_on_loopback(monkeypatch, born)
     endpoint = served_db_endpoint(bootstrap_authority)
@@ -73,7 +79,13 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     with pytest.raises(unit.UnitCapabilityError, match="refuses generation 0"):
         unit.install_bundle(runner, _open(bundle), machine=_MACHINE, served_endpoint=endpoint)
     assert unit.load_unit_capability(runner) is None
-    bringup._ensure_pooler(born.record, "ava", born.home, authority.active_generation(born.home))
+    bringup._ensure_pooler(
+        born.record,
+        "ava",
+        born.home,
+        authority.active_generation(born.home),
+        machine=command_runtime.machine,
+    )
     installed = unit.install_bundle(
         runner, _open(bundle), machine=_MACHINE, served_endpoint=endpoint
     )

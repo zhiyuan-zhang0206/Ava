@@ -32,7 +32,7 @@ import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from base.cluster.machine import validate_machine_name
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
@@ -48,7 +48,7 @@ from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import CREATE_NO_WINDOW
-from base.paths import gateway_memory_dir
+from base.paths import ava_home, gateway_memory_dir
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.emitter import build_pipeline
 from services.derived.memory_indexer import config as indexer_config
@@ -734,20 +734,22 @@ def main() -> None:
     """
     config = ConfigBoot()
     config.boot()
+    machine = machine_from_boot(config)
+    process_home = ava_home().resolve()
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="memory_indexer")
 
     def database() -> Database:
-        return Database(db_config_from_boot(config), gate=gate)
+        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
 
-    pipeline = build_pipeline(database=database)
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     code = 0
     try:
         init_gateway_process(
             name="memory_indexer",
             producer=lambda: pipeline,
-            machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+            machine_reader=machine.name,
             image=image,
         )
         install_graceful_shutdown("memory_indexer")

@@ -55,6 +55,7 @@ async def upload(
             names,
             batch,
             request_inbound_provenance(request),
+            local_machine=request.app.state.machine.name(),
         )
     except UploadDeliveryConflictError as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -84,7 +85,12 @@ async def object_file(
 ) -> FileResponse:
     try:
         path, item = await request.app.state.upload_recovery.native(
-            source.served_object, request.app.state.db_pool, agent_id, batch_id, ordinal
+            source.served_object,
+            request.app.state.db_pool,
+            agent_id,
+            batch_id,
+            ordinal,
+            local_machine=request.app.state.machine.name(),
         )
     except UploadDeliveryConflictError as exc:
         raise HTTPException(409, str(exc)) from exc

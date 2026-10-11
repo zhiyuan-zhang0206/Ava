@@ -108,6 +108,7 @@ def _h_skill_install(args: argparse.Namespace) -> int:
         update_mode=args.update_mode,
         check_every=args.check_every,
         database_factory=args.database_factory,
+        machine=args.runtime.machine,
     )
 
 

@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.db import Database
@@ -196,10 +197,10 @@ class LokiReport:
         )
 
 
-def build_diagnostics(requested: set[str], *, database: Callable[[], Database]) -> list[Diagnostic]:
+def build_diagnostics(
+    requested: set[str], *, database: Callable[[], Database], machine: MachineIdentity
+) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
-    from base.cluster.machine import is_gateway
-
     checks: list[Diagnostic] = []
     if is_macos():
         checks.append(Diagnostic("brew-pin", brew_pins))
@@ -208,7 +209,7 @@ def build_diagnostics(requested: set[str], *, database: Callable[[], Database]) 
         from services.supervision.healthchecks.permissions_helper import episode_reporter, probe
 
         checks.append(Diagnostic("permissions-helper", probe, report=episode_reporter()))
-    if is_gateway():
+    if "gateway" in machine.role():
         if not settings.data_plane.is_remote:
             checks.append(Diagnostic("redis-acl", redis_acl))
             if settings.data_plane.pgbouncer_enabled:

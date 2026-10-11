@@ -11,18 +11,20 @@ from unittest.mock import Mock
 
 import pytest
 
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
 from services.entrypoints.gate import daemon
+from tests.fixtures.configuration import snapshot_process_config
 
 
 @dataclass
 class _Entry:
     image: LoadedCommit
+    machine: MachineIdentity | None = None
     calls: list[str] = field(default_factory=list[str])
     database: Callable[[], Any] | None = None
     logging: Mock = field(default_factory=Mock)
@@ -42,10 +44,12 @@ def entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Entry:
     setup = _Entry(LoadedCommit(tmp_path, "captured-image"))
     setup.capture.return_value = setup.image
     monkeypatch.setattr(LoadedCommit, "capture", setup.capture)
+    monkeypatch.setattr(daemon, "ConfigBoot", snapshot_process_config)
     monkeypatch.setattr(sys, "argv", ["gate", "--port", "32001"])
 
-    def build_pipeline(*, database: Callable[[], Any]) -> Any:
+    def build_pipeline(*, database: Callable[[], Any], machine: MachineIdentity, home: Path) -> Any:
         setup.database = database
+        setup.machine = machine
         setup.step("build")
         return setup.pipeline
 
@@ -90,7 +94,9 @@ def test_entry_keeps_one_image_gate_factory_and_producer(
     monkeypatch.setattr("base.native_process.code_version.first_parent_count", version)
     opened: list[ProcessDbGate] = []
 
-    def database(*, gate: ProcessDbGate) -> object:
+    def database(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> object:
+        assert entry.machine is not None
+        assert local_host == entry.machine.host
         opened.append(gate)
         return object()
 
@@ -107,7 +113,8 @@ def test_entry_keeps_one_image_gate_factory_and_producer(
     args, kwargs = entry.logging.call_args
     assert args == ("gate",)
     assert kwargs["image"] is entry.image
-    assert kwargs["machine_reader"] is machine_name
+    assert entry.machine is not None
+    assert kwargs["machine_reader"] == entry.machine.name
     assert kwargs["producer"]() is entry.pipeline
     entry.pipeline.stop.assert_called_once_with(timeout=2)
     assert entry.calls == [
@@ -187,7 +194,9 @@ def test_real_owned_pipeline_is_joined_on_http_exit(
 ) -> None:
     pipeline = EventPipeline(writer=lambda _events: None)
 
-    def build_pipeline(*, database: Callable[[], Any]) -> EventPipeline:
+    def build_pipeline(
+        *, database: Callable[[], Any], machine: MachineIdentity, home: Path
+    ) -> EventPipeline:
         del database
         return pipeline
 

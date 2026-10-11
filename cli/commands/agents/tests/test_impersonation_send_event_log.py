@@ -17,13 +17,14 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions
 from base.agents.messages import delivery_outbox as outbox
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import Settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.impersonation import _send
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.impersonation_support import attested_caller, recorded_tree
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -45,6 +46,7 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     event_bus: EventBus,
     publish_wake: Callable[[int, str], bool],
     operator_database: Callable[[], Any],
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -52,7 +54,7 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
         "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
         "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
         "clock_timestamp()+interval '10 minutes')",
-        (agent_id, machine_name(), owner.generation, owner.owner),
+        (agent_id, machine_identity.name(), owner.generation, owner.owner),
     )
     db_conn.commit()
     runtime = Settings(profile=None)
@@ -79,7 +81,7 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine,lease_expires_at) "
         "VALUES(%s,'idling',%s,clock_timestamp()+interval '10 minutes')",
-        (target_id, machine_name()),
+        (target_id, machine_identity.name()),
     )
     db_conn.commit()
     snapshot = outbox.DeliveryOutboxLimits(

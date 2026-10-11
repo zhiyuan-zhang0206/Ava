@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent import state as states
 from base.agents.observation.db_wait import DatabaseWaits
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.db.code_version_gate import ProcessDbGate
@@ -21,6 +22,7 @@ from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery imp
     admit_recovery,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("persistent_failure", [False, True])
@@ -35,12 +37,14 @@ async def test_recovery_retries_promptly_but_does_not_execute_or_ack_control(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await admit_recovery(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
 
