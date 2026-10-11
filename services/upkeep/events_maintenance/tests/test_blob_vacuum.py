@@ -26,7 +26,7 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.db.tests.fakes import fake_database
 from services.upkeep.events_maintenance import blob_vacuum
 from services.upkeep.events_maintenance.blob_vacuum import (
@@ -151,7 +151,11 @@ def test_window_follows_cluster_timezone() -> None:
 
 
 def test_run_skips_outside_window(
-    monkeypatch: pytest.MonkeyPatch, cluster_tz: str, *, machine_identity: MachineIdentity
+    process_config: ConfigBoot,
+    monkeypatch: pytest.MonkeyPatch,
+    cluster_tz: str,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Outside the window the daemon entry point no-ops without dialing.
 
@@ -171,7 +175,7 @@ def test_run_skips_outside_window(
 
     monkeypatch.setattr("services.upkeep.events_maintenance.blob_vacuum.datetime", _Frozen)
     result = run_blob_vacuum(
-        events_maintenance_db(local_machine=machine_identity), timezone=cluster_tz
+        events_maintenance_db(process_config, local_machine=machine_identity), timezone=cluster_tz
     )
     assert result.ran is False
     assert result.total_bytes == 0

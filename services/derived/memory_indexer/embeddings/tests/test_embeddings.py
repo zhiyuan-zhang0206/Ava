@@ -631,6 +631,7 @@ def _embedding_server(
     chunked: bool = False,
     drip: bool = True,
     framing: str | None = None,
+    framing_started: threading.Event | None = None,
     error_status: int | None = None,
 ) -> Generator[tuple[str, list[float]]]:
     """Drip body or HTTP framing while every read gap stays below the timeout."""
@@ -685,6 +686,8 @@ def _embedding_server(
             for fragment in wire:
                 self.wfile.write(fragment)
                 self.wfile.flush()
+                if framing_started is not None:
+                    framing_started.set()
                 if stop.wait(read_gap):
                     return
 
