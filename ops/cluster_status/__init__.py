@@ -480,7 +480,7 @@ def _paused_reason(
 
     if state is None:
         return "no_state"
-    if cluster_pause.is_paused(db, state, local_machine=local_machine):
+    if cluster_pause.is_paused(db, state, machine_name=local_machine.name):
         return "business_pause"
     if admission.held():
         return "maintenance"

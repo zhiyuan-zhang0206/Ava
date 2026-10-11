@@ -425,7 +425,7 @@ def _local_machine_status_blocking(
     capability (pure gateway) — via to_thread: the paused flag (file read),
     prod-source HEAD (git rev-parse subprocess), the frozen process commit and
     the psutil resource snapshot must not run on the event loop."""
-    paused = cluster_is_paused(db, local_machine=local_machine)
+    paused = cluster_is_paused(db, machine_name=local_machine.name)
     return MachineStatus(
         name=name,
         serve_gateway="gateway" in role,
@@ -592,7 +592,7 @@ def _get_cluster_status(
         current_serve_gateway=("gateway" in local_machine.role()),
         current_serve_agent_runner=("agent-runner" in local_machine.role()),
         current_serve_observability_station=("observability-station" in local_machine.role()),
-        current_paused=cluster_is_paused(db, local_machine=local_machine),
+        current_paused=cluster_is_paused(db, machine_name=local_machine.name),
         machines=machines,
     )
 
@@ -644,7 +644,7 @@ def _compute_system_status(request: Request) -> SystemStatus:
                     "observability-station" in request.app.state.machine.role()
                 ),
                 current_paused=cluster_is_paused(
-                    request.app.state.db, local_machine=request.app.state.machine
+                    request.app.state.db, machine_name=request.app.state.machine.name
                 ),
                 machines=[],
             )
