@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import ava
 import ava.sdk_surface.agent_identity
@@ -43,7 +43,28 @@ from ._task_update import (
 # NOT invisible to a type checker, though: within this module the name `list`
 # resolves to the function, so annotations that mean the builtin container are
 # spelled `builtins.list[...]`.
-__all_for_ava__ = ["Task", "create", "create_and_assign", "get", "list", "log", "update"]
+__all_for_ava__ = [
+    "Task",
+    "TaskAssignment",
+    "create",
+    "create_and_assign",
+    "get",
+    "list",
+    "log",
+    "update",
+]
+
+
+class TaskAssignment(NamedTuple):
+    """The accepted task and the agent born to work on it.
+
+    Fields:
+        task: the task as accepted.
+        agent_id: id of the agent assigned to it.
+    """
+
+    task: Task
+    agent_id: int
 
 
 def create(
@@ -156,11 +177,11 @@ def create_and_assign(
     parent: int,
     remind_interval_seconds: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
-) -> tuple[Task, int]:
+) -> TaskAssignment:
     """Create an agent and its assigned task under one operation key.
 
-    Reuse the key and inputs to recover the original pair after a lost reply.
-    The returned pair proves acceptance; query task and agent state to observe
+    Reuse the key and inputs to recover the original result after a lost reply.
+    The result proves acceptance; query task and agent state to observe
     current progress. Borrowed leases are unsupported.
 
     Arguments have the same meaning as in create() and ava.agents.spawn().
@@ -168,7 +189,7 @@ def create_and_assign(
     own machine. The parent must exist and be open before either object is born.
 
     Returns:
-        (task, agent_id).
+        A TaskAssignment; it unpacks as `task, agent_id`.
     """
     from base.api_contracts.idempotency import validate_idempotency_key
 
