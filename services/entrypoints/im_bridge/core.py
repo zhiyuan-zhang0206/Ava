@@ -21,13 +21,7 @@ from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound.types import TimelineAcceptance
 from services.entrypoints.im_bridge.outbound.worker import IMOutboxWorker
 from services.entrypoints.im_bridge.spawn_menu import SpawnMenuMixin
-from services.entrypoints.im_bridge.state import (
-    _load_outbox,
-    _load_switch_state,
-    _OutboxEntry,
-    _save_outbox,
-    _save_switch_state,
-)
+from services.entrypoints.im_bridge.state import _load_switch_state, _save_switch_state
 from services.entrypoints.im_bridge.timeline_acceptance import (
     SelectionAdmission,
     accept_timeline,
@@ -116,19 +110,15 @@ class IMBridgeCore(SpawnMenuMixin):
 
         self._switch_state = _load_switch_state()
         self._disabled_channels: set[str] = set(config.im_disabled_adapters)
-        self._outbox_replay_task: asyncio.Task[Any] | None = None
 
     async def stop(self) -> None:
         """Cancel service-owned loops before closing their adapters and database."""
         tasks = [*self._subscriptions.values(), *self._typing_tasks.values()]
-        if self._outbox_replay_task is not None:
-            tasks.append(self._outbox_replay_task)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         self._subscriptions.clear()
         self._typing_tasks.clear()
-        self._outbox_replay_task = None
 
     def register(self, adapter: IMAdapter) -> None:
         register_adapter(self, adapter)
@@ -221,86 +211,22 @@ class IMBridgeCore(SpawnMenuMixin):
             try:
                 reply = await self._handle_chat(state, text, msg.idempotency_key)
             except NETWORK_ERRORS:
-                # Gateway enqueue failed after every retry — the platform
-                # offset has moved, so only the outbox can save this
-                # message (Task #1032: it used to be silently dropped).
+                # Bounded keyed retries are exhausted. The gateway may or may not have
+                # accepted the message (a lost response is UNKNOWN). Nothing is persisted
+                # or replayed, so tell the user and let them decide whether to resend.
                 _log.exception(
-                    "chat enqueue failed channel=%s chat=%s — outboxing",
+                    "chat enqueue failed channel=%s chat=%s - delivery unconfirmed",
                     msg.channel,
                     msg.chat_id,
                 )
                 self._stop_typing(state)
-                await self._enqueue_outbox(state, text, msg.idempotency_key)
-                await self._send(msg.channel, msg.chat_id, Reply(copy.QUEUED_NOTICE))
+                await self._send(msg.channel, msg.chat_id, Reply(copy.DELIVERY_UNCONFIRMED_NOTICE))
                 return
         if reply:
             replies = reply if isinstance(reply, list) else [reply]
             for r in replies:
                 await self._send(msg.channel, msg.chat_id, r)
             await push_watchdog.hint_recovered(self, msg)
-
-    # -- inbound outbox (Task #1032) -----------------------------------------
-
-    async def _enqueue_outbox(
-        self, state: ChatState, text: str, idempotency_key: str | None = None
-    ) -> None:
-        """Persist one undeliverable user message and start the replay loop.
-
-        AtLeastOnce: the message stays on disk until the gateway accepts it.
-        The Idempotency-Key is the platform's own (when the adapter supplies
-        one) or minted here, and replayed unchanged, so the gateway dedups
-        even when a response was lost on the wire."""
-
-        entry = _OutboxEntry(
-            id=uuid.uuid4().hex,
-            channel=state.channel,
-            chat_id=state.chat_id,
-            agent_id=state.current_agent_id or 0,
-            text=text,
-            idempotency_key=idempotency_key or uuid.uuid4().hex,
-            enqueued_at=time.time(),
-        )
-        entries = _load_outbox()
-        entries.append(entry)
-        _save_outbox(entries)
-        _log.warning("im_bridge: outboxed message id=%s (enqueue failed)", entry.id)
-        self.ensure_outbox_replay()
-
-    def ensure_outbox_replay(self) -> None:
-        """Start one replay loop on enqueue or startup to drain persisted messages."""
-
-        if self._outbox_replay_task is None or self._outbox_replay_task.done():
-            self._outbox_replay_task = self._tasks.create_task(self._outbox_replay_loop())
-
-    async def _outbox_replay_loop(self) -> None:
-        """Drain the existing inbound journal through the keyed gateway API."""
-
-        # quiesce-exempt: replays a local file outbox through the gateway API; no database
-        while True:
-            await self._replay_outbox_once()
-            await asyncio.sleep(sum(self.config.im_send_retry_delays) + 5)
-
-    async def _replay_outbox_once(self) -> None:
-        """Try every pending entry once, serially; delivered entries are
-        removed, failed ones stay for the next round."""
-
-        entries = _load_outbox()
-        if not entries:
-            return
-        remaining: list[_OutboxEntry] = []
-        for entry in entries:
-            try:
-                await self.gateway.send_message(
-                    entry.agent_id,
-                    entry.text,
-                    idempotency_key=entry.idempotency_key,
-                )
-            except NETWORK_ERRORS:
-                _log.exception("im_bridge: outbox replay failed id=%s (kept for retry)", entry.id)
-                remaining.append(entry)
-            else:
-                _log.info("im_bridge: outbox replay delivered id=%s", entry.id)
-        _save_outbox(remaining)
 
     async def _send(
         self, channel: str, chat_id: str, reply: Reply, *, adapter: IMAdapter | None = None

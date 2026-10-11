@@ -110,7 +110,6 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
             self.db_pool = db_pool
             self.outbound_store = IMOutboxStore(db_pool)
             self.adapters: dict[str, Any] = {}
-            self.outbox_replay_started = False
             from unittest.mock import AsyncMock, MagicMock
 
             self.outbound_worker = MagicMock()
@@ -123,9 +122,6 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
 
         async def restore_subscriptions(self) -> None:
             pass
-
-        def ensure_outbox_replay(self) -> None:
-            self.outbox_replay_started = True
 
     monkeypatch.setattr("services.entrypoints.im_bridge.core.IMBridgeCore", _FakeCore)
 
@@ -150,7 +146,6 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
             assert captured, "run() never started the health server"
             assert captured[0].is_alive()
             assert send_auth == [frozenset({"digest-of-a-token"})]
-            assert created_cores[0].outbox_replay_started  # Task #1032: drain on startup
             # The root builds the slice once and hands the same one to every consumer.
             assert created_cores[0].config == daemon.im_bridge_config()
             assert isinstance(created_cores[0].gateway, GatewayClient)
@@ -315,9 +310,6 @@ async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
                 raise cleanup_fault
 
         async def restore_subscriptions(self) -> None:
-            pass
-
-        def ensure_outbox_replay(self) -> None:
             pass
 
     class Adapter:

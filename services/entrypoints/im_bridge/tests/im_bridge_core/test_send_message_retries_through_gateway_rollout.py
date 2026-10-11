@@ -10,7 +10,6 @@ import httpx
 import pytest
 
 from services.entrypoints.im_bridge import copy, push_watchdog
-from services.entrypoints.im_bridge import state as state_mod
 from services.entrypoints.im_bridge.cursor_store import PushWatermark
 from services.entrypoints.im_bridge.tests.slices import gateway_client, im_bridge_config
 from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
@@ -668,12 +667,12 @@ async def test_sse_reconnect_log_does_not_kill_subscription_loop() -> None:
         await scenario()
 
 
-async def test_handle_inbound_outboxes_when_gateway_down(
+async def test_handle_inbound_reports_unconfirmed_delivery_when_gateway_stays_down(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
-    """Regression #1032: when the gateway enqueue fails after every retry the
-    user message used to be silently dropped (AtLeastOnce broken). It must be
-    persisted to the outbox and the user told it is queued."""
+    """When the keyed gateway send exhausts its retries the outcome is UNKNOWN (a lost response may
+    still have been accepted). The user is told delivery is unconfirmed, nothing is persisted
+    for a later replay and no acceptance is claimed."""
     async with owned_tasks() as _owned_tasks:
         monkeypatch.setenv("AVA_HOME", str(tmp_path))
         gateway = FakeGateway(send_failures=10)
@@ -686,12 +685,15 @@ async def test_handle_inbound_outboxes_when_gateway_down(
 
         async def scenario() -> None:
             await core.handle_inbound(msg)
-            assert gateway.sent == []  # gateway is down — nothing delivered
-            outbox = state_mod._load_outbox()
-            assert len(outbox) == 1
-            assert outbox[0].text == "hello"
-            assert outbox[0].agent_id == 405
-            assert any("messages queued" in t for _, t in adapter.sent)
+            assert gateway.sent == []  # gateway is down - nothing delivered
+            assert adapter.sent == [("12345", copy.DELIVERY_UNCONFIRMED_NOTICE)]
+            assert not any(
+                word in copy.DELIVERY_UNCONFIRMED_NOTICE.lower() for word in ("queue", "retry")
+            )
+            assert list(tmp_path.rglob("outbox*")) == []
+            # No replay loop exists: a recovered gateway never receives the message later.
+            await asyncio.sleep(0)
+            assert gateway.sent == []
 
         await scenario()
 
