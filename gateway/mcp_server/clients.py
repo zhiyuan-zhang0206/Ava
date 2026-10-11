@@ -26,16 +26,6 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_client(pool: ConnectionPool[Any], name: str, scope: str) -> tuple[int, str]:
-    """Create a client and return its id plus the plaintext token shown once."""
-    try:
-        with write_transaction(pool) as conn:
-            row, token = create_client_in_transaction(conn, name, scope)
-    except psycopg.errors.UniqueViolation as exc:
-        raise ValueError(f"MCP client named {name!r} already exists") from exc
-    return int(row["id"]), token
-
-
 def create_client_in_transaction(
     conn: psycopg.Connection, name: str, scope: str
 ) -> tuple[dict[str, Any], str]:

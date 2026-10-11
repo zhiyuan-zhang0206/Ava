@@ -3391,11 +3391,7 @@ export interface paths {
          */
         get: operations["get_mcp_clients_api_mcp_clients_get"];
         put?: never;
-        /**
-         * Post Mcp Client
-         * @description Create an MCP client and reveal its plaintext token once.
-         */
-        post: operations["post_mcp_client_api_mcp_clients_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6290,23 +6286,6 @@ export interface components {
                 [key: string]: unknown;
             }[];
             resource?: components["schemas"]["ResourceSample"] | null;
-        };
-        /** McpClientCreate */
-        McpClientCreate: {
-            /** Name */
-            name: string;
-            /** @default read */
-            scope: components["schemas"]["McpClientScope"];
-        };
-        /** McpClientCreated */
-        McpClientCreated: {
-            /** Id */
-            id: number;
-            /** Name */
-            name: string;
-            scope: components["schemas"]["McpClientScope"];
-            /** Token */
-            token: string;
         };
         /** McpClientRevoked */
         McpClientRevoked: {
@@ -13360,39 +13339,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["McpClientView"][];
-                };
-            };
-        };
-    };
-    post_mcp_client_api_mcp_clients_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["McpClientCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["McpClientCreated"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
