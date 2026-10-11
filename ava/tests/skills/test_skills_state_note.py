@@ -67,7 +67,6 @@ def _skills(root: Path) -> None:
     [
         pytest.param(lambda: ava.skills.alpha.__doc__, id="doc"),
         pytest.param(lambda: ava.help(ava.skills.alpha), id="help"),
-        pytest.param(lambda: ava.skills.read("alpha"), id="read"),
         pytest.param(lambda: ava.files.read(ava.skills.alpha.path + "/SKILL.md"), id="files-read"),
     ],
 )
@@ -86,7 +85,7 @@ def test_a_namespaced_skill_is_noted_by_its_display_identifier(
 ) -> None:
     _skills(fake_skills_dir)
 
-    ava.skills.read("grp:beta")
+    _ = ava.skills.grp.beta.__doc__
 
     assert _exec_turn == {"skill_reads": ["grp:beta"]}
 
@@ -96,9 +95,9 @@ def test_reading_a_body_twice_notes_it_once_and_two_skills_note_both(
 ) -> None:
     _skills(fake_skills_dir)
 
-    ava.skills.read("alpha")
-    ava.skills.read("grp:beta")
-    ava.skills.read("alpha")
+    _ = ava.skills.alpha.__doc__
+    _ = ava.skills.grp.beta.__doc__
+    _ = ava.skills.alpha.__doc__
 
     assert _exec_turn == {"skill_reads": ["alpha", "grp:beta"]}
 
@@ -120,7 +119,7 @@ def test_outside_an_exec_turn_a_read_succeeds_and_notes_nothing(fake_skills_dir:
     _skills(fake_skills_dir)
     ava.unbind_exec_turn()
 
-    assert "# A" in ava.skills.read("alpha")
+    assert "# A" in ava.skills.alpha.__doc__
 
 
 def test_agent_code_that_replaced_the_update_does_not_break_the_read(
@@ -131,7 +130,7 @@ def test_agent_code_that_replaced_the_update_does_not_break_the_read(
     _skills(fake_skills_dir)
     ava.state_update = "not a dict"  # pyright: ignore[reportAttributeAccessIssue]
 
-    assert "# A" in ava.skills.read("alpha")
+    assert "# A" in ava.skills.alpha.__doc__
 
 
 def test_the_audit_is_still_written_when_the_read_is_noted(
@@ -145,7 +144,7 @@ def test_the_audit_is_still_written_when_the_read_is_noted(
 
     monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
 
-    ava.skills.read("alpha")
+    _ = ava.skills.alpha.__doc__
 
     assert recorded == ["alpha"]
 
@@ -183,7 +182,7 @@ ava.state_update = {}
 import ava.skills
 
 before = set(sys.modules)
-ava.skills.read("alpha")
+ava.skills.alpha.__doc__
 forbidden = ("httpx", "langchain", "langgraph", "agent", "base.lm.catalog.decide.call")
 print(json.dumps({
     "update": ava.state_update,
