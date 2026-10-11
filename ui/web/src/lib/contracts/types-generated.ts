@@ -503,7 +503,7 @@ export interface paths {
          *     billing-class halt candidates, the halted-but-alive survey (report-only),
          *     and the provider balance readout, nothing written. `execute=true` re-checks the provider balance (the run refuses
          *     below the configured floor) and then resurrects each candidate on its home
-         *     machine through the versioned `resurrect-billing-v1` op, which enforces the
+         *     machine through the `resurrect-billing` op, which enforces the
          *     billing-halt whitelist under the metadata row lock.
          *     Idempotent: the candidate set self-clears after a run, a repeated run is an
          *     audited no-op, and a concurrent second run is refused by the run-level
@@ -592,7 +592,7 @@ export interface paths {
         put?: never;
         /**
          * Native Restart
-         * @description Accept the original ACTIVE restart once through its versioned executor.
+         * @description Accept the original ACTIVE restart once through its dedicated executor.
          */
         post: operations["native_restart_api_keyed_v1_agents__agent_id__restart_work_post"];
         delete?: never;
@@ -4927,7 +4927,7 @@ export interface components {
          *     billing-class halt candidates, the halted-but-alive survey, and the
          *     provider balance readout, nothing written. `execute=True` re-checks the
          *     provider balance and, when the gate passes, resurrects each candidate on
-         *     its home machine through the versioned `resurrect-billing-v1` op.
+         *     its home machine through the `resurrect-billing` op.
          */
         BillingResurrectRequest: {
             /**
@@ -7749,7 +7749,7 @@ export interface components {
          * @description Resurrect agent request body.
          *
          *     The public `POST /api/agents/{id}/resurrect` endpoint uses this for an
-         *     explicit lifecycle wake with no work guard. The internal versioned
+         *     explicit lifecycle wake with no work guard. The internal
          *     pending-work path also carries it alongside the exact chat or compact
          *     request id and kind; controller recovery calls the lower lifecycle helper
          *     with its own exact death claim.

@@ -36,7 +36,7 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     status, result = await daemon._dispatch_idempotent(
-        "spawn-launch-v2",
+        "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-1",
         ops_pool,
@@ -57,7 +57,7 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
             ("key-1",),
         )
         row = cur.fetchone()
-    assert row == ("spawn-launch-v2", "completed", {"id": 777})
+    assert row == ("spawn-launch", "completed", {"id": 777})
 
 
 @pytest.mark.asyncio
@@ -75,7 +75,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     first = await daemon._dispatch_idempotent(
-        "spawn-launch-v2",
+        "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-2",
         ops_pool,
@@ -86,7 +86,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         authority=config_authority,
     )
     second = await daemon._dispatch_idempotent(
-        "spawn-launch-v2",
+        "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-2",
         ops_pool,
@@ -241,7 +241,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     await daemon._dispatch_idempotent(
-        "spawn-launch-v2",
+        "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-a",
         ops_pool,
@@ -252,7 +252,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         authority=config_authority,
     )
     await daemon._dispatch_idempotent(
-        "spawn-launch-v2",
+        "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-b",
         ops_pool,

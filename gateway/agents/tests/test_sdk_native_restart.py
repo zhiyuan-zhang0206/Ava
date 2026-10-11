@@ -47,7 +47,7 @@ async def test_sdk_recovers_original_restart_after_lost_response_and_source_clea
         assert db is app.state.db
         assert pool is app.state.db_pool
         calls.append(path)
-        assert path == f"/api/agents/{agent_id}/restart-work-v1"
+        assert path == f"/api/agents/{agent_id}/restart-work"
         operation = NativeRestartOperation.model_validate(packet)
         assert operation.operation_key == idempotency_key
         result = await restart_native_work_op(

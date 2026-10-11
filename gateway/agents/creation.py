@@ -85,7 +85,7 @@ async def create_and_launch_agent(
     The target runner's ops server runs as the least-privilege `ava_runner`
     role, which by design cannot INSERT agents / agents_meta — so the row is
     created HERE, in the gateway process, as the main data-plane identity. The
-    forward op (`kind="spawn-launch-v2"`) validates and wakes the hosted runner.
+    forward op (`kind="spawn-launch"`) validates and wakes the hosted runner.
     The first prompt is committed with the row before this forward.
 
     Every spawn in the system funnels through this helper (POST /api/agents,

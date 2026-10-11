@@ -75,7 +75,7 @@ class TestResurrectRouting:
         assert resp.status_code == 200
         assert resp.json() == {"status": "spawned"}
         assert captured["agent_id"] == agent_id
-        assert captured["path"] == f"/api/agents/{agent_id}/resurrect-explicit-v2"
+        assert captured["path"] == f"/api/agents/{agent_id}/resurrect-explicit"
         assert captured["json_body"]["resurrected_by"] == "user"
         assert captured["json_body"]["prompt"] == "hello"
 
@@ -176,7 +176,7 @@ def test_local_home_machine_is_forwarded(
     assert resp.status_code == 200
     assert resp.json() == {"status": "spawned"}
     assert captured["target"] == "local-test"
-    assert captured["path"] == f"/api/agents/{agent_id}/resurrect-explicit-v2"
+    assert captured["path"] == f"/api/agents/{agent_id}/resurrect-explicit"
 
 
 @pytest.mark.asyncio
@@ -247,7 +247,7 @@ def test_resurrect_routes_through_each_request_apps_resources(
         db: Database, target: str, path: str, json_body: dict[str, object]
     ) -> dict[str, object]:
         assert target == "request-owned-home"
-        assert path == f"/api/agents/{agent_id}/resurrect-explicit-v2"
+        assert path == f"/api/agents/{agent_id}/resurrect-explicit"
         assert json_body["resurrected_by"] == "user"
         seen.append(db)
         return {"status": "spawned"}

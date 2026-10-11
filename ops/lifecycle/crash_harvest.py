@@ -56,7 +56,7 @@ class CrashRecoveryRequestFailure(StrEnum):
 def _recover_crash_marked_blocking(
     db: Database, bus: EventBus, agent_id: int
 ) -> RecoverCrashMarkedResponse:
-    """Adjudicate one `recover-crash-marked-v2` harvest (task #3618).
+    """Adjudicate one `recover-crash-marked` harvest (task #3618).
 
     The requester is the delivery watchdog, escalating a chat inbound still
     `pending` past the stall threshold whose owner is a crash-marked idling
@@ -151,14 +151,12 @@ def _recover_crash_marked_blocking(
         prepared_event = record_audit(conn, record_central_event(conn, prepared_event))
     telemetry.emit_prepared(prepared_event)
     _log.info(
-        "recover-crash-marked-v2: harvested crash-marked corpse for agent %s "
+        "recover-crash-marked: harvested crash-marked corpse for agent %s "
         "(termination_source=reaper; the relaxed trigger resumes its queued work)",
         agent_id,
     )
     try:
         publish_agent_updated_sync(bus, agent_id)
     except Exception:
-        _log.exception(
-            "recover-crash-marked-v2: lifecycle hint publish failed for agent %s", agent_id
-        )
+        _log.exception("recover-crash-marked: lifecycle hint publish failed for agent %s", agent_id)
     return RecoverCrashMarkedResponse(status=CrashRecoveryResult.HARVESTED)
