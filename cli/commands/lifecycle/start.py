@@ -515,7 +515,7 @@ def _cmd_start_body(
     )
 
     print("\n→ status")
-    cmd_status(database_factory=database_factory, machine=command.machine)
+    cmd_status(database_factory=database_factory, machine=command.machine, config=command.config)
 
     # 7) gateway reachability hint.
     if any(spec.session == "gateway" for spec in started) and not wait.unready:

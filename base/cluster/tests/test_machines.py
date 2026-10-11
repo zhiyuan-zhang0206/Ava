@@ -83,7 +83,7 @@ def test_register_self_and_lookup_roundtrip(
 def test_register_self_composes_single_unit_row(
     _machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """Single unit (runner-a style): composed machines row reflects that unit's caps + url."""
+    """Single unit (runner style): composed machines row reflects that unit's caps + url."""
     _machine_setup(name="runner-a", role="agent-runner")
     _machine_setup.register(_db(database_gate=database_gate), url="http://runner-a:9100")
     gateway_url, role, _desc, stopped_at = _read_machine("runner-a")
@@ -584,7 +584,7 @@ def test_register_self_rejects_loopback_station_url_when_gateway_remote(
     register a loopback dial URL — the gateway would probe itself instead of
     the station (WP4 tightening of the runner rule, same 2026-07-18 shape).
     Raised before any DB write."""
-    _machine_setup(name="station-runner-a", role="observability-station")
+    _machine_setup(name="station-a", role="observability-station")
     monkeypatch.setattr(
         settings.gateway, "gateway_url", "https://gw.example.com:8000"
     )  # remote gateway

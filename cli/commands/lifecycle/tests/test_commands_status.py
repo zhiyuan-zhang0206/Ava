@@ -19,7 +19,7 @@ import cli.commands.probe as _probe_commands
 import ops.roster as _roster
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
-from base.config import settings
+from base.config import ConfigBoot, settings
 from cli.database.runtime import CommandRuntime
 from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
 from cli.tests._commands_helpers import _FakeResponse, _FakeResult, _patch_gateway_http, _sess
@@ -81,7 +81,9 @@ def test_status_explains_persistently_unselected_services(
     )
     assert (
         _status_commands.cmd_status(
-            database_factory=operator_database, machine=command_runtime.machine
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+            config=command_runtime.config,
         )
         == 0
     )
@@ -155,7 +157,9 @@ def test_status_runs_without_error(
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _status_commands.cmd_status(
-        database_factory=operator_database, machine=command_runtime.machine
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -181,7 +185,9 @@ def test_status_gateway_excludes_ops(
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _status_commands.cmd_status(
-        database_factory=operator_database, machine=command_runtime.machine
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -203,7 +209,9 @@ def test_status_agent_runner_shows_ops(
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
     rc = _status_commands.cmd_status(
-        database_factory=operator_database, machine=command_runtime.machine
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -235,7 +243,9 @@ def test_status_shows_browser_skip_reason(
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _status_commands.cmd_status(
-        database_factory=operator_database, machine=command_runtime.machine
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -269,7 +279,9 @@ def test_status_shows_the_gate_entry_row(
     )
     assert (
         _status_commands.cmd_status(
-            database_factory=operator_database, machine=command_runtime.machine
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+            config=command_runtime.config,
         )
         == 0
     )
@@ -298,15 +310,18 @@ def test_status_shows_the_end_to_end_redis_bridge_row(
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
-    def print_bridge(*, machine: MachineIdentity) -> None:
+    def print_bridge(*, machine: MachineIdentity, config: ConfigBoot) -> None:
         assert machine is command_runtime.machine
+        assert config is command_runtime.config
         sys.stdout.write("  ✗ 10.64.0.7:6380 Redis PING: connection refused\n")
 
     monkeypatch.setattr(status_mod, "print_redis_bridge_status", print_bridge)
 
     assert (
         _status_commands.cmd_status(
-            database_factory=operator_database, machine=command_runtime.machine
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+            config=command_runtime.config,
         )
         == 0
     )
@@ -331,7 +346,9 @@ def test_status_runner_only_has_no_gate_section(
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
     rc = _status_commands.cmd_status(
-        database_factory=operator_database, machine=command_runtime.machine
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -376,7 +393,9 @@ def test_status_reads_root_units(
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _status_commands.cmd_status(
-        database_factory=operator_database, machine=command_runtime.machine
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
@@ -418,7 +437,9 @@ def test_status_root_mode_survives_an_unreachable_root(
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _status_commands.cmd_status(
-        database_factory=operator_database, machine=command_runtime.machine
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
@@ -520,7 +541,9 @@ def test_cmd_status_warns_on_prod_source_drift(
         "base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: "ava-7/fix"
     )
     rc = _status_commands.cmd_status(
-        database_factory=operator_database, machine=command_runtime.machine
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -547,7 +570,9 @@ def test_cmd_status_detached_prod_source_is_not_a_warning(
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: "HEAD")
     rc = _status_commands.cmd_status(
-        database_factory=operator_database, machine=command_runtime.machine
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -584,7 +609,9 @@ def test_cmd_status_names_the_source_checkout_it_runs(
 
     assert (
         _status_commands.cmd_status(
-            database_factory=operator_database, machine=command_runtime.machine
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+            config=command_runtime.config,
         )
         == 0
     )
@@ -616,7 +643,9 @@ def test_cmd_status_shows_gateway_snapshot_by_default(
         ),
     )
     rc = _status_commands.cmd_status(
-        database_factory=operator_database, machine=command_runtime.machine
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
     assert rc == 0
     out = capsys.readouterr().out
@@ -643,7 +672,9 @@ def test_cmd_status_gateway_unreachable_is_inline_not_fatal(
 
     monkeypatch.setattr("httpx.get", _boom)  # pyright: ignore[reportUnknownArgumentType]
     rc = _status_commands.cmd_status(
-        database_factory=operator_database, machine=command_runtime.machine
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
     assert rc == 0
     assert "gateway unreachable" in capsys.readouterr().out
@@ -679,7 +710,11 @@ def test_status_prints_a_live_host_reading(
     monkeypatch.setattr(status_mod, "print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert (
-        status_mod.cmd_status(database_factory=operator_database, machine=command_runtime.machine)
+        status_mod.cmd_status(
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+            config=command_runtime.config,
+        )
         == 0
     )
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
@@ -715,7 +750,11 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     )
 
     assert (
-        status_mod.cmd_status(database_factory=operator_database, machine=command_runtime.machine)
+        status_mod.cmd_status(
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+            config=command_runtime.config,
+        )
         == 0
     )
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
