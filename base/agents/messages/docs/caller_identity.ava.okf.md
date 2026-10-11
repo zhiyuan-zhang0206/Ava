@@ -24,6 +24,9 @@ unknown fields and malformed identifiers are rejected at every boundary
 schemas, the spawn prompt source, the direct inbound writers). No secrets or
 human identity belong in an instance identifier. `external_agent:codex:run-42`
 is an example; a raw 36-character UUID is not accepted.
+The shared caller parser also recognizes the retired `unknown:` namespace and
+rejects it before persistence or lifecycle dispatch; it never falls back to
+`user`. Other lifecycle audit labels remain opaque.
 
 The declaration is self-asserted. It is not an authenticated principal,
 capability, transport, request ID or Ava agent identity, and it grants no
