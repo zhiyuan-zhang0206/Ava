@@ -159,7 +159,7 @@ async def _lift_upper(pool: AsyncConnectionPool, agent_id: int) -> list[int]:
         await cur.execute("DELETE FROM understanding_group_state WHERE agent_id = %s", (agent_id,))
         await cur.execute(
             "SELECT span_end FROM understanding_nodes WHERE agent_id = %s AND depth = 1"
-            " AND engine_version LIKE 'chunk-%%' AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
+            " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
             " ORDER BY span_start",
             (agent_id,),
         )
