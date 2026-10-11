@@ -7,8 +7,9 @@ client and the live-events -> agent-snapshot -> psycopg chain (both reached via
 are function-scoped now (task #3816 M1/M2), so a clean `import ava` — and the
 trivial shell/files child riding on it — must leave none of these module
 families in `sys.modules`. The gateway transport and its retry policy keep httpx
-behind the first request the same way, so the connection stack an `AvaContext`
-defers (`base/agents/context/tests/test_clients.py`) stays off `import ava` too.
+behind the first request the same way, and the MCP clients start anyio's portal
+on their first call, so the connection stack an `AvaContext` defers
+(`base/agents/context/tests/test_clients.py`) stays off `import ava` too.
 
 Probe mechanics mirror `test_lazy_lm_import.py`: clean subprocess, agent-launch
 env vars stripped, repo root forced onto `sys.path` under `-I`.
@@ -48,12 +49,14 @@ _FORBIDDEN_PREFIXES = (
     "psycopg",
     "opentelemetry",
 )
-# The clients an `AvaContext` builds on first use: HTTP, database pool, Redis, chat model.
+# The clients an `AvaContext` builds on first use: HTTP, database pool, Redis, chat model, and
+# the MCP clients' event-loop portal.
 _CONNECTION_STACK = (
     "httpx",
     "psycopg_pool",
     "redis",
     "langchain_core",
+    "anyio",
 )
 
 # Literal source with data in argv, so test selection can read the probe's imports.
