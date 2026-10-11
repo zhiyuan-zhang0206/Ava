@@ -25,6 +25,8 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
 from base.lm.catalog import ModelCatalog
+from ops import uploads
+from ops.cluster import operations as cluster_ops
 from ops.rpc_schemas import LaunchAgentRequest, UploadReceivePayload
 from services.agent_runner.agent_ops import daemon, health
 
@@ -134,7 +136,7 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
         seen["agent_id"] = agent_id
         return ShellProbeResult(shells=[ShellInfo(id=5, name="build", uptime_seconds=42)])
 
-    monkeypatch.setattr(daemon.cluster, "shell_probe_op", _fake_probe)
+    monkeypatch.setattr(cluster_ops, "shell_probe_op", _fake_probe)
     status, result = await daemon._dispatch(
         "shell_probe",
         {"agent_id": 42},
@@ -174,7 +176,7 @@ async def test_dispatch_shell_probe_bad_payload_fails(
         pytest.fail("must not dispatch on bad payload")
 
     monkeypatch.setattr(
-        daemon.cluster,
+        cluster_ops,
         "shell_probe_op",
         forbidden,
     )
@@ -209,7 +211,7 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
         seen.update(agent_id=agent_id, session_id=session_id)
         return ShellKillResult(mode=ShellKillMode.KILLED)
 
-    monkeypatch.setattr(daemon.cluster, "shell_kill_op", _fake_kill)
+    monkeypatch.setattr(cluster_ops, "shell_kill_op", _fake_kill)
     status, result = await daemon._dispatch(
         "shell_kill",
         {"agent_id": 42, "session_id": 5},
@@ -241,7 +243,7 @@ async def test_dispatch_shell_kill_reports_absent(
         return ShellKillResult(mode=ShellKillMode.ABSENT)
 
     monkeypatch.setattr(
-        daemon.cluster,
+        cluster_ops,
         "shell_kill_op",
         absent,
     )
@@ -280,7 +282,7 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
             commands=[OpsCommandItem(name="project", description="d", instruction_hint="h")]
         )
 
-    monkeypatch.setattr(daemon.cluster, "agent_skill_view_op", _fake_view)
+    monkeypatch.setattr(cluster_ops, "agent_skill_view_op", _fake_view)
     status, result = await daemon._dispatch(
         "agent_skill_view",
         {"agent_id": 42},
@@ -313,7 +315,7 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
         pytest.fail("must not dispatch on bad payload")
 
     monkeypatch.setattr(
-        daemon.cluster,
+        cluster_ops,
         "agent_skill_view_op",
         forbidden,
     )
@@ -350,7 +352,7 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
         seen["lines"] = lines
         return ShellCaptureResult(session_name="ava-agent-42-shell-3-build", lines=["a", "b"])
 
-    monkeypatch.setattr(daemon.cluster, "shell_capture_op", _fake_capture)
+    monkeypatch.setattr(cluster_ops, "shell_capture_op", _fake_capture)
     status, result = await daemon._dispatch(
         "shell_capture",
         {"agent_id": 42, "session_id": 3, "lines": 500},
@@ -388,7 +390,7 @@ async def test_dispatch_shell_capture_defaults_lines(
         seen["lines"] = lines
         return ShellCaptureResult(session_name="n", lines=[])
 
-    monkeypatch.setattr(daemon.cluster, "shell_capture_op", _fake_capture)
+    monkeypatch.setattr(cluster_ops, "shell_capture_op", _fake_capture)
     status, _ = await daemon._dispatch(
         "shell_capture",
         {"agent_id": 1, "session_id": 2},
@@ -424,7 +426,7 @@ async def test_dispatch_upload_receive_calls_upload_receive_op(
             path=f"/home/runner/Downloads/AvaAgent-{payload.agent_id}/{payload.name}"
         )
 
-    monkeypatch.setattr(daemon.uploads, "upload_receive_op", _fake_receive)
+    monkeypatch.setattr(uploads, "upload_receive_op", _fake_receive)
     status, result = await daemon._dispatch(
         "upload_receive",
         {"agent_id": 42, "name": "report.pdf"},
@@ -502,7 +504,7 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
     def _raises(agent_id: int, session_id: int, lines: int = 200) -> object:
         raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
 
-    monkeypatch.setattr(daemon.cluster, "shell_capture_op", _raises)
+    monkeypatch.setattr(cluster_ops, "shell_capture_op", _raises)
     status, result = await daemon._dispatch(
         "shell_capture",
         {"agent_id": 42, "session_id": 9},
@@ -608,7 +610,7 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
             ],
         )
 
-    monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
+    monkeypatch.setattr(cluster_ops, "cluster_status_op", _status)
     status, body, ctype = await daemon._ops_route(
         json.dumps({"kind": "status_probe"}).encode(),
         active_ops={},
@@ -653,7 +655,7 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
             resource=None,
         )
 
-    monkeypatch.setattr(daemon.cluster, "cluster_status_op", _degraded_status)
+    monkeypatch.setattr(cluster_ops, "cluster_status_op", _degraded_status)
 
     status, body, ctype = await daemon._ops_route(
         json.dumps({"kind": "status_probe"}).encode(),

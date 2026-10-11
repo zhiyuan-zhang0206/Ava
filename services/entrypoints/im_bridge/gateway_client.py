@@ -148,8 +148,7 @@ class GatewayClient:
         idempotency_key: str | None = None,
     ) -> int:
         """POST /api/agents — create an agent, return its id. A named preset
-        rides config_overlay["preset"] (task #4086: the top-level field is
-        retired); the gateway folds it into config, the runner never sees it."""
+        rides config_overlay["preset"]; the gateway folds it into config, the runner never sees it."""
         from base.api_contracts.idempotency import validate_idempotency_key
 
         key = (

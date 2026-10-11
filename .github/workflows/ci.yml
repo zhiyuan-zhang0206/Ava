@@ -1485,7 +1485,7 @@ jobs:
                   "--sign",
                   "-",
                   "--identifier",
-                  lifecycle._BUNDLE_ID,
+                  lifecycle.HELPER_BUNDLE_ID,
                   # Production signs the artifact with the AppleEvents entitlement;
                   # keep this lane on the same signing policy so codesign
                   # validates the entitlements plist on every PR.

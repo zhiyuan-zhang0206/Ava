@@ -10,6 +10,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from ops import host_config
 from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
 
 
@@ -30,7 +31,7 @@ async def test_dispatch_config_read_calls_config_read_op(
         captured.append(True)
         return ConfigReadResult(machine="x", host_fields={}, raw_overrides={})
 
-    monkeypatch.setattr(daemon.host_config, "config_read_op", _fake_config_read)
+    monkeypatch.setattr(host_config, "config_read_op", _fake_config_read)
     status, result = await daemon._dispatch(
         "config_read",
         {},
@@ -75,7 +76,7 @@ async def test_dispatch_config_write_passes_overrides(
         captured["trace_id"] = trace_id
         return ConfigWriteOpResult(machine="x", results={}, applied=True, restart_required=[])
 
-    monkeypatch.setattr(daemon.host_config, "config_write_op", _fake_config_write)
+    monkeypatch.setattr(host_config, "config_write_op", _fake_config_write)
     status, _result = await daemon._dispatch(
         "config_write",
         {"overrides": {"ops_concurrency": 2}},

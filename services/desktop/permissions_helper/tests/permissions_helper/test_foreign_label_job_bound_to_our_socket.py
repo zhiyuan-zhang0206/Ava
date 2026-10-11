@@ -1,4 +1,4 @@
-"""Permissions helper cases: old main job bound to our socket."""
+"""Permissions helper cases: a foreign-label job bound to our socket."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from services.desktop.permissions_helper.tests.test_permissions_helper import (
 )
 
 
-def test_old_main_job_bound_to_our_socket_is_retired(
+def test_foreign_label_job_bound_to_our_socket_is_refused(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
@@ -25,7 +25,7 @@ def test_old_main_job_bound_to_our_socket_is_retired(
     sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
 
     mine = lifecycle._label()
-    old_main = _write_agent_plist(agents, "com.ava.permissions-helper.main", sock)
+    foreign = _write_agent_plist(agents, "com.ava.permissions-helper.stray", sock)
     other_cluster = _write_agent_plist(
         agents,
         "com.ava.permissions-helper.ava-other-abcdef12",
@@ -43,15 +43,15 @@ def test_old_main_job_bound_to_our_socket_is_retired(
     monkeypatch.setattr(lifecycle, "run_bounded", fake_run)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="reconcile them externally"):
-        lifecycle._refuse_stale_jobs()
-    assert old_main.exists()
+        lifecycle._refuse_foreign_label_jobs()
+    assert foreign.exists()
     assert recorded == []
     # ...while other clusters' jobs and our own are untouched.
     assert other_cluster.exists()
     assert own.exists()
 
 
-def test_retire_is_idempotent_when_job_already_gone(
+def test_foreign_label_refusal_holds_when_the_job_is_not_loaded(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
@@ -59,7 +59,7 @@ def test_retire_is_idempotent_when_job_already_gone(
     agents = _retire_env(monkeypatch, tmp_path)
     sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
 
-    _write_agent_plist(agents, "com.ava.permissions-helper.main", sock)
+    _write_agent_plist(agents, "com.ava.permissions-helper.stray", sock)
     monkeypatch.setattr(
         lifecycle,
         "run_bounded",
@@ -69,8 +69,8 @@ def test_retire_is_idempotent_when_job_already_gone(
     )
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="reconcile them externally"):
-        lifecycle._refuse_stale_jobs()
-    assert (agents / "com.ava.permissions-helper.main.plist").exists()
+        lifecycle._refuse_foreign_label_jobs()
+    assert (agents / "com.ava.permissions-helper.stray.plist").exists()
 
 
 def test_unrelated_cluster_plists_are_left_alone(
@@ -89,7 +89,7 @@ def test_unrelated_cluster_plists_are_left_alone(
     )
     monkeypatch.setattr(lifecycle, "permissions_helper_socket", lambda: Path(sock))
 
-    assert lifecycle._stale_plists() == []
+    assert lifecycle._foreign_label_plists() == []
     assert other.exists()
 
 

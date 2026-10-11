@@ -266,9 +266,13 @@ async def _reclaim_row(
         return None
     if isinstance(result, _MachineAbsent):
         mode = None
+        interrupted = False
     else:
         try:
             mode = ShellKillMode(result["mode"])
+            # Notify only when the reap cut short a running job. Absent
+            # sessions never notify (nothing was interrupted).
+            interrupted = mode is ShellKillMode.KILLED and bool(result["interrupted"])
         except (KeyError, ValueError):
             _log.warning(
                 "[ttl-reaper] shell_kill for agent %s session %s returned %r",
@@ -277,16 +281,6 @@ async def _reclaim_row(
                 result,
             )
             return None
-    # Notify only when the reap cut short a running job. A missing
-    # `interrupted` field means a pre-policy runner — default True so a
-    # version-skewed fleet keeps the old notify-always behavior instead of
-    # silently swallowing a legit interruption notice. Absent sessions
-    # never notify (nothing was interrupted).
-    interrupted = (
-        mode is ShellKillMode.KILLED
-        and isinstance(result, dict)
-        and bool(result.get("interrupted", True))
-    )
     await asyncio.to_thread(
         functools.partial(
             delete_shell_row,

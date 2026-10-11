@@ -73,19 +73,7 @@ from services.derived.memory_indexer import config as indexer_config
 from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.derived.memory_indexer.backends.factory import get_backend
 from services.derived.memory_indexer.backends.probe import probe_backend
-
-# Note-text chunking lives in chunking.py (split out 2026-09-20 when the
-# hard-exit migration pushed this module against its line budget, task #4222);
-# the private names stay re-exported here for the existing test surface.
-from services.derived.memory_indexer.chunking import (
-    _chunk_body as _chunk_body,
-)
-from services.derived.memory_indexer.chunking import (
-    _file_rows as _file_rows,
-)
-from services.derived.memory_indexer.chunking import (
-    _split_note as _split_note,
-)
+from services.derived.memory_indexer.chunking import _file_rows
 from services.derived.memory_indexer.config import MemoryIndexerInputs
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
 from services.derived.memory_indexer.embeddings.factory import get_provider

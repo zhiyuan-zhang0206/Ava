@@ -57,12 +57,9 @@ def dead_letter_stale_claimed(
     reset to 'pending' on boot) while making a resurrected agent start from
     its real conversation, not a flood of stale mail.
 
-    Age is measured from `claimed_at`, falling back to `created_at` for rows
-    that predate the claimed_at column (2026-08-02): a NULL claimed_at means
-    'claimed before the column existed', so created_at is the only age
-    evidence left. Running owners are never touched; idling owners are swept
-    past the idling threshold because hosted agents may never boot again to
-    finalize their claims.
+    Age is measured from `claimed_at`. Running owners are never touched; idling
+    owners are swept past the idling threshold because hosted agents may never
+    boot again to finalize their claims.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -71,11 +68,9 @@ def dead_letter_stale_claimed(
             "WHERE m.agent_id = am.id "
             "  AND m.status = 'claimed' AND m.kind = 'chat' "
             "  AND ((am.status = 'terminated' "
-            "        AND COALESCE(m.claimed_at, m.created_at) "
-            "            < now() - make_interval(secs => %s)) "
+            "        AND m.claimed_at < now() - make_interval(secs => %s)) "
             "       OR (am.status = 'idling' "
-            "           AND COALESCE(m.claimed_at, m.created_at) "
-            "               < now() - make_interval(secs => %s)))",
+            "           AND m.claimed_at < now() - make_interval(secs => %s)))",
             (threshold_s, idling_threshold_s),
         )
         return cur.rowcount

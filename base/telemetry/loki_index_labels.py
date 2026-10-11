@@ -4,25 +4,17 @@ The Loki event readers and their index-label selector machinery were removed
 with the 2026-10-03 telemetry-readers-on-postgres move (Loki is a discardable
 projection; Postgres is the read surface). What remains are the constants
 ``validate_loki_deploy_config`` pins against the rendered native Loki config
-at converge time, plus ``ARCHIVE_FREEZE_AT`` — the PG ``events`` archive's
-freeze boundary read by events maintenance.
+at converge time.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import cast
 
 EVENT_STREAM_SERVICE_NAME = "unknown_service"
 
-# The PG `events` archive's freeze boundary (task #1281; the LGTM cutover,
-# task #1197): `ARCHIVE_FREEZE_AT` is the archive's newest row with FULL
-# microsecond precision (max(events.ts) = 2026-08-13 03:54:10.626517 UTC) —
-# truncating to seconds would drop the archive rows within that trailing
-# second (they are not in the live stream either). Events maintenance leaves
-# rows at or before it to the archive.
-ARCHIVE_FREEZE_AT = datetime(2026, 8, 13, 3, 54, 10, 626517, tzinfo=UTC)
 EVENT_STREAM_RETENTION = timedelta(hours=84)
 # Must match deployed Loki `querier.max_concurrent`; render validation catches
 # drift before it ships (the 2026-08-18 incident). Raised 4 to 6 with the

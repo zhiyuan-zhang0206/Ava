@@ -584,10 +584,10 @@ async def test_switch_summary_uses_strict_filter() -> None:
 
 def test_render_item_tags_speaker() -> None:
     """Pushed lines carry the [User] / [Ava #<id>] speaker tag."""
-    from services.entrypoints.im_bridge.core import _render_item
+    from services.entrypoints.im_bridge.timeline_acceptance import render_item
 
-    assert _render_item({"kind": "inbound_chat", "payload": "hi"}, 405) == "[User] hi"
-    assert _render_item({"kind": "agent_chat", "payload": "answer"}, 405) == "[Ava #405] answer"
+    assert render_item({"kind": "inbound_chat", "payload": "hi"}, 405) == "[User] hi"
+    assert render_item({"kind": "agent_chat", "payload": "answer"}, 405) == "[Ava #405] answer"
 
 
 # --- v3: typing indicator + button-capable /list (Telegram) ---
