@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "External Caller Profiles"
-description: "Explicit subprocess provenance for external tools, separate from authenticated credentials and gated by consumer compatibility."
+description: "Explicit subprocess provenance for external tools, separate from authenticated credentials."
 tags:
 - base
 - identity
@@ -33,25 +33,25 @@ SDK source selection prefers real hosted-turn context, then an
 explicit external profile, then its established legacy actor. An external shell
 cannot become its Ava parent merely by inheriting `AVA_AGENT_ID`.
 
-## Compatibility and remaining work
+## Sending as an external agent
 
-This is opt-in producer plumbing, not activation. Servers without target-runtime
-v1 support reject the source before delivery. Never retry with user/system/agent
-as a fallback. Existing non-opted-in lifecycle CLI behavior remains unchanged
-for the staged upgrade; its legacy server default is still a known attribution
-gap, not a claim that an undeclared caller is human. MCP source defaults and
-automatic wrapper activation also remain pending the generation-bound write gate. No new
-authorization scope, token store, or idempotency namespace is defined here.
+`ava agents send <id> <text> --source external_agent:<subject>[:<instance>]`
+delivers the message as coming from that external agent; `--source user` delivers
+it as the user. See [[base/agents/messages/docs/caller_identity.ava.okf.md]] for
+when to use which. The SDK path (`ava.agents.send_message` from a process whose
+environment carries the profile) stamps the profile's source the same way.
+
+The declaration is not a credential, so it adds no authorization scope, token
+store or idempotency namespace.
 
 MCP tool audit events use the existing authenticated token lookup: display
 source is `external_agent:mcp:<client-id>`, while separate
 `auth_principal={kind:mcp_client,id:...}` identifies the server-bound credential.
 The client name is metadata, not authority; tokens never enter audit attributes.
-This changes audit only, not the still-gated agent-facing source protocol.
 
 The Codex and Claude launch wrappers accept `--caller-instance run-42` as an
 explicit opt-in, placing a shell-quoted JSON profile only on the external child.
 Omitting the flag leaves existing launch commands unchanged. Validate the
 instance before touching files or creating sessions. Existing live canonical
 Codex generations are adopted as-is; this option cannot retrofit a running
-process environment. Do not use it before target runtime protocol support.
+process environment.

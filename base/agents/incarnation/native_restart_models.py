@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from base.agents.incarnation.native_work_models import NativeWorkTarget
-from base.agents.messages.envelope import validate_writable_source
+from base.agents.messages.envelope import validate_source
 
 
 class NativeRestartOutcome(StrEnum):
@@ -44,7 +44,7 @@ class NativeRestartRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _source(cls, value: str) -> str:
-        validate_writable_source(value)
+        validate_source(value)
         return value
 
 

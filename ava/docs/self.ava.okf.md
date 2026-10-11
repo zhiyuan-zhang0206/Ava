@@ -18,7 +18,7 @@ tags:
 
 ### Identity
 - `AGENT_ID: int` — Your agent ID (read-only forwarding of an internal framework slot; `AVA_SDK_DISABLE` can remove the self namespace without affecting identity).
-- `MACHINE_SPEC: tuple[str, str]` — `(machine_name, description)` current machine name and description.
+- `MACHINE_SPEC: MachineSpec` — `MachineSpec(name, description)`, a NamedTuple (still unpacks as `name, description`) for the current machine; `description` is free prose, empty if unset.
 - `SELF_MACHINE_NAME: str` — Current machine name, also the default value for `ava.agents.spawn(machine=...)`.
 
 ### Lifecycle

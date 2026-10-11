@@ -153,14 +153,10 @@ async def apply_hosted_lifecycle(
         if command is None:
             return None
         lifecycle_kind = command[0]
-        # Protocol zero in both branches is a release, never a downgrade of a
-        # live advertisement: the durable apply ends this incarnation, and the
-        # successor's own admission decides the next advertisement (task #4122).
         if lifecycle_kind == "restart":
             await conn.execute(
                 "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
-                "runtime_owner=NULL,runtime_kind=NULL,lease_expires_at=NULL,"
-                "runtime_protocol_version=0 WHERE id=%s",
+                "runtime_owner=NULL,runtime_kind=NULL,lease_expires_at=NULL WHERE id=%s",
                 (incarnation.agent_id,),
             )
         elif lifecycle_kind == "terminate":
@@ -170,7 +166,7 @@ async def apply_hosted_lifecycle(
                 shell_cutoff = row[2]
             await conn.execute(
                 "UPDATE agents_meta SET status='terminated',termination_source='user',"
-                "lease_expires_at=NULL,runtime_protocol_version=0 WHERE id=%s",
+                "lease_expires_at=NULL WHERE id=%s",
                 (incarnation.agent_id,),
             )
         else:
@@ -303,9 +299,9 @@ async def _legacy_dead_host_adoption(
 ) -> _LegacyAdoption | None:
     """Propose admitting a legacy NULL row over a demonstrably dead local host.
 
-    Legacy rows (``incarnation_resources IS NULL``) predate resource evidence
-    and keep protocol zero, so the exact-process proof an evidence-carrying row
-    offers does not exist for them. A same-machine successor may instead stand
+    Legacy rows (``incarnation_resources IS NULL``) predate resource evidence,
+    so the exact-process proof an evidence-carrying row offers does not exist
+    for them. A same-machine successor may instead stand
     on this evidence set, re-pinned under the admission row lock by the caller
     (issue #2156; the 2026-09-10 force-restart stall where a fresh host waited
     out the dead predecessor's full lease):
@@ -489,8 +485,7 @@ async def admit_hosted_runtime(
     before its lease expires only through the evidence-gated proposal of
     ``_legacy_dead_host_adoption``, re-checked under this row lock.
 
-    Admission reads and locks no deployment-wide state, and the row it writes
-    advertises protocol zero.
+    Admission reads and locks no deployment-wide state.
     """
     from base.agents.incarnation.exec_owner_recovery import recover_local_resources
 
@@ -588,12 +583,6 @@ async def settle_hosted_runtime(
     resources: HostedTurnResources | None,
 ) -> bool:
     """Settle an ordinary turn; only durable lifecycle apply releases ownership.
-
-    The protocol advertisement is retained: a settled managed runtime stays
-    reachable by the caller gate across ordinary idles until a durable
-    lifecycle apply (restart/terminate) or a cleanup site releases it
-    (task #4122 -- resetting the column here dropped an enabled runtime out
-    of the gate on its first idle).
 
     The corpse marker `last_turn_fatal_at` is deliberately untouched here:
     a completed LLM turn already cleared it atomically (`_persist_last_active`

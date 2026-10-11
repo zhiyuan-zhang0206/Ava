@@ -9,6 +9,8 @@ from base.agents.tasks.model import Task, validate_task_snapshot
 from base.agents.tasks.priority import validate_priority, validate_remind_interval_seconds
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE
 
+from .task_registry import TaskAssignment
+
 
 def create_and_assign_guarded(
     title: str,
@@ -22,8 +24,8 @@ def create_and_assign_guarded(
     remind_interval_seconds: int | None,
     priority: str,
     operation_key: str,
-) -> tuple[Task, int]:
-    """Return the accepted original pair; launch/execution are separate owners."""
+) -> TaskAssignment:
+    """Return the accepted original task and agent; launch/execution are separate owners."""
     actor = require_lease_free_agent_id()
     if isinstance(parent, bool) or not isinstance(parent, int):
         raise TypeError("parent must be an integer")
@@ -68,4 +70,4 @@ def create_and_assign_guarded(
         raise TypeError("accepted agent id must be an integer")
     if agent_id <= 0:
         raise ValueError("accepted agent id must be positive")
-    return Task(**snapshot), agent_id
+    return TaskAssignment(Task(**snapshot), agent_id)

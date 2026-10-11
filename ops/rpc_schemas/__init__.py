@@ -32,7 +32,8 @@ from base.agents import (
     ResurrectResult,
     ShellKillMode,
 )
-from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
+from base.agents.messages.caller_identity import CallerIdentity, is_caller_source
+from base.agents.messages.envelope import validate_source
 from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
 from base.api_contracts.op_envelope import OpEnvelope as OpEnvelope
@@ -135,7 +136,7 @@ class SpawnAgentRequest(BaseModel):
         # Same legal set as the claim-side wrap — single-sourced via
         # base.agents.messages.envelope.validate_source.
         if self.prompt_source is not None:
-            validate_writable_source(self.prompt_source)
+            validate_source(self.prompt_source)
         return self
 
 
@@ -218,7 +219,7 @@ class ResurrectAgentRequest(BaseModel):
     @field_validator("resurrected_by")
     @classmethod
     def _check_envelope_source(cls, v: str) -> str:
-        validate_writable_source(v)
+        validate_source(v)
         return v
 
 
@@ -242,7 +243,10 @@ class RestartAgentRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _check_source(cls, value: str) -> str:
-        reject_unnegotiated_caller(value)
+        # Lifecycle sources are opaque audit labels, except a declared external
+        # agent, which must be well-formed.
+        if is_caller_source(value):
+            CallerIdentity.from_source(value)
         return value
 
     @model_validator(mode="after")

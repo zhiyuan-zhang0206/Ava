@@ -51,6 +51,7 @@ import { cn } from "@/lib/format/utils";
 
 import { classifyMarker, markerVisual } from "./markers";
 import { inboundKind } from "./model/runs";
+import { externalAgentName } from "@/lib/format/inbound-source";
 import { isLiveCode, isLiveExecution, isLiveReasoning, useNow } from "./model/reasoning-clock";
 import { ItemTimestamp } from "./timestamp";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
@@ -200,6 +201,20 @@ export function messageCardConfig(
           title: `Agent ${(item.source ?? "").slice("agent:".length)}`,
           titleKey: "timeline.agent",
           titleValues: { id: (item.source ?? "").slice("agent:".length) },
+          border: colors.inbound_agent.border,
+          bg: colors.inbound_agent.bg ?? "",
+          fixedDefault: false,
+          headerTs: true,
+        };
+      }
+      if (kind === "external_agent") {
+        const name = externalAgentName(item.source ?? "");
+        return {
+          rich: null,
+          icon: Bot,
+          title: `External agent ${name}`,
+          titleKey: "timeline.externalAgent",
+          titleValues: { name },
           border: colors.inbound_agent.border,
           bg: colors.inbound_agent.bg ?? "",
           fixedDefault: false,
