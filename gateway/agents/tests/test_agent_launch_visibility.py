@@ -17,6 +17,7 @@ from base.events.live.bus import EventBus
 from base.lm.plugin_providers import build_model_catalog
 from gateway.app import app
 from gateway.tests.test_agents_endpoints import _inbound_rows
+from tests.fixtures.gateway_config import spawn_via_http
 
 
 def _assert_failed_birth_visible(client: TestClient, body: dict[str, Any], agent_id: int) -> None:
@@ -51,7 +52,7 @@ def test_failed_plain_launch_persists_prompt_and_advertises_guarded_recovery(
 
     monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
     with TestClient(app) as client:
-        failed = client.post("/api/agents", json={"prompt": "Do the task", "prompt_source": "user"})
+        failed = spawn_via_http(client, {"prompt": "Do the task", "prompt_source": "user"})
         assert failed.status_code == 502
         body = failed.json()
         agent_id = body["agent_id"]
@@ -77,7 +78,7 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
 
     monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
     with TestClient(app) as client:
-        failed = client.post("/api/agents", json={"prompt": "Keep me", "prompt_source": "user"})
+        failed = spawn_via_http(client, {"prompt": "Keep me", "prompt_source": "user"})
         assert failed.status_code == 502
         body = failed.json()
         assert body["agent_id"] > 0
@@ -94,7 +95,7 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
     with TestClient(app) as client:
-        source = client.post("/api/agents", json={}).json()["id"]
+        source = spawn_via_http(client, {}).json()["id"]
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO checkpoints (thread_id, checkpoint_id, parent_checkpoint_id, "
@@ -107,9 +108,8 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
             raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
         monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
-        failed = client.post(
-            "/api/agents",
-            json={"fork_from": source, "prompt": "Continue here", "prompt_source": "user"},
+        failed = spawn_via_http(
+            client, {"fork_from": source, "prompt": "Continue here", "prompt_source": "user"}
         )
     assert failed.status_code == 502
     agent_id = failed.json()["agent_id"]
@@ -139,7 +139,7 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
 
     monkeypatch.setattr(route, "forward_spawn_to_remote", _admit_then_fail)
     with TestClient(app) as client:
-        response = client.post("/api/agents", json={"prompt": "Stay", "prompt_source": "user"})
+        response = spawn_via_http(client, {"prompt": "Stay", "prompt_source": "user"})
     assert response.status_code == 201
     agent_id = response.json()["id"]
     with db_conn.cursor() as cur:

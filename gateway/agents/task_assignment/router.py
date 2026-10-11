@@ -156,8 +156,6 @@ async def post_task_assignment(
     if idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="task assignment requires principal-v1 scope")
     key = scoped_creation_key(request, idempotency_key, operation_path=PATH)
-    if key is None:
-        raise RuntimeError("guarded admission requires a principal-bound key")
     pool, db, bus = request.app.state.db_pool, request.app.state.db, request.app.state.bus
     raw = body.model_dump(mode="json")
     result = await asyncio.to_thread(lookup_assignment, pool, key, raw)

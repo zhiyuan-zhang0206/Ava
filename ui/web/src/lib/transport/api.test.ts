@@ -223,16 +223,16 @@ describe("lifecycle endpoints", () => {
     ]);
   });
 
-  it("spawnAgent POSTs JSON body to /api/agents", async () => {
+  it("spawnAgent POSTs JSON body to /api/keyed/v1/agents", async () => {
     await api.spawnAgent({ prompt: "Search X", spawner: "claude-code", prompt_source: "user" });
     // After happy-dom provides window, API_BASE is inferred as http://localhost:8000;
     // tests only anchor the endpoint path (gateway contract); host part is ignored.
-    expect(calls[0].url).toMatch(/\/api\/agents$/);
+    expect(calls[0].url).toMatch(/\/api\/keyed\/v1\/agents$/);
     expect(calls[0].init?.method).toBe("POST");
     const headers = new Headers(calls[0].init?.headers);
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("Idempotency-Key")).toBeTruthy();
-    expect(headers.has("Idempotency-Scope")).toBe(false);
+    expect(headers.get("Idempotency-Scope")).toBe("principal-v1");
     expect(JSON.parse(calls[0].init?.body as string)).toEqual({
       prompt: "Search X",
       spawner: "claude-code",

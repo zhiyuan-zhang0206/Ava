@@ -303,32 +303,7 @@ export interface paths {
          */
         get: operations["get_agents_api_agents_get"];
         put?: never;
-        /**
-         * Post Agents
-         * @description Spawn a new agent — uniform HTTP path for SDK / frontend / scripts.
-         *
-         *     Spawn is HTTP-uniform: every spawn funnels through
-         *     `create_and_launch_agent`, which creates the agent row in the gateway
-         *     process (the main data-plane identity — the target runner's ops server
-         *     runs as the least-privilege `ava_runner` role and cannot INSERT agents)
-         *     and forwards a launch-only op to the target runner's ops server, whether
-         *     the runner is remote or co-located on this box (localhost) — one code
-         *     path, uniform logs/traces, no in-process shortcut. Auto label generation
-         *     is done asynchronously by the services/derived/labeler daemon — does not block
-         *     the spawn response.
-         *
-         *     Plain and fork first prompts commit with the row. The fork marker precedes
-         *     its chat in that transaction. InboundArrived is a best-effort live hint;
-         *     the pending scan recovers a missed wake.
-         *
-         *     body.machine = None targets the local machine (which must be a registered
-         *     agent-runner).
-         *
-         *     400: the target machine is registered but has no agent-runner capability
-         *     (wire `reason='spawn_target_not_agent_runner'`). 404: the target is not in the
-         *     registry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet).
-         */
-        post: operations["post_agents_api_agents_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -368,8 +343,31 @@ export interface paths {
          * Post Guarded Agents
          * @description Create or fork an agent through principal-bound keyed admission.
          *
-         *     Older routing cannot execute this path. Callers must keep it fixed for an
-         *     intent and never fall back to the legacy path after an uncertain response.
+         *     Spawn is HTTP-uniform: every spawn funnels through
+         *     `create_and_launch_agent`, which creates the agent row in the gateway
+         *     process (the main data-plane identity — the target runner's ops server
+         *     runs as the least-privilege `ava_runner` role and cannot INSERT agents)
+         *     and forwards a launch-only op to the target runner's ops server, whether
+         *     the runner is remote or co-located on this box (localhost) — one code
+         *     path, uniform logs/traces, no in-process shortcut. Auto label generation
+         *     is done asynchronously by the services/derived/labeler daemon — does not block
+         *     the spawn response.
+         *
+         *     Plain and fork first prompts commit with the row. The fork marker precedes
+         *     its chat in that transaction. InboundArrived is a best-effort live hint;
+         *     the pending scan recovers a missed wake.
+         *
+         *     body.machine = None targets the local machine (which must be a registered
+         *     agent-runner).
+         *
+         *     Callers must keep the key fixed for one intent: a retry replays the retained
+         *     birth instead of creating another agent.
+         *
+         *     400: the target machine is registered but has no agent-runner capability
+         *     (wire `reason='spawn_target_not_agent_runner'`). 404: the target is not in the
+         *     registry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet),
+         *     or the key already identifies a different request. 422: the scope header is
+         *     not principal-v1.
          */
         post: operations["post_guarded_agents_api_keyed_v1_agents_post"];
         delete?: never;
@@ -8562,7 +8560,7 @@ export interface components {
         };
         /**
          * SpawnAgentRequest
-         * @description POST /api/agents request body — for frontend / SDK; frontend does
+         * @description POST /api/keyed/v1/agents request body — for frontend / SDK; frontend does
          *     not need to know checkpoint ids.
          *
          *     If `fork_from` is given, the gateway resolves the latest checkpoint
@@ -9739,41 +9737,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentDirectoryPage"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_agents_api_agents_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SpawnAgentRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SpawnedAgent"];
                 };
             };
             /** @description Validation Error */

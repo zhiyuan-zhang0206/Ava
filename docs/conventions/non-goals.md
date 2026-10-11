@@ -189,7 +189,7 @@ first and ask "what changed that made it worth doing".
 - **Bespoke spawn-wrapping endpoint per "AI does X for you" affordance**: a dedicated route whose
   only job is to assemble a prompt and forward it to spawn — `/api/presets/draft` was this, folded
   away (2026-07-30) in favor of composing the prompt client-side. The affordance is already
-  expressible with existing primitives: `POST /api/agents` plus the frontend composing a short
+  expressible with existing primitives: `POST /api/keyed/v1/agents` plus the frontend composing a short
   first-message prompt and navigating to the new agent's chat; the domain knowledge of *how* to do
   the task lives in a skill the prompt points at, not in a server-side prompt template. Trigger: a
   case needs machinery a plain composed prompt can't express — e.g. the `packages` / `schedules` /

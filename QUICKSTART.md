@@ -105,10 +105,13 @@ Or use the command line:
 
 ```bash
 # Create an agent via the API, presenting the cluster secret as a Bearer token
+# (one Idempotency-Key per creation intent)
 SECRET=$(grep '^AVA_CLUSTER_SECRET=' ~/.ava/.env | cut -d= -f2)
-curl -XPOST http://localhost:8000/api/agents \
+curl -XPOST http://localhost:8000/api/keyed/v1/agents \
   -H "Authorization: Bearer $SECRET" \
   -H 'content-type: application/json' \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H 'Idempotency-Scope: principal-v1' \
   -d '{"prompt":"Hello, introduce yourself","prompt_source":"user"}'
 ```
 
