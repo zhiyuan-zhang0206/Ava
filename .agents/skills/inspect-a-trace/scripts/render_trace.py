@@ -111,7 +111,7 @@ def _content_section(data: dict) -> str:
     if content is None:
         return "<p class='note'>content not fetched — re-run read_trace.py with --with-content</p>"
     if content.get("pruned"):
-        return "<p class='note'>checkpoint pruned — turn content unavailable (expected for old turns)</p>"
+        return "<p class='note'>no checkpoint carries this trace — turn content unavailable</p>"
     msgs = content.get("messages", [])
     blocks = []
     for m in msgs[:60]:

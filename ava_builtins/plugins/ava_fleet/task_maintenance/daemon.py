@@ -11,14 +11,14 @@ They must not resurrect terminated agents: per the 2026-08-22 user ruling, an ol
 agent remains terminated with its reminder unclaimed while the task escalates;
 whoever takes over spawns a new agent. Counter updates stay direct DB writes.
 
-- Remind: every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS` (default 5 min), find
+- Remind: every Fleet `task_maintenance_interval_seconds` (default 5 min), find
   in-progress tasks whose owner has not touched them within their
   `remind_interval_seconds` window and deliver one system-note digest per owner. An
   overdue window repeats at max(backoff, remind_interval_seconds), so a P3 task
   (4h interval) is not nagged hourly; `last_reminded_at` gates it. Digest and
   counter acceptance share a transaction under the selected task row locks;
   a rollback leaves both absent, and a lost post-commit hint cannot duplicate it.
-- Escalate: when `reminder_count` reaches `AVA_TASK_ESCALATE_N` (default 3),
+- Escalate: when `reminder_count` reaches Fleet `task_escalate_n` (default 3),
   notify the parent task's owner (the delegator) that the current owner is
   unresponsive — once per overdue window: the delivered digest stamps
   `escalated_at`, and any update() clears it with the reminder counters. A

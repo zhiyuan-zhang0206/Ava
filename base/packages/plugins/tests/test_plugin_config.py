@@ -19,7 +19,6 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from base.config import ConfigBoot, set_field, settings
-from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.config_registration import (
@@ -29,7 +28,6 @@ from base.packages.plugins.config_registration import (
     apply_config_overlay,
     bind_plugin_config,
     disk_image_path,
-    effective_config_snapshot,
     get_plugin_config,
     is_per_agent_field,
     merge_disk_image_schema,
@@ -725,47 +723,6 @@ def test_eval_network_allowlist_rejects_unknown_capability(
             configs=isolated_registry,
             models=model_catalog.models,
         )
-
-
-def test_effective_config_snapshot_namespaces_plugin_fields(
-    config_authority: ConfigAuthority, isolated_registry: dict[str, BaseModel], unit_home
-):
-    """snapshot prefixes plugin fields with `<plugin>.<field>` to avoid collisions with same-named framework fields."""
-    _setup_overlayable_plugin(isolated_registry)
-    snap = effective_config_snapshot(
-        configs=isolated_registry, framework_values=config_authority.flat_dump()
-    )
-    assert "overlay_test.marker" in snap
-    assert snap["overlay_test.marker"] == ".git"
-    # framework fields are not prefixed; sensitive ones (e.g. db_url, which
-    # embeds the cluster credentials) are excluded from the snapshot entirely
-    assert "gateway_url" in snap
-    assert "db_url" not in snap
-
-
-def test_effective_config_snapshot_excludes_sensitive_fields(
-    config_authority: ConfigAuthority, isolated_registry: dict[str, BaseModel], unit_home
-):
-    """Fields marked `sensitive=True` never enter the snapshot — it is stored as
-    plain JSON on every restart_completed inbound row, so a sensitive value must
-    not get a second plaintext copy there (2026-08-08 audit, P2-7)."""
-
-    class _SensitiveConfig(BaseModel):
-        model_config = ConfigDict(frozen=True)
-        marker: str = Field(default=".git")
-        webhook_secret: str = Field(
-            default="plain-text-secret",
-            json_schema_extra={"sensitive": True},
-        )
-
-    bind_plugin_config("sensitive_test", _SensitiveConfig, configs=isolated_registry)
-
-    snap = effective_config_snapshot(
-        configs=isolated_registry, framework_values=config_authority.flat_dump()
-    )
-    assert "sensitive_test.marker" in snap
-    assert "sensitive_test.webhook_secret" not in snap
-    assert "plain-text-secret" not in str(snap)
 
 
 @pytest.mark.parametrize("field", ["gemini_explicit_cache_enabled", "gemini_cache_timeout_seconds"])

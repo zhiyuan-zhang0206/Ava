@@ -46,8 +46,8 @@ from agent.messages import (
 from agent.nodes import CLAIM, INIT_CONTEXT
 from agent.state import AgentState, CompactState, ContextReset
 from base.agents.context import AvaContext, agent_id_from_config
-from base.agents.history.checkpoint_cleanup import mark_compact_boundary
 from base.agents.history.closing_request import ClosingRequest
+from base.agents.history.compact_boundary import mark_compact_boundary
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
