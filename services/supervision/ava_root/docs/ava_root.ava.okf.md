@@ -60,13 +60,6 @@ an immutable running release or seal ignored dependency directories.
   writes no PIDFile. `KillMode=process` preserves independent data-plane siblings.
 ## Unit intent and recorded failures
 
-The up-half/episode tests arrange child closure through a captured disposable
-birth and await its real watcher before testing replacement. They retain
-input-seal validation, durable intent, failure episodes and fresh generation
-assertions without coupling them to a live TERM deadline. Native down-refusal
-in `tests/test_ava_root_intent.py` and `tests/test_ava_root_stop_window.py` retain
-real graceful-stop and refusal coverage.
-
 Each unit carries one policy fact: its `intent` (`running` | `stopped`) and the
 source that last set it (`operator` | `self` | `selection`), persisted per unit
 under the run directory (`intent/<unit>.json`, atomic writes). Classification of
@@ -74,7 +67,7 @@ an expected stop reads only this intent — a mechanical transition residue neve
 reads back as an operator action (task #4872). An interrupted replacement is
 recorded explicitly as `restart_failed` (the half it failed in, `down` or `up`,
 and since when) and clears only once a fresh active generation proves it gone;
-the health monitor counts it and retries under its backoff. A root restart
+the health monitor may retry within its finite process-local budget. A root restart
 merges each stored record conservatively: an explicit operator or selection stop
 holds its unit down, a stop root recorded for itself during shutdown is
 superseded by the admitted start, and a recorded failure is carried until a
@@ -88,15 +81,30 @@ full stop/start leaves no mixed state.
 
 The health monitor derives one condition per unit each round: the unit's intent
 is running and it sits in an explicit failure state — a recorded replacement
-failure or an open restart breaker
+failure or exhausted automatic restart attempts
 (`services/supervision/ava_root/failure_state.py`). The condition is a state, so every
 round that finds it holding emits `root_unit_failure_state` (unit, kind,
 detail); the observability stack's rules own the debounce and the notification,
 and the signal stops on its own when the condition clears. A terminal probe
 verdict (unknown identity, inspection error, foreign listener) emits
-`root_unit_not_revivable` on every round it is observed, at WARNING. The
-edge events (`root_restart_failed`, `root_restart_breaker_open`) remain the
-audit trail of when each state opened.
+`root_unit_not_revivable` on every round it is observed, at WARNING. `root_restart_failed` records a replacement error. The exhaustion state uses
+`kind=restarts_exhausted`; alert rules also accept historical `breaker_open`
+events during a version transition.
+
+## Finite automatic restart policy
+
+Each ordinary health round can restart a DOWN unit once. Three actual calls
+exhaust the continuous-outage budget; later rounds observe and warn. The next
+ordinary round observes readiness: spawn acceptance is not ALIVE. There is no
+confirmation poll, adaptive backoff, failure threshold or restart breaker.
+Generation startup grace remains.
+
+ALIVE or an observed operator stop resets the count. UNKNOWN, foreign owners,
+NEVER policy, probe-only units and maintenance holds neither spend nor replenish
+it. A `CODE_BEHIND_MINIMUM_EXIT_CODE` exit requires updating the host; root warns
+without restarting it. The count is process-local and resets across root
+restarts. Explicit operator up/restart retains authority. Service restart never
+authorizes replaying agent execution or UNKNOWN work.
 
 ## Control contract
 
