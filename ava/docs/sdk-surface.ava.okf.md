@@ -53,6 +53,15 @@ and owns no second HTTP connection.
 - [[watcher.ava.okf.md]] — Background listener: at / cron / launch (wake self = `ava.agents.send_message`)
 
 ### Context
+
+Execution bootstrap binds the request identity, machine, clients and the
+configuration owner's clock before loading plugin surfaces. External attachment
+bootstrap supplies its own or borrowed machine to that load, but the
+installation's fallback event producer owns separate cold clients until process
+exit. Detaching an attachment closes only its owned clients; subsequent bare
+calls never borrow those closed clients. Surface loading and the later runtime
+faces upgrade each happen once. Agent-launched bare scripts retain their current
+import-time plugin bootstrap.
 - `ava.context` — the `AvaContext` this process runs as: `ava.context.identity` (`agent_id`, `owns_loop`, `actor`). The exec child rebuilds the host's context from the exec request envelope and installs it before plugin loading and user code; a script an agent launched derives it from `AVA_AGENT_ID`. It does not exist (raises `AttributeError`) in the agent host and in a bare script, as `ava.state` does not outside an exec turn. `ava.context.sql` / `.redis` / `.gateway` are the connections (lazy; released when the process ends); `ava.DB` / `ava.REDIS` are the same objects under their SDK names. Free functions such as `ava.agents.*` read the identity and clients from this one entry and keep their call shapes. All threads inside that child observe the same binding through normal imports, without a ContextVar or a patch to thread startup. The shared host supplies dependencies explicitly to its helpers and plugin callbacks, and never binds a current agent to the SDK module. Its boot entry fixes a shared-host purpose in the existing SDK process slot before plugins or graph work, so inherited `AVA_AGENT_ID` cannot turn it into a launched child or allow an external attachment. Context bind/release cannot clear that startup purpose. An external controller may bind one attachment for its process and restores its previous context on detach. Lifecycle writes with an omitted source require an established actor before HTTP; an absent identity is an error.
 
 ### Self & User

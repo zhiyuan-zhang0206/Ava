@@ -201,7 +201,12 @@ class Attachment:
         # state fields registered — the surface-only default would silently
         # drop them (review finding, #2616).
         self._bind_borrowed_context()
-        ava.ensure_plugins_loaded(surface=False, config=config, clock_factory=self._clock_factory)
+        ava.ensure_plugins_loaded(
+            surface=False,
+            config=config,
+            clock_factory=self._clock_factory,
+            machine=self._machine,
+        )
         self._bind_catalog()
         if config is None:
             from ava.sdk_surface.settings import config_authority

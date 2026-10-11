@@ -37,6 +37,7 @@ def loaded_code_image() -> _LoadedCommit:
 # invariant.
 from base.agents.context import AvaContext
 from base.clock import Clock, clock_config_from_boot
+from base.cluster.machine import MachineIdentity as _MachineIdentity
 from base.config import ConfigBoot
 
 from .sdk_surface import process_context
@@ -294,6 +295,7 @@ def ensure_plugins_loaded(
     config: ConfigBoot | None = None,
     clock_factory: Callable[[], Clock] | None = None,
     producer: Callable[[], Any] | None = None,
+    machine: _MachineIdentity | None = None,
 ) -> None:
     """Idempotently load plugin namespaces (`ava.tasks` etc.) into *this* process.
 
@@ -321,6 +323,12 @@ def ensure_plugins_loaded(
     failures propagate unchanged; a later call re-raises the same failure without
     retrying the load. The loader's earlier per-module import containment is a
     separate boundary in `agent.extensions`.
+
+    An explicit composition root supplies its configuration, clock and optional
+    machine owner. If no producer is supplied, the installation retains its own
+    cold clients with those inputs until process exit; it never borrows an
+    attachment's shorter-lived clients. Bound SDK calls use their own context's
+    producer instead.
     """
     from .sdk_surface import install as _sdk_install
     from .sdk_surface import sdk_disable
@@ -359,7 +367,7 @@ def ensure_plugins_loaded(
             # The installation outlives attachments. Bound calls capture their
             # own context's producer; bare calls keep this distinct cold owner.
             if producer is None:
-                clients = process_context.process_clients(config=config)
+                clients = process_context.process_clients(config=config, machine=machine)
                 atexit.register(clients.close)
                 producer = clients.event_pipeline
             authority = ConfigAuthority.deferred(

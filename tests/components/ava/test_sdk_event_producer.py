@@ -12,6 +12,7 @@ from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk import call_policy
+from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.telemetry import emit
@@ -180,8 +181,12 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         return pipe
 
     bare_clients = ClientSet(pipeline_factory=pipeline)
+    prepared_config = ConfigBoot()
+    prepared_machine = machine_from_boot(prepared_config)
 
-    def clients(*, config: ConfigBoot) -> ClientSet:
+    def clients(*, config: ConfigBoot, machine: MachineIdentity | None) -> ClientSet:
+        assert config is prepared_config
+        assert machine is prepared_machine
         return bare_clients
 
     def register(callback: object) -> object:
@@ -207,7 +212,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         AvaContext(clients=attachment, identity=AgentIdentity(agent_id=6111, owns_loop=False))
     )
     try:
-        ava.ensure_plugins_loaded(config=ConfigBoot())
+        ava.ensure_plugins_loaded(config=prepared_config, machine=prepared_machine)
         assert captured == [bare_clients.event_pipeline]
         assert exits == [bare_clients.close]
         assert made == []
