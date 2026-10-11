@@ -206,6 +206,17 @@ def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_header_at_the
     ]
 
 
+def test_an_inbound_without_a_recorded_body_offset_is_refused() -> None:
+    chunk: list[BaseMessage] = [
+        HumanMessage(
+            content="[2026-10-05 Mon 11:04:09]\n\nold",
+            additional_kwargs={"ava_msg_type": "inbound", "ava_source": "user"},
+        )
+    ]
+    with pytest.raises(ValueError, match="ava_inbound_body_start"):
+        build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS))
+
+
 def _note(kind: str | None, tag: str | None = None) -> HumanMessage:
     kwargs: dict[str, str] = {} if kind is None else {"ava_msg_type": kind}
     if tag:
