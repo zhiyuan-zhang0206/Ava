@@ -22,7 +22,6 @@ from ava.sdk_surface.install import Installation
 from tests.fixtures.pin_agent import exec_context
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
     """SIGTERM -> TimeoutError inside the child -> kind=timed_out envelope with
     partial output preserved."""
@@ -62,7 +61,6 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
     assert payload.kind == "timed_out"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch: pytest.MonkeyPatch,
     model_installation: Installation,

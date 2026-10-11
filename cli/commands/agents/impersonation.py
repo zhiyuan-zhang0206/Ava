@@ -79,8 +79,7 @@ def _write_relay_stub(
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        if os.name != "nt":
-            os.fchmod(fd, 0o600)  # apply the exact mode even under a permissive umask
+        os.fchmod(fd, 0o600)  # apply the exact mode even under a permissive umask
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             fd = -1
             stream.write(
@@ -249,9 +248,7 @@ def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int
     )
     lease = control.require_active(db, lease_id, caller, local_machine=args.runtime.machine.name())
     source = f"agent:{lease['agent_id']}"
-    status = send_agent_message(
-        args.target_agent_id, content, source=source, origin_agent_id=int(lease["agent_id"])
-    )
+    status = send_agent_message(args.target_agent_id, content, source=source)
     _emit({"status": status, "to": args.target_agent_id, "source": source})
     return 0
 

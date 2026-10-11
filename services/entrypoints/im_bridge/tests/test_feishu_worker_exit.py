@@ -24,8 +24,6 @@ from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
 from services.entrypoints.im_bridge.tests.slices import feishu_config
 from tests.components.services.daemon_shutdown_test_support import Child
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGTERM contract")
-
 
 def run_blocked_ws_child(markers_path: Path, *, responsive: bool = True) -> None:
     """Use a blocked SDK transport with the real adapter and daemon main."""

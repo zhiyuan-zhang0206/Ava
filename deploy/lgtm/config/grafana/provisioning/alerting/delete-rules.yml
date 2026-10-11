@@ -8,3 +8,5 @@ apiVersion: 1
 deleteRules:
   - orgId: 1
     uid: ava-ops-pitr-storage-growth
+  - orgId: 1
+    uid: ava-ops-agent-restart-spike

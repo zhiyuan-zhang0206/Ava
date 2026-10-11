@@ -471,13 +471,11 @@ def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         ["config", "set", "KEY=VALUE"],
         ["logs", "retention"],
         ["agents", "send", "1", "hello"],
-        ["boot"],
         ["status"],
         ["agents", "ls"],
         ["config", "get"],
         ["stop", "--help"],
         ["config", "unset", "--", "--help"],
-        ["boot", "--help"],
     ],
 )
 def test_foreign_checkout_is_refused_before_dispatch(
@@ -487,8 +485,8 @@ def test_foreign_checkout_is_refused_before_dispatch(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A checkout that is not the home's own does not operate that home: every
-    command is refused before anything dispatches (and before `ava boot` could
-    retry a start), and nothing is written to the home."""
+    command is refused before anything dispatches, and nothing is written to the
+    home."""
     home = _owned_home(tmp_path, monkeypatch)
     dispatched: list[str] = []
     monkeypatch.setattr(

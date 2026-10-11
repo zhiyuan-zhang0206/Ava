@@ -86,9 +86,9 @@ directly; never shut down but never noisy.
 ### Shared infra — consulted, not reported to
 
 - **Cluster Operator** — disk / worktrees / runtime / cluster bring-up / deploy.
-  The **only executor of cluster rollouts**: no other agent runs
-  `ava.self.update()` or triggers a rollout on its own (organization-level
-  rule; keeps update authority in one place).
+  The **only executor of cluster rollouts**: no other agent triggers a
+  rollout on its own (organization-level rule; keeps update authority in one
+  place).
   May also watch resources (disk / memory / CPU thresholds); when the cluster's
   load justifies it, spawn a dedicated **Resource Monitor** agent that watches
   thresholds and alerts, instead of overloading the operator.

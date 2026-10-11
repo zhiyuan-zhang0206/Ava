@@ -256,9 +256,8 @@ class Registry(BaseModel):
 
     `version` is the registry schema version — 2 since the content-channel
     support (per-package `UpdateState` + per-machine `ChannelState`; tasks
-    #2915 / #3267). The reader accepts exactly this version: a v1 file is
-    refused (the lazy-migration shim is retired; every writer has been v2-only
-    since #2355), and a newer file is refused outright. Also the migration
+    #2915 / #3267). The reader accepts exactly this version; any other file is
+    refused outright. Also the migration
     anchor if the schema evolves further (the sibling `~/.agents/.skill-lock.json`
     format already carries one; audit round 2, skills-plugins #14)."""
 

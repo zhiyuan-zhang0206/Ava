@@ -1,7 +1,6 @@
 """One live CPU / memory / disk / battery reading for this machine — no history.
 
-The status surfaces used to carry a 300-sample ring buffer per machine (the
-retired `base.resource_monitor`). Since issue #46 the host metrics live in
+The host metrics live in
 Prometheus, scraped by the per-machine OTel Collector sidecar's `host_metrics`
 receiver, and Prometheus is the ONE time-series store: a second retained
 history would be a second answer to "what was the CPU on machine X" that drifts

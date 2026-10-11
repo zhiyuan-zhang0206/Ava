@@ -51,17 +51,17 @@ def _mirror_last(event_name: str, agent: int) -> dict[str, Any]:
 
 
 def test_production_loguru_sink_routes_through_the_emitter() -> None:
-    """`_postgres_sink` must enqueue into the emitter (which batches), not write
+    """`_event_sink` must enqueue into the emitter (which batches), not write
     straight to the DB per record — the regression that deleted batching before.
     """
 
     import inspect
 
-    src = inspect.getsource(slog._postgres_sink)
+    src = inspect.getsource(slog._event_sink)
     assert "telemetry.emit" in src
-    wiring = inspect.getsource(slog.add_postgres_sink)
+    wiring = inspect.getsource(slog.add_event_sink)
     assert "telemetry.init_telemetry" in wiring
-    assert "_postgres_sink" in wiring  # the adapter is the loguru handler
+    assert "_event_sink" in wiring  # the adapter is the loguru handler
 
 
 def _rec(extra: dict[str, Any]) -> Any:
@@ -69,10 +69,10 @@ def _rec(extra: dict[str, Any]) -> Any:
     return {"extra": extra}
 
 
-def test_add_postgres_sink_registers_at_most_once(
+def test_add_event_sink_registers_at_most_once(
     database: Database, machine_identity: MachineIdentity, unit_home: Path
 ) -> None:
-    """Two `add_postgres_sink` calls (exec_child's env + request init paths)
+    """Two `add_event_sink` calls (exec_child's env + request init paths)
     must not double-register the adapter: one loguru record lands exactly one
     mirror row. The 2026-08-24 double registration wrote every post-init
     record twice — byte-identical rows, same surrogate id — into the JSONL
@@ -84,10 +84,10 @@ def test_add_postgres_sink_registers_at_most_once(
     pipeline = telemetry.build_pipeline(
         database=lambda: database, machine=machine_identity, home=unit_home
     )
-    first = slog.add_postgres_sink(
+    first = slog.add_event_sink(
         process="test-dup-guard", producer=lambda: pipeline, machine_reader=lambda: "test-host"
     )
-    second = slog.add_postgres_sink(
+    second = slog.add_event_sink(
         process="test-dup-guard", producer=lambda: pipeline, machine_reader=lambda: "test-host"
     )
     assert second == first, "repeat registration must return the live sink id"
@@ -165,10 +165,12 @@ def test_event_pipeline_filter_keeps_warning_and_named_events() -> None:
     assert f(_rec_level({"event": "log"}, "WARNING"))
     assert f(_rec_level({"event": "log"}, "ERROR"))
     assert f(_rec_level({"event": "log"}, "CRITICAL"))
-    # named events (node_exit, llm_usage) and label-alias events are not bare logs
+    # named events (node_exit, llm_usage) are not bare logs
     assert f(_rec_level({"event": "node_exit"}))
     assert f(_rec_level({"event": "llm_usage"}))
-    assert f(_rec_level({"label": "exec"}))
+    # A label is payload metadata and follows the ordinary bare-log sample rate.
+    slog._log_info_sample_counter = itertools.count()
+    assert sum(f(_rec_level({"label": "exec"})) for _ in range(10)) == 1
     # a record without a level passes unsampled (test-records / tolerant path)
     assert f(_rec({}))
 
@@ -181,9 +183,9 @@ def test_loguru_adapter_sets_source_from_extra(
     'system')."""
     from loguru import logger as _g
 
-    from base.log.process import _postgres_sink
+    from base.log.process import _event_sink
 
-    sink_id = _g.add(_postgres_sink, level="INFO", enqueue=False, catch=False)
+    sink_id = _g.add(_event_sink, level="INFO", enqueue=False, catch=False)
     try:
         _g.configure(extra={"agent_id": str(_AGENT)})
         _g.info("a line from the user path", event="label_change", source="user")

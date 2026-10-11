@@ -357,7 +357,6 @@ ignore_imports = [
     "services.agent_runner.agent_host.* -> agent.turn.runloop",
     "services.agent_runner.agent_host.host -> agent.db",
     "services.agent_runner.agent_host.pools -> agent.db",
-    "services.agent_runner.agent_host.recovery.interrupt -> agent.db",
     "services.agent_runner.agent_host.* -> agent.graph",
     # The daemon is the composition root that builds the plugin `ExtensionRegistry` once the graph
     # (and with it every agent_runtime face) is loaded, and hands it to `AgentHost`.
@@ -376,10 +375,7 @@ ignore_imports = [
     "services.agent_runner.agent_host.invocation -> agent.turn.trace_checkpoint",
     "services.agent_runner.agent_host.host -> agent.graph.node_log",
     # Database recovery retains and repairs the original fenced continuation.
-    "services.agent_runner.agent_host.db_recovery -> agent.impersonation",
-    "services.agent_runner.agent_host.db_recovery -> agent.ownership.inbound",
     # DB recovery must preserve an accepted original native halt before startup repair.
-    "services.agent_runner.agent_host.db_recovery -> agent.ownership.native_cancel",
     # The settlement boundary catches the inbound-owner fence's refusal at a
     # settled abort, so a replaced runtime makes the reconcile pass a logged
     # no-op instead of a second turn failure.
@@ -387,13 +383,12 @@ ignore_imports = [
     "services.agent_runner.agent_host.* -> agent.ownership.hosted",
     # Completed invocation recovery reads its original lifecycle receipt and
     # handles the typed owner refusal without retargeting a replacement.
-    "services.agent_runner.agent_host.invocation -> agent.ownership.inbound",
     "services.agent_runner.agent_host.invocation -> agent.ownership.hosted_completion",
     # The corpse reaper is the other half of the hosted ownership machinery
     # (split out of agent.ownership.hosted at its 800-line budget ceiling):
     # the host's beat runs the grace reap, and the settlement boundary runs
     # the prompt reap of a corpse that re-crashed under its own mark.
-    "services.agent_runner.agent_host.recovery.crash -> agent.ownership.corpse_reap",
+    "services.agent_runner.agent_host.host -> agent.ownership.corpse_reap",
     "services.agent_runner.agent_host.settlement -> agent.ownership.corpse_reap",
     # The hosted invocation driver shares the native takeover boundary: it
     # gates active leases and settles external state only after graph flush.
@@ -404,7 +399,6 @@ ignore_imports = [
     "services.agent_runner.agent_host.invocation.native_work -> agent.impersonation",
     "services.agent_runner.agent_host.invocation.native_work -> agent.ownership.native_cancel",
     "services.agent_runner.agent_host.daemon -> agent.startup",
-    "services.agent_runner.agent_host.db_recovery -> agent.startup",
     "services.agent_runner.agent_host.host -> agent.startup",
     "services.agent_runner.agent_host.settlement -> agent.startup",
     "services.agent_runner.agent_host.daemon -> agent.state",
@@ -424,11 +418,8 @@ ignore_imports = [
     "services.agent_runner.agent_host.invocation.compact.execute -> agent.hooks.compact",
     "services.agent_runner.agent_host.invocation.compact.execute -> agent.hooks.compact_anchor",
     "services.agent_runner.agent_host.invocation.compact.execute -> agent.state",
-    "services.agent_runner.agent_host.invocation.compact.recovery -> agent.impersonation",
     "services.agent_runner.agent_host.invocation.compact.source -> agent.state",
     "services.agent_runner.agent_host.invocation.compact.lifecycle -> agent.ownership.hosted",
-    "services.agent_runner.agent_host.invocation.compact.lifecycle -> agent.ownership.hosted_completion",
-    "services.agent_runner.agent_host.invocation.compact.lifecycle -> agent.ownership.lifecycle_intent",
 ]
 
 # The one reverse edge base must never grow: `base` is the bottom layer,
@@ -1141,6 +1132,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/host/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/catalog/decide/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

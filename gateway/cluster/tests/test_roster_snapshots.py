@@ -32,11 +32,11 @@ _ROW = tuple[str, str | None, list[str], datetime, str | None, datetime | None, 
 _NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 
 
-def _row(name: str = "wsl", url: str | None = "http://wsl:8113") -> _ROW:
+def _row(name: str = "runner-a", url: str | None = "http://runner-a:8113") -> _ROW:
     return (name, url, ["agent-runner"], _NOW, None, None, False)
 
 
-def _status(name: str = "wsl", **extra: object) -> dict[str, object]:
+def _status(name: str = "runner-a", **extra: object) -> dict[str, object]:
     return {
         "machine_name": name,
         "serve_gateway": False,
@@ -125,7 +125,7 @@ def test_a_fresh_reachable_snapshot_renders_online_with_its_age(
 ) -> None:
     [machine] = _gather(
         [_row()],
-        {"wsl": _snap(status=_status(), status_age_s=12)},
+        {"runner-a": _snap(status=_status(), status_age_s=12)},
         database_gate=database_gate,
         local_machine=machine_identity,
     )
@@ -142,7 +142,7 @@ def test_one_dropped_probe_keeps_the_last_status_and_its_age(
 ) -> None:
     [machine] = _gather(
         [_row()],
-        {"wsl": _snap(reachable=False, failures=1, status=_status(), status_age_s=70)},
+        {"runner-a": _snap(reachable=False, failures=1, status=_status(), status_age_s=70)},
         database_gate=database_gate,
         local_machine=machine_identity,
     )
@@ -170,7 +170,10 @@ def test_a_machine_that_failed_its_passes_renders_offline(
     # long run reaches this test long after parametrization.
     snapshot = _snap(reachable=False, failures=failures, status=_status() if answered else None)
     [machine] = _gather(
-        [_row()], {"wsl": snapshot}, database_gate=database_gate, local_machine=machine_identity
+        [_row()],
+        {"runner-a": snapshot},
+        database_gate=database_gate,
+        local_machine=machine_identity,
     )
 
     assert machine.online is False and machine.paused is None
@@ -182,7 +185,7 @@ def test_a_reachable_answer_that_is_not_a_cluster_status_is_online_unknown(
 ) -> None:
     [machine] = _gather(
         [_row()],
-        {"wsl": _snap(reachable=True, status=None)},
+        {"runner-a": _snap(reachable=True, status=None)},
         database_gate=database_gate,
         local_machine=machine_identity,
     )
@@ -196,7 +199,7 @@ def test_a_snapshot_answered_by_another_host_renders_identity_mismatch(
 ) -> None:
     [machine] = _gather(
         [_row()],
-        {"wsl": _snap(status=_status("somewhere-else"))},
+        {"runner-a": _snap(status=_status("somewhere-else"))},
         database_gate=database_gate,
         local_machine=machine_identity,
     )
@@ -255,7 +258,7 @@ def test_the_gateway_remembers_no_failure_between_reads(
     second = _gather([_row()], None, database_gate=database_gate, local_machine=machine_identity)
 
     assert [m.online for m in first + second] == [False, False]
-    assert calls == ["wsl", "wsl"]
+    assert calls == ["runner-a", "runner-a"]
 
 
 def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
@@ -316,8 +319,8 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
     machine_identity: MachineIdentity,
 ) -> None:
     db_conn.execute("TRUNCATE machines")
-    _machine(db_conn, "wsl-snap")
-    _snapshot_row(db_conn, "wsl-snap", running_sha="from-the-snapshot")
+    _machine(db_conn, "runner-a-snap")
+    _snapshot_row(db_conn, "runner-a-snap", running_sha="from-the-snapshot")
     dialed: list[str] = []
 
     async def dispatch(*, target_machine: str, **_kw: Any) -> dict[str, object]:
@@ -330,11 +333,11 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
         assert dialed == []
         fresh = client.get("/api/cluster/roster?fresh=true").json()
 
-    row = next(m for m in default if m["name"] == "wsl-snap")
+    row = next(m for m in default if m["name"] == "runner-a-snap")
     assert row["running_sha"] == "from-the-snapshot" and row["observed_at"] is not None
-    live = next(m for m in fresh if m["name"] == "wsl-snap")
+    live = next(m for m in fresh if m["name"] == "runner-a-snap")
     assert live["running_sha"] == "from-a-dial" and live["observed_at"] is None
-    assert dialed == ["wsl-snap"]
+    assert dialed == ["runner-a-snap"]
 
 
 def test_the_machines_endpoint_follows_the_same_two_modes(
@@ -344,8 +347,8 @@ def test_the_machines_endpoint_follows_the_same_two_modes(
     machine_identity: MachineIdentity,
 ) -> None:
     db_conn.execute("TRUNCATE machines")
-    _machine(db_conn, "wsl-snap")
-    _snapshot_row(db_conn, "wsl-snap", running_sha="x")
+    _machine(db_conn, "runner-a-snap")
+    _snapshot_row(db_conn, "runner-a-snap", running_sha="x")
     dialed: list[str] = []
 
     async def dispatch(*, target_machine: str, **_kw: Any) -> dict[str, object]:
@@ -357,4 +360,4 @@ def test_the_machines_endpoint_follows_the_same_two_modes(
         assert client.get("/api/cluster/machines").json()[0]["live"] is True
         assert dialed == []
         assert client.get("/api/cluster/machines?fresh=true").json()[0]["live"] is True
-    assert dialed == ["wsl-snap"]
+    assert dialed == ["runner-a-snap"]

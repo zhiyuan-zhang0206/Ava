@@ -26,7 +26,7 @@ _OLD_HIERARCHY = """\
 import time
 from datetime import UTC, datetime
 
-from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
+from schedules.catchup import cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
 CRON = "* * * * *"
@@ -37,7 +37,6 @@ def _fire(_trigger):
 
 
 def main():
-    catch_up([(CRON, None)], timezone=cluster_timezone(), fire=_fire)
     nxt = next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone())
     fire_slot_once(nxt, None, fire=_fire)
 """
@@ -46,7 +45,6 @@ def main():
 # `db = Database.from_settings()`); an unbound read is its own red — see the undefined-name tests.
 _NEW_HIERARCHY = (
     _OLD_HIERARCHY.replace("def _fire(_trigger):", "def _fire(_slot, _trigger):")
-    .replace("catch_up([", "catch_up(db, [")
     .replace("fire_slot_once(nxt", "fire_slot_once(db, nxt")
     .replace("def main():\n", "def main():\n    db = None\n")
 )
@@ -59,7 +57,6 @@ def _check(script: str) -> str | None:
 def test_an_old_signature_call_is_red_where_the_import_alone_was_green() -> None:
     red = _check(_OLD_HIERARCHY)
     assert red is not None and red.startswith("call-signature:")
-    assert "L15 catch_up(): missing a required argument: 'triggers'" in red
     assert "fire_slot_once(): missing a required argument: 'payload'" in red
 
 
@@ -70,17 +67,17 @@ def test_the_current_signature_is_green() -> None:
 def test_the_attribute_form_and_an_alias_are_resolved() -> None:
     script = (
         "import schedules.catchup as c\nimport schedules.catchup\n"
-        "c.catch_up([], timezone=None, fire=print)\n"
+        "c.fire_slot_once(1, fire=print)\n"
         "schedules.catchup.fire_slot_once(1, 2, fire=print)\n"
     )
     red = _check(script)
     assert red is not None
-    assert "L3 c.catch_up()" in red and "L4 schedules.catchup.fire_slot_once()" in red
+    assert "L3 c.fire_slot_once()" in red and "L4 schedules.catchup.fire_slot_once()" in red
 
 
 def test_an_unknown_keyword_is_red() -> None:
     red = _check(
-        "from schedules.catchup import catch_up\ncatch_up(1, [], timezone=None, fire=print, nope=1)\n"
+        "from schedules.catchup import fire_slot_once\nfire_slot_once(1, 2, 3, fire=print, nope=1)\n"
     )
     assert red is not None and "unexpected keyword argument 'nope'" in red
 
@@ -94,10 +91,10 @@ def test_a_removed_module_attribute_is_red() -> None:
     "script",
     [
         # Unbindable statically: starred / double-starred arguments.
-        "from schedules.catchup import catch_up\n\na, k = (), {}\ncatch_up(*a, **k)\n",
+        "from schedules.catchup import fire_slot_once\n\na, k = (), {}\nfire_slot_once(*a, **k)\n",
         # A name the script rebinds is not the imported object.
-        "from schedules.catchup import catch_up\n\ndef catch_up(): ...\n\ncatch_up()\n",
-        "from schedules.catchup import catch_up\n\ndef f(catch_up):\n    catch_up()\n",
+        "from schedules.catchup import fire_slot_once\n\ndef fire_slot_once(): ...\n\nfire_slot_once()\n",
+        "from schedules.catchup import fire_slot_once\n\ndef f(fire_slot_once):\n    fire_slot_once()\n",
         # A callee reached through an instance cannot be resolved without running anything.
         "from base.db import Database\nfrom base.db.code_version_gate import ProcessDbGate\n"
         "def connect(gate: ProcessDbGate):\n"
@@ -135,7 +132,7 @@ def test_check_file_prints_the_call_signature_verdict(
         )
         == 1
     )
-    assert "CHECK-RED missing=call-signature:L15 catch_up()" in capsys.readouterr().out
+    assert "CHECK-RED missing=call-signature:L16 fire_slot_once()" in capsys.readouterr().out
 
 
 def test_the_sweep_checks_agent_written_rows_like_built_in_ones(

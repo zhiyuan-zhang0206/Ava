@@ -61,16 +61,15 @@ class SkillInvokedPayload(BaseModel):
 
     The self-evolution collector attributes skills to an agent run by reading
     ``skill`` for rows whose ``invocation_depth`` is ``"loaded"`` (active
-    access) versus ``"prompt_injected"`` (baseline system-prompt exposure).
-    Producer (``ava.skills``) and that consumer share this one shape instead of
-    stringly-typed dict access. See the module docstring for the tiering rule.
+    access). Producer (``ava.skills``) and that consumer share this one shape
+    instead of stringly-typed dict access. See the module docstring for the tiering rule.
     """
 
     model_config = ConfigDict(frozen=True)
 
     skill: str
     identifier: str
-    invocation_depth: Literal["loaded", "prompt_injected"]
+    invocation_depth: Literal["loaded"]
 
 
 def prepare_event_log(

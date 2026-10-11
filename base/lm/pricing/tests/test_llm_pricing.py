@@ -51,13 +51,6 @@ def _pricing_catalog_models(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return cast(dict[str, dict[str, Any]], models)
 
 
-def _runtime_pricing_catalog_raw() -> dict[str, Any]:
-    return cast(
-        dict[str, Any],
-        json.loads((Path(__file__).resolve().parents[1] / "pricing_catalog.json").read_text()),
-    )
-
-
 def _plugin_rates(model: str, at: datetime, *, model_catalog: ModelCatalog) -> Rates:
     selected = model_catalog.prices.plugin[model].rates_at(at, input_tokens=0)
     assert selected is not None
@@ -103,6 +96,7 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
         "moonshot",
         "zhipu",
         "alibaba",
+        "typesafe",
     }
     assert {
         "gemini-embedding-2": models["gemini-embedding-2"]["vendor"],
@@ -111,24 +105,18 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     }
 
 
-def test_deepseek_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+def test_deepseek_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
-        # Removed from the plugin registry 2026-09-11 (expired internal beta):
-        # this entry is now the only remaining record, and must stay.
-        "deepseek-v4.1-flash-expires-on-0910",
     }
 
-    assert expected.isdisjoint(runtime_models)
     assert expected <= archive_models.keys()
 
 
-def test_gemini_chat_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+def test_gemini_chat_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "gemini-3.8-flash",
@@ -136,18 +124,13 @@ def test_gemini_chat_catalog_entries_live_only_in_the_archive() -> None:
         "gemini-3.5-flash",
         "gemini-flash-lite-latest",
         "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
     }
 
-    assert expected.isdisjoint(runtime_models)
     assert expected <= archive_models.keys()
     assert "gemini-embedding-2" in archive_models
-    assert runtime_models == {}
 
 
-def test_anthropic_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+def test_anthropic_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "claude-sonnet-5",
@@ -155,35 +138,24 @@ def test_anthropic_catalog_entries_live_only_in_the_archive() -> None:
         "claude-opus-5",
         "claude-fable-5",
         "claude-fable-5-1",
-        "claude-opus-4-8",
-        "claude-sonnet-4-6",
-        "claude-opus-4-7",
-        "claude-opus-4-6",
-        "claude-haiku-4-5",
     }
 
-    assert expected.isdisjoint(runtime_models)
     assert expected <= archive_models.keys()
 
 
-def test_openai_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+def test_openai_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "gpt-6-astra",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
-        "gpt-5.5",
-        "gpt-5.4-mini",
     }
 
-    assert expected.isdisjoint(runtime_models)
     assert expected <= archive_models.keys()
 
 
-def test_qwen_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+def test_qwen_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "qwen3.8-max",
@@ -191,12 +163,10 @@ def test_qwen_catalog_entries_live_only_in_the_archive() -> None:
         "qwen3.8-flash",
     }
 
-    assert expected.isdisjoint(runtime_models)
     assert expected <= archive_models.keys()
 
 
-def test_glm_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+def test_glm_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "glm-5.2",
@@ -205,30 +175,24 @@ def test_glm_catalog_entries_live_only_in_the_archive() -> None:
         "glm-5.3-flashx",
     }
 
-    assert expected.isdisjoint(runtime_models)
     assert expected <= archive_models.keys()
 
 
-def test_kimi_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+def test_kimi_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {"kimi-k3"}
 
-    assert expected.isdisjoint(runtime_models)
     assert expected <= archive_models.keys()
 
 
-def test_mimo_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+def test_mimo_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "mimo-v2.5-pro",
-        "mimo-v2.5-pro-ultraspeed",
         "mimo-v2.6-pro",
         "mimo-v2.6-pro-ultraspeed",
     }
 
-    assert expected.isdisjoint(runtime_models)
     assert expected <= archive_models.keys()
 
 
@@ -309,7 +273,6 @@ def test_parse_catalog_rejects_unknown_schema_version() -> None:
         ("gpt-5.6-terra", 4.0 + 18.0),
         ("gpt-5.6-luna", 0.40 + 1.80),
         ("mimo-v2.5-pro", 0.435 + 0.87),
-        ("mimo-v2.5-pro-ultraspeed", 1.305 + 2.61),
         ("mimo-v2.6-pro", 0.435 + 0.87),
         ("mimo-v2.6-pro-ultraspeed", 4.35 + 8.70),
     ],

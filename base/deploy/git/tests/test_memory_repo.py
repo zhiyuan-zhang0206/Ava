@@ -440,9 +440,8 @@ def test_run_git_is_bounded_and_kills_the_tree_on_expiry(
     memory indexer runs it through `asyncio.to_thread`, and `asyncio.run()`'s
     shutdown waits on `shutdown_default_executor()` — so a fetch wedged against a
     dead remote holds the daemon's exit open long past the SIGTERM it was told to
-    stop on. `run_bounded` (not the raw kwarg) because on Windows the direct
-    child is Git-for-Windows' launcher stub, and a plain timeout would kill the
-    stub and leave the real git running.
+    stop on. `run_bounded` (not the raw kwarg) because a plain timeout would
+    kill only the direct child and leave its descendants running.
     """
     seen: list[dict[str, object]] = []
 

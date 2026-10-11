@@ -297,44 +297,39 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
 def test_prune_old_mirror_removes_stale_keeps_recent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    """_prune_old_mirror deletes files older than retention_days — legacy
-    `spans-YYYYMMDD-<pid>.jsonl` AND the collector's rotated
-    `spans-<ISO>.jsonl` — keeps recent ones, and never touches the unstamped
-    ACTIVE `spans.jsonl` or non-mirror files."""
+    """_prune_old_mirror deletes the collector's rotated `spans-<ISO>-size.jsonl`
+    files older than retention_days, keeps recent ones, and never touches the
+    unstamped ACTIVE `spans.jsonl` or non-mirror files."""
     from base.telemetry.tracing import _prune_old_mirror
 
     monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
-    old = tmp_path / "spans-20200101-1.jsonl"  # well before any cutoff
-    old_rotated = tmp_path / "spans-2020-01-01T00-00-00.000.jsonl"  # same, rotated name
-    recent = tmp_path / "spans-20990101-1.jsonl"  # well after any cutoff
+    old = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"  # well before any cutoff
+    old_gz = tmp_path / "spans-2020-01-01T01-00-00.000-time.jsonl.gz"  # same, gzipped
+    recent = tmp_path / "spans-2099-01-01T00-00-00.000-size.jsonl"  # well after any cutoff
     active = tmp_path / "spans.jsonl"  # the collector's active file: never pruned
     other = tmp_path / ".ship-watermark.json"  # not a mirror file
-    for p in (old, old_rotated, recent, active, other):
+    for p in (old, old_gz, recent, active, other):
         p.write_text("{}\n", encoding="utf-8")
 
     _prune_old_mirror(retention_days=14)
 
     assert not old.exists()
-    assert not old_rotated.exists()
+    assert not old_gz.exists()
     assert recent.exists()
     assert active.exists()
     assert other.exists()
 
 
 def test_mirror_day_parses_all_collector_name_shapes(tmp_path: Path) -> None:
-    """`mirror_day` parses every mirror filename shape in the wild: legacy
-    pid-dated files, collector-rotated backups WITH the timberjack trigger
-    suffix (`-size` / `-time`), older unsuffixed rotated backups, manual
-    `spans.cut-*` orphans, and the `.gz` variants of each — while the
-    unstamped ACTIVE `spans.jsonl` stays None (never a prune target)."""
+    """`mirror_day` parses every mirror filename shape in the wild:
+    collector-rotated backups with the timberjack trigger suffix (`-size` /
+    `-time`), manual `spans.cut-*` orphans, and the `.gz` variants of each —
+    while the unstamped ACTIVE `spans.jsonl` stays None (never a prune target)."""
     from datetime import date
 
     from base.telemetry.trace_mirror import mirror_day
 
     cases = {
-        "spans-20200101-1.jsonl": date(2020, 1, 1),
-        "spans-20200101-1.jsonl.gz": date(2020, 1, 1),
-        "spans-2026-08-13T23-28-01.123.jsonl": date(2026, 8, 13),
         "spans-2026-08-27T03-29-10.942-size.jsonl": date(2026, 8, 27),
         "spans-2026-08-27T03-29-10.942-time.jsonl": date(2026, 8, 27),
         "spans-2026-08-27T03-29-10.942-size.jsonl.gz": date(2026, 8, 27),
@@ -422,7 +417,7 @@ def test_gzip_old_mirror_compresses_rotated_keeps_active(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     """_gzip_old_mirror compresses every non-active mirror file (rotated,
-    suffixed, cut, legacy) to `.jsonl.gz` with lossless content, leaves the
+    suffixed, cut) to `.jsonl.gz` with lossless content, leaves the
     ACTIVE `spans.jsonl` alone, and is idempotent on re-run."""
     import gzip as gz
 
@@ -487,7 +482,7 @@ def test_prune_old_mirror_disabled_when_nonpositive(
     from base.telemetry.tracing import _prune_old_mirror
 
     monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
-    old = tmp_path / "spans-20200101-1.jsonl"
+    old = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"
     old.write_text("{}\n", encoding="utf-8")
     _prune_old_mirror(retention_days=0)
     assert old.exists()

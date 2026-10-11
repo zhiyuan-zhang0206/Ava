@@ -317,7 +317,7 @@ async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
                     liveness=liveness,
                     extra_routes={
                         ("POST", "/send"): await _handle_send(core),
-                        ("POST", "/send/alert-outbound-v1"): alerts.handle,
+                        ("POST", "/send/alert-outbound"): alerts.handle,
                     },
                     auth_digests=daemon_acceptance(),
                     image=image,

@@ -110,7 +110,6 @@ from base.deploy.schema.migration_layout import (
 )
 from base.host.env.dotenv_boot import home_checkout_error, resolve_ava_home
 from base.log import logger
-from base.native_process.os_platform import CREATE_NO_WINDOW as CREATE_NO_WINDOW
 
 # Repo root = base/deploy/schema/../../.. = `<root>/`; migrations dir is under repo root.
 MIGRATIONS_DIR: Path = Path(__file__).resolve().parents[3] / "migrations"

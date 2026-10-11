@@ -34,7 +34,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 # This host is the gateway of the DB under test in the "matching" cases.
 _GATEWAY = ("gateway-host", "/Users/ava/.ava")
 # A different unit of the same cluster — the agent-runner that caused the wedge.
-_RUNNER = ("wsl", "/home/ava/.ava")
+_RUNNER = ("runner-a", "/home/ava/.ava")
 
 _SYN = "29991231T235959_synthetic-authority"
 
@@ -150,7 +150,7 @@ def test_refuses_when_another_unit_owns_the_cluster(
 
     # The message must name both identities — the operator's first question is
     # "which host am I on, and which one owns this DB".
-    assert "wsl:/home/ava/.ava" in str(exc.value)
+    assert "runner-a:/home/ava/.ava" in str(exc.value)
     assert "gateway-host:/Users/ava/.ava" in str(exc.value)
     assert not _synthetic_table_exists(), "refusal must not have touched the schema"
 

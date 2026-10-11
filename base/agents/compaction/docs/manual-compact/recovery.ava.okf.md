@@ -1,49 +1,31 @@
 ---
 type: doc
 title: "Manual compact recovery and authority"
-description: "Unknown result closure, retained diagnostics and exact runner authority."
+description: Single attempt and finite failure, without automatic cold continuation repair.
 ---
 
-# Recovery and authority
+# Interruption and authority
 
-GET `/api/keyed/v1/agents/{id}/compact-commands/{command}` exposes original
-acceptance, outcome, safe reason, attempt/provider/execution, result availability,
-application checkpoint, a separate recovery checkpoint and native continuation release. It does not expose
-the summary as a current conversation snapshot.
+GET `/api/keyed/v1/agents/{id}/compact-commands/{command}` exposes the original
+acceptance, outcome, reason, attempt, provider, execution, result availability,
+checkpoint and continuation-release receipt. Historical recovery fields remain
+readable, but no new automatic cold recovery populates them.
 
-Missing result after a claimed attempt stays UNCERTAIN. Only actual executor
-unwind/resource closure, or an exact public certified receiver chain, may write
-a consumer pause, flush it and prove the latest cold no-application head before
-releasing the pending pointer. This is diagnostic recovery, not successful
-compaction: execution `checkpoint_id` stays null. A lease timeout, arbitrary new
-owner or status change cannot certify an unknown executor stopped. Without that
-proof ordinary inputs remain pending. An existing application marker cannot be
-reclassified as an unknown-generation pause.
+A fresh accepted compact has one provider attempt. If generation, result saving,
+checkpoint application or acknowledgement fails, the original call stops.
+The host attempts one diagnostic UNCERTAIN write; failure to save that diagnostic
+is logged too. An already admitted attempt is never generated or applied again
+on a later wake. Its pending continuation remains held for inspection. A later
+host does not materialize the summary, certify closure or automatically settle an
+associated guarded restart. Normal original compact and restart still complete
+when all their writes succeed.
 
-The authority owner grants runners INSERT on immutable source observations
-and UPDATE on command execution/result/closure. Command INSERT is verified
-Gateway admission; observation rewrite, receipt DELETE and agents_meta INSERT
-remain outside runner authority. Real runner credentials exercise the entire
-host chain and checkpoint/native-work closure.
+A construction refusal before attempt admission releases REJECTED with
+`single_attempt_unavailable` or `provider_unavailable`. This allows ordinary
+new input and differs from an unknown admitted execution.
 
-Running generations must support this protocol before operators use it. Older
-binaries may still execute legacy commands or raw checkpoint mutations and do
-not gain guarded support merely from installed schema/routes. Deployment,
-retirement of older generations and operational reconciliation are separate
-operator actions; this contribution performs none of them.
-
-A construction refusal before attempt admission releases a REJECTED receipt
-with `single_attempt_unavailable` (or `provider_unavailable`), without execution
-or provider evidence. This differs from a claimed attempt's unknown result.
-
-The serialized driver and actual resource tail hand an accepted guarded restart
-to the original immutable compact execution before ordinary work may mint a
-new UUID. SQL response loss reads original APPLIED/OBSERVED proof before database
-repair. Actual generation failure and native cancellation use the same handoff
-after diagnostic/native closure. A dead executor's settled work is not transferred
-as ACTIVE execution: its admitted successor uses the existing lifecycle
-`target_replaced` settlement, retaining SUPERSEDED with no application timestamp.
-The original restart owner also certifies `resurrect` and `force_terminate`
-no-effect receipts. These retain their original reason across source cleanup.
-That no-effect receipt permits new input; it never restarts the successor or
-reapplies the original overlay. Unknown restart proof retains the gate.
+Runner authority retains INSERT on source observations and UPDATE on execution,
+result and closure. Gateway admission owns command INSERT; receipt deletion,
+observation rewrite and agents_meta INSERT stay outside runner authority.
+Older running binaries and deployment compatibility require separate operator
+handling; installed routes alone do not update runtime behavior.

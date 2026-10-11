@@ -141,8 +141,7 @@ def _cron_entry() -> str:
 def _register_linux() -> int:
     """Replace the PR-flow line in the user crontab.
 
-    Lines are matched by the marker as a substring, so a line an older version
-    wrote with a per-home suffix after the marker is replaced in place.
+    Lines are matched by the marker as a substring.
     """
     missing_rc = base.host.system.cron.require_crontab(
         "  * PR flow: crontab not installed; the daily sampler job cannot be registered",

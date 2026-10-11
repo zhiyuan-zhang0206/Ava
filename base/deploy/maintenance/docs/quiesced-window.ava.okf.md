@@ -7,7 +7,7 @@ status: current
 
 # Quiesced window — loops hold off, remaining clients are reported
 
-`admission.quiesced()` (phases `drained` through `ready`) is the stop window
+`admission.quiesced()` (phases `drained` through `stopped`) is the stop window
 read by every resident background loop that touches the database. The shared
 round runner (`base/daemon/round_loop.py:run_rounds`) skips a round while it
 holds, so the TTL reaper, the schedule manager, the ops delivery-outbox
@@ -20,11 +20,9 @@ every resident periodic loop in `services/`, `gateway/` and `ops/` to gate or
 carry a reasoned `# quiesce-exempt:` marker.
 None of them may borrow the database across the window; an unreadable owner
 reads as quiesced, the same refuse-new-work posture the journal itself enforces
-by raising. The host's pending-turn scan reads the narrower
-`maintenance.in_stop_leg()` (`drained` .. `stopped`): it holds through the stop
-leg, but from the start leg on a booting host must drain its pending workset
-even while the unit is still held — pub/sub has no replay, so recovery may
-not wait for the hold to release.
+by raising. The host's pending-turn scan gates on the same predicate: the
+operator's stop owns agent cancellation inside the window, and the pending
+rows wait for the scan after the hold releases.
 
 The stop does not release pools: its `services` phase stops every service process,
 so each pool closes with its process before the `data-plane` phase starts, and the

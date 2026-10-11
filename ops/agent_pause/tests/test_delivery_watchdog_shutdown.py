@@ -8,21 +8,13 @@ for the harness and ``base.daemon.shutdown.hard_exit`` for the mechanism).
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-
-import pytest
 
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from tests.components.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
     spawn_child,
-)
-
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="POSIX SIGTERM path; Windows stops route through the private console",
 )
 
 

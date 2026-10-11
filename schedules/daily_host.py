@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import ava
 from ava.agents import AgentStatus as S
-from schedules.catchup import catch_up, fire_slot_once
+from schedules.catchup import fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 from base.db import Database
 
@@ -40,8 +40,7 @@ def report_agent(env_name: str, label: str) -> int:
 def run_daily_loop(
     db: Database, cron: str, tz: str, fire: Callable[[datetime, None], None]
 ) -> None:
-    """Catch up bounded missed slots, then claim each due slot at most once."""
-    catch_up(db, [(cron, None)], timezone=tz, fire=fire)
+    """Claim online slots at most once, skipping slots before this start."""
     last_run_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)

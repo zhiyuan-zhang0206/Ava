@@ -1,9 +1,6 @@
 """Cross-domain stop budget for the backup scheduler's wedged executor."""
 
-import sys
 from pathlib import Path
-
-import pytest
 
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from tests.components.services.daemon_shutdown_test_support import (
@@ -11,8 +8,6 @@ from tests.components.services.daemon_shutdown_test_support import (
     KILL_SLACK_S,
     spawn_child,
 )
-
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="backup scheduler is POSIX-only")
 
 
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:

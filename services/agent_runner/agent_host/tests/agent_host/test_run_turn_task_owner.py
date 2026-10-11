@@ -36,7 +36,7 @@ async def test_business_error_remains_primary_when_settlement_also_fails(
     assert joined.value.exceptions == (primary, cleanup)
 
 
-async def test_root_cancellation_does_not_cancel_or_disown_work_and_settlement(
+async def test_root_cancellation_cancels_work_and_retains_finite_settlement(
     wired: _Build, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     host, _, _ = wired({7: _Row()})
@@ -66,7 +66,7 @@ async def test_root_cancellation_does_not_cancel_or_disown_work_and_settlement(
         assert actual_work is not None and actual_work in host._resource_service._pending
         root.cancel()
         await asyncio.sleep(0)
-        assert not actual_work.cancelling()
+        assert actual_work.cancelling()
         assert not root.done()
         work_release.set()
         await settle_entered.wait()

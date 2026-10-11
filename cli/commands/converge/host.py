@@ -71,10 +71,6 @@ from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
 from cli.commands.extensions.external_skills import converge_external_agent_skill
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step
 from cli.commands.observability.otel_collector import ensure_otel_collector_step
-
-# The step contract lives in spec.py so step implementations can span
-# modules without an import cycle; re-exported here because every caller and
-# test reaches for `cli.commands.converge.host.ConvergeCtx` / `ALL_ROLES`.
 from cli.database.runtime import CommandRuntime
 
 __all__ = [
@@ -184,8 +180,7 @@ def _ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
             "  ! cross-machine transfer backend 'drive' is unavailable on this"
             " agent-runner: no writable Google Drive synced folder, so file transfer"
             " via the shared Drive folder will not work. Install Google Drive for"
-            " Desktop (macOS, or on the Windows side of a WSL host -- it then appears"
-            " under /mnt/<letter>), sign in, and make sure the synced 'My Drive' area"
+            " Desktop (macOS), sign in, and make sure the synced 'My Drive' area"
             " is writable to enable it; set AVA_CROSS_MACHINE_TRANSFER_BACKEND=none"
             " to skip this probe on a runner that moves files its own way."
             " Looked in: " + looked,
@@ -570,14 +565,14 @@ def _desired_service_names(
     roles: MachineRoles | None, *, machine: MachineIdentity
 ) -> frozenset[str]:
     from base.deploy.lifecycle.service_selection import read_selection
-    from cli.commands._repo import _services_for_roles_annotated
+    from ops.spec import services_for_capabilities_annotated
 
     if roles is None:
         return frozenset()
     selection = read_selection()
     return frozenset(
         spec.session
-        for spec, gate in _services_for_roles_annotated(roles, machine=machine)
+        for spec, gate in services_for_capabilities_annotated(roles, machine=machine)
         if gate is None and selection.enabled(spec.session)
     )
 

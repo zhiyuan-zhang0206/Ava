@@ -9,9 +9,7 @@ cluster secret (docs/decisions/data/backup/2026-09-28-backup-passphrase-minted-a
   secret, so an empty-secret single box encrypts for real;
 - a home born before that carries the passphrase it had encrypted under,
   `sha256(secret)`, pinned once at its conversion; an empty-secret home
-  carries a minted one instead, since `sha256("")` is a public constant
-  (`LEGACY_EMPTY_SECRET_PASSPHRASE`, which only an explicit restore option
-  ever uses);
+  carries a minted one instead, since `sha256("")` is a public constant;
 - rotating the secret never touches it.
 
 Writers and readers never derive a passphrase: a home without a pin has no
@@ -50,12 +48,6 @@ def derive(cluster_secret: str) -> str:
     return hashlib.sha256(cluster_secret.encode()).hexdigest()
 
 
-# What an empty-secret home encrypted under before it pinned a minted passphrase:
-# a public constant, so those artifacts were never confidential. Only an
-# explicit restore option (`--legacy-empty-secret-passphrase`) decrypts with it.
-LEGACY_EMPTY_SECRET_PASSPHRASE = derive("")
-
-
 def mint() -> str:
     """A fresh random passphrase (256 bits), in the pinned file's format."""
     return secrets.token_hex(32)
@@ -72,7 +64,7 @@ def pinned(home: Path) -> str | None:
     if not path.exists():
         return None
     problem = private_file_problem(path)
-    if problem is None and os.name != "nt" and path.lstat().st_mode & 0o077:
+    if problem is None and path.lstat().st_mode & 0o077:
         problem = "is not owner-only"
     if problem is not None:
         raise PassphrasePinError(f"{path}: {problem}")
@@ -125,20 +117,12 @@ def logical_backup_passphrase() -> str:
     return resolve(ava_home())
 
 
-LEGACY_RESTORE_HINT = (
-    "an artifact an empty-secret home wrote before its cutover pinned a minted passphrase "
-    "decrypts only with the explicit --legacy-empty-secret-passphrase of scripts/data_plane_ops/restore_drill.py"
-)
-
-
-def write_key_file(directory: Path, *, legacy_empty_secret: bool = False) -> Path:
+def write_key_file(directory: Path) -> Path:
     """Write the logical-backup passphrase to a new private temporary key file.
 
-    The pinned passphrase, or `LEGACY_EMPTY_SECRET_PASSPHRASE` when the caller
-    explicitly asks for it (never as a fallback). The key never reaches argv;
-    the caller removes the file.
+    The key never reaches argv; the caller removes the file.
     """
-    value = LEGACY_EMPTY_SECRET_PASSPHRASE if legacy_empty_secret else logical_backup_passphrase()
+    value = logical_backup_passphrase()
     fd, name = tempfile.mkstemp(prefix=".backup-key-", dir=directory)
     path = Path(name)
     try:

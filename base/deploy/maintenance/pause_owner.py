@@ -4,9 +4,8 @@ A maintenance hold (`begin_maintenance`) records its exact ``(holder,
 acquired_at)`` capability in this atomic local journal, so a compensating
 resume still works while the gateway database is down. Every transition
 matches only that journal; a delayed generation A resume can therefore never
-unpause generation B. A ``paused`` or ``resumed`` record without a maintenance
-hold is what the retired updater's stop op left: readers keep honoring it, and
-only an operator's `rm` of the journal removes it.
+unpause generation B. A record without a maintenance hold, like an unreadable
+one, reads as invalid and only an operator's `rm` of the journal removes it.
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, cast
@@ -39,8 +37,7 @@ class PauseOwnerSnapshot:
     acquired_at: dt.datetime | None = None
     maintenance: MaintenanceHold | None = None
     # The shepherding identity of the OPERATOR-SIDE entry that last took or
-    # advanced a maintenance hold (task #3270); None for legacy journals and
-    # daemon-driven pauses. Judged by `base.deploy.maintenance.hold_driver.liveness` -- see the
+    # advanced a maintenance hold (task #3270); None for daemon-driven pauses. Judged by `base.deploy.maintenance.hold_driver.liveness` -- see the
     # stranded-hold verdict.
     driver: HoldDriver | None = None
 
@@ -103,7 +100,7 @@ def _read_unlocked(path: Path) -> PauseOwnerSnapshot:
         acquired_at = dt.datetime.fromisoformat(acquired_raw.replace("Z", "+00:00"))
         if acquired_at.tzinfo is None:
             _invalid("acquired_at must carry a timezone")
-        maintenance = MaintenanceHold.decode(raw["maintenance"]) if "maintenance" in raw else None
+        maintenance = MaintenanceHold.decode(raw["maintenance"])
         driver = _decode_driver(raw.get("driver"))
     except FileNotFoundError:
         return PauseOwnerSnapshot(status="inactive")
@@ -129,8 +126,6 @@ def read() -> PauseOwnerSnapshot:
 
 
 def _fsync_parent(path: Path) -> None:
-    if os.name == "nt":
-        return
     fsync_parent(path)
 
 

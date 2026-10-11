@@ -6,7 +6,6 @@ from uuid import UUID
 
 import psycopg
 from psycopg.sql import SQL
-from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from base.agents.incarnation.native_work_models import (
@@ -16,7 +15,6 @@ from base.agents.incarnation.native_work_models import (
 )
 from base.agents.incarnation.resource_transfer import ResourceTransferProof
 from base.agents.incarnation.resources import IncarnationResources, decode_resources
-from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 class NativeWorkTransfer(BaseModel):
@@ -188,35 +186,3 @@ def receiver(work: NativeWorkRecord) -> tuple[str, UUID, UUID]:
             raise NativeWorkUncertainError("native work transfer chain is incomplete")
         end = (transfer.target_machine, proof.target_generation, proof.target_owner)
     return end
-
-
-async def certify_transfer(
-    conn: psycopg.AsyncConnection,
-    proof: ResourceTransferProof | None,
-    *,
-    work_id: UUID | None,
-    source_machine: str,
-    target_machine: str,
-    incarnation: RuntimeIncarnation,
-) -> None:
-    """Append only actual resource proof after successful same-TX admission."""
-    if work_id is None or proof is None:
-        return
-    work = await load_work(conn, work_id, lock=True)
-    if work is None or work.phase in (NativeWorkPhase.SETTLED, NativeWorkPhase.ABANDONED):
-        return
-    if (proof.agent_id, proof.target_generation, proof.target_owner) != (
-        incarnation.agent_id,
-        incarnation.generation,
-        incarnation.owner,
-    ) or receiver(work) != (source_machine, proof.source_generation, proof.source_owner):
-        return
-    chain = [item.model_dump(mode="json") for item in work.transfers]
-    chain.append(
-        NativeWorkTransfer(
-            source_machine=source_machine, target_machine=target_machine, proof=proof
-        ).model_dump(mode="json")
-    )
-    await conn.execute(
-        "UPDATE native_graph_work SET transfer_chain=%s WHERE id=%s", (Jsonb(chain), work_id)
-    )

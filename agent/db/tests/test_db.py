@@ -209,7 +209,7 @@ class TestReconcileClaimedInbounds:
             cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))  # pyright: ignore[reportUnknownArgumentType]
             assert cur.fetchone() == ("done",)
 
-    async def test_orphan_rows_reset_to_pending(
+    async def test_orphan_rows_are_consumed_without_redelivery(
         self,
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
@@ -241,10 +241,10 @@ class TestReconcileClaimedInbounds:
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
             aops_pool, tid, committed_inbound_ids=set(), incarnation=None
         )
-        assert (committed, reset, dead_lettered) == (0, 1, 0)
+        assert (committed, reset, dead_lettered) == (0, 0, 1)
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))  # pyright: ignore[reportUnknownArgumentType]
-            assert cur.fetchone() == ("pending",)
+            assert cur.fetchone() == ("done",)
 
     async def test_mixed_claimed_rows_split_correctly(
         self,
@@ -284,14 +284,14 @@ class TestReconcileClaimedInbounds:
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
             aops_pool, tid, committed_inbound_ids={iid_a}, incarnation=None
         )
-        assert (committed, reset, dead_lettered) == (1, 1, 0)
+        assert (committed, reset, dead_lettered) == (1, 0, 1)
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT id, status FROM inbound_messages WHERE id IN (%s, %s) ORDER BY id",
                 (iid_a, iid_b),  # pyright: ignore[reportUnknownArgumentType]
             )
             rows = dict(cur.fetchall())
-        assert rows == {iid_a: "done", iid_b: "pending"}
+        assert rows == {iid_a: "done", iid_b: "done"}
 
     async def test_no_claimed_rows_is_noop(
         self,
@@ -400,7 +400,7 @@ class TestReconcileClaimedInbounds:
             cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))  # pyright: ignore[reportUnknownArgumentType]
             assert cur.fetchone() == ("done",)
 
-    async def test_fresh_orphan_rows_still_reset_to_pending(
+    async def test_fresh_orphan_rows_are_also_consumed(
         self,
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
@@ -434,10 +434,10 @@ class TestReconcileClaimedInbounds:
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
             aops_pool, tid, committed_inbound_ids=set(), incarnation=None
         )
-        assert (committed, reset, dead_lettered) == (0, 1, 0)
+        assert (committed, reset, dead_lettered) == (0, 0, 1)
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))  # pyright: ignore[reportUnknownArgumentType]
-            assert cur.fetchone() == ("pending",)
+            assert cur.fetchone() == ("done",)
 
     async def test_stale_uncommitted_row_dead_lettered_beside_committed(
         self,
@@ -489,7 +489,7 @@ class TestReconcileClaimedInbounds:
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
             aops_pool, tid, committed_inbound_ids={committed_iid}, incarnation=None
         )
-        assert (committed, reset, dead_lettered) == (1, 1, 1)
+        assert (committed, reset, dead_lettered) == (1, 0, 2)
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT id, status FROM inbound_messages WHERE id = ANY(%s) ORDER BY id",
@@ -498,7 +498,7 @@ class TestReconcileClaimedInbounds:
             assert dict(cur.fetchall()) == {
                 committed_iid: "done",
                 stale_iid: "done",
-                young_iid: "pending",
+                young_iid: "done",
             }
 
 

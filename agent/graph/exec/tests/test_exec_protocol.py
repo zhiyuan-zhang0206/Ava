@@ -155,13 +155,13 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
     serialization cost in the durable event stream."""
     from base import telemetry
     from base.log import logger
-    from base.log.process import add_postgres_sink
+    from base.log.process import add_event_sink
 
     events_before = len(_exec_envelope_events())
     pipeline = telemetry.build_pipeline(
         database=lambda: database, machine=machine_identity, home=ava_home()
     )
-    sink_id = add_postgres_sink(
+    sink_id = add_event_sink(
         process="test-exec-envelope",
         producer=lambda: pipeline,
         machine_reader=machine_identity.name,

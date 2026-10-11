@@ -66,7 +66,7 @@ def test_anthropic_shape_logs(loguru_records):
             # no output_token_details
         },
     )
-    log_llm_usage(msg, agent_id=7, model="claude-opus-4-7", catalog=build_model_catalog())
+    log_llm_usage(msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog())
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=2000 cached=1500" in out
     assert "out=50 reason=0" in out
@@ -81,7 +81,7 @@ def test_zero_input_no_pct(loguru_records):
             "total_tokens": 0,
         },
     )
-    log_llm_usage(msg, agent_id=7, model="claude-opus-4-7", catalog=build_model_catalog())
+    log_llm_usage(msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog())
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=0" in out
     assert "%" not in out
@@ -145,7 +145,7 @@ def test_usage_has_no_task_attribution(loguru_records) -> None:
 
 def test_no_usage_metadata_silent(loguru_records):
     msg = AIMessage(content="")
-    log_llm_usage(msg, agent_id=7, model="claude-opus-4-7", catalog=build_model_catalog())
+    log_llm_usage(msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog())
     assert loguru_records == []
 
 
@@ -325,47 +325,6 @@ def test_price_snapshot_absent_for_unpriced_model(
     assert "plugin price registry" in warning
 
 
-def test_historical_cache_provenance_labels(loguru_records: list[dict[str, Any]]):
-    """Historical cache provenance remains accepted when records are replayed."""
-    msg = AIMessage(
-        content="",
-        usage_metadata={
-            "input_tokens": 1000,
-            "output_tokens": 100,
-            "total_tokens": 1100,
-            "input_token_details": {"cache_read": 200},
-        },
-    )
-    log_llm_usage(
-        msg,
-        agent_id=7,
-        model="gemini-3.8-flash",
-        cache_mechanism="mixed",
-        cache_scope="explicit_block",
-        catalog=build_model_catalog(),
-    )
-    extra = loguru_records[0]["extra"]
-    assert extra["cache_mechanism"] == "mixed"
-    assert extra["cache_scope"] == "explicit_block"
-
-
-def test_no_provenance_labels_when_unknown(loguru_records: list[dict[str, Any]]):
-    """Without labels the event carries no cache_mechanism/cache_scope key —
-    an honest 'unknown' rather than a fabricated one."""
-    msg = AIMessage(
-        content="",
-        usage_metadata={
-            "input_tokens": 1000,
-            "output_tokens": 100,
-            "total_tokens": 1100,
-            "input_token_details": {"cache_read": 200},
-        },
-    )
-    log_llm_usage(msg, agent_id=7, model="gemini-3.8-flash", catalog=build_model_catalog())
-    assert "cache_mechanism" not in loguru_records[0]["extra"]
-    assert "cache_scope" not in loguru_records[0]["extra"]
-
-
 _EVENT_KEYS = (
     "model",
     "in_total",
@@ -398,7 +357,7 @@ def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records):
             "output_token_details": {"reasoning": 20},
         },
     )
-    log_llm_usage(msg, agent_id=7, model="claude-opus-4-7", catalog=build_model_catalog())
+    log_llm_usage(msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog())
     event = cast("dict[str, Any]", loguru_records[0]["extra"])  # pyright: ignore[reportUnknownArgumentType]
     stamped: dict[str, Any] = msg.additional_kwargs["ava_usage"]
     assert stamped["cost_usd"] > 0
@@ -415,9 +374,7 @@ def test_non_agent_logging_does_not_stamp(loguru_records):
         content="",
         usage_metadata={"input_tokens": 10, "output_tokens": 1, "total_tokens": 11},
     )
-    log_usage_from_message(
-        msg, "claude-opus-4-7", usage_kind="label", catalog=build_model_catalog()
-    )
+    log_usage_from_message(msg, "claude-opus-5", usage_kind="label", catalog=build_model_catalog())
     assert "ava_usage" not in msg.additional_kwargs
 
 

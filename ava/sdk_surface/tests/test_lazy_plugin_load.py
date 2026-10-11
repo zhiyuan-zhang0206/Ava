@@ -63,7 +63,6 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
             prior.registry,
             catalog=prior.catalog,
             authority=prior.authority,
-            delivery_sender=prior.delivery_sender,
             sampling=prior.sampling,
             clock_factory=prior.clock_factory,
             producer=prior.producer,

@@ -18,8 +18,8 @@ Eval cases are built from the user's real run traces — the dataset. Real
 usage is exactly what makes them valuable, and exactly what makes them hard:
 
 - **Real data, no ground truth.** A real trace carries no answer key. The
-  labeler (`ava_builtins/skills/platform/ava-self-evolution/scripts/label.py`) only detects visible breakage (breach,
-  corrections, re-prompts, exec failures) and the rubric scores proxy
+  labeler (`ava_builtins/skills/platform/ava-self-evolution/scripts/label.py`) only detects visible breakage (corrections,
+  re-prompts, exec failures) and the rubric scores proxy
   signals (completion, efficiency), not correctness. Nothing in a trace says
   "this was the right output".
 - **Representative cases are naturally scarce.** Real usage is long-tailed:

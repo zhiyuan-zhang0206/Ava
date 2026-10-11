@@ -28,9 +28,7 @@ if TYPE_CHECKING:
 # access and record the attribution there. `"loaded"` is the only depth
 # ava_self_evolution scores
 # (`ava_builtins/skills/ava_self_evolution/reference/collect.py:_skills_touched`);
-# baseline prompt exposure is not recorded at all (the `prompt_injected`
-# depth was dropped: ~55K rows of "installed on this machine" noise drowned
-# the `loaded` signal).
+# baseline prompt exposure is not recorded at all.
 
 
 # Skills load as a **namespace tree mirroring folder structure**: every SKILL.md

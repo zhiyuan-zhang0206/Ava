@@ -27,16 +27,14 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_platform_tag_maps_machines(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The pinned asset tags cover darwin/linux/windows amd64+arm64; anything
+    """The pinned asset tags cover darwin/linux amd64+arm64; anything
     else is unsupported (None → sidecar skipped, agents auto-disable OTLP)."""
     cases = [
         ("Darwin", "arm64", "darwin_arm64"),
         ("Darwin", "x86_64", "darwin_amd64"),
         ("Linux", "x86_64", "linux_amd64"),
         ("Linux", "aarch64", "linux_arm64"),
-        ("Windows", "AMD64", "windows_amd64"),
         ("Linux", "i686", None),
-        ("Windows", "ARM64", None),
     ]
     for system, machine, expected in cases:
         monkeypatch.setattr(platform, "system", lambda _s=system: _s)

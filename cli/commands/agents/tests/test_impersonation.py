@@ -437,10 +437,10 @@ def test_send_delivers_as_the_borrowed_agent(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    seen: list[tuple[int, str, str, int | None]] = []
+    seen: list[tuple[int, str, str]] = []
 
-    def deliver(agent_id: int, content: str, *, source: str, origin_agent_id: int | None) -> str:
-        seen.append((agent_id, content, source, origin_agent_id))
+    def deliver(agent_id: int, content: str, *, source: str) -> str:
+        seen.append((agent_id, content, source))
         return "enqueued"
 
     def require_active(
@@ -466,7 +466,7 @@ def test_send_delivers_as_the_borrowed_agent(
     )
     args.database_factory = operator_database
     assert args.func(args) == 0
-    assert seen == [(42, "hi", "agent:405", 405)]
+    assert seen == [(42, "hi", "agent:405")]
     assert json.loads(capsys.readouterr().out) == {
         "status": "enqueued",
         "to": 42,

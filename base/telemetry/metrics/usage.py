@@ -229,7 +229,7 @@ def select_agents(
             UNION
             SELECT child.id FROM agents_meta child JOIN selected parent ON (
                 (%s IN ('spawn', 'all') AND child.fork_source_agent_id IS NULL
-                 AND COALESCE(child.born_spawner, child.spawner) = 'agent:' || parent.id::text)
+                 AND child.born_spawner = 'agent:' || parent.id::text)
                 OR (%s IN ('fork', 'all') AND child.fork_source_agent_id = parent.id)
             )
         ) SELECT id FROM selected ORDER BY id""",

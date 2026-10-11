@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,8 +13,6 @@ import pytest
 from base.config import ConfigBoot
 from services.backup.scheduler.operation import worker_process as workers
 from services.backup.scheduler.tests.operation_support import operation_kind, stub_worker, until
-
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="operation workers require POSIX")
 
 
 async def test_zero_exit_valid_result_is_committed_and_staging_removed(

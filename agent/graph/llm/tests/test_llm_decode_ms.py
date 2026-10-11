@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage
+from langchain_core.messages import AIMessageChunk, AnyMessage, HumanMessage
 
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_llm
@@ -169,44 +169,6 @@ async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> N
     )
     assert handler.llm_decode_ms is None
     assert handler.llm_latency_ms == 0.0  # (1000 - 1000) * 1000
-
-
-async def test_non_streaming_fallback_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stream stalls → non-streaming ainvoke fallback: the whole message
-    arrives in one chunk with no first→last window → decode_ms must stay
-    None (never a fake wall-clock number)."""
-    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.05)
-
-    async def _hang() -> AsyncIterator[AIMessageChunk]:
-        import asyncio
-
-        await asyncio.Future()  # never returns — simulates a dead stream
-        yield  # type: ignore[unreachable]
-
-    async def _ainvoke(messages):
-        return AIMessage(content="full response from the non-streaming fallback")
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _hang()
-    fake_llm.ainvoke = _ainvoke
-    fake_llm.bind_tools.return_value = fake_llm
-
-    handler = _FakeHandler()
-    chunks: list[AIMessageChunk] = []
-    await _stream_llm(
-        fake_llm,
-        [],
-        chunks=chunks,
-        handler=handler,
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        catalog=build_model_catalog(),
-    )
-
-    assert handler.llm_decode_ms is None
-    assert handler.llm_latency_ms is not None and handler.llm_latency_ms > 0
-    assert len(chunks) == 1  # single full chunk, no streaming window
 
 
 async def test_stream_preserves_prefix_and_does_not_recover_cache_403() -> None:
