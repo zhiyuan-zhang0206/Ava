@@ -9,6 +9,7 @@ pty-sessions service under the tmp test home."""
 
 from __future__ import annotations
 
+import ast
 import datetime
 import os
 import pathlib
@@ -291,7 +292,7 @@ def test_boot_arms_orphan_guard(tmp_path: pathlib.Path) -> None:
     assert "os._exit(125)" in boot
     guard_line = boot.index("_orphan_guard")
     assert guard_line < boot.index("import ava")
-    compile(boot, "<boot>", "exec")  # must be valid Python
+    ast.parse(boot)  # must be valid Python
 
 
 def test_boot_orphan_guard_message_names_session_gone(tmp_path: pathlib.Path) -> None:
@@ -310,7 +311,7 @@ def test_boot_loads_plugins_before_running_script(tmp_path: pathlib.Path) -> Non
     boot = watcher._build_boot(tmp_path / "x.py", None, 42)
     assert "ava.ensure_plugins_loaded()" in boot
     assert boot.index("ava.ensure_plugins_loaded()") < boot.index("runpy.run_path")
-    compile(boot, "<boot>", "exec")  # must be valid Python
+    ast.parse(boot)  # must be valid Python
 
 
 def test_boot_propagates_failures_without_catching(tmp_path: pathlib.Path) -> None:
@@ -326,7 +327,7 @@ def test_boot_propagates_failures_without_catching(tmp_path: pathlib.Path) -> No
     assert "except Exception" not in boot.split("finally:")[0]
     assert "except BaseException" not in boot
     assert "runpy.run_path" in boot
-    compile(boot, "<boot>", "exec")  # must be valid Python
+    ast.parse(boot)  # must be valid Python
 
 
 def test_boot_self_cleans_generated_files(tmp_path: pathlib.Path) -> None:
@@ -340,7 +341,7 @@ def test_boot_self_cleans_generated_files(tmp_path: pathlib.Path) -> None:
     assert "except OSError" in boot
     assert str(script) in boot  # the script path is unlinked too
     assert "__file__" in boot  # and the bootstrap deletes itself
-    compile(boot, "<boot>", "exec")
+    ast.parse(boot)
 
 
 @pytest.mark.flaky  # real watcher session + time.sleep polling (5s deadline)
@@ -631,7 +632,7 @@ def test_boot_inlines_agent_identity(tmp_path: pathlib.Path) -> None:
     assert env_line < boot.index("import ava")  # before the ava import, not just before use
     assert env_line < boot.index("ava.ensure_plugins_loaded()")
     assert env_line < boot.index("runpy.run_path")
-    compile(boot, "<boot>", "exec")  # must be valid Python
+    ast.parse(boot)  # must be valid Python
 
 
 @pytest.mark.flaky  # real pty watcher session + file-polling (15s deadline)

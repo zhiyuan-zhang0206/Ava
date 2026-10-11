@@ -13,7 +13,6 @@ into a plugin load.
 
 from __future__ import annotations
 
-import importlib
 import sys
 from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import contextmanager
@@ -342,7 +341,7 @@ def _partial_extensions(
     import agent
     from agent import extensions
 
-    prior_module = sys.modules["agent.extensions"]
+    prior_module = extensions
     prior_parent_binding = vars(agent)["extensions"]
     prior_finders = sys.meta_path
     try:
@@ -352,7 +351,8 @@ def _partial_extensions(
             patch.delitem(sys.modules, "agent.extensions")
             finder = _ExtensionsFinder(_ReentrantLoader(during_import, load))
             patch.setattr(sys, "meta_path", [finder, *prior_finders])
-            importlib.import_module("agent.extensions")
+            import agent.extensions  # pyright: ignore[reportUnusedImport]
+
             yield
     finally:
         assert sys.modules["agent.extensions"] is prior_module

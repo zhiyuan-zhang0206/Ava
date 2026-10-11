@@ -7,11 +7,15 @@ logic so a future edit that drops a guard call or inverts the condition (which
 would silently reopen the watcher-compacts-its-own-agent bug) fails loudly.
 """
 
+from pathlib import Path
+
 import pytest
 
 import ava
 from ava.sdk_surface import agent_identity
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
+
+_CHILD = Path(__file__).parent / "bootstrap" / "child_sdk_probes.py"
 
 
 def _owns_loop() -> bool:
@@ -211,8 +215,8 @@ def test_bare_script_has_no_context() -> None:
     import sys
 
     env = {k: v for k, v in os.environ.items() if k != "AVA_AGENT_ID"}
-    proc = subprocess.run(
-        [sys.executable, "-I", "-c", "import ava\nprint(hasattr(ava, 'context'))"],
+    proc = subprocess.run(  # noqa: S603 — fixed interpreter and child script
+        [sys.executable, "-I", str(_CHILD), "no_context_for_bare_script"],
         env=env,
         capture_output=True,
         text=True,
