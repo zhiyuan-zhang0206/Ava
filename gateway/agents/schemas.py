@@ -122,7 +122,7 @@ class SystemNoteIn(BaseModel):
 
 
 class ResolveNoticeIn(BaseModel):
-    """POST /api/agents/{id}/notices/{notice_id}/resolve request body.
+    """POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve request body.
 
     `action` is the explicit close verb (never inferred from whether `reply` is
     present): `answer` / `dismiss` apply to a require_response notice, `read`
@@ -155,8 +155,9 @@ class NoticeCreateIn(BaseModel):
 
 
 class NoticeEditIn(BaseModel):
-    """PATCH /api/agents/{id}/notices/current request body — revise the agent's
-    open notice (the SDK ava.ui.edit_notice contract). All fields optional;
+    """PATCH /api/agents/{id}/notices/current/guarded-v1 request body (with
+    `observed_notice_id`) — revise the agent's open notice (the SDK
+    ava.ui.edit_notice contract). All fields optional;
     pass only what changes. `require_response` cannot be changed (turn an FYI
     into a question by dismissing and posting fresh)."""
 

@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.api_contracts.idempotency import keyed_headers
 from base.config import settings
 from gateway.agents.notice_operations import current as current_notice_receipts
 from gateway.agents.notice_operations import router as guarded_notices
@@ -62,7 +63,7 @@ def test_original_snapshot_survives_replacement_and_deletion(
     later = client.post(
         f"/api/agents/{agent}/notices",
         json={"title": "B"},
-        headers={"Idempotency-Key": str(uuid4())},
+        headers=keyed_headers(str(uuid4())),
     )
     assert later.status_code == 201
     assert _send(client, agent, notice, dismiss, key="fresh").status_code == 409
@@ -228,9 +229,9 @@ def test_reply_concurrent_with_guarded_edit_has_no_lock_cycle(
         edit = executor.submit(_send, client, agent, notice, False)
         reply = executor.submit(
             client.post,
-            f"/api/agents/{agent}/notices/{notice}/resolve",
+            f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve",
             json={"action": "answer", "reply": "yes"},
-            headers={"Idempotency-Key": "reply"},
+            headers={**HEADERS, "Idempotency-Key": "reply"},
         )
         assert edit.result(timeout=10).status_code in (200, 409)
         assert reply.result(timeout=10).status_code == 201
@@ -271,7 +272,7 @@ def test_creation_waits_for_guarded_owner_lock(
             client.post,
             f"/api/agents/{agent}/notices",
             json={"title": "B"},
-            headers={"Idempotency-Key": "later"},
+            headers=keyed_headers("later"),
         )
         try:
             assert not later.done()
@@ -315,9 +316,9 @@ def test_reply_fk_is_compatible_with_guarded_agent_lock(
         db_conn.execute("SELECT id FROM agents WHERE id=%s FOR NO KEY UPDATE", (agent,))
         reply = executor.submit(
             client.post,
-            f"/api/agents/{agent}/notices/{notice}/resolve",
+            f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve",
             json={"action": "answer", "reply": "yes"},
-            headers={"Idempotency-Key": "reply"},
+            headers={**HEADERS, "Idempotency-Key": "reply"},
         )
         assert reply.result(timeout=10).status_code == 201
     assert _send(client, agent, notice, False).status_code == 409

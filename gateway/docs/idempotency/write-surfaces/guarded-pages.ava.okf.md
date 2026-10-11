@@ -11,12 +11,13 @@ description: Versioned page registry acceptance and observed-row close routes.
 | `POST /api/keyed/v1/agents/{agent_id}/pages` | keyed | replacement registry row and original PageRow receipt |
 | `POST /api/keyed/v1/agents/{agent_id}/pages/{name}/close` | keyed | observed numeric row close and original PageRow receipt |
 
-These server-only routes require verified `principal-v1` and a valid caller key.
-They retain `legacy_keyed_retry=False`; no SDK/UI activation accompanies them.
-The original HTTP page paths remain one-shot. Fresh registration on upgraded
-HTTP writers allocates a new row ID even after expired same-name registration;
-raw row maintenance and older writers remain separate compatibility boundaries.
-Historical acceptance is not proof that the name-based URL still serves the
-original page. See the current domain owner for transaction, stale-target,
-unchanged-close and rolling-writer requirements:
+These are the only page register and close write surfaces; they require
+verified `principal-v1` and a valid caller key. SDK
+`ava.gateway_client.register_page` sends one fresh key per call and retries an
+ambiguous outcome under it. `close_page` first reads the agent's open pages, then closes
+exactly the observed row; no open page of that name means nothing is sent.
+Fresh registration allocates a new row ID even after an expired same-name
+registration. Historical acceptance is not proof that the name-based URL still
+serves the original page. See the current domain owner for transaction,
+stale-target and unchanged-close requirements:
 [[gateway/routers/docs/page-acceptance.ava.okf.md]].

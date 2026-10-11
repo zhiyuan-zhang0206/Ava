@@ -38,6 +38,7 @@ __description__: str = (
     "or dismiss; the monitoring view shows all of it live."
 )
 
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
@@ -274,14 +275,18 @@ def edit_notice(
         raise ValueError("edit_notice needs at least one field to change")
 
     aid = ava.sdk_surface.agent_identity.require_agent_id()
+    observed = _observe_open_notice_id(aid)
+    if observed is None:
+        return
 
-    # One unified write path (R3 door ④): the gateway edits the agent's
-    # current open notice and re-publishes the posted event.
+    # One unified write path (R3 door ④): the gateway edits exactly the observed
+    # notice row and re-publishes the posted event.
     from ava import gateway_client
 
     resp = gateway_client.patch(
-        f"/api/agents/{aid}/notices/current",
-        body,
+        f"/api/agents/{aid}/notices/current/guarded-v1",
+        {"observed_notice_id": observed, **body},
+        idempotency_key=uuid.uuid4().hex,
     )
     _raise_as_value_error(resp)
 
@@ -290,12 +295,35 @@ def dismiss_notice() -> None:
     """Withdraw the open notice. At most one notice is open per agent (notify
     auto-resolves the previous one), so no id is needed."""
     aid = ava.sdk_surface.agent_identity.require_agent_id()
-    # One unified write path (R3 door ④): the gateway withdraws the agent's
-    # current open notice and publishes the resolve + agent-updated events.
+    observed = _observe_open_notice_id(aid)
+    if observed is None:
+        return
+    # One unified write path (R3 door ④): the gateway withdraws exactly the
+    # observed notice row and publishes the resolve + agent-updated events.
     from ava import gateway_client
 
-    resp = gateway_client.post(f"/api/agents/{aid}/notices/current/dismiss")
+    resp = gateway_client.post(
+        f"/api/agents/{aid}/notices/current/dismiss/guarded-v1",
+        {"observed_notice_id": observed},
+        idempotency_key=uuid.uuid4().hex,
+    )
     _raise_as_value_error(resp)
+
+
+def _observe_open_notice_id(agent_id: int) -> int | None:
+    """Global id of the agent's open notice, or None when it has none.
+
+    The guarded edit/withdraw routes target an observed global row, so a retry
+    of an ambiguous call can never touch a notice posted later.
+    """
+    from ava import gateway_client
+
+    resp = gateway_client.get(
+        "/api/notices/open", params={"agent_id": agent_id, "include_awaiting": True}
+    )
+    gateway_client.raise_from_response(resp)
+    rows = resp.json()
+    return int(rows[0]["id"]) if rows else None
 
 
 # ── ava.tasks SDK namespace — the task registry (see task_registry.py) ───────

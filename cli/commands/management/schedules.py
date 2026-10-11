@@ -47,7 +47,9 @@ def _headers() -> dict[str, str]:
 def _mutation_headers() -> dict[str, str]:
     from uuid import uuid4
 
-    return {**_headers(), "Idempotency-Key": str(uuid4())}
+    from base.api_contracts.idempotency import keyed_headers
+
+    return {**_headers(), **keyed_headers(str(uuid4()))}
 
 
 # ── list ──

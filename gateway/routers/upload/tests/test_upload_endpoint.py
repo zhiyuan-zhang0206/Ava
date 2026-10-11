@@ -1,16 +1,18 @@
-"""File upload endpoint tests — POST /api/agents/{agent_id}/uploads.
+"""Silent upload endpoint tests — POST /api/agents/{agent_id}/uploads.
 
-Verifies: one or more files saved to the right path, a single inbound
-message inserted per request (the whole batch is one notification),
-agent-not-found -> 404, filename sanitization.
+Verifies: one or more files saved as immutable objects under the agent's upload
+directory, no inbound queued, key + principal-v1 scope required, `deliver=true`
+refused, agent-not-found -> 404, per-file / per-agent quota limits, and the GET
+route serving a saved file back.
 """
 
 from __future__ import annotations
 
-import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import httpx2 as httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -19,30 +21,30 @@ from gateway.app import app
 from tests.fixtures.gateway_config import spawn_via_http
 
 
-@pytest.mark.asyncio
-async def test_upload_lock_cache_evicts_idle_locks_but_keeps_held_lock() -> None:
-    """A busy agent's upload mutex remains stable while stale idle locks are evicted."""
-    from gateway.routers.upload.router import AgentUploadLocks
+def _upload(
+    client: TestClient,
+    agent_id: int,
+    files: list[tuple[str, tuple[str, bytes, str]]],
+    *,
+    query: str = "",
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """POST one silent batch under a fresh key and the principal-v1 scope."""
+    return client.post(
+        f"/api/agents/{agent_id}/uploads{query}",
+        headers=headers
+        if headers is not None
+        else {"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"},
+        files=files,
+    )
 
-    locks = AgentUploadLocks(max_entries=2)
-    lock = await locks.lock_for(1)
-    await lock.acquire()
-    try:
-        await locks.lock_for(2)
-        await locks.lock_for(3)
 
-        assert locks.agent_ids == [1, 3]
-    finally:
-        lock.release()
-
-
-def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT content, kind, source FROM inbound_messages WHERE agent_id = %s ORDER BY id",
-            (agent_id,),
-        )
-        return cur.fetchall()
+def _inbound_count(db: psycopg.Connection, agent_id: int) -> int:
+    row = db.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,)
+    ).fetchone()
+    assert row is not None
+    return row[0]
 
 
 def _spawn_agent() -> int:
@@ -57,157 +59,171 @@ def _spawn_agent() -> int:
         return resp.json()["id"]
 
 
-def _assert_hello_world_upload_listed(files: list[dict[str, object]]) -> None:
-    assert len(files) == 1
-    assert files[0]["filename"] == "hello.txt"
-    assert files[0]["size"] == 13
-    assert files[0]["content_type"] == "text/plain"
+def _agent_dir(home: Path, agent_id: int) -> Path:
+    return home / "Downloads" / f"AvaAgent-{agent_id}"
 
 
-def _assert_saved_privately(dest: Path, body: bytes) -> None:
-    assert dest.exists()
-    assert dest.read_bytes() == body
-    assert dest.parent.stat().st_mode & 0o777 == 0o700
-    assert dest.stat().st_mode & 0o777 == 0o600
-
-
-def _assert_one_local_path_inbound(
-    rows: list[tuple[str, str, str]], dest: Path, size_text: str
-) -> None:
-    assert len(rows) == 1
-    content, kind, source = rows[0]
-    # The agent runs on this gateway (single-box), so the message carries
-    # its LOCAL absolute path — the address it can act on directly.
-    assert str(dest) in content
-    assert size_text in content
-    assert kind == "chat"
-    assert source == "user"
+def _stored_files(directory: Path) -> list[Path]:
+    return sorted(path for path in directory.iterdir() if path.is_file())
 
 
 class TestUploadFile:
-    def test_upload_single_file_saves_and_inserts_one_inbound(
+    def test_upload_single_file_saves_privately_and_queues_no_inbound(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Happy path: one file -> saved to mocked Downloads dir, one inbound inserted."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("hello.txt", b"Hello, world!", "text/plain"))],
+            resp = _upload(
+                client,
+                agent_id,
+                [("files", ("hello.txt", b"Hello, world!", "text/plain"))],
             )
 
-        assert resp.status_code == 200
-        _assert_hello_world_upload_listed(resp.json()["files"])
+        assert resp.status_code == 200, resp.text
+        files = resp.json()["files"]
+        assert len(files) == 1
+        assert files[0]["filename"] == "hello.txt"
+        assert files[0]["size"] == 13
+        assert files[0]["content_type"] == "text/plain"
+        dest = Path(files[0]["path"])
+        assert dest.parent == _agent_dir(tmp_path, agent_id)
+        assert dest.read_bytes() == b"Hello, world!"
+        assert dest.parent.stat().st_mode & 0o777 == 0o700
+        assert dest.stat().st_mode & 0o777 == 0o600
+        assert _inbound_count(db_conn, agent_id) == 0
 
-        dest = tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "hello.txt"
-        _assert_saved_privately(dest, b"Hello, world!")
-        _assert_one_local_path_inbound(_inbound_rows(db_conn, agent_id), dest, "13 bytes")
-
-    def test_upload_multiple_files_one_batch_inbound(
+    def test_upload_multiple_files_one_batch(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A batch of files is each saved, but produces exactly ONE inbound
-        that lists every saved path — not one notification per file."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[
+            resp = _upload(
+                client,
+                agent_id,
+                [
                     ("files", ("a.txt", b"aaa", "text/plain")),
                     ("files", ("b.txt", b"bb", "text/plain")),
                     ("files", ("c.txt", b"c", "text/plain")),
                 ],
             )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         files = resp.json()["files"]
         assert [f["filename"] for f in files] == ["a.txt", "b.txt", "c.txt"]
         assert [f["size"] for f in files] == [3, 2, 1]
+        assert [Path(f["path"]).read_bytes() for f in files] == [b"aaa", b"bb", b"c"]
 
-        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
-        for name, body in (("a.txt", b"aaa"), ("b.txt", b"bb"), ("c.txt", b"c")):
-            assert (base / name).read_bytes() == body
-
-        rows = _inbound_rows(db_conn, agent_id)
-        assert len(rows) == 1
-        content = rows[0][0]
-        assert "3 files uploaded" in content
-        # The agent runs on this gateway, so each line carries the local
-        # absolute path the agent can read directly.
-        for name in ("a.txt", "b.txt", "c.txt"):
-            assert str(base / name) in content
-
-    def test_upload_sanitizes_filename_slashes(
+    def test_slashes_in_a_display_name_never_reach_the_stored_path(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Filename with / is sanitized (replaced with _)."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("etc/passwd.txt", b"data", "text/plain"))],
-            )
+            resp = _upload(client, agent_id, [("files", ("etc/passwd.txt", b"data", "text/plain"))])
 
-        assert resp.status_code == 200
-        assert resp.json()["files"][0]["filename"] == "etc_passwd.txt"
-
-        dest = tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "etc_passwd.txt"
-        assert dest.exists()
+        assert resp.status_code == 200, resp.text
+        file = resp.json()["files"][0]
+        assert file["filename"] == "etc/passwd.txt"
+        assert Path(file["path"]).parent == _agent_dir(tmp_path, agent_id)
+        assert Path(file["path"]).suffix == ".txt"
 
     def test_upload_agent_not_found_returns_404(self) -> None:
-        """Upload to nonexistent agent -> 404."""
         with TestClient(app) as client:
-            resp = client.post(
-                "/api/agents/99999/uploads",
-                files=[("files", ("x.txt", b"x", "text/plain"))],
-            )
+            resp = _upload(client, 99999, [("files", ("x.txt", b"x", "text/plain"))])
         assert resp.status_code == 404
-
-    def test_upload_preserves_path_in_response(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Response includes the full saved path."""
-        agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("photo.png", b"\x89PNG", "image/png"))],
-            )
-
-        f = resp.json()["files"][0]
-        assert f["path"].endswith(f"AvaAgent-{agent_id}/photo.png")
-        assert f["content_type"] == "image/png"
 
     def test_upload_empty_file(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Empty file (0 bytes) is accepted."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("empty.txt", b"", "text/plain"))],
+            resp = _upload(client, agent_id, [("files", ("empty.txt", b"", "text/plain"))])
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["files"][0]["size"] == 0
+
+
+class TestUploadContract:
+    """The route is silent and keyed: nothing is saved without a verified operation identity."""
+
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            {},
+            {"Idempotency-Key": "k"},
+            {"Idempotency-Scope": "principal-v1"},
+            {"Idempotency-Key": "k", "Idempotency-Scope": "unsupported"},
+        ],
+    )
+    def test_missing_or_unsupported_identity_is_refused_before_any_effect(
+        self,
+        db_conn: psycopg.Connection,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        headers: dict[str, str],
+    ) -> None:
+        agent_id = _spawn_agent()
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        with TestClient(app) as client:
+            resp = _upload(
+                client,
+                agent_id,
+                [("files", ("a.txt", b"x", "text/plain"))],
+                headers=headers,
             )
 
-        assert resp.status_code == 200
-        assert resp.json()["files"][0]["size"] == 0
-        rows = _inbound_rows(db_conn, agent_id)
-        assert "0 bytes" in rows[0][0]
+        assert resp.status_code == 422
+        assert not _agent_dir(tmp_path, agent_id).exists()
+        row = db_conn.execute("SELECT count(*) FROM agent_upload_batches").fetchone()
+        assert row is not None and row[0] == 0
+
+    def test_deliver_true_is_refused_and_saves_nothing(
+        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        agent_id = _spawn_agent()
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        with TestClient(app) as client:
+            resp = _upload(
+                client,
+                agent_id,
+                [("files", ("a.txt", b"x", "text/plain"))],
+                query="?deliver=true",
+            )
+
+        assert resp.status_code == 422
+        assert "/api/keyed/v1/agents/{id}/uploads" in resp.json()["detail"]
+        assert not _agent_dir(tmp_path, agent_id).exists()
+        assert _inbound_count(db_conn, agent_id) == 0
+
+    def test_response_url_serves_the_saved_object(
+        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        agent_id = _spawn_agent()
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        with TestClient(app) as client:
+            resp = _upload(client, agent_id, [("files", ("shot.png", b"\x89PNG", "image/png"))])
+            url = resp.json()["files"][0]["url"]
+            served = client.get(url)
+
+        assert url == f"/api/agents/{agent_id}/uploads/{Path(resp.json()['files'][0]['path']).name}"
+        assert served.status_code == 200
+        assert served.content == b"\x89PNG"
+        assert _inbound_count(db_conn, agent_id) == 0
 
 
 class TestUploadLimits:
-    """Audit round-2 security P1-2: the upload endpoint is bounded — per-file
-    size, per-agent total quota, per-agent file count — before any byte lands."""
+    """The upload endpoint is bounded — per-file size, per-agent total quota,
+    per-agent file count — before any byte lands."""
 
     def test_per_file_limit_rejected_413(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -218,37 +234,29 @@ class TestUploadLimits:
 
         monkeypatch.setattr(uploads_router, "MAX_UPLOAD_BYTES", 10)
         with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("big.bin", b"x" * 11, "application/octet-stream"))],
+            resp = _upload(
+                client,
+                agent_id,
+                [("files", ("big.bin", b"x" * 11, "application/octet-stream"))],
             )
         assert resp.status_code == 413
-        assert not (tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "big.bin").exists()
-        assert _inbound_rows(db_conn, agent_id) == []  # no notification on refusal
+        assert not _agent_dir(tmp_path, agent_id).exists()
 
     def test_agent_quota_rejected_413(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Two files crossing the total quota: the first lands, the second 413s."""
+        """Two batches crossing the total quota: the first lands, the second 413s."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         import gateway.routers.upload.router as uploads_router
 
         monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 30)
         with TestClient(app) as client:
-            ok = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("a.txt", b"a" * 20, "text/plain"))],
-            )
-            over = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("b.txt", b"b" * 20, "text/plain"))],
-            )
+            ok = _upload(client, agent_id, [("files", ("a.txt", b"a" * 20, "text/plain"))])
+            over = _upload(client, agent_id, [("files", ("b.txt", b"b" * 20, "text/plain"))])
         assert ok.status_code == 200
         assert over.status_code == 413
-        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
-        assert (base / "a.txt").exists()
-        assert not (base / "b.txt").exists()
+        assert len(_stored_files(_agent_dir(tmp_path, agent_id))) == 1
 
     def test_agent_quota_rejects_entire_oversized_batch(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -260,21 +268,18 @@ class TestUploadLimits:
 
         monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 5)
         with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[
+            resp = _upload(
+                client,
+                agent_id,
+                [
                     ("files", ("a.txt", b"aaa", "text/plain")),
                     ("files", ("b.txt", b"bbb", "text/plain")),
                 ],
             )
 
-        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
         assert resp.status_code == 413
-        assert not (base / "a.txt").exists()
-        assert not (base / "b.txt").exists()
-        assert _inbound_rows(db_conn, agent_id) == []
-        temp_dir = base / ".tmp"
-        assert not temp_dir.exists() or list(temp_dir.iterdir()) == []
+        directory = _agent_dir(tmp_path, agent_id)
+        assert not directory.exists() or _stored_files(directory) == []
 
     def test_file_count_cap_rejected_413(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -285,14 +290,8 @@ class TestUploadLimits:
 
         monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_FILES", 1)
         with TestClient(app) as client:
-            ok = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("a.txt", b"a", "text/plain"))],
-            )
-            over = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("b.txt", b"b", "text/plain"))],
-            )
+            ok = _upload(client, agent_id, [("files", ("a.txt", b"a", "text/plain"))])
+            over = _upload(client, agent_id, [("files", ("b.txt", b"b", "text/plain"))])
         assert ok.status_code == 200
         assert over.status_code == 413
 
@@ -306,18 +305,18 @@ class TestUploadLimits:
 
         monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_FILES", 1)
         with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[
+            resp = _upload(
+                client,
+                agent_id,
+                [
                     ("files", ("a.txt", b"a", "text/plain")),
                     ("files", ("b.txt", b"b", "text/plain")),
                 ],
             )
 
-        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
         assert resp.status_code == 413
-        assert not (base / "a.txt").exists()
-        assert not (base / "b.txt").exists()
+        directory = _agent_dir(tmp_path, agent_id)
+        assert not directory.exists() or _stored_files(directory) == []
 
     def test_concurrent_batches_share_agent_quota(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -328,134 +327,19 @@ class TestUploadLimits:
         import gateway.routers.upload.router as uploads_router
 
         monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 10)
-        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
-        final_write_barrier = threading.Barrier(2)
-        original_write_bytes = Path.write_bytes
-
-        def _block_direct_final_write(path: Path, contents: bytes) -> int:
-            if path.parent == base:
-                final_write_barrier.wait(timeout=2)
-            return original_write_bytes(path, contents)
-
-        monkeypatch.setattr(Path, "write_bytes", _block_direct_final_write)
         with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as executor:
             responses = [
                 executor.submit(
-                    client.post,
-                    f"/api/agents/{agent_id}/uploads?deliver=false",
-                    files=[("files", (name, b"x" * 6, "text/plain"))],
+                    _upload, client, agent_id, [("files", (name, b"x" * 6, "text/plain"))]
                 )
                 for name in ("a.txt", "b.txt")
             ]
             statuses = [response.result().status_code for response in responses]
 
         assert sorted(statuses) == [200, 413]
-        stored = [path for path in base.iterdir() if path.is_file()]
-        assert sum(path.stat().st_size for path in stored) <= 10
+        stored = _stored_files(_agent_dir(tmp_path, agent_id))
         assert len(stored) == 1
         assert stored[0].read_bytes() == b"x" * 6
-
-    def test_successful_upload_sweeps_stale_temp_files(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Crash leftovers in .tmp do not count toward quota and are removed."""
-        agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        import gateway.routers.upload.router as uploads_router
-
-        monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 5)
-        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
-        temp_dir = base / ".tmp"
-        temp_dir.mkdir(parents=True)
-        (temp_dir / "stale").write_bytes(b"x" * 100)
-
-        with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads?deliver=false",
-                files=[("files", ("fresh.txt", b"fresh", "text/plain"))],
-            )
-
-        assert resp.status_code == 200
-        assert (base / "fresh.txt").read_bytes() == b"fresh"
-        assert list(temp_dir.iterdir()) == []
-
-    def test_failed_promotion_removes_new_final_names(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A rename failure restores the directory to its pre-batch state."""
-        agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        import gateway.routers.upload.router as uploads_router
-
-        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
-        temp_dir = base / ".tmp"
-        original_replace = uploads_router.os.replace
-        promotions = 0
-
-        def _fail_second_promotion(src: str | Path, dest: str | Path) -> None:
-            nonlocal promotions
-            if Path(src).parent == temp_dir and Path(dest).parent == base:
-                promotions += 1
-                if promotions == 2:
-                    raise OSError("injected rename failure")
-            original_replace(src, dest)
-
-        monkeypatch.setattr(uploads_router.os, "replace", _fail_second_promotion)
-        with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads?deliver=false",
-                files=[
-                    ("files", ("a.txt", b"a", "text/plain")),
-                    ("files", ("b.txt", b"b", "text/plain")),
-                ],
-            )
-
-        assert resp.status_code == 500
-        assert not (base / "a.txt").exists()
-        assert not (base / "b.txt").exists()
-        assert list(temp_dir.iterdir()) == []
-
-
-class TestUploadUrlAndAttachMode:
-    def test_response_includes_reference_url(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("shot.png", b"\x89PNG", "image/png"))],
-            )
-        assert resp.status_code == 200
-        assert resp.json()["files"][0]["url"] == f"/api/agents/{agent_id}/uploads/shot.png"
-
-    def test_deliver_false_skips_inbound(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The native-attachment path saves silently — no inbound queued."""
-        agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads?deliver=false",
-                files=[("files", ("shot.png", b"\x89PNG", "image/png"))],
-            )
-        assert resp.status_code == 200
-        assert (tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "shot.png").exists()
-        assert _inbound_rows(db_conn, agent_id) == []  # no notification
-
-    def test_deliver_true_still_notifies(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with TestClient(app) as client:
-            client.post(
-                f"/api/agents/{agent_id}/uploads?deliver=true",
-                files=[("files", ("a.txt", b"x", "text/plain"))],
-            )
-        assert len(_inbound_rows(db_conn, agent_id)) == 1
 
 
 class TestServeUpload:
@@ -466,11 +350,8 @@ class TestServeUpload:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         raw = b"\x89PNG\r\n\x1a\npixels"
         with TestClient(app) as client:
-            client.post(
-                f"/api/agents/{agent_id}/uploads?deliver=false",
-                files=[("files", ("shot.png", raw, "image/png"))],
-            )
-            resp = client.get(f"/api/agents/{agent_id}/uploads/shot.png")
+            saved = _upload(client, agent_id, [("files", ("shot.png", raw, "image/png"))])
+            resp = client.get(saved.json()["files"][0]["url"])
         assert resp.status_code == 200
         assert resp.content == raw
 
@@ -482,11 +363,12 @@ class TestServeUpload:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         with TestClient(app) as client:
-            client.post(
-                f"/api/agents/{agent_id}/uploads?deliver=false",
-                files=[("files", ("page.html", b"<script>alert(1)</script>", "text/html"))],
+            saved = _upload(
+                client,
+                agent_id,
+                [("files", ("page.html", b"<script>alert(1)</script>", "text/html"))],
             )
-            resp = client.get(f"/api/agents/{agent_id}/uploads/page.html")
+            resp = client.get(saved.json()["files"][0]["url"])
         assert resp.status_code == 200
         assert resp.headers["x-content-type-options"] == "nosniff"
         assert resp.headers["content-disposition"].startswith("attachment")
@@ -497,11 +379,8 @@ class TestServeUpload:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         with TestClient(app) as client:
-            client.post(
-                f"/api/agents/{agent_id}/uploads?deliver=false",
-                files=[("files", ("shot.png", b"\x89PNG", "image/png"))],
-            )
-            resp = client.get(f"/api/agents/{agent_id}/uploads/shot.png")
+            saved = _upload(client, agent_id, [("files", ("shot.png", b"\x89PNG", "image/png"))])
+            resp = client.get(saved.json()["files"][0]["url"])
         assert resp.status_code == 200
         assert resp.headers["x-content-type-options"] == "nosniff"
         assert "content-disposition" not in resp.headers
@@ -530,177 +409,3 @@ class TestServeUpload:
         with TestClient(app) as client:
             resp = client.get("/api/agents/99999/uploads/x.png")
         assert resp.status_code == 404
-
-
-class TestRemoteAgentPull:
-    """Cross-machine upload: when the agent runs on a remote runner, the
-    gateway dispatches an `upload_receive` op so the file lands on the
-    runner's local disk, and the inbound message carries THAT path."""
-
-    def test_remote_agent_message_carries_runner_path(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Agent on a remote machine: dispatch returns the runner's local path,
-        and the message uses it (not the gateway's)."""
-        agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        # Point the agent at a remote machine.
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET machine = %s WHERE id = %s", ("mbp-remote", agent_id)
-            )
-        db_conn.commit()
-
-        runner_path = f"/Users/runner/Downloads/AvaAgent-{agent_id}/hello.txt"
-
-        async def fake_dispatch(_db: object, target_machine: str, kind: str, payload: dict, **kw):
-            assert target_machine == "mbp-remote"
-            assert kind == "upload_receive"
-            assert payload == {"agent_id": agent_id, "name": "hello.txt"}
-            return {"path": runner_path}
-
-        from ops.cluster import rpc as cluster_rpc
-
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-
-        with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("hello.txt", b"Hello, world!", "text/plain"))],
-            )
-        assert resp.status_code == 200
-
-        content = _inbound_rows(db_conn, agent_id)[0][0]
-        # The agent's LOCAL path on the runner, not the gateway's path.
-        assert runner_path in content
-
-    def test_remote_agent_pull_failure_identifies_gateway_location(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Runner unreachable: the upload succeeds and its notification
-        identifies the gateway-side path and download route (best-effort pull)."""
-        agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET machine = %s WHERE id = %s", ("mbp-remote", agent_id)
-            )
-        db_conn.commit()
-
-        async def fake_dispatch(_db: object, target_machine: str, kind: str, payload: dict, **kw):
-            raise RuntimeError("runner unreachable")
-
-        from ops.cluster import rpc as cluster_rpc
-
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-
-        with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("hello.txt", b"Hello, world!", "text/plain"))],
-            )
-        assert resp.status_code == 200  # upload never fails on a failed pull
-        content = _inbound_rows(db_conn, agent_id)[0][0]
-        dest = tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "hello.txt"
-        from base.cluster.machine import machine_name
-
-        assert str(dest) in content
-        assert f"machine: {machine_name()}" in content
-        assert f"gateway download: /api/agents/{agent_id}/uploads/hello.txt" in content
-        assert "local copy unconfirmed on mbp-remote" in content
-        with TestClient(app) as client:
-            download = client.get(resp.json()["files"][0]["url"])
-        assert download.status_code == 200
-        assert download.content == b"Hello, world!"
-
-    def test_local_agent_skips_dispatch(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Agent on this gateway: no dispatch; message carries the gateway's
-        local path (== the agent's local path)."""
-        agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        called = []
-
-        async def fake_dispatch(_db: object, target_machine: str, kind: str, payload: dict, **kw):
-            called.append((target_machine, kind))  # pyright: ignore[reportUnknownMemberType]
-            raise AssertionError("should not dispatch for a local agent")
-
-        from ops.cluster import rpc as cluster_rpc
-
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-
-        with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[("files", ("hello.txt", b"Hello, world!", "text/plain"))],
-            )
-        assert resp.status_code == 200
-        assert called == []
-        content = _inbound_rows(db_conn, agent_id)[0][0]
-        dest = tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "hello.txt"
-        assert str(dest) in content
-
-    @pytest.mark.parametrize(
-        "failed", [{"a.txt"}, {"b.txt"}, {"c.txt"}, {"a.txt", "b.txt", "c.txt"}]
-    )
-    def test_remote_agent_partial_pull_failure_preserves_file_association(
-        self,
-        db_conn: psycopg.Connection,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        failed: set[str],
-    ) -> None:
-        """Batch upload where only some files pull: the message carries the
-        pulled runner paths for successes and the gateway paths for failures —
-        each path stays paired with the correct filename and byte count."""
-        agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET machine = %s WHERE id = %s", ("mbp-remote", agent_id)
-            )
-        db_conn.commit()
-
-        async def fake_dispatch(
-            _db: object, target_machine: str, kind: str, payload: dict[str, object], **kw: object
-        ) -> dict[str, str]:
-            name = payload["name"]
-            assert isinstance(name, str)
-            if name in failed:
-                raise RuntimeError(f"runner unreachable for {name}")
-            return {"path": f"/Users/runner/Downloads/AvaAgent-{agent_id}/{name}"}
-
-        from ops.cluster import rpc as cluster_rpc
-
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)
-
-        with TestClient(app) as client:
-            resp = client.post(
-                f"/api/agents/{agent_id}/uploads",
-                files=[
-                    ("files", ("a.txt", b"aaa", "text/plain")),
-                    ("files", ("b.txt", b"bb", "text/plain")),
-                    ("files", ("c.txt", b"c", "text/plain")),
-                ],
-            )
-        assert resp.status_code == 200
-        content = _inbound_rows(db_conn, agent_id)[0][0]
-        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
-        from base.cluster.machine import machine_name
-
-        lines = content.splitlines()[1:]
-        assert len(lines) == 3
-        for line, name, size in zip(lines, ("a.txt", "b.txt", "c.txt"), (3, 2, 1), strict=True):
-            assert name in line
-            assert f"{size} bytes" in line
-            if name in failed:
-                assert str(base / name) in line
-                assert f"machine: {machine_name()}" in line
-                assert f"gateway download: /api/agents/{agent_id}/uploads/{name}" in line
-                assert "local copy unconfirmed on mbp-remote" in line
-            else:
-                assert f"/Users/runner/Downloads/AvaAgent-{agent_id}/{name}" in line
-                assert "machine: mbp-remote" in line

@@ -30,6 +30,7 @@ from uuid import uuid4
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import PoolTimeout
 
+from base.api_contracts.idempotency import keyed_headers
 from base.db.transaction import write_transaction
 from base.paths import ava_home
 from services.entrypoints.im_bridge import copy
@@ -146,11 +147,13 @@ class NoticeBridge:
         resp.raise_for_status()
         return resp.json()
 
+    def _keyed_headers(self) -> dict[str, str]:
+        """Auth headers plus one fresh principal-v1 operation key for a resolve call."""
+        return {**self.core.gateway._headers(), **keyed_headers(str(uuid4()))}
+
     async def _post(self, path: str, body: dict[str, Any]) -> None:
         g = self.core.gateway
-        resp = await (await g._http()).post(
-            path, json=body, headers={**g._headers(), "Idempotency-Key": str(uuid4())}
-        )
+        resp = await (await g._http()).post(path, json=body, headers=self._keyed_headers())
         resp.raise_for_status()
 
     # -- polling -----------------------------------------------------------
@@ -385,7 +388,7 @@ class NoticeBridge:
     async def _resolve(self, action: str, agent_id: str, notice_id: str) -> str:
         """Resolve read/dismiss via the gateway; returns a hint."""
         await self._post(
-            f"/api/agents/{agent_id}/notices/{notice_id}/resolve",
+            f"/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve",
             {"action": action, "reply": None},
         )
         return "✅ Handled" if action == "dismiss" else "✓ Marked as read"  # emoji-ok: hint
@@ -457,9 +460,9 @@ class NoticeBridge:
         """One call to the original target; return its actual domain response, no fallback."""
         g = self.core.gateway
         response = await (await g._http()).post(
-            f"/api/agents/{agent_id}/notices/{notice_id}/resolve",
+            f"/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve",
             json={"action": "answer", "reply": text},
-            headers={**g._headers(), "Idempotency-Key": str(uuid4())},
+            headers=self._keyed_headers(),
         )
         response.raise_for_status()
         result: dict[str, Any] = response.json()
@@ -483,7 +486,7 @@ class NoticeBridge:
             return None  # other commands pass through to the normal flow
         try:
             await self._post(
-                f"/api/agents/{mode['agent_id']}/notices/{mode['notice_id']}/resolve",
+                f"/api/keyed/v1/agents/{mode['agent_id']}/notices/{mode['notice_id']}/resolve",
                 {"action": "answer", "reply": text},
             )
         except Exception:

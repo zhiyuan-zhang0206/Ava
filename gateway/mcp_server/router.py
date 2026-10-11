@@ -25,18 +25,6 @@ from gateway.mcp_server.creation_receipts import (
 router = APIRouter(dependencies=[Depends(require_human_credential)])
 
 
-class McpClientCreate(BaseModel):
-    name: str
-    scope: McpClientScope = McpClientScope.READ
-
-
-class McpClientCreated(BaseModel):
-    id: int
-    name: str
-    scope: McpClientScope
-    token: str
-
-
 class McpClientView(BaseModel):
     id: int
     name: str
@@ -54,16 +42,6 @@ class McpClientRevoked(BaseModel):
 def get_mcp_clients(request: Request) -> list[McpClientView]:
     """List MCP clients without their credential hashes."""
     return [McpClientView(**row) for row in clients.list_clients(request.app.state.db_pool)]
-
-
-@router.post("/api/mcp/clients")
-def post_mcp_client(request: Request, body: McpClientCreate) -> McpClientCreated:
-    """Create an MCP client and reveal its plaintext token once."""
-    try:
-        client_id, token = clients.create_client(request.app.state.db_pool, body.name, body.scope)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return McpClientCreated(id=client_id, name=body.name, scope=body.scope, token=token)
 
 
 @router.post("/api/mcp/clients/{client_id}/revoke")

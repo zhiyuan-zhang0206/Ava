@@ -72,10 +72,6 @@ class RouteContract:
     idempotency: Idempotency = Idempotency.IDEMPOTENT
     pause: PauseSemantics = PauseSemantics.DATA_PLANE
     note: str = ""
-    # True only for keyed routes already protected by the rollout baseline.
-    # Newly protected routes need positive server negotiation before callers
-    # may automatically retry an ambiguous outcome against a mixed-version gateway.
-    legacy_keyed_retry: bool = False
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -118,7 +114,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/keyed/v1/agents/{agent_id}/retry-launch"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="guarded observed-attempt retry; receipt and pointer commit together",
-        legacy_keyed_retry=False,
     ),
     ("POST", "/api/keyed/v1/agents"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
@@ -256,7 +251,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # ── gateway/routers/guide.py ───────────────────────────────────
     ("POST", "/api/keyed/v1/guide/draft"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        legacy_keyed_retry=False,
         note="raw draft identity and original immutable birth snapshot",
     ),
     # ── gateway/cluster/status.py (health) ───────────────────────────────────
@@ -301,14 +295,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/mcp_server/router.py ─────────────────────────────
     ("GET", "/api/mcp/clients"): RouteContract(),
-    ("POST", "/api/mcp/clients"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="client creation — plaintext token is revealed once",
-    ),
     ("POST", "/api/keyed/v1/mcp/clients"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="guarded credential creation; replays recover metadata, never the one-time token",
-        legacy_keyed_retry=False,
     ),
     ("POST", "/api/mcp/clients/{client_id}/revoke"): RouteContract(
         note="client revocation — guarded update; repeats cannot revoke twice"
@@ -332,13 +321,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/notices/live"): RouteContract(),
     ("GET", "/api/notices/open"): RouteContract(),
-    ("POST", "/api/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="notice resolution and reply require a key and share one durable receipt",
-    ),
     ("POST", "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        legacy_keyed_retry=False,
         note="required verified principal key resolves only the explicit global notice and replays its original inbound",
     ),
     ("POST", "/api/agents/{agent_id}/notices"): RouteContract(
@@ -347,28 +331,17 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("PATCH", "/api/agents/{agent_id}/notices/current/guarded-v1"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        legacy_keyed_retry=False,
         note="observed global notice edit and immutable acceptance commit together; no client activation",
     ),
     ("POST", "/api/agents/{agent_id}/notices/current/dismiss/guarded-v1"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        legacy_keyed_retry=False,
         note="withdraw only the observed global notice; keyed replay never selects a later notice",
-    ),
-    ("PATCH", "/api/agents/{agent_id}/notices/current"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="current-notice selector can edit a later notice after an ambiguous response",
-    ),
-    ("POST", "/api/agents/{agent_id}/notices/current/dismiss"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="current-notice selector can withdraw a later notice after an ambiguous response",
     ),
     # ── gateway/inspect/okf_graph.py ───────────────────────────────────
     ("GET", "/api/okf/graph"): RouteContract(),
     # ── gateway/extensions/packages.py ───────────────────────────────────
     ("POST", "/api/keyed/v1/packages/draft"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        legacy_keyed_retry=False,
         note="raw draft identity and original immutable birth snapshot",
     ),
     # ── gateway/routers/pages.py ───────────────────────────────────
@@ -377,21 +350,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/pages/{page_key}/{rest:path}"): RouteContract(note="page reverse proxy"),
     ("POST", "/api/keyed/v1/agents/{agent_id}/pages"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        legacy_keyed_retry=False,
         note="versioned page registration commits replacement and original acceptance together",
     ),
     ("POST", "/api/keyed/v1/agents/{agent_id}/pages/{name}/close"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        legacy_keyed_retry=False,
         note="versioned page close requires observed row identity; replay cannot close a later page",
-    ),
-    ("POST", "/api/agents/{agent_id}/pages"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="registration replaces the current page; an ambiguous retry can close newer work",
-    ),
-    ("DELETE", "/api/agents/{agent_id}/pages/{name}"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="name-based close can target a later registration after name reuse",
     ),
     ("GET", "/api/agents/{agent_id}/pages"): RouteContract(note="list open pages"),
     # ── gateway/extensions/plugin_ui.py ───────────────────────────────────
@@ -419,7 +382,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("POST", "/api/keyed/v1/schedules/draft"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        legacy_keyed_retry=False,
         note="raw draft identity and original immutable birth snapshot",
     ),
     ("POST", "/api/schedules/{schedule_id}/start"): RouteContract(
@@ -459,7 +421,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/messages"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="enqueue chat inbound — one logical message must land exactly once; clients retry with an Idempotency-Key",
-        legacy_keyed_retry=True,
     ),
     ("POST", "/api/agents/{agent_id}/messages/reconcile"): RouteContract(
         note="idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery"
@@ -516,7 +477,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/uploads/{filename}"): RouteContract(),
     ("POST", "/api/keyed/v1/agents/{agent_id}/uploads"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        legacy_keyed_retry=False,
         note="immutable source acceptance and delivery intent; native receiver and one retained inbound recover together; no client activation",
     ),
     ("GET", "/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}"): RouteContract(),
@@ -525,8 +485,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         "/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}/objects/{ordinal}",
     ): RouteContract(),
     ("POST", "/api/agents/{agent_id}/uploads"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="save files to disk + enqueue inbound; a retry duplicates files",
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="silent save only: the claimed manifest is published as immutable objects and the original receipt replays under the same key; no inbound is queued",
     ),
 }
 

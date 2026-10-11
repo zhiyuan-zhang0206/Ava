@@ -16,7 +16,7 @@ from base.agents.context.clients import GatewayHandle
 from base.agents.messages.delivery.retry import GatewayResponse, network_errors, retryable_response
 from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency
-from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER, validate_idempotency_key
+from base.api_contracts.idempotency import keyed_headers
 from base.host.net.resilience import Policy, http_classifier, retry
 
 __all__ = [
@@ -340,7 +340,6 @@ def post(
     *,
     idempotent: bool | None = None,
     idempotency_key: str | None = None,
-    idempotency_scope: str | None = None,
     max_retries: int | None = None,
     context: AvaContext | None = None,
 ) -> TransportResponse:
@@ -361,13 +360,10 @@ def post(
     doorplate (`base.api_contracts.contracts`): IDEMPOTENT retries the transient family,
     NON_IDEMPOTENT surfaces an uncertain transport failure immediately (the
     server may have acted on it — re-sending can duplicate the effect, e.g.
-    spawn's phantom-twin agent), and
-    AT_LEAST_ONCE_WITH_KEY retries with an `Idempotency-Key` header (one key
+    a pure INSERT), and AT_LEAST_ONCE_WITH_KEY retries with an
+    `Idempotency-Key` + `Idempotency-Scope: principal-v1` header pair (one key
     per logical call, shared by all retries) — the server dedups, so
-    re-sending is safe only for routes protected by the rollout baseline.
-    Newly protected keyed routes still send a key, but do not retry ambiguous
-    outcomes until positive server capability negotiation is available: an
-    older gateway may ignore the key. An explicit `idempotent=...` overrides the contract
+    re-sending is safe. An explicit `idempotent=...` overrides the contract
     (kept for callers that know better); `idempotency_key` pins the key for
     a caller that wants to control it. The connect family is always
     retried: those fail before anything reached the server.
@@ -377,9 +373,6 @@ def post(
     with a long message body) pass a per-call timeout. `None` means "use the
     client's configured timeout" — there is deliberately no way to ask for an
     unbounded request.
-
-    `idempotency_scope` opts into the principal-v1 wire namespace and requires
-    an explicit key on a keyed route. It changes neither the route nor its retry gate.
 
     `max_retries` overrides the module-wide attempt count (`_max_retries()`) for
     this one call. The default fits routes the gateway works on directly, but
@@ -396,30 +389,20 @@ def post(
     # our None straight through therefore disabled the client's timeout on every
     # POST in this module rather than falling back to it, so a gateway route that
     # stopped responding parked its SDK callers forever instead of raising.
-    if idempotency_scope is not None:
-        if not isinstance(idempotency_scope, str) or idempotency_scope != PRINCIPAL_SCOPE:
-            raise ValueError("unsupported idempotency scope; expected principal-v1")
-        idempotency_key = validate_idempotency_key(idempotency_key)
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else cast(httpx.Timeout, timeout)
 
     # Inherit retry semantics from the route's doorplate unless the caller
     # overrides: server promises (base/api_contracts/contracts.py), clients inherit.
     semantics = _post_semantics(path, idempotent=idempotent)
-    contract = contracts.contract_for("POST", path)
-    retryable = semantics is Idempotency.IDEMPOTENT or (
-        semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY
-        and contract is not None
-        and contract.legacy_keyed_retry
-    )
+    keyed = semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY
+    retryable = semantics is Idempotency.IDEMPOTENT or keyed
     # One key per logical call — every retry of this call shares it, so the
     # server can dedup the retries against the original.
-    key = idempotency_key or _uuid.uuid4().hex
-    headers = {"Idempotency-Key": key} if semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY else None
-
-    if idempotency_scope is not None:
-        if headers is None:
-            raise ValueError("idempotency scope requires a keyed route")
-        headers[SCOPE_HEADER] = idempotency_scope
+    headers = (
+        keyed_headers(_uuid.uuid4().hex if idempotency_key is None else idempotency_key)
+        if keyed
+        else None
+    )
 
     retries = _max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
@@ -462,38 +445,27 @@ def get(
 
 
 def patch(
-    path: str, json: dict[str, Any] | None = None, *, idempotency_key: str | None = None
+    path: str,
+    json: dict[str, Any] | None = None,
+    *,
+    idempotency_key: str | None = None,
 ) -> TransportResponse:
     """Unified PATCH wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
-    Retry ambiguous failures only when the route declares natural idempotency.
-    A PATCH verb alone does not prove its business effects are repeatable.
-    Newly keyed routes send a stable key but do not retry ambiguous failures:
-    an older gateway may ignore the header. Pass the original key to replay.
+    Retries ambiguous failures when the route declares natural idempotency or
+    promises server-side deduplication: a keyed route sends the same key and
+    `principal-v1` scope on every retry. A PATCH verb alone does not prove its
+    business effects are repeatable. Pass the original key to replay.
     """
-    contract = contracts.contract_for("PATCH", path)
-    keyed = contract is not None and contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY
-    key = (
-        validate_idempotency_key(idempotency_key)
-        if idempotency_key is not None
-        else _uuid.uuid4().hex
+    semantics = contracts.idempotency_for("PATCH", path)
+    keyed = semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY
+    headers = (
+        keyed_headers(_uuid.uuid4().hex if idempotency_key is None else idempotency_key)
+        if keyed
+        else None
     )
-    headers = {"Idempotency-Key": key} if keyed else None
     return _request_with_retry(
-        lambda: (
-            _http().patch(path, json=json or {}, headers=headers)
-            if keyed
-            else _http().patch(path, json=json or {})
-        ),
+        lambda: _http().patch(path, json=json or {}, headers=headers),
         _max_retries(),
-        retryable=contracts.idempotency_for("PATCH", path) is Idempotency.IDEMPOTENT,
-    )
-
-
-def _delete(path: str) -> TransportResponse:
-    """Delete with the route's verified retry policy, not a verb-based assumption."""
-    return _request_with_retry(
-        lambda: _http().delete(path),
-        _max_retries(),
-        retryable=contracts.idempotency_for("DELETE", path) is Idempotency.IDEMPOTENT,
+        retryable=keyed or semantics is Idempotency.IDEMPOTENT,
     )

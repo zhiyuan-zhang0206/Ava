@@ -25,9 +25,8 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
 from base.lm.catalog import ModelCatalog
-from ops import uploads
 from ops.cluster import operations as cluster_ops
-from ops.rpc_schemas import LaunchAgentRequest, UploadReceivePayload
+from ops.rpc_schemas import LaunchAgentRequest
 from services.agent_runner.agent_ops import daemon, health
 
 _db = Database.from_settings
@@ -403,66 +402,6 @@ async def test_dispatch_shell_capture_defaults_lines(
     )
     assert status == "completed"
     assert seen == {"lines": 200}
-
-
-@pytest.mark.asyncio
-async def test_dispatch_upload_receive_calls_upload_receive_op(
-    op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
-    """upload_receive kind -> uploads.upload_receive_op(payload)."""
-    from ops.rpc_schemas import UploadReceiveResult
-
-    dispatch_pool: ConnectionPool = _stub_pool()
-    seen: dict[str, object] = {}
-
-    def _fake_receive(payload: UploadReceivePayload, *, pool: ConnectionPool | None = None):
-        assert pool is dispatch_pool
-        seen["agent_id"] = payload.agent_id
-        seen["name"] = payload.name
-        return UploadReceiveResult(
-            path=f"/home/runner/Downloads/AvaAgent-{payload.agent_id}/{payload.name}"
-        )
-
-    monkeypatch.setattr(uploads, "upload_receive_op", _fake_receive)
-    status, result = await daemon._dispatch(
-        "upload_receive",
-        {"agent_id": 42, "name": "report.pdf"},
-        active_ops={},
-        workers=set(),
-        pool=dispatch_pool,
-        executor=op_executor,
-        catalog=model_catalog,
-        authority=config_authority,
-    )
-    assert status == "completed"
-    assert seen == {"agent_id": 42, "name": "report.pdf"}
-    assert result == {"path": "/home/runner/Downloads/AvaAgent-42/report.pdf"}
-
-
-@pytest.mark.asyncio
-async def test_dispatch_upload_receive_bad_payload_fails(
-    op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
-    """upload_receive with a malformed payload -> failed (not a crash)."""
-    dispatch_pool: ConnectionPool = _stub_pool()
-    status, result = await daemon._dispatch(
-        "upload_receive",
-        {"agent_id": "not-an-int"},
-        active_ops={},
-        workers=set(),
-        pool=dispatch_pool,
-        executor=op_executor,
-        catalog=model_catalog,
-        authority=config_authority,
-    )
-    assert status == "failed"
-    assert "error" in result
 
 
 @pytest.mark.asyncio

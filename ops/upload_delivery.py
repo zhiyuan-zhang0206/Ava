@@ -1,4 +1,4 @@
-"""Versioned immutable batch receiver; never falls back to overwriting upload_receive."""
+"""Versioned immutable batch receiver; never overwrites an existing final."""
 
 import time
 

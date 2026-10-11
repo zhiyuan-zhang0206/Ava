@@ -1,8 +1,8 @@
-"""Strong versioned delivered uploads; legacy consumers are not activated here."""
+"""Strong versioned delivered uploads; SDK and MCP consumers are not activated here."""
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Path, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
@@ -15,26 +15,9 @@ from base.agents.upload_delivery.models import (
 )
 from base.agents.upload_delivery.paths import render_safe_headers
 from gateway.agents.inbound_provenance import request_inbound_provenance
-from gateway.http.auth.request_principal import (
-    PRINCIPAL_SCOPE,
-    SCOPE_HEADER,
-    AuthPrincipal,
-    principal_key,
-)
-from gateway.routers.upload.router import read_upload_batch
+from gateway.routers.upload.router import operation_key, read_upload_batch
 
 router = APIRouter()
-
-
-def operation_key(
-    request: Request,
-    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
-    idempotency_scope: str = Header(alias=SCOPE_HEADER),
-) -> str:
-    principal = getattr(request.state, "auth_principal", None)
-    if idempotency_scope != PRINCIPAL_SCOPE or not isinstance(principal, AuthPrincipal):
-        raise HTTPException(422, "delivered uploads require verified principal-v1 scope")
-    return principal_key(principal, request.method, request.url.path, idempotency_key)
 
 
 @router.post("/api/keyed/v1/agents/{agent_id}/uploads", status_code=202)
@@ -44,7 +27,7 @@ async def upload(
     key: Annotated[str, Depends(operation_key)],
     files: Annotated[list[UploadFile], File()],
 ) -> Acceptance:
-    batch, _ = await read_upload_batch(files)
+    batch = await read_upload_batch(files)
     names = [file.filename or "untitled" for file in files]
     try:
         return await request.app.state.upload_recovery.native(

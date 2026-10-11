@@ -58,6 +58,6 @@ The original `/api/agents/{agent_id}/retry-launch` route and its one-shot
 attempt-rotation owner are removed. The browser API and SDK require an explicit
 observed UUID and caller key for the versioned route. Launch-failure responses
 advertise that route. See [[ava/agents/docs/launch-retry.ava.okf.md]]. There is no
-capability cache, client outbox or automatic ambiguous-failure retry; recovery
-must reuse the original intent. Installed older consumers are not supported by a
+capability cache or client outbox; SDK transport retries an ambiguous outcome
+under the original key, and recovery must reuse the original intent. Installed older consumers are not supported by a
 fallback route.

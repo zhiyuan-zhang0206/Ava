@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { newOperationKey } from "./operation-key";
+import { keyedHeaders, newOperationKey } from "./operation-key";
 import type { NativeWorkTarget, CompactTarget } from "../contracts/types";
 
 import { ApiError, api, MessageDeliveryUnknownError } from "./api";
@@ -325,6 +325,7 @@ describe("agent label / messages / cancel", () => {
     expect(calls[0].init?.headers).toEqual({
       "content-type": "application/json",
       "Idempotency-Key": "client-message-123",
+      "Idempotency-Scope": "principal-v1",
     });
     expect(JSON.parse(calls[0].init?.body as string)).toEqual({
       content: "hello",
@@ -364,6 +365,7 @@ describe("agent label / messages / cancel", () => {
     expect(new Headers(calls[1].init?.headers).get("Idempotency-Key")).toBe(
       "client-timeout-123",
     );
+    expect(new Headers(calls[1].init?.headers).get("Idempotency-Scope")).toBe("principal-v1");
   });
 
   it("times out when headers arrive but the response body never completes", async () => {
@@ -719,14 +721,16 @@ describe("uploadFiles", () => {
     vi.unstubAllGlobals();
   });
 
-  it("POSTs one file as FormData to /api/agents/{id}/uploads", async () => {
+  it("POSTs one file as FormData to /api/agents/{id}/uploads under a principal-v1 key", async () => {
     const file = new File(["hello"], "test.txt", { type: "text/plain" });
     const promise = api.uploadFiles(42, [file]);
 
     expect(inst.open).toHaveBeenCalledWith(
       "POST",
-      expect.stringMatching(/\/api\/agents\/42\/uploads\?deliver=true$/),
+      expect.stringMatching(/\/api\/agents\/42\/uploads$/),
     );
+    expect(inst.setRequestHeader).toHaveBeenCalledWith("Idempotency-Key", expect.any(String));
+    expect(inst.setRequestHeader).toHaveBeenCalledWith("Idempotency-Scope", "principal-v1");
 
     expect(inst.send).toHaveBeenCalledTimes(1);
     const fd = inst.send.mock.calls[0][0] as FormData;
@@ -748,43 +752,43 @@ describe("uploadFiles", () => {
 
   it("uses an explicit silent upload identity across invocations without retrying", async () => {
     const file = new File(["image"], "photo.png");
-    const failed = api.uploadFiles(7, [file], undefined, false, "same-batch");
-    expect(inst.setRequestHeader.mock.calls).toEqual([["Idempotency-Key", "same-batch"]]);
+    const failed = api.uploadFiles(7, [file], undefined, "same-batch");
+    expect(inst.setRequestHeader.mock.calls).toEqual([
+      ["Idempotency-Key", "same-batch"],
+      ["Idempotency-Scope", "principal-v1"],
+    ]);
     inst.onerror?.();
     await expect(failed).rejects.toThrow("Upload failed");
     expect(inst.send).toHaveBeenCalledTimes(1);
-    const replay = api.uploadFiles(7, [file], undefined, false, "same-batch");
-    expect(inst.setRequestHeader.mock.calls).toEqual([["Idempotency-Key", "same-batch"]]);
+    const replay = api.uploadFiles(7, [file], undefined, "same-batch");
+    expect(inst.setRequestHeader.mock.calls).toEqual([
+      ["Idempotency-Key", "same-batch"],
+      ["Idempotency-Scope", "principal-v1"],
+    ]);
     inst.responseText = '{"files":[]}';
     inst.onload?.();
     await replay;
   });
 
-  it("mints once per silent invocation and leaves delivering uploads unkeyed", async () => {
+  it("mints one key per invocation", async () => {
     const file = new File(["image"], "photo.png");
-    const first = api.uploadFiles(7, [file], undefined, false);
+    const first = api.uploadFiles(7, [file]);
     const key = inst.setRequestHeader.mock.calls[0][1] as string;
     expect(key).toBeTruthy();
     inst.responseText = '{"files":[]}';
     inst.onload?.();
     await first;
-    const second = api.uploadFiles(7, [file], undefined, false);
+    const second = api.uploadFiles(7, [file]);
     expect(inst.setRequestHeader.mock.calls[0][1]).not.toBe(key);
     inst.responseText = '{"files":[]}';
     inst.onload?.();
     await second;
-    const ordinary = api.uploadFiles(7, [file]);
-    expect(inst.setRequestHeader).not.toHaveBeenCalled();
-    inst.responseText = '{"files":[]}';
-    inst.onload?.();
-    await ordinary;
   });
 
   it("fails malformed supplied keys before starting an upload", () => {
     const file = new File([], "photo.png");
-    expect(() => api.uploadFiles(7, [file], undefined, false, "")).toThrow("idempotency key");
-    expect(() => api.uploadFiles(7, [file], undefined, false, "x".repeat(129))).toThrow("idempotency key");
-    expect(() => api.uploadFiles(7, [file], undefined, true, "batch")).toThrow("deliver=false");
+    expect(() => api.uploadFiles(7, [file], undefined, "")).toThrow("idempotency key");
+    expect(() => api.uploadFiles(7, [file], undefined, "x".repeat(129))).toThrow("idempotency key");
   });
 
   it("appends every file under the 'files' field for a batch", () => {
@@ -844,13 +848,13 @@ describe("uploadFiles", () => {
 });
 
 describe("schedule operation identities", () => {
-  it("reuses an explicit restart identity without silently selecting principal scope", async () => {
+  it("reuses an explicit restart identity under the principal scope", async () => {
     await api.restartSchedule(17, "same-restart");
     await api.restartSchedule(17, "same-restart");
     for (const call of calls) {
       const headers = new Headers(call.init?.headers);
       expect(headers.get("Idempotency-Key")).toBe("same-restart");
-      expect(headers.has("Idempotency-Scope")).toBe(false);
+      expect(headers.get("Idempotency-Scope")).toBe("principal-v1");
     }
   });
 
@@ -874,7 +878,7 @@ describe("schedule creation identity", () => {
       const headers = new Headers(call.init?.headers);
       expect(headers.get("Idempotency-Key")).toBe("create-once");
       expect(headers.get("content-type")).toBe("application/json");
-      expect(headers.has("Idempotency-Scope")).toBe(false);
+      expect(headers.get("Idempotency-Scope")).toBe("principal-v1");
     }
   });
 });
@@ -964,5 +968,18 @@ describe("run timeline read ownership", () => {
     caller.abort();
     expect(await result).toBe(original);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("keyedHeaders", () => {
+  it("pairs the operation key with the principal scope", () => {
+    expect(keyedHeaders("op-1")).toEqual({
+      "Idempotency-Key": "op-1",
+      "Idempotency-Scope": "principal-v1",
+    });
+  });
+
+  it.each(["", "x".repeat(129)])("rejects an unusable key before any request", (key) => {
+    expect(() => keyedHeaders(key)).toThrow("idempotency key must contain 1 to 128 characters");
   });
 });

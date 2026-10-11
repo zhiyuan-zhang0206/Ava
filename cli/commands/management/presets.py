@@ -98,6 +98,7 @@ def cmd_presets_create(
     """`ava presets create --name N --label L [--description D] [--config JSON]`."""
     from uuid import uuid4
 
+    from base.api_contracts.idempotency import keyed_headers
     from base.cluster.machine import gateway_auth_headers
     from base.host.net.http_dial import post as dial_post
 
@@ -122,7 +123,7 @@ def cmd_presets_create(
         url,
         json=body,
         timeout=_TIMEOUT_S,
-        headers={**gateway_auth_headers(), "Idempotency-Key": str(uuid4())},
+        headers={**gateway_auth_headers(), **keyed_headers(str(uuid4()))},
     )
     if resp.status_code == 409:
         print(f"preset named {name!r} already exists", file=sys.stderr)

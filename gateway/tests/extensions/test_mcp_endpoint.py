@@ -31,6 +31,7 @@ from base.api_contracts.mcp_tool_contract import project_message
 from base.cluster.auth import bearer_header
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
+from tests.fixtures.gateway_config import create_mcp_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 _ACCEPT = "application/json, text/event-stream"
@@ -58,7 +59,7 @@ def _sse_messages(body: str) -> list[dict[str, Any]]:
 
 
 def _create_token(client: TestClient, *, name: str = "test", scope: str = "write") -> str:
-    response = client.post("/api/mcp/clients", json={"name": name, "scope": scope})
+    response = create_mcp_client(client, name, scope)
     assert response.status_code == 200, response.text
     return str(response.json()["token"])
 
@@ -423,9 +424,7 @@ def test_token_clients_same_key_are_isolated_and_body_reuse_conflicts() -> None:
 
 def test_revoked_client_cannot_replay_prior_key() -> None:
     with TestClient(app) as client:
-        created = client.post(
-            "/api/mcp/clients", json={"name": "idem-revoked", "scope": "write"}
-        ).json()
+        created = create_mcp_client(client, "idem-revoked", "write").json()
         token = created["token"]
         agent_id = int(
             _tool_result(
@@ -556,10 +555,8 @@ def test_client_token_works_when_cluster_auth_is_enabled(
 ) -> None:
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
-        created = client.post(
-            "/api/mcp/clients",
-            json={"name": "separate-auth-client", "scope": "read"},
-            headers=bearer_header(_SECRET),
+        created = create_mcp_client(
+            client, "separate-auth-client", "read", headers=bearer_header(_SECRET)
         )
         assert created.status_code == 200, created.text
 
@@ -577,10 +574,7 @@ def test_client_token_works_when_cluster_auth_is_enabled(
 
 def test_revoked_client_token_is_rejected() -> None:
     with TestClient(app) as client:
-        created = client.post(
-            "/api/mcp/clients",
-            json={"name": "revoked-client", "scope": "write"},
-        )
+        created = create_mcp_client(client, "revoked-client", "write")
         assert created.status_code == 200, created.text
         body = created.json()
         revoked = client.post(f"/api/mcp/clients/{body['id']}/revoke")
@@ -606,10 +600,7 @@ def test_revoked_client_token_is_rejected() -> None:
 def test_tool_call_audit_identifies_client_and_redacts_args() -> None:
     prompt = "sensitive audit prompt"
     with TestClient(app) as client:
-        created = client.post(
-            "/api/mcp/clients",
-            json={"name": "audit-write-client", "scope": "write"},
-        )
+        created = create_mcp_client(client, "audit-write-client", "write")
         assert created.status_code == 200, created.text
         body = created.json()
         _tool_call(
@@ -745,7 +736,7 @@ def test_concurrent_requests_keep_verified_clients_and_ignore_context_arguments(
     monkeypatch.setattr(router, "create_and_launch_agent", simultaneous_create)
     with TestClient(app) as client:
         credentials = [
-            client.post("/api/mcp/clients", json={"name": name, "scope": "write"}).json()
+            create_mcp_client(client, name, "write").json()
             for name in ("concurrent-first", "concurrent-second")
         ]
 

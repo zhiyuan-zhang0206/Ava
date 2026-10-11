@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 import httpx
 
+from base.api_contracts.idempotency import keyed_headers
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
@@ -84,13 +85,14 @@ class GatewayClient:
         dedups — never a duplicate even after commit. Outbox replays pass
         their persisted key (Task #1032), so a replay after a lost gateway
         response stays a no-op server-side."""
-        key = idempotency_key or uuid.uuid4().hex
+        key = uuid.uuid4().hex if idempotency_key is None else idempotency_key
+        headers = {**self._headers(), **keyed_headers(key)}
         for attempt, delay in enumerate(self._config.im_send_retry_delays, start=1):
             try:
                 client = await self._http()
                 resp = await client.post(
                     f"/api/agents/{agent_id}/messages",
-                    headers={**self._headers(), "Idempotency-Key": key},
+                    headers=headers,
                     # IM is a frontend like the web composer — the human speaking
                     # through any channel is just "user".
                     json={"content": text, "source": "user"},
@@ -149,17 +151,7 @@ class GatewayClient:
     ) -> int:
         """POST /api/keyed/v1/agents — create an agent, return its id. A named preset
         rides config_overlay["preset"]; the gateway folds it into config, the runner never sees it."""
-        from base.api_contracts.idempotency import (
-            PRINCIPAL_SCOPE,
-            SCOPE_HEADER,
-            validate_idempotency_key,
-        )
-
-        key = (
-            uuid.uuid4().hex
-            if idempotency_key is None
-            else validate_idempotency_key(idempotency_key)
-        )
+        key = uuid.uuid4().hex if idempotency_key is None else idempotency_key
         client = await self._http()
         overlay = dict(config) if config else {}
         if preset is not None:
@@ -169,7 +161,7 @@ class GatewayClient:
             payload["config"] = overlay
         resp = await client.post(
             "/api/keyed/v1/agents",
-            headers={**self._headers(), "Idempotency-Key": key, SCOPE_HEADER: PRINCIPAL_SCOPE},
+            headers={**self._headers(), **keyed_headers(key)},
             json=payload,
         )
         if resp.status_code != 201:

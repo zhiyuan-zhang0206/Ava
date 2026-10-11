@@ -1,7 +1,8 @@
 """The ava.ui.notify() agent_notices endpoints (user-facing).
 
 - GET  /api/notices/open     — cross-fleet open FYI notices (require_response false).
-- POST /api/agents/{id}/notices/{notice_id}/resolve — resolve one open notice.
+- POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve — resolve one open notice
+  (the handler lives here; `notice_operations.router` mounts it).
 
 The unified agent->user queue lives in agent_notices (migration 0053). An agent
 calls ava.ui.notify() to post a notice at one of three rungs (require_response x
@@ -29,7 +30,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, LiteralString, cast
 
 import psycopg
-from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
 from base.agents.messages.inbound import InboundKind
@@ -50,7 +51,6 @@ from gateway.agents.notice_operations.receipts import (
 from gateway.agents.schemas import (
     AgentMessageEnqueued,
     NoticeCreateIn,
-    NoticeEditIn,
     NoticeItem,
     NoticesCursor,
     NoticesFeed,
@@ -115,10 +115,11 @@ def _row_to_item(r: tuple[Any, ...]) -> NoticeItem:
 
 
 def _open_notices_blocking(
-    pool: ConnectionPool, limit: int, *, include_awaiting: bool
+    pool: ConnectionPool, limit: int, *, include_awaiting: bool, agent_id: int | None = None
 ) -> list[tuple[Any, ...]]:
     """Sync open-notices query — via to_thread. FYI-only by default;
-    include_awaiting=True returns both kinds (the IM bridge's queue view).
+    include_awaiting=True returns both kinds (the IM bridge's queue view);
+    agent_id narrows the result to one agent's open notices.
 
     Lazy expiry (audit C1): before the SELECT, FYI notices older than
     NOTICE_FYI_TTL_DAYS are auto-resolved 'read' in the same transaction — so
@@ -139,9 +140,16 @@ def _open_notices_blocking(
             else "WHERE NOT n.require_response AND n.resolved_at IS NULL "
             "AND n.created_at > now() - make_interval(days => %s) "
         )
+        agent_clause = "" if agent_id is None else "AND n.agent_id = %s "
+        params = (NOTICE_FYI_TTL_DAYS, limit)
+        if agent_id is not None:
+            params = (NOTICE_FYI_TTL_DAYS, agent_id, limit)
         cur.execute(
-            _SELECT + where + "ORDER BY n.priority ASC, n.created_at DESC, n.id DESC LIMIT %s",
-            (NOTICE_FYI_TTL_DAYS, limit),
+            _SELECT
+            + where
+            + agent_clause
+            + "ORDER BY n.priority ASC, n.created_at DESC, n.id DESC LIMIT %s",
+            params,
         )
         return cur.fetchall()
 
@@ -162,6 +170,7 @@ async def get_open_notices(
     request: Request,
     limit: Annotated[int | None, Query(ge=1, le=_OPEN_FEED_MAX_LIMIT)] = None,
     include_awaiting: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
+    agent_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> list[NoticeItem]:
     """The cross-fleet open notices feed, priority-then-newest.
 
@@ -169,13 +178,19 @@ async def get_open_notices(
     ones ride the agent snapshot. include_awaiting=True returns both kinds:
     the IM bridge's "/notice list" queue view (Task #941) lists everything
     still open and hands each item its own processing buttons. A notice is
-    open when resolved_at IS NULL. Omit `limit` for the configured default cap
+    open when resolved_at IS NULL. `agent_id` narrows the feed to one agent's
+    open notices — how an agent observes its own notice's global id before a
+    guarded edit/withdraw. Omit `limit` for the configured default cap
     (``display.notices_open_default_limit``, 200 out of the box).
     """
     if limit is None:
         limit = settings.display.notices_open_default_limit
     rows = await asyncio.to_thread(
-        _open_notices_blocking, request.app.state.db_pool, limit, include_awaiting=include_awaiting
+        _open_notices_blocking,
+        request.app.state.db_pool,
+        limit,
+        include_awaiting=include_awaiting,
+        agent_id=agent_id,
     )
     return [_row_to_item(r) for r in rows]
 
@@ -287,10 +302,6 @@ async def get_notices_feed(
     )
 
 
-@router.post(
-    "/api/agents/{agent_id}/notices/{notice_id}/resolve",
-    status_code=201,
-)
 async def post_notice_resolve(
     agent_id: int,
     notice_id: int,
@@ -435,12 +446,12 @@ async def post_notice_resolve(
 
 
 # ── unified notice write API (R3 door ④) ─────────────────────────────────
-# The agent->user queue has ONE write path now: the agent SDK calls these
-# endpoints (ava.ui.notify / edit_notice / dismiss_notice), which perform the
-# whole lifecycle atomically in one transaction — supersede+insert for
-# notify, guarded update for edit/dismiss — plus the event publishes. The
-# previous SDK-side direct-DB writes are gone; the agent_notices table is the
-# single truth source and every writer goes through the same code.
+# The agent->user queue has ONE write path: the agent SDK calls these
+# endpoints (ava.ui.notify here; edit_notice / dismiss_notice through the
+# guarded routes in `notice_operations`), which perform the whole lifecycle
+# atomically in one transaction — supersede+insert for notify, observed-row
+# update for edit/dismiss — plus the event publishes. The agent_notices table
+# is the single truth source and every writer goes through the same code.
 #
 # Pause semantics: data-plane like every other agent write — the quiesce has
 # drained the agents before the migration window, so nothing legitimately
@@ -617,114 +628,3 @@ async def post_notice_create(
         "pending_notices": pending,
         "superseded": superseded_local,
     }
-
-
-@router.patch("/api/agents/{agent_id}/notices/current", status_code=204, response_model=None)
-async def patch_notice_edit(agent_id: int, body: NoticeEditIn, request: Request) -> Response:
-    """Revise the agent's open notice (the SDK ava.ui.edit_notice contract).
-
-    Pass only the fields to change; require_response cannot change (turn an
-    FYI into a question by dismissing and posting fresh). No open notice ->
-    idempotent 204 (the SDK contract: silently return). The posted event is
-    re-published so the frontend feed picks up the revision.
-    """
-    # `model_fields_set` distinguishes "not passed" from "explicitly null":
-    # the SDK contract clears a field by passing null (content=None erases the
-    # body), and leaves it untouched by omitting it.
-    sets: list[str] = []
-    params: list[object] = []
-    if "title" in body.model_fields_set:
-        if not body.title or not body.title.strip():
-            raise HTTPException(status_code=422, detail="title must be non-empty")
-        sets.append("title = %s")
-        params.append(body.title)
-    if "content" in body.model_fields_set:
-        sets.append("content = %s")
-        params.append(body.content)  # None clears
-    if "priority" in body.model_fields_set:
-        sets.append("priority = %s")
-        params.append(body.priority)
-    if "blocking" in body.model_fields_set:
-        sets.append("blocking = %s")
-        params.append(body.blocking)
-    if not sets:
-        raise HTTPException(status_code=422, detail="edit needs at least one field to change")
-
-    def _edit(conn: psycopg.Connection) -> tuple[int, bool, str, str, int | None] | None:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, require_response, priority, title, task_id FROM agent_notices "
-                "WHERE agent_id = %s AND resolved_at IS NULL FOR UPDATE",
-                (agent_id,),
-            )
-            row = cur.fetchone()
-            if row is None:
-                return None
-            global_id, require_response, cur_priority, cur_title, cur_task_id = row
-            if body.blocking is not None and body.blocking and not require_response:
-                raise HTTPException(
-                    status_code=422,
-                    detail="blocking=True requires a notice that needs a response",
-                )
-            cur.execute(
-                cast(
-                    LiteralString,
-                    "UPDATE agent_notices SET " + ", ".join(sets) + ", updated_at = now() "  # noqa: S608 — fixed literals only
-                    "WHERE id = %s",
-                ),
-                (*params, global_id),
-            )
-            return (
-                int(global_id),
-                bool(require_response),
-                str(body.priority if body.priority is not None else cur_priority),
-                str(body.title if body.title is not None else cur_title),
-                int(cur_task_id) if cur_task_id is not None else None,
-            )
-
-    def _edit_wrapper(pool: ConnectionPool) -> tuple[int, bool, str, str, int | None] | None:
-        with write_transaction(pool) as conn:
-            edited = _edit(conn)
-            conn.commit()
-            if edited is not None and edited[1]:
-                _publish_response_required_hint(request.app.state.bus, agent_id)
-            return edited
-
-    edited = await asyncio.to_thread(_edit_wrapper, request.app.state.db_pool)
-    if edited is None:
-        return Response(status_code=204)
-    _gid, _require_response, new_priority, new_title, task_id = edited
-    await _ops.publish_notice_posted(
-        request.app.state.bus, agent_id, _gid, new_priority, new_title, task_id
-    )
-    return Response(status_code=204)
-
-
-@router.post("/api/agents/{agent_id}/notices/current/dismiss", status_code=204, response_model=None)
-async def post_notice_dismiss(agent_id: int, request: Request) -> Response:
-    """Withdraw the agent's open notice (the SDK ava.ui.dismiss_notice
-    contract): resolution 'withdrawn' + resolve event, plus an inspector
-    snapshot refresh when the withdrawn row required a response. No open notice
-    -> idempotent 204."""
-
-    def _dismiss(pool: ConnectionPool) -> int | None:
-        with write_transaction(pool) as conn, conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agent_notices SET resolved_at = now(), resolution = 'withdrawn' "
-                "WHERE agent_id = %s AND resolved_at IS NULL RETURNING id, require_response",
-                (agent_id,),
-            )
-            row = cur.fetchone()
-            conn.commit()
-            if row is None:
-                return None
-            dismissed, require_response = int(row[0]), bool(row[1])
-            if require_response:
-                _publish_response_required_hint(request.app.state.bus, agent_id)
-            return dismissed
-
-    dismissed = await asyncio.to_thread(_dismiss, request.app.state.db_pool)
-    if dismissed is None:
-        return Response(status_code=204)
-    await _ops.publish_notice_resolved(request.app.state.bus, agent_id, dismissed)
-    return Response(status_code=204)

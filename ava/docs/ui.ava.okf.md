@@ -22,13 +22,14 @@ Only one active page is allowed at a time (opening a new one auto-closes the old
 - `show(name, port, title=None) → Page` — Register an already running HTTP server (does not probe whether anything is listening; the registry still refuses a port another live page holds).
 - `close(name)` — Deregister page and kill the server started by `serve()`.
 
-Page registration and name-based close are one-shot HTTP operations. The SDK
-surfaces an ambiguous response failure without automatically replaying it:
-registration replaces the current page, and repeating an old close after name
-reuse could close a later page. A returned registry row is acceptance, not a
-receipt that can recover the same operation after a lost response. Before an
-explicit new show/serve/close intent, inspect current pages; no client outbox or
-automatic recovery is provided by these calls.
+Page registration and close are keyed HTTP operations: each call sends one
+`Idempotency-Key` with the `principal-v1` scope and retries an ambiguous
+response under it, and the gateway replays the original acceptance instead of
+replacing the current page or closing a later one. `close` reads the open pages
+first and closes exactly the observed registry row. A returned registry row is
+acceptance, not proof the name-based URL still serves that page. Before an
+explicit new show/serve/close intent, inspect current pages; no client outbox is
+provided by these calls.
 
 `name` must match `^[a-zA-Z0-9_-]+$` (1-64 chars). Returned `Page`: id, name, port, title, url.
 

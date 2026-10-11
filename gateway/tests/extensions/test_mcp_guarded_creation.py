@@ -20,6 +20,7 @@ from gateway.tests.extensions.test_mcp_endpoint import (
 from gateway.tests.extensions.test_mcp_endpoint import (
     _enable_endpoint as _enable_endpoint,
 )
+from tests.fixtures.gateway_config import create_mcp_client
 
 TOOL = "spawn_agent_guarded_v1"
 ARGS = {"prompt": "one original goal", "idempotency_key": "original"}
@@ -157,9 +158,7 @@ def test_identity_arguments_cannot_override_verified_client(
 
 def test_revoked_credential_cannot_recover_original_birth(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
-        credential = client.post(
-            "/api/mcp/clients", json={"name": "revoked", "scope": "write"}
-        ).json()
+        credential = create_mcp_client(client, "revoked", "write").json()
         original = _tool_result(_tool_call(client, credential["token"], TOOL, ARGS))
         assert client.post(f"/api/mcp/clients/{credential['id']}/revoke").status_code == 200
         response = client.post(
