@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Ava Tab Groups",
+  "version": "1",
+  "description": "Files the pages an Ava agent opens into one tab group per agent.",
+  "permissions": ["tabs", "tabGroups", "debugger"],
+  "background": { "service_worker": "group-3161376ebbc2.js" }
+}
