@@ -20,7 +20,8 @@ persistence.
 
 ## Core Responsibilities
 - **Exact search**: one matrix product per query over every row, aggregated
-  per path — no approximate index, so its results are the reconciliation
+  per path (the response lists `hits`: each file's best row as path, kind,
+  chunk_idx and cosine score) — no approximate index, so its results are the reconciliation
   baseline
 - **Persistence**: every mutation rewrites `$AVA_HOME/memory-search/vectors.npz`
   atomically (tmp file + rename) before acking — a kill-after-ack never loses

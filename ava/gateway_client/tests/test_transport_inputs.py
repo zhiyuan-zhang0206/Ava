@@ -47,15 +47,15 @@ def test_contexts_keep_live_deadlines_and_rebuild_inputs_without_an_sdk_installa
     with httpx.Client(base_url="http://host.test", transport=httpx.MockTransport(answer)) as client:
         for owner in (first, second):
             with owner.clients.using_gateway(client):
-                assert memory_search("query", 3, context=owner) == []
+                assert memory_search("query", 3, purpose="search", context=owner) == []
         first_values["deadline"] = 12.0
         for owner in (first, second):
             with owner.clients.using_gateway(client):
-                assert memory_search("query", 3, context=owner) == []
+                assert memory_search("query", 3, purpose="search", context=owner) == []
         previous = first.clients.get(GatewayTransportInputs)
         first.clients.close()
         with first.clients.using_gateway(client):
-            assert memory_search("query", 3, timeout=4.0, context=first) == []
+            assert memory_search("query", 3, purpose="search", timeout=4.0, context=first) == []
         assert first.clients.get(GatewayTransportInputs) is not previous
     assert seen == [11.0, 24.0, 15.0, 24.0, 4.0]
     assert reads == ["first", "second", "first", "second"]

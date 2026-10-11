@@ -600,7 +600,7 @@ def _result_read(client: TestClient, method: str, path: str, *, caller: str | No
     """Call a guarded endpoint with the one valid POST body when needed."""
     params = {"caller": caller} if caller is not None else None
     if method == "POST":
-        return client.post(path, params=params, json={"query": "test", "k": 1})
+        return client.post(path, params=params, json={"query": "test", "k": 1, "purpose": "search"})
     return client.get(path, params=params)
 
 
@@ -632,7 +632,7 @@ def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
             return [0.0] * 8
 
     class StubBackend:
-        async def search_topk_async(self, *_args: object, **_kwargs: object) -> list[str]:
+        async def search_topk_async(self, *_args: object, **_kwargs: object) -> list[object]:
             return []
 
     def backend(*_args: object, **_kwargs: object) -> StubBackend:

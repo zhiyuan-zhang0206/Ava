@@ -310,6 +310,54 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    memory_rerank_model: str = Field(
+        default="jev-1.13.0",
+        alias="AVA_MEMORY_RERANK_MODEL",
+        description=(
+            "Decision model that ranks memory search results. After vector search, the "
+            "gateway makes one decision request per retrieved chunk ('is this note "
+            "worth reading for the query?') and orders results by the probability of "
+            "yes. A decision model only answers questions, so no text is generated. If "
+            "it fails, the search fails; there is no fallback to vector order. The "
+            "passive-recall score threshold is calibrated for the default model; "
+            "changing it means recalibrating memory_recall_inject_threshold."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    memory_rerank_candidates: int = Field(
+        # 30 rather than 50: in the 2026-10-11 benchmark, passive recall precision at the 0.80
+        # threshold was the same at 30 candidates (P(>=1) about 0.77), search nDCG@5 was 0.746
+        # against 0.755, and cost about 60%. Measured with every request in flight, ranking 30
+        # candidates took about 2s and 50 took about 3s.
+        default=30,
+        ge=1,
+        le=100,
+        alias="AVA_MEMORY_RERANK_CANDIDATES",
+        description=(
+            "How many notes vector search hands to the decision model per memory search "
+            "(each represented by its best-matching chunk), one decision request each. "
+            "More candidates raise the ranking's recall, its cost and its latency; a "
+            "search asking for more results than this ranks that many instead. The "
+            "default of 30 matched 50 on passive-recall precision and nearly on search "
+            "ranking quality in the 2026-10-11 benchmark, at about 60% of the cost and "
+            "a shorter ranking wait."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     memory_search_max_batch_rows: int = Field(
         default=65536,
         gt=0,

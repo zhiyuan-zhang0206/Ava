@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 
@@ -44,7 +45,7 @@ from psycopg_pool import ConnectionPool
 
 from base.db import Database
 from base.db.transaction import write_transaction
-from services.derived.memory_indexer.backends.base import KIND_BODY, pk_of
+from services.derived.memory_indexer.backends.base import KIND_BODY, ChunkHit, pk_of
 
 _log = logging.getLogger("services.derived.memory_indexer.backends.pgvector")
 
@@ -105,7 +106,7 @@ _DELETE_STALE_SQL = (
 _ALL_META_SQL = "SELECT path, mtime, content_hash, embedder FROM memory_embeddings"
 
 _SEARCH_SQL = """
-SELECT path, (vector <=> %s::vector) AS distance
+SELECT path, kind, chunk_idx, (vector <=> %s::vector) AS distance
 FROM memory_embeddings
 ORDER BY distance
 LIMIT %s
@@ -402,27 +403,29 @@ class PGVectorBackend:
                 meta[path] = (mtime, hash_, fingerprint)
         return meta
 
-    def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:
-        """Cosine top-k **paths**, aggregated over chunk rows — see
+    def search_topk(self, query_vector: np.ndarray, k: int) -> list[ChunkHit]:
+        """Cosine top-k files, each with its best chunk row — see
         `_search_topk`."""
         return self._search_topk(query_vector, k, None)
 
-    def _search_topk(self, query_vector: np.ndarray, k: int, timeout: float | None) -> list[str]:
-        """Cosine top-k **paths**, aggregated over chunk rows.
+    def _search_topk(
+        self, query_vector: np.ndarray, k: int, timeout: float | None
+    ) -> list[ChunkHit]:
+        """Cosine top-k **files**, each with its best chunk row.
 
         `vector <=> %s` is pgvector's cosine distance (1 - cosine_similarity,
-        ascending). Raw rows aggregate
-        per path (minimum distance wins) and the top-k paths return in that
-        order; fewer than k when the table has fewer distinct paths; empty
-        when the table is empty. `timeout` bounds the pool-borrow wait when
-        connected (None = the pool's default)."""
+        ascending). Raw rows aggregate per path (minimum distance wins) and
+        the top-k files return in that order, scored as the cosine similarity
+        `1 - distance`; fewer than k when the table has fewer distinct paths;
+        empty when the table is empty. `timeout` bounds the pool-borrow wait
+        when connected (None = the pool's default)."""
         with self._conn(timeout=timeout) as conn:
             rows = conn.execute(
                 _SEARCH_SQL,
                 (_vector_text(query_vector), max(_RAW_SEARCH_LIMIT, k)),
             ).fetchall()
-        best: dict[str, float] = {}
-        for path, distance in rows:
+        best: dict[str, tuple[float, str, int]] = {}
+        for path, kind, chunk_idx, distance in rows:
             if distance is None:
                 # Defensive branch, unreachable against current pgvector
                 # (verified on 0.8.6: a zero query vector is defined —
@@ -432,13 +435,20 @@ class PGVectorBackend:
                 # become `float(None)` -> TypeError -> 503: an unrankable row
                 # is skipped, not ranked and not crashed on.
                 continue
-            if path not in best or distance < best[path]:
-                best[path] = float(distance)
-        return sorted(best, key=best.__getitem__)[:k]
+            # A zero query vector yields a NaN distance; it has no direction, so every
+            # row is equally (un)similar — score 0 rather than a NaN that no ranking holds.
+            row_distance = 1.0 if math.isnan(distance) else float(distance)
+            if path not in best or row_distance < best[path][0]:
+                best[path] = (row_distance, str(kind), int(chunk_idx))
+        ranked = sorted(best.items(), key=lambda item: item[1][0])[:k]
+        return [
+            ChunkHit(path, kind, chunk_idx, 1.0 - distance)
+            for path, (distance, kind, chunk_idx) in ranked
+        ]
 
     async def search_topk_async(
         self, query_vector: np.ndarray, k: int, *, timeout: float
-    ) -> list[str]:
+    ) -> list[ChunkHit]:
         """Async twin of `search_topk` — thread-pooled over the sync query
         (the protocol allows it; psycopg is sync here). `timeout` bounds the
         pool-borrow wait when connected; the caller's `asyncio.timeout` covers

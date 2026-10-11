@@ -274,8 +274,18 @@ def test_search_topk_orders_by_cosine_and_aggregates(backend: PGVectorBackend) -
     backend.upsert("/a.md", 1.0, "ha", 0.9 * ones, kind="body", chunk_idx=1)
     backend.upsert("/a.md", 1.0, "ha", 0.5 * ones, kind="body", chunk_idx=2)
     backend.upsert("/b.md", 2.0, "hb", -ones, kind="body", chunk_idx=0)
-    assert backend.search_topk(ones, k=5) == ["/a.md", "/b.md"]
-    assert backend.search_topk(ones, k=1) == ["/a.md"]
+    assert [hit.path for hit in backend.search_topk(ones, k=5)] == ["/a.md", "/b.md"]
+    assert [hit.path for hit in backend.search_topk(ones, k=1)] == ["/a.md"]
+
+
+def test_search_topk_reports_best_chunk_and_cosine_score(backend: PGVectorBackend) -> None:
+    """The hit names the winning row and scores it as cosine similarity (1 - distance)."""
+    backend.upsert("/a.md", 1.0, "ha", _vec(0), kind="body", chunk_idx=0)
+    backend.upsert("/a.md", 1.0, "ha", _vec(1), kind="body", chunk_idx=1)
+    backend.upsert("/a.md", 1.0, "ha", _vec(2), kind="desc", chunk_idx=0)
+    (hit,) = backend.search_topk(_vec(1), k=5)
+    assert (hit.path, hit.kind, hit.chunk_idx) == ("/a.md", "body", 1)
+    assert hit.score == pytest.approx(1.0)
 
 
 def test_search_topk_empty_table(backend: PGVectorBackend) -> None:
@@ -289,7 +299,8 @@ def test_search_topk_async_matches_sync(backend: PGVectorBackend) -> None:
     backend.upsert("/b.md", 2.0, "hb", -ones, kind="body", chunk_idx=0)
     sync = backend.search_topk(ones, k=5)
     async_result = asyncio.run(backend.search_topk_async(ones, 5, timeout=5.0))
-    assert async_result == sync == ["/a.md", "/b.md"]
+    assert async_result == sync
+    assert [hit.path for hit in sync] == ["/a.md", "/b.md"]
 
 
 def test_backend_without_connect_uses_short_lived_connections(db_conn: psycopg.Connection) -> None:
@@ -312,18 +323,19 @@ def test_backend_without_connect_uses_short_lived_connections(db_conn: psycopg.C
     backend = PGVectorBackend(Database.from_settings(), dim=_DIM, fingerprint=_FP)
     ones = np.ones(_DIM, dtype=np.float32)
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
-    assert backend.search_topk(ones, k=5) == ["/a.md"]
+    assert [hit.path for hit in backend.search_topk(ones, k=5)] == ["/a.md"]
     assert backend.all_meta() == {"/a.md": (1.0, "ha", _FP)}
     backend.close()  # no pool — must not raise
 
 
 def test_zero_vector_query_returns_defined_ranking(backend: PGVectorBackend) -> None:
-    """A zero query vector is defined for pgvector (similarity fixed at 0,
-    distance 1.0 for every row) — a defined ranking, never a crash."""
+    """A zero query vector has no direction: pgvector answers a NaN distance, which the
+    backend scores as similarity 0 — a defined ranking, never a crash."""
     backend.upsert("/a.md", 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     backend.upsert("/b.md", 2.0, "hb", _vec(1), kind="body", chunk_idx=0)
     result = backend.search_topk(np.zeros(_DIM, dtype=np.float32), 5)
-    assert set(result) == {"/a.md", "/b.md"}
+    assert {hit.path for hit in result} == {"/a.md", "/b.md"}
+    assert [hit.score for hit in result] == [0.0, 0.0]
 
 
 def test_nan_query_fails_loudly(backend: PGVectorBackend) -> None:
@@ -341,7 +353,7 @@ def test_path_with_quotes_and_backslashes_roundtrips(backend: PGVectorBackend) -
     path = '/notes/"quoted"\\back\\slash.md'
     backend.upsert(path, 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     assert backend.all_meta() == {path: (1.0, "h", _FP)}
-    assert backend.search_topk(_vec(0), 5) == [path]
+    assert [hit.path for hit in backend.search_topk(_vec(0), 5)] == [path]
     backend.delete(path)
     assert backend.all_meta() == {}
 

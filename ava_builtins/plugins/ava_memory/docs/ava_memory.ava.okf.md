@@ -34,7 +34,7 @@ passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
 - If auto-compact hook would also trigger in the same turn, **defers** (returns None) — `messages` have add_messages reducer that merges, without failing loud, but auto-compact's REMOVE_ALL full replacement is order-sensitive and would swallow the same-turn appended note
 
 **Behavior**:
-- Performs semantic search against recent conversation, injects matched note references as system messages (`system_note`), seen by agent in next turn. Each hit presents path + frontmatter description — two of the three fields `ava.memory.search` returns; recall deliberately omits tags (the injected note is a pointer, not a tag list). Description is empty when absent, never synthesized from title/body
+- Performs semantic search against recent conversation, injects matched note references as system messages (`system_note`), seen by agent in next turn. Each injected note presents path, score, frontmatter description and the passage that matched — `ava.memory.search`'s fields minus tags (the injected note is a pointer, not a tag list). Description is empty when absent, never synthesized from title/body
 - Uses the built-in `memory` (`MemoryState`) sub-state's `injected_paths` union reducer (`_memory_state_merge`) to accumulate path set, each note appears at most once
 
 The recall engine (search + rendering beyond gating) is in the core `agent/graph/recall/memory_recall.py:passive_memory_recall`;
@@ -52,7 +52,7 @@ Skill nodes see [[ava_builtins/plugins/ava_memory/skills/docs/skills.ava.okf.md|
 This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and declares it as `SdkNamespace("memory", ...)`. There is no core `ava/memory.py`; disabling the plugin removes the surface entirely.
 
 - `ava.memory.PATH` — memory pool root path (`$AVA_HOME/memory`, computed by `ava_home()` each time it is read), shared by all agents
-- `ava.memory.search(query, k=5)` — semantic search, returns `list[(path, description, tags)]`
+- `ava.memory.search(query, k=5)` — semantic search, returns `list[MemoryMatch]` (`path`, `description`, `tags`, `score`, `chunk`), most relevant first
   (description empty string when absent; tags include the note's `type/<x>` tag so a caller can weigh a hit by its kind)
 - `ava.memory.write(slug, content, *, title=None, description=None, tags=None, store="personal")` — canonical entry writer for personal and shared stores; resolves the target from the agent/store rather than cwd, writes the note's frontmatter (a caller-supplied block stays the note's only one, is completed with the fields it is missing, and has its bare values quoted where YAML would misread them), closes the composed note with a terminal newline when it lacks one, and upserts the relevant index pointer — the store's `MEMORY.md`, or the shared topic directory's own `index.md` (created when missing) for a subdirectory entry
 
