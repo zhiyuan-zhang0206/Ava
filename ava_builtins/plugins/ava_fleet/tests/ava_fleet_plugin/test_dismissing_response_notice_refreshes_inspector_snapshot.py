@@ -12,10 +12,10 @@ import ava
 from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import (
     _load_activity_plugin as _load_activity_plugin,
 )
-from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import (
-    _sdk_via_inprocess_gateway as _sdk_via_inprocess_gateway,
-)
 from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import _seed_agent
+from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import (
+    sdk_via_inprocess_gateway as sdk_via_inprocess_gateway,
+)
 from base.agents.observation.snapshot import select_one
 from base.config import settings
 from base.lm.catalog import ModelCatalog
@@ -23,6 +23,7 @@ from tests.fixtures.pin_agent import pin_agent
 
 
 def test_dismissing_response_notice_refreshes_inspector_snapshot(
+    sdk_via_inprocess_gateway: None,
     _load_activity_plugin: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
@@ -58,6 +59,7 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
 
 
 def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
+    sdk_via_inprocess_gateway: None,
     _load_activity_plugin: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
@@ -119,7 +121,7 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
 
 
 def test_notice_return_int_and_edit_dismiss_take_no_id(
-    _load_activity_plugin: None, db_conn: psycopg.Connection
+    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     """notify returns a Notice (int subclass); edit/dismiss act on the single
     open notice with no id argument."""
@@ -152,7 +154,9 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     assert nid2.pending_notices[0]["id"] == nid2  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 
-def test_notify_with_expire_at_valid(_load_activity_plugin: None, db_conn: psycopg.Connection):
+def test_notify_with_expire_at_valid(
+    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
+):
     from datetime import datetime, timedelta
 
     agent_id = _seed_agent(db_conn)
