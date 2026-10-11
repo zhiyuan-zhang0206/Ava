@@ -16,9 +16,9 @@ from base.daemon.health import DEFAULT_PORTS, DaemonProbe
 # The capability groups a service can belong to. These are `MachineRole` values
 # (`machine_role()` returns a frozenset of them); "capability" and "role" are the
 # same axis in Ava's vocabulary (a unit carries a SET of capabilities).
-_GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
-_AGENT_RUNNER: frozenset[MachineRole] = frozenset({"agent-runner"})
-_BOTH: frozenset[MachineRole] = frozenset({"gateway", "agent-runner"})
+GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
+AGENT_RUNNER: frozenset[MachineRole] = frozenset({"agent-runner"})
+BOTH: frozenset[MachineRole] = frozenset({"gateway", "agent-runner"})
 
 DbAccess = Literal["gateway", "runner"]
 
@@ -235,9 +235,9 @@ def db_access(spec: ServiceSpec) -> DbAccess | None:
         return "gateway"
     if marker in {"runner", "agent"}:
         return "runner"
-    if spec.capabilities == _GATEWAY:
+    if spec.capabilities == GATEWAY:
         return "gateway"
-    if spec.capabilities == _AGENT_RUNNER:
+    if spec.capabilities == AGENT_RUNNER:
         return "runner"
     raise ValueError(
         f"service {spec.session!r} uses the database but declares no db_access and "
@@ -258,8 +258,8 @@ def api_access(spec: ServiceSpec) -> DbAccess | None:
     if declared is not None:
         return declared
     marker = profile_marker(spec)
-    if marker == "gateway" or (marker is None and spec.capabilities == _GATEWAY):
+    if marker == "gateway" or (marker is None and spec.capabilities == GATEWAY):
         return "gateway"
-    if marker in {"runner", "agent"} or (marker is None and spec.capabilities == _AGENT_RUNNER):
+    if marker in {"runner", "agent"} or (marker is None and spec.capabilities == AGENT_RUNNER):
         return "runner"
     return None

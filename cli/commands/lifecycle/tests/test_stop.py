@@ -353,7 +353,7 @@ def test_delegated_start_leaves_authorization_and_resume_with_child(
     drained()
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     unpause = MagicMock()
-    monkeypatch.setattr("ops.cluster.pause.unpause_local_cluster", unpause)
+    monkeypatch.setattr("ops.cluster_status.pause.unpause_local_cluster", unpause)
 
     def child() -> int:
         assert not admission.start_authorized(None)
@@ -690,7 +690,7 @@ def test_nested_start_receives_the_exact_outer_operation_without_releasing_it(
     drained()
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     unpause = MagicMock()
-    monkeypatch.setattr("ops.cluster.pause.unpause_local_cluster", unpause)
+    monkeypatch.setattr("ops.cluster_status.pause.unpause_local_cluster", unpause)
     operation = admission.authorized_start("local", WHEN)
 
     @resume_after_start

@@ -9,11 +9,11 @@ import pytest
 import cli.commands.probe as _probe_commands
 from base import telemetry
 from cli.commands.lifecycle import start as start_commands
-from ops.roster.service_spec import _GATEWAY, ServiceSpec
+from ops.roster.service_spec import GATEWAY, ServiceSpec
 
 
 def _spec(session: str) -> ServiceSpec:
-    return ServiceSpec(session=session, cmd="x", capabilities=_GATEWAY, requires_db=True)
+    return ServiceSpec(session=session, cmd="x", capabilities=GATEWAY, requires_db=True)
 
 
 @pytest.fixture

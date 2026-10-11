@@ -44,7 +44,7 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
 from cli.commands.probe import ReadinessWait
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
-from ops.roster.service_spec import _AGENT_RUNNER, _GATEWAY, ServiceSpec
+from ops.roster.service_spec import AGENT_RUNNER, GATEWAY, ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -58,7 +58,7 @@ def _healthz_spec(service: str, port: int) -> ServiceSpec:
     return ServiceSpec(
         session=service,
         cmd="x",
-        capabilities=_AGENT_RUNNER,
+        capabilities=AGENT_RUNNER,
         requires_db=True,
         curl_url=f"http://localhost:{port}/healthz",
         health_name=service.replace("-", "_"),
@@ -71,7 +71,7 @@ def _other_endpoint_spec(service: str, url: str) -> ServiceSpec:
     return ServiceSpec(
         session=service,
         cmd="x",
-        capabilities=_GATEWAY,
+        capabilities=GATEWAY,
         requires_db=False,
         curl_url=url,
     )

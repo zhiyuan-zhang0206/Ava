@@ -9,7 +9,7 @@ tags:
 # Insights service — read models over agent history
 
 ## What is it
-A gateway-side daemon (`ServiceSpec.capabilities=_GATEWAY`; no port and no fixed-table slot) that serves the read models derived from agents' checkpoints and audit record. Rebuilding an agent's stitched history is seconds of CPU on a cold read, so it lives in a process of its own: it never competes with the gateway's event loop, thread pool or GIL, and stopping it never touches the gateway.
+A gateway-side daemon (`ServiceSpec.capabilities=GATEWAY`; no port and no fixed-table slot) that serves the read models derived from agents' checkpoints and audit record. Rebuilding an agent's stitched history is seconds of CPU on a cold read, so it lives in a process of its own: it never competes with the gateway's event loop, thread pool or GIL, and stopping it never touches the gateway.
 
 ## Shape
 - `daemon.py` — pidfile, the socket and the uvicorn server. Composition root: owns one `ConfigBoot` and passes its live clock/timestamp readers to the app. Its entry captures one `LoadedCommit`, shared by logging and `CodeVersion`. One `ProcessDbGate` admits both logging and service database handles, built from this configuration owner's current dial slice. Unknown capture stays unknown; pidfile, pool, socket and bounded shutdown ordering are unchanged.

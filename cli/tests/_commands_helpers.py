@@ -161,14 +161,14 @@ def _hermetic_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _spec(service: str):
     from ops.roster.service_spec import (
-        _GATEWAY,  # typed frozenset[MachineRole]; capability irrelevant to probe tests
+        GATEWAY,  # typed frozenset[MachineRole]; capability irrelevant to probe tests
         ServiceSpec,
     )
 
     return ServiceSpec(
         session=service,
         cmd="x",
-        capabilities=_GATEWAY,
+        capabilities=GATEWAY,
         requires_db=True,  # irrelevant to these probe tests
         curl_url="http://localhost:1/",
     )

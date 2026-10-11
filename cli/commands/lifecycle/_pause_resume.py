@@ -59,7 +59,7 @@ def resume_after_start[**P](
         operation = admission.authorized_start(current.holder, current.acquired_at)
         result = start(operation, database_factory, *args, **kwargs)
         if result == 0 and start_serving.is_serving():
-            from ops.cluster.pause import unpause_local_cluster
+            from ops.cluster_status.pause import unpause_local_cluster
 
             admission.require_start_allowed(operation)
             unpause_local_cluster(

@@ -23,7 +23,7 @@ from cli.commands.lifecycle import start
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
-from ops.roster.service_spec import _GATEWAY, ServiceSpec
+from ops.roster.service_spec import GATEWAY, ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -47,7 +47,7 @@ def _roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None],
             ServiceSpec(
                 session=name,
                 cmd="unused",
-                capabilities=_GATEWAY,
+                capabilities=GATEWAY,
                 requires_db=True,
                 curl_url="http://127.0.0.1:1/",
             ),
