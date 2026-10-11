@@ -17,7 +17,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from cli.commands.lifecycle import _start_readiness_preflight as preflight
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 
 
 class _Backend:
@@ -37,11 +40,16 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> None:
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A unit home with the three private trees, and the environment-dependent
     checks stubbed so each test drives exactly the family it names."""
+
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return frozenset({"agent-runner"})
+
     home = tmp_path / "home"
     for name in ("logs", "workspaces", "memory"):
         (home / name).mkdir(parents=True)
     monkeypatch.setattr("base.paths.ava_home", lambda: home)
-    monkeypatch.setattr("cli.commands._repo._roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr("cli.commands._repo._roles_or_none", read_roles)
     monkeypatch.setattr(
         "cli.commands.lifecycle.root_driver._root_tree_roster",
         lambda *_a, **_k: (),  # pyright: ignore[reportUnknownArgumentType]
@@ -80,27 +88,43 @@ def repo(tmp_path: Path) -> Path:
     return _venv(tmp_path)
 
 
-def _run(repo: Path, *, check_launcher: bool = True) -> int:
-    return preflight.preflight_start_readiness(repo, check_launcher=check_launcher)
+def _run(repo: Path, *, check_launcher: bool = True, command_runtime: CommandRuntime) -> int:
+    return preflight.preflight_start_readiness(
+        repo, check_launcher=check_launcher, machine=command_runtime.machine
+    )
 
 
-def test_passes_on_a_clean_home(home: Path, repo: Path) -> None:
+def test_passes_on_a_clean_home(home: Path, repo: Path, *, command_runtime: CommandRuntime) -> None:
     """Every check passes: rc 0, and the report says so."""
-    assert _run(repo) == 0
+    assert _run(repo, command_runtime=command_runtime) == 0
 
 
 def test_machine_role_missing_skips_ports_as_an_observation(
-    home: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """An unresolvable identity is the probe gate's refusal, not this one's: the
     port checks are skipped and the update still proceeds."""
-    monkeypatch.setattr("cli.commands._repo._roles_or_none", lambda: None)
 
-    assert _run(repo) == 0
+    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
+        del machine
+        return None
+
+    monkeypatch.setattr("cli.commands._repo._roles_or_none", read_roles)
+
+    assert _run(repo, command_runtime=command_runtime) == 0
 
 
 def test_prod_checkout_violation_is_fatal(
-    home: Path, repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """`ava start` refuses a prod home launched from a dev checkout; that refusal
     must be reachable before the stop."""
@@ -109,12 +133,17 @@ def test_prod_checkout_violation_is_fatal(
         lambda _repo: "prod home launched from a disposable checkout",  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     assert "prod home launched from a disposable checkout" in capsys.readouterr().err
 
 
 def test_health_port_occupancy_is_fatal(
-    home: Path, repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A terminal occupant on a daemon health port refuses `ava start` (#977);
     the same verdict must refuse the stop."""
@@ -124,7 +153,7 @@ def test_health_port_occupancy_is_fatal(
     )
     monkeypatch.setattr("cli.commands.probe.occupied_health_ports", lambda _roster: (occupied,))  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     err = capsys.readouterr().err
     assert "ava-gateway" in err
     assert "other-unit" in err
@@ -132,55 +161,75 @@ def test_health_port_occupancy_is_fatal(
 
 
 def test_private_tree_root_symlink_is_fatal(
-    home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    repo: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A `logs` root converge would abort on, checked without converging it."""
     (home / "logs").rmdir()
     (home / "logs").symlink_to(repo)
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     err = capsys.readouterr().err
     assert "is a symlink" in err
     assert str(home / "logs") in err
 
 
 def test_private_tree_root_file_is_fatal(
-    home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    repo: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     (home / "workspaces").rmdir()
     (home / "workspaces").write_text("not a directory")
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     assert "is not a directory" in capsys.readouterr().err
 
 
 def test_metadata_marker_must_be_a_regular_file(
-    home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    repo: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The marker converge touches and then repairs: a FIFO there aborts the
     marker write, so it refuses the stop."""
     os.mkfifo(home / "logs" / ".metadata_never_index")
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     assert "is not a regular file" in capsys.readouterr().err
 
 
 def test_non_regular_node_inside_a_tree_is_an_observation(
-    home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    repo: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The 2026-09-12 class: converge skips these, so they cannot fail a start —
     but they are reported before the stop instead of only in the converge log."""
     node = home / "workspaces" / "leftover.sock"
     os.mkfifo(node)
 
-    assert _run(repo) == 0
+    assert _run(repo, command_runtime=command_runtime) == 0
     captured = capsys.readouterr()
     assert str(node) in captured.out
     assert "skips" in captured.out
 
 
 def test_scan_failure_is_an_observation(
-    home: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A preflight must never be the thing that takes an update down: a scan
     that cannot run is reported and the stop proceeds."""
@@ -190,11 +239,16 @@ def test_scan_failure_is_an_observation(
 
     monkeypatch.setattr(preflight, "scan_non_regular_nodes", _boom)
 
-    assert _run(repo) == 0
+    assert _run(repo, command_runtime=command_runtime) == 0
 
 
 def test_migration_readability_is_fatal(
-    home: Path, repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The apply-side vet: a tracked migration the applier cannot open would fail
     `ava start`'s apply on the stopped host."""
@@ -203,14 +257,19 @@ def test_migration_readability_is_fatal(
         lambda: [("20260912T010000_x", "Permission denied: 'x.sql'")],
     )
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     err = capsys.readouterr().err
     assert "20260912T010000_x" in err
     assert "not readable" in err
 
 
 def test_migration_enumeration_failure_is_fatal(
-    home: Path, repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """An enumeration the loader itself refuses (not a git worktree) also fails
     the apply; it must refuse here, not surprise the stopped host."""
@@ -221,57 +280,76 @@ def test_migration_enumeration_failure_is_fatal(
 
     monkeypatch.setattr("base.deploy.schema.migrations.unreadable_migration_files", _raise)
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     assert "cannot be enumerated" in capsys.readouterr().err
 
 
 def test_configs_and_secrets_must_be_directories(
-    home: Path, repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    repo: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Converge only mkdirs `configs` / `secrets`, so a file there aborts the
     start after the stop (same class as the tree roots); a symlink TO a
     directory is tolerated by `mkdir(exist_ok=True)` and must not refuse."""
     (home / "configs").write_text("not a directory")
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     err = capsys.readouterr().err
     assert str(home / "configs") in err
     assert "is not a directory" in err
 
     (home / "configs").unlink()
     (home / "secrets").symlink_to(tmp_path, target_is_directory=True)
-    assert _run(repo) == 0, "mkdir(exist_ok=True) tolerates a symlink to a directory"
+    assert _run(repo, command_runtime=command_runtime) == 0, (
+        "mkdir(exist_ok=True) tolerates a symlink to a directory"
+    )
 
     (home / "secrets").unlink()
     (home / "secrets").symlink_to(tmp_path / "absent")
-    assert _run(repo) == 1, "a dangling symlink makes mkdir raise"
+    assert _run(repo, command_runtime=command_runtime) == 1, "a dangling symlink makes mkdir raise"
 
 
 def test_missing_venv_interpreter_is_fatal(
-    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Task #3165 (D4): every service session launches through
     `.venv/bin/python` — a damaged venv is the restart verb's real
     "stopped and cannot come back" class, and nothing else checks it there."""
     repo = _venv(tmp_path, python=False)
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     err = capsys.readouterr().err
     assert str(repo / ".venv" / "bin" / "python") in err
     assert "is missing" in err
 
 
 def test_venv_interpreter_without_exec_bit_is_fatal(
-    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     repo = _venv(tmp_path, python_executable=False)
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     assert "is not executable" in capsys.readouterr().err
 
 
 def test_launcher_check_covers_the_ava_entry_point_only_for_the_update_leg(
-    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The `.venv/bin/ava` exec bit is checked when the caller's start execs it
     (the update leg) and skipped for an in-process start (`ava restart`), whose
@@ -280,28 +358,37 @@ def test_launcher_check_covers_the_ava_entry_point_only_for_the_update_leg(
     repo = _venv(tmp_path, ava=True, ava_executable=False)
     launcher = repo / ".venv" / "bin" / "ava"
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     assert "not executable" in capsys.readouterr().err
 
-    assert _run(repo, check_launcher=False) == 0
+    assert _run(repo, check_launcher=False, command_runtime=command_runtime) == 0
 
     launcher.chmod(0o755)
-    assert _run(repo) == 0
+    assert _run(repo, command_runtime=command_runtime) == 0
 
 
 def test_missing_interpreter_still_refuses_an_in_process_start(
-    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """`check_launcher=False` only drops the `ava` entry point: the interpreter
     every session launches through is checked for both callers."""
     repo = _venv(tmp_path, python=False, ava=True)
 
-    assert _run(repo, check_launcher=False) == 1
+    assert _run(repo, check_launcher=False, command_runtime=command_runtime) == 1
     assert "is missing" in capsys.readouterr().err
 
 
 def test_all_fatal_findings_are_reported_together(
-    home: Path, repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """One refusal lists every reason, so the operator fixes the set in one pass."""
     monkeypatch.setattr(
@@ -311,7 +398,7 @@ def test_all_fatal_findings_are_reported_together(
     (home / "memory").rmdir()
     (home / "memory").write_text("not a directory")
 
-    assert _run(repo) == 1
+    assert _run(repo, command_runtime=command_runtime) == 1
     err = capsys.readouterr().err
     assert "checkout problem" in err
     assert str(home / "memory") in err

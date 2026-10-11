@@ -74,13 +74,11 @@ from enum import Enum
 from pathlib import Path
 from typing import cast
 
-from base.config import get_field
 from base.daemon.http_transport import RouteHandler as RouteHandler
 from base.daemon.http_transport import start_daemon_http
 from base.daemon.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
 from base.host.env.port_table import FIXED_PORTS
 from base.host.env.registry import health_port_env_aliases
-from base.native_process import loaded_commit
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
 
@@ -115,8 +113,8 @@ _HEALTH_PORT_OVERRIDES: dict[str, str] = {
 MAX_BODY_BYTES = 64 * 1024
 
 
-def _health_port(name: str) -> int:
-    """Return the healthz port for daemon `name`; read by `ServiceEndpoints.from_settings` only.
+def health_port(name: str, *, read_field: Callable[[str], int | None]) -> int:
+    """Resolve a daemon's registered health port through the caller's config reader.
 
     First reads ``settings.<name>_health_port`` (overridable by env
     ``AVA_<NAME>_HEALTH_PORT``); falls back to ``DEFAULT_PORTS``; if
@@ -125,7 +123,7 @@ def _health_port(name: str) -> int:
     allowed).
     """
     override_attr = _HEALTH_PORT_OVERRIDES.get(name)
-    override = None if override_attr is None else get_field(override_attr)
+    override = None if override_attr is None else read_field(override_attr)
     return DEFAULT_PORTS[name] if override is None else int(override)
 
 
@@ -170,7 +168,7 @@ def _healthz_payload(
     components: list[dict[str, object]] | None = None,
     extra: dict[str, object] | None = None,
     *,
-    image: LoadedCommit | None = None,
+    image: LoadedCommit,
 ) -> tuple[int, bytes]:
     """Build the shared GET /healthz envelope, preserving daemon identity.
 
@@ -183,14 +181,13 @@ def _healthz_payload(
     the daemon process itself, so unlike any on-disk bookmark it cannot be
     refreshed without a restart — which makes a per-daemon `curl /healthz` the
     way to tell a daemon still holding pre-rollout code from one that restarted
-    onto it. An explicit loaded image keeps its own unknown SHA; only callers
-    without an image use the legacy process capture."""
+    onto it. The supplied immutable image keeps its own unknown SHA."""
     payload: dict[str, object] = {
         "name": name,
         "pid": pid,
         "home": home,
         "started_at": started_at,
-        "sha": loaded_commit.get() if image is None else image.sha,
+        "sha": image.sha,
     }
     from base.daemon import health_schema
 
@@ -221,7 +218,7 @@ async def start_health_server(
     components: list[dict[str, object]] | Callable[[], list[dict[str, object]]] | None = None,
     extra: dict[str, object] | Callable[[], dict[str, object]] | None = None,
     auth_digests: frozenset[str] | None = None,
-    image: LoadedCommit | None = None,
+    image: LoadedCommit,
 ) -> asyncio.Server:
     """Start daemon HTTP server; return server instance (caller is responsible for close).
 
@@ -248,9 +245,8 @@ async def start_health_server(
             sharing mutable response state with this server.
         extra: optional non-component health fields. As with ``components``, a
             callable is evaluated on each request.
-        image: optional immutable code image captured by the process entry point.
-            The handler retains this object; a missing SHA stays unknown. Without
-            an image, the existing legacy process capture supplies the SHA.
+        image: immutable code image captured by the process entry point.
+            The handler retains this object; a missing SHA stays unknown.
         auth_digests: when set, every ``extra_routes`` request must carry
             ``Authorization: Bearer <token>`` whose SHA-256 is one of
             ``auth_digests``, or it gets 401. ``/healthz`` stays unauthenticated

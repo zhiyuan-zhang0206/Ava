@@ -35,7 +35,6 @@ from base.agents.labels import publish_label_updated
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
 from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
-from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -677,7 +676,7 @@ async def post_guarded_agents(
     if idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="guarded creation requires principal-v1 scope")
     key = scoped_creation_key(request, idempotency_key, operation_path="/api/keyed/v1/agents")
-    target = body.machine if body.machine is not None else machine_name()
+    target = body.machine if body.machine is not None else request.app.state.machine.name()
     try:
         return await create_and_launch_agent(
             body,

@@ -58,9 +58,11 @@ entry and static `__all__` name these definitions; the lightweight identity slot
 protocol and its minimal context/client-close contracts are defined and exported
 by `identity_restore`; the real SDK module satisfies the writable slot directly. The root identity and metering guards depend on ordinary fixture
 overrides (`sdk_identity`, `sdk_metering`); their defaults carry no SDK state.
-The local environment shares the prepared `process_config`, one lazy ClientSet
-and its clock factory through pytest's session stash. Repinning changes identity
-while borrowing those clients and clock. The session closes its own clients.
+Each test assembles its SDK root from the prepared `process_config` and its
+explicit `machine_identity`. The context, lazy DB factory and event pipeline
+borrow that same machine owner. Repinning changes agent identity while borrowing
+those clients, machine and clock. Teardown closes the owned ClientSet after the
+identity and recorder guards finish, then restores the preceding context.
 Recorder teardown restores `Installation.metered` before monkeypatch restores
 the installation slot; full plugin teardown remains its separate owner. Direct
 recorder callers restore their own returned ledger in `finally`.

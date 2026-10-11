@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -9,12 +10,14 @@ import pytest
 import redis
 
 from base import cluster
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.tests.test_pooler_stop import native_pooler as native_pooler
 from services.supervision.ava_root.health import ProbeRunner
 from services.supervision.ava_root_glue import diagnostic_probes as probes
 from tests._containers import _free_port, redis_server
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_native_redis_diagnostic_uses_authenticated_ping_without_acl_or_config_writes(
@@ -48,7 +51,9 @@ async def test_absent_native_redis_diagnostic_is_down(monkeypatch: pytest.Monkey
 
 
 async def test_native_pooler_diagnostic_authenticates_without_config_writes(
-    native_pooler: tuple[OwnedPooler, str, str], monkeypatch: pytest.MonkeyPatch
+    native_pooler: tuple[OwnedPooler, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
     custodian, _pooled, _direct = native_pooler
     ports = cluster.new_home_ports()
@@ -65,7 +70,7 @@ async def test_native_pooler_diagnostic_authenticates_without_config_writes(
         Mock(return_value=SimpleNamespace(password="fixture-admin")),  # noqa: S106 — trusted fixture pooler
     )
     before = custodian.config.read_bytes()
-    result = await ProbeRunner().observe(probes.pgbouncer, 5)
+    result = await ProbeRunner().observe(partial(probes.pgbouncer, machine=machine_identity), 5)
     assert result.verdict.value == "alive", result.detail
     assert custodian.identity.live()
     assert custodian.config.read_bytes() == before

@@ -55,15 +55,40 @@ Implementation: `scripts/ci/no_silent_resurrection.py` (stdlib + git only).
    distinctive dead line (an identifier of at least 20 characters with an
    underscore or camelCase). A hit is attributed to the commit covering the
    most of its dead lines (ties: the most recent). An incomplete expression or
-   declaration ending in an opening `(` remains strong for a three-line block,
-   but cannot qualify as a solo distinctive hit: the prefix alone omits the
-   arguments or body that define the deleted contract. Complete distinctive
-   single lines still fail. This distinguishes extending a current caller
-   from restoring its deleted arguments or implementation.
+   declaration ending in an opening `(`, or a function/class header without
+   its body, remains strong for a three-line block but cannot qualify as a solo
+   distinctive hit. Python string contents do not supply identifier proof;
+   neither does a qualified capitalized type reference without a constructor
+   call. An `except`/`except*` header consisting only of exception names,
+   attribute references or tuples also needs its body as evidence. Headers
+   that call a factory or evaluate a subscript remain distinctive candidates;
+   `if` and `with` operations are not treated as declarations.
+   Actual distinctive calls, assignments, inline bodies and restored
+   three-line blocks still fail. These fragments alone omit the operation or
+   implementation that defines the deleted contract.
+   Before applying declarations, Python keyword continuation lines can carry
+   **retained-fragment evidence** from the merge-base blob at the same path.
+   The supported domain is deliberately narrow: a unique module-level function,
+   the same body statement index and assignment targets, unchanged decorators
+   and preceding statements, and one direct assignment call per callee in that
+   owner. Callee and positional AST shapes must match; all original named
+   keywords must retain their exact token spelling and relative order. Only
+   additional named keywords are admitted. Starred/unpacked inputs, duplicate
+   keywords, nested control flow, moved statements and ambiguous owners retain
+   raw detection. Parse/tokenization failures are reported and retain it too.
+   A retained line must contain just one original keyword plus an optional
+   trailing comma. Its path and head line number matter: equal text in a new
+   call is not exempt. Retained lines bridge runs like live lines, but do not
+   count as dead evidence. Complete calls/returns, removed or changed inputs,
+   new keywords and restored operations remain candidates. This proves existing
+   syntax provenance, not behavioral safety or permission to change a contract.
+
 6. **Allowances** come from the PR's commit messages (merge-base..head): a
    `Resurrects: <reason>` line allows every hit, or only the hits it names by
    deleting sha (at least 7 hex characters, containing a digit) or path
-   (containing `/` or a file extension); `This reverts commit <sha>` allows
+   (containing `/` or a file extension). When both are specified, a hit must
+   match a deleting sha and a path; several shas or paths are alternatives
+   within their own dimension. `This reverts commit <sha>` allows
    the hits that sha deleted. A declaration that matched no hit is warned
    about.
 
@@ -89,6 +114,13 @@ Name the deleting sha or a path to allow only the matching hits:
     Resurrects: 6ecfe14c3
     Resurrects: services/delivery_watchdog/
 
+To restrict one deleting commit to one path, put both in the same line:
+
+    Resurrects: 6ecfe14c3 services/delivery_watchdog/
+
+Both targets must match that hit. A matching sha does not allow unrelated paths,
+and a matching path does not allow a different deleting commit.
+
 A `Resurrects:` line with neither a sha nor a path allows every hit; a commit
 that reverts the deleting commit (`This reverts commit <sha>`) is allowed
 automatically. When the check fails it prints the recipe with the actual
@@ -103,6 +135,11 @@ normalization happens, so a reformatted copy of deleted content may match or
 not match depending on the whitespace. A line that only moved within `main`
 is not dead (it still exists in the base tree), and a line a commit removed
 and re-added in the same commit was never deleted.
+
+A complete historical call can reappear when an argument or an intervening
+filter is removed. Text matching cannot establish whether that change retires
+an obsolete input or restores unsafe behavior. Those complete operations remain
+subject to the check; a contraction of code is not proof of a harmless change.
 
 ## False positives and tuning
 
@@ -130,6 +167,24 @@ the sweep is the tool for that. Recorded passes and residual classes:
 - Pass 2's largest flag is 3116eb0f "docs: restore the decision records
   that described since-removed mechanisms" (66 hits): a deliberate
   restoration - exactly the case the allowance line is for.
+- 2026-10-11, #5165: adding a required ConfigBoot reader removed an obsolete
+  unused-argument comment from a retained function header. Other matches were
+  a Mock's string target and a standard exception type assertion, deleted from
+  unrelated old tests. Solo proof now uses lexical identifiers, distinguishes
+  declarations from bodies, and distinguishes type references from calls;
+  the three-line threshold and textual block candidates are unchanged. The
+  separate docstring-shape match now uses the stdlib `ast.get_docstring` owner.
+- 2026-10-11, #5182: removing a retired protocol error narrowed an existing
+  `except` tuple back to a historical header. The post-commit notification
+  behavior stayed intact. Type-reference-only exception headers now need
+  corroborating dead lines; evaluated headers, inline suites, complete calls
+  and restored three-line handler blocks still fail.
+
+- 2026-10-11, Machine identity: adding an explicit machine input unfolded three
+  already-live keywords from a one-line `notices_for` call. Position-specific
+  retained-fragment evidence removes that formatting artifact; restored calls,
+  changed/deleted inputs, control changes and genuine three-line blocks retain
+  their existing rules. The gate's historical-policy objective is unchanged.
 
 ## Local runs
 

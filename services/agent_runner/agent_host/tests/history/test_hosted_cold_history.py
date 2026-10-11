@@ -18,9 +18,10 @@ from base.agents.history.delta_read_compat import (
     wrap_saver_reads_with_delta_reconstruction,
 )
 from base.agents.incarnation.resources import ResourceBirth
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -30,7 +31,8 @@ from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_unwrapped_saver_does_not_opt_into_reconstruction_cache() -> None:
@@ -49,12 +51,15 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent, *_ = create_agent_row(
         database,
         event_bus,
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         catalog=model_catalog,
         authority=config_authority,
     )
@@ -112,8 +117,9 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
         checkpointer=saver,
         graph=graph,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        machine=configured_machine(),
     )
 
     async def drive(

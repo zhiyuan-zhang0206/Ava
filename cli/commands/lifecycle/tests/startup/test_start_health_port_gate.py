@@ -25,19 +25,28 @@ eagerly is worse than none:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.probe as _probe_commands
+from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
+from base.telemetry import EventPipeline
 from cli.commands.lifecycle import start as start_mod
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     _hermetic_start as _base_start,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
 from cli.commands.probe import ReadinessWait
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from ops.roster.service_spec import _AGENT_RUNNER, _GATEWAY, ServiceSpec
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 # The gate IS the subject here, so stand the global autouse net down for this
 # module (cli/commands/tests/health_port_guard.py:_guard_health_port_gate reports every port free).
@@ -195,15 +204,23 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequ
 
 def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> list[str]:
     launched: list[str] = []
-    monkeypatch.setattr(
-        "ops.spec.services_for_capabilities_annotated",
-        lambda _r: tuple((s, None) for s in specs),  # pyright: ignore[reportUnknownArgumentType] — roster test double
-    )
-    monkeypatch.setattr(
-        _root_driver_commands,
-        "start_roster",
-        lambda _roles, skip: tuple(s for s in specs if s.session not in skip),  # pyright: ignore[reportUnknownArgumentType] — roster test double
-    )
+
+    def annotated_roster(
+        roles: frozenset[str], *, machine: MachineIdentity
+    ) -> tuple[tuple[ServiceSpec, None], ...]:
+        assert isinstance(machine, MachineIdentity)
+        del roles
+        return tuple((spec, None) for spec in specs)
+
+    def start_roster(
+        roles: frozenset[str], skip: set[str], *, machine: MachineIdentity
+    ) -> tuple[ServiceSpec, ...]:
+        assert isinstance(machine, MachineIdentity)
+        del roles
+        return tuple(spec for spec in specs if spec.session not in skip)
+
+    monkeypatch.setattr("ops.spec.services_for_capabilities_annotated", annotated_roster)
+    monkeypatch.setattr(_root_driver_commands, "start_roster", start_roster)
 
     def launch(roster: tuple[ServiceSpec, ...], *_a: object, **_kw: object) -> LaunchOutcome:
         launched.extend(s.session for s in roster)
@@ -214,11 +231,25 @@ def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> 
 
 
 def test_start_refuses_and_launches_nothing(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], _hermetic_start: None
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _hermetic_start: None,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("agent-host", 8113),))
     _verdicts(monkeypatch, {"agent-host": DaemonProbe.port_taken(_FOREIGN)})
-    assert _start_commands.cmd_start(retained_children=[]) == 1
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
+        )
+        == 1
+    )
     assert launched == []
     message = "".join(capsys.readouterr())
     assert "/home/ava/.ava" in message
@@ -227,29 +258,69 @@ def test_start_refuses_and_launches_nothing(
 
 
 def test_a_clear_roster_starts_normally(
-    monkeypatch: pytest.MonkeyPatch, _hermetic_start: None
+    monkeypatch: pytest.MonkeyPatch,
+    _hermetic_start: None,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("ops", 8113),))
     _verdicts(monkeypatch, {"ops": DaemonProbe.down("cold")})
-    assert _start_commands.cmd_start(retained_children=[]) == 0
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
+        )
+        == 0
+    )
     assert launched == ["ops"]
 
 
 def test_a_disabled_service_cannot_block_start(
-    monkeypatch: pytest.MonkeyPatch, _hermetic_start: None
+    monkeypatch: pytest.MonkeyPatch,
+    _hermetic_start: None,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103), _healthz_spec("ops", 8113)))
     _verdicts(
         monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN), "ops": DaemonProbe.down("cold")}
     )
-    assert _start_commands.cmd_start(disabled_services=("labeler",), retained_children=[]) == 0
+    assert (
+        _start_commands.cmd_start(
+            disabled_services=("labeler",),
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
+        )
+        == 0
+    )
     assert launched == ["ops"]
 
 
 def test_optional_port_conflict_does_not_block_core_start(
-    monkeypatch: pytest.MonkeyPatch, _hermetic_start: None
+    monkeypatch: pytest.MonkeyPatch,
+    _hermetic_start: None,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103),))
     _verdicts(monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN)})
-    assert _start_commands.cmd_start(retained_children=[]) == 0
+    assert (
+        _start_commands.cmd_start(
+            retained_children=[],
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            command=command_runtime,
+        )
+        == 0
+    )
     assert launched == ["labeler"]

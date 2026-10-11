@@ -10,21 +10,32 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.daemon.health import Liveness
 from base.deploy.maintenance import admission
 from services.derived.memory_indexer import daemon
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_a_quiesced_unit_processes_no_batch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, quiesced: bool
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    quiesced: bool,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
     monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
     batches: list[set[Path]] = []
 
     def record_batch(
-        _backend: object, batch: set[Path], _provider: object, _liveness: object
+        _backend: object,
+        batch: set[Path],
+        _provider: object,
+        _liveness: object,
+        *,
+        machine: MachineIdentity,
     ) -> None:
         batches.append(batch)
 
@@ -32,7 +43,9 @@ async def test_a_quiesced_unit_processes_no_batch(
     dirty: queue.Queue[Path] = queue.Queue()
     dirty.put(tmp_path / "note.md")
     retry = daemon._ReconcileRetrySchedule(base_s=1.0, cap_s=2.0)
-    task = asyncio.create_task(daemon._drain_loop(Mock(), dirty, Liveness(60.0), Mock(), retry))
+    task = asyncio.create_task(
+        daemon._drain_loop(Mock(), dirty, Liveness(60.0), Mock(), retry, machine=machine_identity)
+    )
     try:
         await asyncio.sleep(0.2)
     finally:

@@ -10,7 +10,9 @@ import pytest
 from base.cluster.auth import ClusterSecretMissingError
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from gateway.cluster import server as _server
+from tests.fixtures.configuration import snapshot_process_config
 
 
 def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
@@ -26,10 +28,11 @@ def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
         captured.update(kwargs)
 
     monkeypatch.setattr(settings.services, "gateway_pidfile", tmp_path / "gateway.pid")
+    monkeypatch.setattr(_server, "ConfigBoot", snapshot_process_config)
     monkeypatch.setattr(_server, "assert_schema_current", _ignore)
     monkeypatch.setattr(_server, "raise_fd_limit", _ignore)
     monkeypatch.setattr(_server, "init_gateway_process", _ignore)
-    monkeypatch.setattr(_server, "is_gateway", lambda: False)
+    monkeypatch.setattr(settings.general, "machine_serve_gateway", False)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _record_serve)
 
@@ -71,15 +74,20 @@ def test_gateway_start_raises_the_min_code_version_after_schema_and_logging(
     def _schema_asserted(_url: str) -> None:
         steps.append("schema")
 
-    def _raised(_db: Database) -> int:
+    def _raised(_gate: ProcessDbGate, _db: Database) -> int:
         steps.append("raise")
         return 1
 
+    monkeypatch.setattr(_server, "ConfigBoot", snapshot_process_config)
     monkeypatch.setattr(_server, "assert_schema_current", _schema_asserted)
     monkeypatch.setattr(_server, "raise_fd_limit", _ignore)
-    monkeypatch.setattr(_server, "init_gateway_process", lambda: steps.append("logging"))
-    monkeypatch.setattr(_server, "raise_min_code_version", _raised)
-    monkeypatch.setattr(_server, "is_gateway", lambda: serves_gateway)
+
+    def logging_initialized(**_inputs: object) -> None:
+        steps.append("logging")
+
+    monkeypatch.setattr(_server, "init_gateway_process", logging_initialized)
+    monkeypatch.setattr(ProcessDbGate, "raise_min_code_version", _raised)
+    monkeypatch.setattr(settings.general, "machine_serve_gateway", serves_gateway)
     monkeypatch.setattr(_server, "verify_transport_encryption", _ignore)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _ignore)
@@ -108,11 +116,12 @@ def _stub_process_entry(
     def _serve(kwargs: dict[str, object]) -> None:
         steps.append(f"serve:{kwargs['host']}")
 
+    monkeypatch.setattr(_server, "ConfigBoot", snapshot_process_config)
     monkeypatch.setattr(_server, "assert_schema_current", _schema)
     monkeypatch.setattr(_server, "raise_fd_limit", _ignore)
     monkeypatch.setattr(_server, "init_gateway_process", _ignore)
-    monkeypatch.setattr(_server, "raise_min_code_version", _ignore)
-    monkeypatch.setattr(_server, "is_gateway", lambda: gateway)
+    monkeypatch.setattr(ProcessDbGate, "raise_min_code_version", _ignore)
+    monkeypatch.setattr(settings.general, "machine_serve_gateway", gateway)
     monkeypatch.setattr(_server, "verify_transport_encryption", _ignore)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _serve)
@@ -153,7 +162,7 @@ def test_gateway_bind_follows_the_declared_reachable_address_not_the_secret(
     with a non-loopback address binds exactly as it always has (all interfaces)."""
     steps = _stub_process_entry(monkeypatch, tmp_path, gateway=gateway)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: reachable)
+    monkeypatch.setattr(settings.general, "machine_host", reachable)
 
     _server.main()
 

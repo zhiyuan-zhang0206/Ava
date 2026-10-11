@@ -12,7 +12,9 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.entrypoints.im_bridge.adapters.telegram import TelegramAdapter
 from services.entrypoints.im_bridge.core import IMBridgeCore
@@ -27,6 +29,7 @@ from services.entrypoints.im_bridge.tests.slices import im_bridge_config, telegr
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import FakeGateway
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as pool
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -79,13 +82,25 @@ def receipts(pool: ConnectionPool) -> list[tuple[Any, ...]]:
 
 
 async def test_new_install_accepts_atomically_and_worker_sends_frozen_target_buttons(
-    pool: ConnectionPool, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.initialize_poll()  # The daemon initializes before readiness, not a user command.
     with pool.connection() as conn:
         notice = insert_notice(
-            conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0
+            conn,
+            spawn_agent(
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
+            ),
+            0,
         )
     await core.notice_bridge.poll_once()
     accepted = receipts(pool)
@@ -105,11 +120,21 @@ async def test_new_install_accepts_atomically_and_worker_sends_frozen_target_but
 
 
 async def test_two_connections_reverse_commit_do_not_skip_late_lower_id(
-    pool: ConnectionPool, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll()
-    agent = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     with pool.connection() as low:
         low_id = insert_notice(low, agent, 0, "low")
         with pool.connection() as high:
@@ -139,10 +164,20 @@ async def test_first_initialization_retains_existing_history_only(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     with pool.connection() as conn:
         old = insert_notice(
-            conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0, "old history"
+            conn,
+            spawn_agent(
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
+            ),
+            0,
+            "old history",
         )
     # A cursor file left by an earlier generation is neither read nor rewritten.
     path = tmp_path / "state" / "im_bridge" / "notice_cursor.json"
@@ -154,7 +189,15 @@ async def test_first_initialization_retains_existing_history_only(
     assert cutover(pool) == (old, NoticePollImportReason.LEGACY_HISTORY_UNKNOWN.value)
     with pool.connection() as conn:
         new = insert_notice(
-            conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0, "new range"
+            conn,
+            spawn_agent(
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
+            ),
+            0,
+            "new range",
         )
     await core.notice_bridge.poll_once()
     assert [r[0] for r in receipts(pool)] == [new]
@@ -173,13 +216,25 @@ async def test_empty_history_initializes_at_floor_zero(pool: ConnectionPool) -> 
 
 
 async def test_filtered_decision_commits_without_owner_and_does_not_later_replay(
-    pool: ConnectionPool, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll()
     with pool.connection() as conn:
         notice = insert_notice(
-            conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0
+            conn,
+            spawn_agent(
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
+            ),
+            0,
         )
     adapter.recipient = None
     core.notice_bridge._filters = {"min_priority": "P1", "agent": None}
@@ -194,12 +249,26 @@ async def test_filtered_decision_commits_without_owner_and_does_not_later_replay
 
 
 async def test_no_owner_holds_without_fake_receipt_then_accepts_when_available(
-    pool: ConnectionPool, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll()
     with pool.connection() as conn:
-        insert_notice(conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0)
+        insert_notice(
+            conn,
+            spawn_agent(
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
+            ),
+            0,
+        )
     adapter.recipient = None
     await core.notice_bridge.poll_once()
     assert not receipts(pool)
@@ -216,11 +285,22 @@ async def test_acceptance_rollback_then_lost_response_converge_without_inline_se
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll()
     with pool.connection() as conn:
-        insert_notice(conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0)
+        insert_notice(
+            conn,
+            spawn_agent(
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
+            ),
+            0,
+        )
     insert = IMOutboxStore.insert_intent
 
     def rollback(conn: Connection, intent: Any) -> int:
@@ -254,13 +334,25 @@ async def test_acceptance_rollback_then_lost_response_converge_without_inline_se
 
 
 async def test_concurrent_normal_acceptances_freeze_first_target_without_duplicate(
-    pool: ConnectionPool, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    pool: ConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     core, adapter = make_core(pool)
     core.notice_bridge.poll_store.initialize_notice_poll()
     with pool.connection() as conn:
         notice = insert_notice(
-            conn, spawn_agent(catalog=model_catalog, authority=config_authority), 0
+            conn,
+            spawn_agent(
+                catalog=model_catalog,
+                authority=config_authority,
+                database_gate=database_gate,
+                machine=machine_identity,
+            ),
+            0,
         )
     snapshot = core.notice_bridge._unaccepted_notices()[0]
 

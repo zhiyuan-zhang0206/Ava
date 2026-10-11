@@ -41,7 +41,7 @@ from typing import Any
 
 import httpx
 
-from base.cluster.machine import machine_role
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.paths import traces_dir
 
@@ -61,7 +61,7 @@ class _ShipTarget:
     label: str
 
 
-def _require_ship_config() -> _ShipTarget:
+def _require_ship_config(*, machine: MachineIdentity) -> _ShipTarget:
     """Validate config and return the role-correct OTLP replay target.
 
     Raises:
@@ -74,7 +74,7 @@ def _require_ship_config() -> _ShipTarget:
             "(live exporter + trace ship) is off. Set it true to ship the "
             "mirror to Tempo."
         )
-    if machine_role() == frozenset({"agent-runner"}):
+    if machine.role() == frozenset({"agent-runner"}):
         from base.cluster.auth import bearer_header
         from cli.commands.observability.otel_collector import (
             gateway_otel_ingress_endpoint,
@@ -269,7 +269,9 @@ def _ship_files(
     return total_lines, total_spans, shipped_files
 
 
-def cmd_trace_ship(*, since: str | None, until: str | None, dry_run: bool) -> int:
+def cmd_trace_ship(
+    *, since: str | None, until: str | None, dry_run: bool, machine: MachineIdentity
+) -> int:
     """Ship the local trace mirror toward Tempo over the role-correct transport.
 
     With no --since/--until, ships incrementally from the per-file watermark.
@@ -278,7 +280,7 @@ def cmd_trace_ship(*, since: str | None, until: str | None, dry_run: bool) -> in
     ``dry_run`` reads the mirror only and needs no backend config — it is the
     one way to inspect what reached the mirror when the backend is off.
     """
-    target = _require_ship_config() if not dry_run else None
+    target = _require_ship_config(machine=machine) if not dry_run else None
     windowed = since is not None or until is not None
     lo = datetime.strptime(since, "%Y-%m-%d").date() if since else date.min  # noqa: DTZ007 — date-only
     hi = datetime.strptime(until, "%Y-%m-%d").date() if until else date.max  # noqa: DTZ007 — date-only

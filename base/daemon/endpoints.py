@@ -2,19 +2,24 @@
 
 A daemon's endpoint is a fact of the unit: the healthz port (the fixed port table, or the unit's
 `AVA_<NAME>_HEALTH_PORT` override) and the pidfile under `$AVA_HOME/run`. A composition root
-builds the table once (`ServiceEndpoints.from_settings()`) and hands a daemon its own row
+builds the table from its config owner and runtime directory (`ServiceEndpoints.from_boot`)
+and hands a daemon its own row
 (`endpoints.of("labeler")`) and a supervisor, probe or command the table; nothing below the root
 reads the settings or `AVA_HOME` for a port or pidfile; the `ambient-endpoint` rule bans building
 the table outside the roots a package names.
+
+Legacy roots still use `from_settings` until their config inputs are explicit. Both factories
+use the same registered port resolver; a table remains the values at its construction time.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.daemon.health import _health_port
+from base.config import ConfigBoot, get_field
+from base.daemon.health import health_port
 from base.host.env.registry import health_port_env_aliases
 from base.paths import run_dir
 
@@ -41,10 +46,22 @@ class ServiceEndpoints:
     @classmethod
     def from_settings(cls) -> ServiceEndpoints:
         """The table as the live settings and `AVA_HOME` describe it now."""
-        runtime = run_dir()
+        return cls._from_fields(get_field, runtime=run_dir())
+
+    @classmethod
+    def from_boot(cls, config: ConfigBoot, *, runtime: Path) -> ServiceEndpoints:
+        """Capture the caller's current port fields and explicit runtime directory."""
+        return cls._from_fields(config.get_field, runtime=runtime)
+
+    @classmethod
+    def _from_fields(
+        cls, read_field: Callable[[str], int | None], *, runtime: Path
+    ) -> ServiceEndpoints:
         return cls(
             {
-                name: ServiceEndpoint(name, _health_port(name), runtime / f"{name}.pid")
+                name: ServiceEndpoint(
+                    name, health_port(name, read_field=read_field), runtime / f"{name}.pid"
+                )
                 for name in health_port_env_aliases()
             }
         )

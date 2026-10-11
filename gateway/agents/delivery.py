@@ -47,6 +47,7 @@ async def deliver_chat_inbound(
     agent_id: int,
     *,
     prepare: Callable[[psycopg.Connection], str | None],
+    local_machine: str,
     source: str = "user",
     refresh_badge: bool = False,
     payload: dict[str, object] | None = None,
@@ -101,6 +102,7 @@ async def deliver_chat_inbound(
         source,
         client_message_id,
         refresh_badge=refresh_badge,
+        local_machine=local_machine,
     )
 
 
@@ -114,6 +116,7 @@ async def _finish_chat_delivery(
     client_message_id: str | None,
     *,
     refresh_badge: bool = False,
+    local_machine: str,
 ) -> ChatDelivery:
     """Await separate wake, UI and resurrection effects after durable commit."""
     try:
@@ -134,6 +137,7 @@ async def _finish_chat_delivery(
                 agent_id,
                 trigger_inbound_id=receipt.inbound_id,
                 trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=local_machine,
             )
         else:
             # Claimed/done work is a receipt lookup, never a stale resurrection.
@@ -153,6 +157,7 @@ async def reconcile_chat_delivery(
     content: str,
     source: str,
     payload: dict[str, object] | None,
+    local_machine: str,
 ) -> ChatDelivery | None:
     """Resolve an uncertain send and heal any still-pending delivery tail.
 
@@ -173,7 +178,14 @@ async def reconcile_chat_delivery(
     if receipt is None:
         return None
     return await _finish_chat_delivery(
-        db, bus, agent_id, receipt, content, source, client_message_id
+        db,
+        bus,
+        agent_id,
+        receipt,
+        content,
+        source,
+        client_message_id,
+        local_machine=local_machine,
     )
 
 

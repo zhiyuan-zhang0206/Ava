@@ -95,8 +95,8 @@ receiver.
 ## Key dependencies
 
 - `base/telemetry/emitter.py` — caller: `_write_batch` runs the OTLP export after
-  the JSONL mirror append; `_drain_on_exit` calls
-  `telemetry_otlp.shutdown()` at exit.
+  the JSONL mirror append; the concrete pipeline closes its own exporter after
+  joining the ordinary writer. `_drain_on_exit` observes that same pipeline.
 - OTel SDK (`opentelemetry-*`) — imported lazily inside `_build_providers` /
   `_emit_log`, so flag-off processes never pay for it.
 - `base/config/domains/observability/settings.py` — the producer-local `telemetry_otlp_*`
@@ -111,12 +111,12 @@ receiver.
 
 ## Entry points
 
-- `base/telemetry/otlp/telemetry_otlp.py:export_batch(events)` — module singleton
-  `backend`; no-op when the flag is off; `flush()` / `shutdown()` — test
-  seam / finite process-exit observation. `telemetry_otlp_worker.OtlpWorker`
+- `base/telemetry/otlp/telemetry_otlp.py:OtlpBackend` — built by the root
+  with its explicit eligibility callback and owned by `ExportingEventPipeline`;
+  no-op when the flag is off; `flush()` / `shutdown()` observe that owner. `telemetry_otlp_worker.OtlpWorker`
   owns the one writer and each partial SDK resource through teardown.
-- `base/telemetry/emitter.py:_export_otlp` — the drain-thread call site
-  (suppress-guarded, deferred import)
+- `base/telemetry/emitter.py:build_pipeline` — constructs the concrete writer
+  and passes its backend export callback to `_write_batch`.
 - `cli/commands/observability/trace.py:cmd_trace_ship` — `ava trace ship
   [--since/--until] [--dry-run]`
 
@@ -125,13 +125,10 @@ receiver.
 - Routine OTLP diagnostics use loguru with `_no_emitter`, reaching stderr/file
   without re-entering the pipeline. Registered disabled/recovered events also
   record the otherwise invisible episode in the JSONL mirror.
-- Runner exporter component IDs stay `otlphttp/tempo`, `otlphttp/loki` and
-  `otlphttp/prometheus` across the direct-backend → relay cutover. The
-  file_storage extension keys the Tempo/Loki persistent queues by component
-  ID; renaming either would orphan the upgrade backlog, and a 1 GiB `max_size`
-  byte cap bounds each queue file on disk (task #4012). Metrics keep the ID but
-  retain bounded in-memory retry. Queue/drop/silence observability lives in
-  [[infra-metrics.ava.okf.md|Infrastructure metrics]].
+- Runner exporters retain `otlphttp/tempo`, `otlphttp/loki` and
+  `otlphttp/prometheus`. Tempo/Loki `file_storage` queues use these IDs; renaming
+  would orphan backlog. Each queue has a 1 GiB byte cap; metrics retry in memory.
+  Queue/drop/silence signals: [[infra-metrics.ava.okf.md|Infrastructure metrics]].
 - Exit flush (task #4320) — both providers build with
   `shutdown_on_exit=False`; the single ordered exit seam and its accepted
   semantics: [[exit-flush.ava.okf.md|OTLP exit flush]].

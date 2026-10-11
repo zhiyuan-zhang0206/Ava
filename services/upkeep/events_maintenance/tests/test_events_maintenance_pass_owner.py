@@ -6,13 +6,18 @@ import asyncio
 import logging
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 
+from base.config import ConfigBoot
 from base.daemon.health import LivenessGroup, LoopProgress
+from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.events_maintenance import daemon
+from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 
 
@@ -68,6 +73,7 @@ async def test_late_failure_is_reported_without_reviving_the_loop(
 
 
 def _mock_service(
+    process_config: ConfigBoot,
     monkeypatch: pytest.MonkeyPatch,
     work: Callable[..., None],
     trackers: list[LivenessGroup],
@@ -79,6 +85,7 @@ def _mock_service(
         *,
         liveness: LivenessGroup,
         components: Callable[[], list[dict[str, object]]],
+        image: LoadedCommit,
     ) -> object:
         trackers.append(liveness)
         return object()
@@ -97,10 +104,22 @@ def _mock_service(
     def pool(_self: object) -> Pool:
         return Pool()
 
-    config = events_maintenance_config(events_maintenance_pass_deadline_s=0.02)
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: closed.append("pidfile"))
+    config = events_maintenance_config(process_config, events_maintenance_pass_deadline_s=0.02)
+
+    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
+        return False
+
+    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
+
+    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        return closed.append("pidfile")
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", health)
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
     monkeypatch.setattr(daemon, "_run_maintenance", work)
@@ -108,11 +127,20 @@ def _mock_service(
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", sibling)
     monkeypatch.setattr(daemon.Database, "pool", pool)
     monkeypatch.setattr(daemon.admission, "quiesced", lambda: False)
-    monkeypatch.setattr(daemon, "events_maintenance_config", lambda: config)
+
+    def build_config(entry_config: ConfigBoot) -> EventsMaintenanceConfig:
+        assert entry_config is process_config
+        return config
+
+    monkeypatch.setattr(daemon, "events_maintenance_config", build_config)
 
 
 async def test_service_stop_cancels_expired_proxy_before_worker_returns(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     started = threading.Event()
     release = threading.Event()
@@ -127,7 +155,7 @@ async def test_service_stop_cancels_expired_proxy_before_worker_returns(
         finally:
             finished.set()
 
-    _mock_service(monkeypatch, blocking_pass, trackers, closed)
+    _mock_service(process_config, monkeypatch, blocking_pass, trackers, closed)
 
     async def wait_for_wedge() -> None:
         while not trackers or not trackers[0].snapshot()["dispatch"]["wedged"]:
@@ -135,7 +163,14 @@ async def test_service_stop_cancels_expired_proxy_before_worker_returns(
 
     before = asyncio.all_tasks()
     async with asyncio.TaskGroup() as tests:
-        service = tests.create_task(daemon.run())
+        service = tests.create_task(
+            daemon.run(
+                process_config=process_config,
+                runtime=tmp_path / "run",
+                database=lambda: database,
+                image=LoadedCommit(Path(), None),
+            )
+        )
         probe = tests.create_task(wait_for_wedge())
         try:
             done, _ = await asyncio.wait({probe}, timeout=1.0)

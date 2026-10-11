@@ -13,6 +13,7 @@ from base.agents.compaction.execution import claim_attempt, pending, require_rec
 from base.agents.compaction.models import CompactHeldError
 from base.agents.compaction.tests.helpers import source
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from base.lm.catalog import ModelCatalog
 
@@ -27,9 +28,14 @@ async def test_stale_or_unclosed_receiver_cannot_claim_or_apply_original(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     incarnation, target, *_ = await source(
-        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        aops_pool,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accept(pool, str(target.observation_id), target.source.agent_id, target)

@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 
 from base import telemetry
+from base.db import Database
 from base.telemetry import Event
 from base.telemetry.otlp import telemetry_otlp
+from base.telemetry.tests.identity_inputs import allow_identity, machine_identity
 
 _AGENT = 8902
 
@@ -21,16 +25,7 @@ _AGENT = 8902
 def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Most cases exercise an allowed production backend; gate tests override it."""
     monkeypatch.delenv("AVA_EXEC_REQUEST_FILE", raising=False)
-    monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: True, raising=False)
-
-
-@pytest.fixture(autouse=True)
-def _fresh_observability_export_gate() -> Any:
-    """The production gate is process-cached; tests model fresh processes."""
-    gate = telemetry_otlp.observability_export_allowed
-    gate.cache_clear()
-    yield
-    gate.cache_clear()
+    monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity, raising=False)
 
 
 def _event(
@@ -62,8 +57,8 @@ def _event(
 
 @pytest.fixture
 def otlp_backend(monkeypatch):
-    """An `_OtlpBackend` wired to in-memory OTel providers, installed as the
-    module singleton so `export_batch()` / `shutdown()` hit the test instance.
+    """An `OtlpBackend` wired to in-memory OTel providers, bound to this test
+    pipeline so its writes reach the explicit test owner.
     Yields (backend, log_exporter, metric_reader).
 
     Re-enables AVA_TELEMETRY_OTLP_ENABLED (`tests/fixtures/env_bootstrap.py` turns the flag
@@ -84,8 +79,11 @@ def otlp_backend(monkeypatch):
     metric_provider = MeterProvider(metric_readers=[metric_reader])
 
     monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
-    backend = telemetry_otlp._OtlpBackend(providers=(logger_provider, metric_provider))
-    monkeypatch.setattr(telemetry_otlp, "backend", backend)  # pyright: ignore[reportUnknownMemberType]
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True, providers=(logger_provider, metric_provider)
+    )
+
+    telemetry._state["pipeline"]._exporter = backend
     yield backend, log_exporter, metric_reader
     backend.shutdown()
 
@@ -605,25 +603,29 @@ def test_non_telemetry_events_produce_no_metrics(otlp_backend) -> None:
     assert _metrics(metric_reader) == {}
 
 
-def test_warmup_initializes_enabled_backend(otlp_backend) -> None:
+def test_warmup_initializes_enabled_backend(
+    otlp_backend: tuple[telemetry_otlp.OtlpBackend, Any, Any],
+) -> None:
     """Warmup constructs the providers before an exec can emit sdk_call events."""
     backend, _log_exporter, _metric_reader = otlp_backend
 
-    telemetry_otlp.warmup()
+    backend.warmup()
 
     assert backend._logs is not None  # pyright: ignore[reportUnknownMemberType]
     assert backend._metric_provider is not None  # pyright: ignore[reportUnknownMemberType]
     assert backend._thread is not None  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_export_batch_builds_backend_once(otlp_backend) -> None:
+def test_export_batch_builds_backend_once(
+    otlp_backend: tuple[telemetry_otlp.OtlpBackend, Any, Any],
+) -> None:
     """The first record brings the backend up; later batches reuse it (idempotent)."""
     backend, _log_exporter, _metric_reader = otlp_backend
 
-    telemetry_otlp.export_batch([_event()])
+    backend.export_batch([_event()])
     first = backend._logs  # pyright: ignore[reportUnknownMemberType]
     assert first is not None
-    telemetry_otlp.export_batch([_event()])
+    backend.export_batch([_event()])
     assert backend._logs is first  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -632,7 +634,7 @@ def test_flush_without_init_is_noop() -> None:
 
     The exec child's zero-record exit path must never touch OTel — this is the
     backend-side half of that contract (task #3816 M3)."""
-    backend = telemetry_otlp._OtlpBackend()
+    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
     backend.flush()
     assert backend._thread is None
     assert backend._queue.empty()
@@ -672,16 +674,23 @@ def test_flag_defaults_on_with_standard_endpoint(monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _bind_telemetry(db_conn: psycopg.Connection) -> None:
-    telemetry.init_telemetry(process="test-proc")
-    with db_conn.cursor() as cur:
-        cur.execute("INSERT INTO agents (id) VALUES (%s) ON CONFLICT DO NOTHING", (_AGENT,))
-        cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running') "
-            "ON CONFLICT DO NOTHING",
-            (_AGENT,),
-        )
-    db_conn.commit()
+def _bind_telemetry(db_conn: psycopg.Connection, database: Database) -> Iterator[None]:
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity(), home=Path(".ava")
+    )
+    try:
+        telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
+        with db_conn.cursor() as cur:
+            cur.execute("INSERT INTO agents (id) VALUES (%s) ON CONFLICT DO NOTHING", (_AGENT,))
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running') "
+                "ON CONFLICT DO NOTHING",
+                (_AGENT,),
+            )
+        db_conn.commit()
+        yield
+    finally:
+        pipeline.stop(timeout=2)
 
 
 # ── exec-child export path (task #1423) ──────────────────────────────────────

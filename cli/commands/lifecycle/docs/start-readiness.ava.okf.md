@@ -46,4 +46,4 @@ only core launch failures.
 - [[cli/commands/lifecycle/docs/readiness-verdict.ava.okf.md]] — exit codes,
   core deadlines, optional availability and alerts.
 - [[cli/docs/start_identity.ava.okf.md]] — init identity and start admission.
-- [[base/cluster/docs/machine.ava.okf.md]] — capabilities and the selected service roster.
+- [[base/cluster/machine/docs/machine.ava.okf.md]] — capabilities and the selected service roster.

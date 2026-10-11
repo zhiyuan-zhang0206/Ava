@@ -42,7 +42,6 @@ from base.agents.impersonation.event_log import LOG_PROTOCOL_VERSION
 from base.agents.impersonation.history import append, capture_pending, set_actor
 from base.agents.impersonation.status import ImpersonationStatus, parse_lease
 from base.agents.messages.caller_identity import CallerIdentity
-from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database, publish_inbound_wake
 from base.events.live.announce import (
@@ -142,6 +141,7 @@ def request(
     executor_name: str = "",
     process_metadata: dict[str, Any] | None = None,
     automatic: bool = False,
+    local_machine: str,
 ) -> dict[str, Any]:
     """Prepare a controller lease and return its scoped relay credential."""
     ttl = _ttl(ttl_seconds)
@@ -162,7 +162,7 @@ def request(
     event_delivery_protocol_version = event_protocol_for_new_lease(automatic=automatic)
     with db.write_transaction() as conn:
         meta = lock_agent(conn, agent_id)
-        if meta["machine"] != machine_name():
+        if meta["machine"] != local_machine:
             raise ImpersonationError("Impersonation is limited to the agent's own machine")
         if AgentStatus(meta["status"]) not in (AgentStatus.RUNNING, AgentStatus.IDLING):
             raise ImpersonationError("Agent must be running or idling to receive a request")
@@ -209,10 +209,21 @@ def event_protocol_for_new_lease(*, automatic: bool) -> int | None:
     return LOG_PROTOCOL_VERSION if automatic else None
 
 
-def get(db: Database, bus: EventBus, lease_id: str, caller: object) -> dict[str, Any]:
+def get(
+    db: Database,
+    bus: EventBus,
+    lease_id: str,
+    caller: object,
+    *,
+    local_machine: str,
+) -> dict[str, Any]:
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        authenticate(lease, caller)
+        authenticate(
+            lease,
+            caller,
+            local_machine=local_machine,
+        )
         was_open = lease["status"] in OPEN
         result = public(expire(conn, lease))
     if was_open and result["status"] == ImpersonationStatus.EXPIRED:
@@ -220,7 +231,13 @@ def get(db: Database, bus: EventBus, lease_id: str, caller: object) -> dict[str,
     return result
 
 
-def require_active(db: Database, lease_id: str, caller: object) -> dict[str, Any]:
+def require_active(
+    db: Database,
+    lease_id: str,
+    caller: object,
+    *,
+    local_machine: str,
+) -> dict[str, Any]:
     """Check one committed snapshot; SDK work does not hold a database lock."""
     with db.connect() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
@@ -239,6 +256,7 @@ def require_active(db: Database, lease_id: str, caller: object) -> dict[str, Any
         fresh=lease.pop("fresh"),
         machine=lease.pop("current_machine"),
         status=AgentStatus(lease.pop("current_status")),
+        local_machine=local_machine,
     )
     return public(lease)
 
@@ -250,6 +268,8 @@ def accept(
     agent_id: int,
     incarnation: RuntimeIncarnation,
     start_message: str,
+    *,
+    local_machine: str,
 ) -> dict[str, Any]:
     """Record native preparation and the required start message for the external session.
 
@@ -265,7 +285,10 @@ def accept(
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
-        local(lease)
+        local(
+            lease,
+            local_machine=local_machine,
+        )
         if lease["agent_id"] != agent_id or lease["status"] != ImpersonationStatus.REQUESTED:
             raise ImpersonationError("Only the requested agent can accept a pending request")
         if lease["relay_provider"] is None:
@@ -454,11 +477,22 @@ def native_status(
 
 
 def renew(
-    db: Database, bus: EventBus, lease_id: str, caller: object, *, ttl_seconds: int | None = None
+    db: Database,
+    bus: EventBus,
+    lease_id: str,
+    caller: object,
+    *,
+    ttl_seconds: int | None = None,
+    local_machine: str,
 ) -> dict[str, Any]:
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        require_active_locked(conn, lease, caller)
+        require_active_locked(
+            conn,
+            lease,
+            caller,
+            local_machine=local_machine,
+        )
         set_actor(conn, lease["source"])
         ttl = lease["ttl_seconds"] if ttl_seconds is None else _ttl(ttl_seconds)
         conn.execute(
@@ -472,7 +506,13 @@ def renew(
 
 
 def release(
-    db: Database, bus: EventBus, lease_id: str, caller: object, summary: str
+    db: Database,
+    bus: EventBus,
+    lease_id: str,
+    caller: object,
+    summary: str,
+    *,
+    local_machine: str,
 ) -> dict[str, Any]:
     if not summary.strip():
         raise ValueError("A nonempty handoff summary is required")
@@ -482,20 +522,38 @@ def release(
     # Keep the admission fence durable when a live participant delays release.
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        authenticate(lease, caller)
+        authenticate(
+            lease,
+            caller,
+            local_machine=local_machine,
+        )
         if lease["status"] == ImpersonationStatus.RELEASED:
             return public(lease)
-        require_active_locked(conn, lease, caller)
+        require_active_locked(
+            conn,
+            lease,
+            caller,
+            local_machine=local_machine,
+        )
         set_actor(conn, lease["source"])
         if is_log_native(lease):
             capture.close_event_admission(conn, lease_id)
 
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        authenticate(lease, caller)
+        authenticate(
+            lease,
+            caller,
+            local_machine=local_machine,
+        )
         if lease["status"] == ImpersonationStatus.RELEASED:
             return public(lease)
-        require_active_locked(conn, lease, caller)
+        require_active_locked(
+            conn,
+            lease,
+            caller,
+            local_machine=local_machine,
+        )
         set_actor(conn, lease["source"])
         if is_log_native(lease):
             try:
@@ -524,13 +582,25 @@ def release(
     return result
 
 
-def inbox(db: Database, lease_id: str, caller: object, *, limit: int = 100) -> list[dict[str, Any]]:
+def inbox(
+    db: Database,
+    lease_id: str,
+    caller: object,
+    *,
+    limit: int = 100,
+    local_machine: str,
+) -> list[dict[str, Any]]:
     """Read and record the controller's pending inbox page, oldest first."""
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        require_active_locked(conn, lease, caller)
+        require_active_locked(
+            conn,
+            lease,
+            caller,
+            local_machine=local_machine,
+        )
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT id,content,kind,source,payload,created_at FROM inbound_messages "
@@ -549,10 +619,23 @@ def inbox(db: Database, lease_id: str, caller: object, *, limit: int = 100) -> l
     return messages
 
 
-def ack(db: Database, bus: EventBus, lease_id: str, caller: object, message_ids: list[int]) -> None:
+def ack(
+    db: Database,
+    bus: EventBus,
+    lease_id: str,
+    caller: object,
+    message_ids: list[int],
+    *,
+    local_machine: str,
+) -> None:
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        require_active_locked(conn, lease, caller)
+        require_active_locked(
+            conn,
+            lease,
+            caller,
+            local_machine=local_machine,
+        )
         rows = conn.execute(
             "SELECT inbound_id FROM agent_impersonation_messages WHERE lease_id=%s "
             "AND inbound_id=ANY(%s)",
@@ -594,11 +677,22 @@ def ack(db: Database, bus: EventBus, lease_id: str, caller: object, message_ids:
 
 
 def merge_plugin_delta(
-    db: Database, lease_id: str, caller: object, delta: dict[str, Any], *, expected_version: int
+    db: Database,
+    lease_id: str,
+    caller: object,
+    delta: dict[str, Any],
+    *,
+    expected_version: int,
+    local_machine: str,
 ) -> None:
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        require_active_locked(conn, lease, caller)
+        require_active_locked(
+            conn,
+            lease,
+            caller,
+            local_machine=local_machine,
+        )
         if lease["delta_version"] != expected_version:
             raise ImpersonationError("Concurrent external state update; reload the agent state")
         conn.execute(

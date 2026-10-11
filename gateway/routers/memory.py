@@ -356,7 +356,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
                 model=inputs.rerank_model(),
                 catalog=request.app.state.catalog,
                 k=body.k,
-                memory_root=gateway_memory_dir(),
+                memory_root=gateway_memory_dir(roles=request.app.state.machine.role()),
             )
     except TimeoutError as exc:
         raise IndexerUnavailable(f"memory search exceeded its {deadline:g}s deadline") from exc
@@ -423,7 +423,7 @@ async def _vector_candidates(
 
 
 @router.post("/api/memory/refresh", response_model=MemoryRefreshResponse)
-async def post_memory_refresh() -> MemoryRefreshResponse:
+async def post_memory_refresh(request: Request) -> MemoryRefreshResponse:
     """Fast-forward the gateway memory checkout to the consolidated pool.
 
     The gateway indexes `main`; once the pool's per-machine branches are
@@ -442,7 +442,7 @@ async def post_memory_refresh() -> MemoryRefreshResponse:
     """
     from base.deploy.git import memory_repo
 
-    head = await asyncio.to_thread(memory_repo.pull_main)
+    head = await asyncio.to_thread(memory_repo.pull_main, machine=request.app.state.machine)
     return MemoryRefreshResponse(head=head)
 
 
@@ -503,7 +503,7 @@ class MemoryGraphCache:
 @router.get("/api/memory/graph", response_model=MemoryGraphResponse)
 def get_memory_graph(request: Request) -> MemoryGraphResponse:
     """Return concept notes and cross-links from the gateway memory bundle."""
-    root = gateway_memory_dir()
+    root = gateway_memory_dir(roles=request.app.state.machine.role())
     revision = _pool_revision(root)
     if revision is None:
         return _build_memory_graph(root)
@@ -512,7 +512,7 @@ def get_memory_graph(request: Request) -> MemoryGraphResponse:
 
 
 @router.get("/api/memory/note", response_model=MemoryNoteResponse)
-def get_memory_note(path: str) -> MemoryNoteResponse:
+def get_memory_note(request: Request, path: str) -> MemoryNoteResponse:
     """Return one parsed memory note by its **relative** path (sans frontmatter).
 
     `path` is a memory-pool-relative markdown path as the graph carries it
@@ -522,7 +522,7 @@ def get_memory_note(path: str) -> MemoryNoteResponse:
     frontmatter) is not a note either: 404. The response carries the parsed
     fields plus the markdown body with the YAML frontmatter already stripped.
     """
-    root = gateway_memory_dir().resolve()
+    root = gateway_memory_dir(roles=request.app.state.machine.role()).resolve()
     rel = Path(path)
     if rel.is_absolute() or rel.suffix != ".md":
         raise HTTPException(status_code=404, detail="memory note not found")
@@ -554,10 +554,10 @@ def get_memory_note(path: str) -> MemoryNoteResponse:
 
 
 @router.get("/api/memory/pool", response_class=Response)
-def get_memory_pool() -> Response:
+def get_memory_pool(request: Request) -> Response:
     """Download the consolidated memory pool as a git bundle.
 
-    Serves `gateway_memory_dir()` — the consolidated checkout on `main` — as a
+    Serves the request-owned memory checkout on `main` as a
     `git bundle` of HEAD (full real ancestry, so a bootstrapped machine branch
     is a true descendant of `main` and converges cleanly when a memory remote
     is configured later). A fresh agent-runner whose memory remote is not
@@ -569,7 +569,7 @@ def get_memory_pool() -> Response:
     /api route. `X-Pool-Head` carries the checkout's HEAD sha so the receiver
     can verify what it cloned is the advertised snapshot.
     """
-    root = gateway_memory_dir()
+    root = gateway_memory_dir(roles=request.app.state.machine.role())
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="gateway memory pool not initialized")
     try:

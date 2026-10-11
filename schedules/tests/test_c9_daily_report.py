@@ -7,6 +7,7 @@ import json
 import shutil
 import sys
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import cast
@@ -15,8 +16,10 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from schedules.catchup import fire_slot_once
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -182,14 +185,21 @@ def test_summarize_splits_attribution_and_meters_minutes() -> None:
 
 
 def test_fire_reconciles_the_claimed_slot_window_and_emits(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    machine_identity: MachineIdentity,
 ) -> None:
     """_fire derives its window from the CLAIMED slot (the fire_slot_once
     callback argument), not from the wall clock — the layer QA's simulation flagged."""
     module = _load_schedule_module()
 
-    def fake_init_gateway(name: str) -> None:
-        del name
+    def fake_init_gateway(
+        name: str, *, producer: object, machine_reader: object, image: LoadedCommit
+    ) -> None:
+        assert name == module._PROCESS_NAME
+        assert callable(producer) and callable(machine_reader)
+        assert image.sha is None
 
     monkeypatch.setattr(module, "init_gateway_process", fake_init_gateway)
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
@@ -199,7 +209,17 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
 
-    assert fire_slot_once(database, slot, None, fire=module._fire)
+    assert fire_slot_once(
+        database,
+        slot,
+        None,
+        fire=partial(
+            module._fire,
+            producer=lambda: None,
+            image=LoadedCommit(REPO_ROOT, None),
+            machine_reader=machine_identity.name,
+        ),
+    )
 
     assert accounting.windows == [("2026-09-05T21:00:00Z", "2026-09-06T21:00:00Z")]
     assert len(emitted) == 1
@@ -213,7 +233,10 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
 
 
 def test_fire_reports_failure_without_raising(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    machine_identity: MachineIdentity,
 ) -> None:
     module = _load_schedule_module()
     accounting = _FakeAccounting(module)
@@ -230,7 +253,17 @@ def test_fire_reports_failure_without_raising(
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
 
-    assert fire_slot_once(database, slot, None, fire=module._fire)
+    assert fire_slot_once(
+        database,
+        slot,
+        None,
+        fire=partial(
+            module._fire,
+            producer=lambda: None,
+            image=LoadedCommit(REPO_ROOT, None),
+            machine_reader=machine_identity.name,
+        ),
+    )
 
     assert len(failures) == 1
     assert "RuntimeError" in failures[0]

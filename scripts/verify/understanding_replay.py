@@ -94,9 +94,13 @@ from base.agents.observation.snapshot import agent_model_target  # noqa: E402
 from base.clock import Clock, clock_config_from_boot  # noqa: E402
 from base.config import ConfigBoot  # noqa: E402
 from base.db import Database  # noqa: E402
+from base.db.code_version_gate import ProcessDbGate  # noqa: E402
 from base.lm.catalog import ModelCatalog  # noqa: E402
 from base.lm.context_budget import resolve_context_budget  # noqa: E402
 from base.lm.plugin_providers import build_model_catalog  # noqa: E402
+from base.native_process.code_version import CodeVersion  # noqa: E402
+from base.native_process.loaded_commit import LoadedCommit  # noqa: E402
+from base.telemetry import process_name  # noqa: E402
 
 _DOCKERENV = Path("/.dockerenv")
 
@@ -348,7 +352,9 @@ def main() -> None:
     _require_preview()
     config = ConfigBoot()
     config.boot()
-    db = Database.from_settings()
+    version = CodeVersion(LoadedCommit.capture())
+    gate = ProcessDbGate(version=version.get, process=process_name())
+    db = Database.from_settings(gate=gate)
     if args.command == "report":
         _report(db, args.agent_id)
         return

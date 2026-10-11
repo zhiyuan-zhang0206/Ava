@@ -30,6 +30,7 @@ import psutil
 import pytest
 
 from base.cluster import ownership, port_preflight
+from base.cluster.machine import MachineIdentity
 from tests.factories.secret_argv import (
     SECRET,
     SECRET_VALUES,
@@ -38,6 +39,7 @@ from tests.factories.secret_argv import (
 )
 from tests.factories.secret_argv import secret_env as secret_env
 from tests.factories.secret_argv import secrets_in_creator_env as secrets_in_creator_env
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 from tests.path_scoped.pty_shells import output_until, type_line
@@ -179,7 +181,9 @@ def test_agent_shell_session(
     assert_service_tree_clean(pty_service, label="ava.shell.sessions.create_session")
 
 
-def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_redis_bringup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine_identity: MachineIdentity
+) -> None:
     """The cluster's own redis: `--requirepass <secret>` and `redis-cli -a <secret>`
     would both publish the cluster secret. It goes through a 0600 conf file and
     `$REDISCLI_AUTH` instead."""
@@ -194,7 +198,12 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(ci.subprocess, "run", fake_run)
     monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path / "redis")
     monkeypatch.setattr(ci, "_ensure_redis_acl", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(port_preflight, "bind_addrs", lambda: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
+
+    def bind_fixture(*, machine: MachineIdentity) -> list[str]:
+        assert machine is machine_identity
+        return ["127.0.0.1"]
+
+    monkeypatch.setattr(port_preflight, "bind_addrs", bind_fixture)
     monkeypatch.setattr(ci, "print", lambda *_a, **_k: None, raising=False)  # pyright: ignore[reportUnknownArgumentType]
     # `_redis_server_bin` resolves through `brew_prefix`, which shells out to `brew`; the faked
     # `subprocess.run` above would answer it with "PONG". Stub the resolved path directly.
@@ -207,7 +216,8 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # down on the first probe (so the full start path runs), up on the next
     probes = iter([False, True, True])
     monkeypatch.setattr(ci, "_redis_running", lambda *_a: next(probes))  # pyright: ignore[reportUnknownArgumentType]
-    assert ci.start_redis(46999, SECRET, SECRET, "ava") == 0
+    machine_identity.set(host="127.0.0.1")
+    assert ci.start_redis(46999, SECRET, SECRET, "ava", machine=machine_identity) == 0
 
     for argv in calls:
         assert_clean(argv, label="redis bring-up")

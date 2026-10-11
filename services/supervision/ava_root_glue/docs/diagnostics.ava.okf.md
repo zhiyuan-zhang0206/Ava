@@ -64,3 +64,10 @@ Readiness of native LGTM services belongs to their actual root service specs.
 External station reachability is a remote protocol claim and carries no authority
 over that station's native processes. [[services/supervision/ava_root_glue/docs/ava_root_glue.ava.okf.md|Root wiring]]
 keeps these ownership boundaries explicit.
+
+The deployment wiring captures one loaded image and owns one DB gate shared by
+the station target reader and the log writer. Health rounds receive that same
+image and a cold `ClientSet`; only startup opens the pipeline. Stop joins the
+actual writer after both observation owners, including when an observation
+close fails. A logging startup failure retains its original error and closes
+any pipeline it constructed. The generic drill wiring opens no DB resources.

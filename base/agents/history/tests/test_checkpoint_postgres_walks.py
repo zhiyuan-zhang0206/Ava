@@ -32,10 +32,11 @@ from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver a
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 
 
-def _db() -> Database:
-    return Database.from_settings()
+def _db(database_gate: ProcessDbGate) -> Database:
+    return Database.from_settings(gate=database_gate)
 
 
 def _checkpoint_id(config: RunnableConfig) -> str:
@@ -96,7 +97,7 @@ def _write_steps(
 
 
 async def test_missing_delta_parent_fails_sync_async_and_public_reader(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
     thread = "6111"
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
@@ -112,7 +113,7 @@ async def test_missing_delta_parent_fails_sync_async_and_public_reader(
         with pytest.raises(RuntimeError, match="delta messages ancestry is incomplete"):
             await saver.aget_delta_channel_history(config=configs[-1], channels=["messages"])
     with pytest.raises(CheckpointReadError) as failed:
-        load_checkpoint_messages(_db(), int(thread))
+        load_checkpoint_messages(_db(database_gate=database_gate), int(thread))
     assert isinstance(failed.value.__cause__, RuntimeError)
     assert str(missing) in str(failed.value.__cause__)
     # Detection is read-only; it neither removes nor substitutes the live head.
@@ -123,7 +124,7 @@ async def test_missing_delta_parent_fails_sync_async_and_public_reader(
 
 
 def test_real_message_reset_can_cut_off_a_missing_older_parent(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
     thread = "6112"
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
@@ -151,7 +152,10 @@ def test_real_message_reset_can_cut_off_a_missing_older_parent(
         assert any(
             isinstance(message, RemoveMessage) for write in entry["writes"] for message in write[2]
         )
-    assert [message.id for message in load_checkpoint_messages(_db(), int(thread))] == ["kept"]
+    assert [
+        message.id
+        for message in load_checkpoint_messages(_db(database_gate=database_gate), int(thread))
+    ] == ["kept"]
 
 
 def _write_numbers(entry: DeltaChannelHistory) -> list[int]:
@@ -191,7 +195,7 @@ def _append_newer_checkpoints_across_page_boundary(
 
 
 async def test_historical_walk_page_boundary_and_compact_segment(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
     thread = "6380"
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
@@ -210,7 +214,9 @@ async def test_historical_walk_page_boundary_and_compact_segment(
     # newest page, read by the gateway as one retained compaction segment.
     assert "configurable" in target
     segment = load_checkpoint_messages_segment(
-        _db(), int(thread), cast(str, target["configurable"]["checkpoint_id"])
+        _db(database_gate=database_gate),
+        int(thread),
+        cast(str, target["configurable"]["checkpoint_id"]),
     )
     assert [message.id for message in segment] == ["write-1"]
 

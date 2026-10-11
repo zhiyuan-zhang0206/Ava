@@ -6,20 +6,31 @@ pg/redis ports. A missing record (defensive) is a hard error, not a silent
 fall-through onto some shared instance.
 """
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 
 from base import cluster
 from base.config import settings
 from cli.commands.data_plane import cluster_instance as _ci
 from cli.commands.lifecycle import start as _start
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.factories.data_plane import cluster_record
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _rec() -> cluster.ClusterRecord:
     return cluster_record({"gateway": 23000, "postgres": 23011, "redis": 23012}, created_at="x")
 
 
-def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gateway_data_plane_brings_up_own_instance(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
     """A born cluster → the per-cluster instance on the record's exact pg/redis
     ports, with each data-plane identity read from its own URL."""
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType]
@@ -35,7 +46,14 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
     own_calls: list[dict[str, object]] = []
     monkeypatch.setattr(_ci, "ensure_cluster_storage", lambda **kw: own_calls.append(kw) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _start._ensure_gateway_data_plane(retained_children=[]) == 0
+    assert (
+        _start._ensure_gateway_data_plane(
+            retained_children=[],
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
+        == 0
+    )
     # The root that holds the secret published the telemetry token the station probe reads.
     from base.cluster.authority.api import read_telemetry_token, telemetry_token
     from base.paths import ava_home
@@ -50,12 +68,17 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
             "redis_password": "redis-runtime",
             "redis_user": "ava",
             "retained_children": [],
+            "machine": command_runtime.machine,
         }
     ]
 
 
 def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A home born before the always-authenticated data plane (no ledger, not a
     first start in progress) is refused before any native effect — never
@@ -68,11 +91,23 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
         "ensure_cluster_storage",
         lambda **_kw: pytest.fail("native effect on a legacy home"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert _start._ensure_gateway_data_plane(retained_children=[]) == 1
+    assert (
+        _start._ensure_gateway_data_plane(
+            retained_children=[],
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
+        == 1
+    )
     assert "no conversion exists" in capsys.readouterr().err
 
 
-def test_gateway_data_plane_no_record_is_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gateway_data_plane_no_record_is_error(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
     """A not-yet-registered home (defensive) → a hard error, never a bring-up."""
     monkeypatch.setattr(cluster, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
@@ -81,11 +116,21 @@ def test_gateway_data_plane_no_record_is_error(monkeypatch: pytest.MonkeyPatch) 
         lambda **_kw: pytest.fail("bring-up without a record"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert _start._ensure_gateway_data_plane(retained_children=[]) == 1
+    assert (
+        _start._ensure_gateway_data_plane(
+            retained_children=[],
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+        )
+        == 1
+    )
 
 
 def test_local_launch_without_owner_cannot_publish_authority(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     from unittest.mock import Mock
 
@@ -94,19 +139,24 @@ def test_local_launch_without_owner_cannot_publish_authority(
     effect = Mock(side_effect=AssertionError("authority must not be published"))
     monkeypatch.setattr("base.cluster.authority.api.publish_telemetry_token", effect)
     with pytest.raises(ValueError, match="caller-owned child retention"):
-        bringup.ensure_gateway_data_plane()
+        bringup.ensure_gateway_data_plane(
+            database_factory=operator_database, machine=command_runtime.machine
+        )
     effect.assert_not_called()
 
 
 def test_gateway_hint_names_where_the_web_login_password_lives(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A browser logs in with the cluster secret, which `ava init` minted into the home's
     `.env`: the ready output says where, without printing the secret."""
     from base.paths import ava_home
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "never-printed-secret")
-    _start._print_gateway_hint()
+    _start._print_gateway_hint(machine=command_runtime.machine)
     out = capsys.readouterr().out
     assert "web login password" in out and "AVA_CLUSTER_SECRET" in out
     assert str(ava_home() / ".env") in out

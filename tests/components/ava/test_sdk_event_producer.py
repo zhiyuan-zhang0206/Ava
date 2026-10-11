@@ -12,6 +12,9 @@ from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk import call_policy
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 from base.telemetry import emit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainStatus, Event
@@ -108,7 +111,9 @@ def test_capture_failure_prevents_lazy_producer_construction() -> None:
 
 
 def test_context_switch_in_body_does_not_change_the_captured_producer_or_identity(
-    monkeypatch: pytest.MonkeyPatch, sampling: call_policy.SamplingPolicyOwner
+    monkeypatch: pytest.MonkeyPatch,
+    sampling: call_policy.SamplingPolicyOwner,
+    process_config: ConfigBoot,
 ) -> None:
     written: list[Event] = []
     built: list[EventPipeline] = []
@@ -123,8 +128,16 @@ def test_context_switch_in_body_does_not_change_the_captured_producer_or_identit
 
     first = ClientSet(pipeline_factory=producer)
     second = ClientSet(pipeline_factory=forbidden)
-    old_context = AvaContext(identity=AgentIdentity(6111, False), clients=first)
-    new_context = AvaContext(identity=AgentIdentity(6112, False), clients=second)
+    first_machine = machine_from_boot(process_config)
+    second_machine = machine_from_boot(process_config)
+    first_machine.set(name="first-sdk-owner")
+    second_machine.set(name="second-sdk-owner")
+    old_context = AvaContext(
+        identity=AgentIdentity(6111, False), clients=first, machine=first_machine
+    )
+    new_context = AvaContext(
+        identity=AgentIdentity(6112, False), clients=second, machine=second_machine
+    )
     monkeypatch.setattr(ava, "context", old_context)
 
     def body() -> None:
@@ -136,6 +149,7 @@ def test_context_switch_in_body_does_not_change_the_captured_producer_or_identit
         assert first.sync_events(timeout=1).status is DrainStatus.COMPLETED
         assert len(built) == 1 and len(written) == 1
         assert written[0].agent_id == 6111 and written[0].source == "agent:6111"
+        assert written[0].machine == "first-sdk-owner"
     finally:
         first.close(pipeline_timeout=1)
         second.close(pipeline_timeout=1)
@@ -167,8 +181,12 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         return pipe
 
     bare_clients = ClientSet(pipeline_factory=pipeline)
+    prepared_config = ConfigBoot()
+    prepared_machine = machine_from_boot(prepared_config)
 
-    def clients(*, config: ConfigBoot) -> ClientSet:
+    def clients(*, config: ConfigBoot, machine: MachineIdentity | None) -> ClientSet:
+        assert config is prepared_config
+        assert machine is prepared_machine
         return bare_clients
 
     def register(callback: object) -> object:
@@ -194,7 +212,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         AvaContext(clients=attachment, identity=AgentIdentity(agent_id=6111, owns_loop=False))
     )
     try:
-        ava.ensure_plugins_loaded(config=ConfigBoot())
+        ava.ensure_plugins_loaded(config=prepared_config, machine=prepared_machine)
         assert captured == [bare_clients.event_pipeline]
         assert exits == [bare_clients.close]
         assert made == []

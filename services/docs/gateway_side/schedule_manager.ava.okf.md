@@ -34,3 +34,21 @@ Still in memory, deliberately: the set of schedules whose stale same-name surviv
 - `services/wake/schedule_manager/runner.py` — `.venv/bin/python -m services.wake.schedule_manager.runner <id> [revision]`, the independent process that composes the SDK before calling the gateway schedule execution engine
 - `services/wake/schedule_manager/daemon.py` — `.venv/bin/python -m services.wake.schedule_manager.daemon`
 - The application root supervises it through the roster's `/healthz` identity probe (`ops/roster/healthz.py`).
+
+
+## Process composition
+
+The executable entry captures one `LoadedCommit` and retains its `CodeVersion`
+and `ProcessDbGate`. The work database factory and the lazy telemetry producer
+share that gate, so new handles preserve the process admission read budget.
+Logging and the existing health endpoint receive the same captured image; a
+checkout move cannot relabel the running daemon. The daemon's existing startup,
+pidfile, work and bounded-exit order remains unchanged.
+
+The service entry retains its prepared `ConfigBoot` and resolved unit runtime
+path. Endpoint and pidfile operations borrow those inputs through
+`ServiceEndpoints.from_boot`; each original lookup reads the same live view.
+The work and logging database factory calls `db_config_from_boot` at each
+handle creation and retains the entry's gate and lazy machine host reader.
+Schema checks, health-before-pool ordering and shutdown stay at their original
+boundaries. Business-specific configuration slices keep their existing readers.

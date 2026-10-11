@@ -33,6 +33,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 from base.packages.extensions import install_registry as reg
 from base.paths import ava_home
 from cli.commands.extensions.skills_sync import _Source
@@ -53,6 +55,8 @@ def cmd_skill_install(
     accept_risk: bool = False,
     update_mode: str | None = None,
     check_every: str | None = None,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentity,
 ) -> int:
     """`ava skill install <git-url-or-local-path> [--ref REF] [--path SUBDIR]
     [--accept-risk] [--update-mode auto|notify|off] [--check-every DUR]` —
@@ -102,6 +106,8 @@ def cmd_skill_install(
                 accept_risk=accept_risk,
                 update_mode=update_mode,
                 check_every=interval,
+                database_factory=database_factory,
+                machine=machine,
             )
         except SkillScanRefused as e:
             print("[ava skill install] security scan found critical patterns:", file=sys.stderr)

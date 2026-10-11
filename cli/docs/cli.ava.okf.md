@@ -1,7 +1,7 @@
 ---
 type: doc
 title: CLI
-description: '`ava init` records a home''s identity once; `ava start` owns native provisioning and root-owned readiness; argparse dispatches lifecycle operations to cli/commands/.'
+description: 'Settings-free syntax and home admission dispatch lifecycle and operator commands.'
 tags:
 - gateway
 - tool
@@ -17,6 +17,7 @@ aliases. Parsing preserves caller-owned children. Agents/notices
 and impersonation builders live in `cli.commands.agents`, extensions in
 `cli.commands.extensions.parsers`, others in `cli/parsers/`. Adapters lazy-import
 `cmd_*` at dispatch; `pyproject.toml` installs `.venv/bin/ava` via `uv sync`.
+Operator inputs are described in [[cli/database/docs/database.ava.okf.md]].
 
 ## Top-Level Commands
 
@@ -86,9 +87,7 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 
 ## Entry Points
 
-- `cli/main.py:main()` — dispatch; `cli.parsers` — `build_parser` for construction, `parse_args` for syntax, `command_options` for documentation.
-- `cli/init_intent.py:run_init()` — the first-start inputs; `cli/start_intent.py:run_start()` — start admission and the full home lifecycle lock; `cli/start_identity.py` — durable initialization journal and the start gate (`require_initialized`); `cli/unit_join.py` — a runner's gateway join.
-- `cli/commands/cluster/home.py` — `destroy` (confirmed at a terminal), exact cleanup before marking the home detached; `start.py` / `status.py` / `data_plane/cluster_instance.py` — runtime operations.
+See [[entry.ava.okf.md|fresh executable and embedded entry points]].
 
 ## Notes
 

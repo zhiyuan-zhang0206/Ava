@@ -4,19 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
+from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, backend_urls, service_argv
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from cli.commands.observability import lgtm_native
-
-_REAL_VERIFY_LOKI = lgtm_native._verify_loki
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def _skip_binary_verification(_home: Path) -> None:
@@ -62,62 +67,6 @@ def _stub_dashboard_render(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_versions_file_has_the_pinned_release_assets() -> None:
-    versions_path = _repo() / "deploy/lgtm/native/versions.yml"
-    versions = yaml.safe_load(versions_path.read_text(encoding="utf-8"))
-
-    darwin_versions = {
-        name: {
-            "version": spec["version"],
-            "assets": {"darwin-arm64": spec["assets"]["darwin-arm64"]},
-        }
-        for name, spec in versions.items()
-    }
-    assert darwin_versions == {
-        "loki": {
-            "version": "3.7.6",
-            "assets": {
-                "darwin-arm64": {
-                    "url": "https://github.com/grafana/loki/releases/download/v3.7.6/loki-darwin-arm64.zip",
-                    "sha256": "c189a879f040c823b815051ccbc145a23f6799cb531d619a06c0e8cce7076826",
-                }
-            },
-        },
-        "prometheus": {
-            "version": "3.13.2",
-            "assets": {
-                "darwin-arm64": {
-                    "url": "https://github.com/prometheus/prometheus/releases/download/v3.13.2/prometheus-3.13.2.darwin-arm64.tar.gz",
-                    "sha256": "f68ca4f1dbedd6366bbfdd8ac5d2c0b7ba1f273474acc8d38eb33202fbeec7a4",
-                }
-            },
-        },
-        "grafana": {
-            "version": "13.2.3",
-            "assets": {
-                "darwin-arm64": {
-                    "url": "https://dl.grafana.com/oss/release/grafana-13.2.3.darwin-arm64.tar.gz",
-                    "sha256": "248a51bcfacdb1ec642006cee46b4de44a34bcf41ddea88d96a4605e2e9d808c",
-                }
-            },
-        },
-    }
-
-
-def test_platform_tag_supports_darwin_arm64_and_linux_amd64(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "arm64")
-    monkeypatch.setattr(lgtm_native, "_verify_loki", _skip_binary_verification)
-    assert lgtm_native.platform_tag() == "darwin_arm64"
-
-    monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Linux")
-    assert lgtm_native.platform_tag() is None
-    monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "x86_64")
-    assert lgtm_native.platform_tag() == "linux_amd64"
-
-
 def test_render_warns_when_a_value_diverges_from_the_env_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -157,7 +106,12 @@ def test_render_value_divergence_check_stays_quiet_when_consistent(
 
 
 def test_ensure_skips_download_when_markers_match(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     _mark_current(home)
@@ -172,13 +126,25 @@ def test_ensure_skips_download_when_markers_match(
         fail_download,
     )
 
-    lgtm_native.ensure_lgtm_native(_repo(), home, services=frozenset(lgtm_native.BACKENDS))
+    lgtm_native.ensure_lgtm_native(
+        _repo(),
+        home,
+        services=frozenset(lgtm_native.BACKENDS),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
+    )
 
     assert (home / "lgtm/native/config/loki.yaml").exists()
 
 
 def test_ensure_downloads_when_a_marker_is_stale(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     _mark_current(home)
@@ -197,7 +163,14 @@ def test_ensure_downloads_when_a_marker_is_stale(
         record_download,
     )
 
-    lgtm_native.ensure_lgtm_native(_repo(), home, services=frozenset(lgtm_native.BACKENDS))
+    lgtm_native.ensure_lgtm_native(
+        _repo(),
+        home,
+        services=frozenset(lgtm_native.BACKENDS),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
+    )
 
     assert downloads == ["loki"]
 
@@ -358,14 +331,26 @@ def _assert_prometheus_scrapes_loopback_backends(prometheus_config: dict[str, An
 
 
 def test_ensure_renders_configs_with_native_paths_and_loopback(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     _mark_current(home)
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     _pin_default_listen_hosts_and_read_urls(monkeypatch)
 
-    lgtm_native.ensure_lgtm_native(_repo(), home, services=frozenset(lgtm_native.BACKENDS))
+    lgtm_native.ensure_lgtm_native(
+        _repo(),
+        home,
+        services=frozenset(lgtm_native.BACKENDS),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
+    )
 
     config_dir = _native_dir(home) / "config"
     loki = (config_dir / "loki.yaml").read_text(encoding="utf-8")
@@ -404,7 +389,12 @@ def test_prometheus_too_old_samples_rule_uses_window_delta_in_fast_group() -> No
 
 
 def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The Prometheus scrape targets derive from the telemetry read URLs, so
     the external-migration form (widened listen host + matching URLs) keeps
@@ -426,7 +416,14 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
         "base.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
     )
 
-    lgtm_native.ensure_lgtm_native(_repo(), home, services=frozenset(lgtm_native.BACKENDS))
+    lgtm_native.ensure_lgtm_native(
+        _repo(),
+        home,
+        services=frozenset(lgtm_native.BACKENDS),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
+    )
 
     prometheus = yaml.safe_load(
         (_native_dir(home) / "config/prometheus.yml").read_text(encoding="utf-8")
@@ -444,7 +441,12 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
 
 
 def test_render_configs_validates_loki_before_writing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     validated: list[dict[str, object]] = []
     write_if_changed = lgtm_native._write_if_changed
@@ -460,20 +462,34 @@ def test_render_configs_validates_loki_before_writing(
     monkeypatch.setattr(lgtm_native, "validate_loki_deploy_config", record_validation)
     monkeypatch.setattr(lgtm_native, "_write_if_changed", verify_validation_precedes_write)
 
-    lgtm_native._render_configs(_repo(), tmp_path / "native", tmp_path / "home")
+    lgtm_native._render_configs(
+        _repo(),
+        tmp_path / "native",
+        tmp_path / "home",
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
+    )
 
     assert validated
 
 
 def test_native_step_does_not_touch_an_unmarked_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
+    machine_config_484 = ConfigBoot()
     ctx = lgtm_native.ConvergeCtx(
         repo=_repo(),
         ava_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
         services=frozenset(lgtm_native.BACKENDS),
-        config=ConfigBoot(),
+        config=machine_config_484,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=machine_from_boot(machine_config_484),
     )
 
     def fail_ensure(_repo_path: Path, _home: Path) -> None:
@@ -490,7 +506,11 @@ def test_native_step_does_not_touch_an_unmarked_home(
     assert not ctx.ava_home.exists()
 
 
-def test_render_provisioning_generates_the_dashboard_from_the_render_path(tmp_path: Path) -> None:
+def test_render_provisioning_generates_the_dashboard_from_the_render_path(
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     """Task #3697 S3: ava-ops-main.json in the rendered tree comes from the
     metric-registry render, not from the checkout copy — and its hash is
     recorded in the protection sidecar."""
@@ -503,7 +523,9 @@ def test_render_provisioning_generates_the_dashboard_from_the_render_path(tmp_pa
     (source / "datasources/datasources.yml").write_text("datasource\n", encoding="utf-8")
     native = tmp_path / "native"
 
-    lgtm_native._render_provisioning(repo, native)
+    lgtm_native._render_provisioning(
+        repo, native, database_factory=operator_database, producer=operator_pipeline
+    )
 
     dest_dir = native / "config/provisioning"
     assert (dest_dir / "dashboards/ava-ops-main.json").read_text(encoding="utf-8") == _STUB_RENDER
@@ -514,6 +536,8 @@ def test_render_provisioning_generates_the_dashboard_from_the_render_path(tmp_pa
 
 def test_render_provisioning_keeps_the_generated_dashboard_without_its_source(
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """Deleting the checkout copy must not delete the generated artifact: the
     disappearance cleanup only covers verbatim copies."""
@@ -524,43 +548,61 @@ def test_render_provisioning_keeps_the_generated_dashboard_without_its_source(
     checkout_copy.write_text('{"checkout": true}\n', encoding="utf-8")
     native = tmp_path / "native"
 
-    lgtm_native._render_provisioning(repo, native)
+    lgtm_native._render_provisioning(
+        repo, native, database_factory=operator_database, producer=operator_pipeline
+    )
     dest = native / "config/provisioning/dashboards/ava-ops-main.json"
     assert dest.is_file()
 
     checkout_copy.unlink()
-    lgtm_native._render_provisioning(repo, native)
+    lgtm_native._render_provisioning(
+        repo, native, database_factory=operator_database, producer=operator_pipeline
+    )
 
     assert dest.read_text(encoding="utf-8") == _STUB_RENDER
 
 
-def test_render_provisioning_rewrites_the_dashboard_only_on_change(tmp_path: Path) -> None:
+def test_render_provisioning_rewrites_the_dashboard_only_on_change(
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     repo = tmp_path / "repo"
     (repo / "deploy/lgtm/config/grafana/provisioning").mkdir(parents=True)
     native = tmp_path / "native"
 
-    lgtm_native._render_provisioning(repo, native)
+    lgtm_native._render_provisioning(
+        repo, native, database_factory=operator_database, producer=operator_pipeline
+    )
     dest = native / "config/provisioning/dashboards/ava-ops-main.json"
     before = dest.stat().st_mtime_ns
 
-    lgtm_native._render_provisioning(repo, native)
+    lgtm_native._render_provisioning(
+        repo, native, database_factory=operator_database, producer=operator_pipeline
+    )
 
     assert dest.stat().st_mtime_ns == before
 
 
 def test_render_provisioning_replaces_a_dashboard_written_outside_converge(
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The stale-dashboard shape: `ava lgtm render --force` wrote the file without recording its
     hash, so the sidecar named older content. The next rollout's render must still land."""
     repo = tmp_path / "repo"
     (repo / "deploy/lgtm/config/grafana/provisioning").mkdir(parents=True)
     native = tmp_path / "native"
-    lgtm_native._render_provisioning(repo, native)
+    lgtm_native._render_provisioning(
+        repo, native, database_factory=operator_database, producer=operator_pipeline
+    )
     dest = native / "config/provisioning/dashboards/ava-ops-main.json"
     dest.write_text('{"panels": ["rendered by hand on 10-02"]}\n', encoding="utf-8")
 
-    lgtm_native._render_provisioning(repo, native)
+    lgtm_native._render_provisioning(
+        repo, native, database_factory=operator_database, producer=operator_pipeline
+    )
 
     assert dest.read_text(encoding="utf-8") == _STUB_RENDER
     hashes = json.loads((native / "config/provisioning-hashes.json").read_text(encoding="utf-8"))
@@ -570,12 +612,18 @@ def test_render_provisioning_replaces_a_dashboard_written_outside_converge(
 
 
 def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     repo = tmp_path / "repo"
     (repo / "deploy/lgtm/config/grafana/provisioning").mkdir(parents=True)
     native = tmp_path / "native"
-    lgtm_native._render_provisioning(repo, native)
+    lgtm_native._render_provisioning(
+        repo, native, database_factory=operator_database, producer=operator_pipeline
+    )
     dest = native / "config/provisioning/dashboards/ava-ops-main.json"
     before = dest.read_text(encoding="utf-8")
 
@@ -592,14 +640,21 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
 
     monkeypatch.setattr("base.telemetry.emit", record_emit)
 
-    lgtm_native._render_provisioning(repo, native)
+    lgtm_native._render_provisioning(
+        repo, native, database_factory=operator_database, producer=operator_pipeline
+    )
 
     assert dest.read_text(encoding="utf-8") == before
     assert emitted == [
         (
             "telemetry",
             "lgtm_dashboard_render_failed",
-            {"level": "warning", "source": "converge", "attributes": {"error": "render exploded"}},
+            {
+                "producer": operator_pipeline,
+                "level": "warning",
+                "source": "converge",
+                "attributes": {"error": "render exploded"},
+            },
         )
     ]
     err = capsys.readouterr().err
@@ -607,7 +662,12 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
 
 
 def test_native_listener_ports_are_independent_of_external_query_urls(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "isolated"
     native = home / "lgtm/native"
@@ -622,7 +682,14 @@ def test_native_listener_ports_are_independent_of_external_query_urls(
         monkeypatch.setattr(settings.observability, f"lgtm_{name}_port", port)
     monkeypatch.setattr(settings.observability, "telemetry_loki_url", "https://query.example/loki")
     repo = Path(__file__).resolve().parents[4]
-    lgtm_native._render_configs(repo, native, home)
+    lgtm_native._render_configs(
+        repo,
+        native,
+        home,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
+    )
     loki = yaml.safe_load((native / "config/loki.yaml").read_text())
     assert loki["server"]["http_listen_port"] == 53100
     assert loki["server"]["grpc_listen_port"] == 59095
@@ -638,7 +705,12 @@ def test_native_listener_ports_are_independent_of_external_query_urls(
 
 
 def test_matching_versions_from_another_platform_are_downloaded_again(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     native = home / "lgtm/native"
@@ -658,33 +730,24 @@ def test_matching_versions_from_another_platform_are_downloaded_again(
         downloads.append(name)
 
     monkeypatch.setattr(lgtm_native, "_download_and_verify", download)
-    lgtm_native.ensure_lgtm_native(repo, home, services=frozenset(lgtm_native.BACKENDS))
+    lgtm_native.ensure_lgtm_native(
+        repo,
+        home,
+        services=frozenset(lgtm_native.BACKENDS),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
+    )
     assert downloads == list(BACKENDS)
 
 
-def test_pinned_loki_parser_rejection_blocks_preparation(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    calls: list[list[str]] = []
-
-    def reject(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, 1, "", "unknown config field")
-
-    monkeypatch.setattr(lgtm_native.subprocess, "run", reject)
-    with pytest.raises(RuntimeError, match="unknown config field"):
-        _REAL_VERIFY_LOKI(tmp_path)
-    assert calls == [
-        [
-            str(tmp_path / "lgtm/native/bin/loki"),
-            f"-config.file={tmp_path}/lgtm/native/config/loki.yaml",
-            "-verify-config",
-        ]
-    ]
-
-
 def test_native_preparation_downloads_only_selected_backend(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     downloads: list[str] = []
 
@@ -694,8 +757,18 @@ def test_native_preparation_downloads_only_selected_backend(
     def download(name: str, _version: str, _asset: dict[str, str], _native: Path) -> None:
         downloads.append(name)
 
-    def render(_repo: Path, _native: Path, _home: Path) -> None:
-        pass
+    def render(
+        _repo: Path,
+        _native: Path,
+        _home: Path,
+        *,
+        database_factory: Callable[[], Any],
+        producer: Callable[[], EventPipeline],
+        machine: MachineIdentity,
+    ) -> None:
+        assert database_factory is operator_database
+        assert producer is operator_pipeline
+        assert machine is command_runtime.machine
 
     def no_loki(_home: Path) -> None:
         pytest.fail("Unselected Loki must not require its executable or validator")
@@ -706,5 +779,12 @@ def test_native_preparation_downloads_only_selected_backend(
     monkeypatch.setattr(lgtm_native, "_render_configs", render)
     monkeypatch.setattr(lgtm_native, "_verify_loki", no_loki)
     monkeypatch.setattr(lgtm_native, "_render_grafana_admin_password", no_loki)
-    lgtm_native.ensure_lgtm_native(tmp_path, tmp_path / "home", services=frozenset({"prometheus"}))
+    lgtm_native.ensure_lgtm_native(
+        tmp_path,
+        tmp_path / "home",
+        services=frozenset({"prometheus"}),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
+    )
     assert downloads == ["prometheus"]

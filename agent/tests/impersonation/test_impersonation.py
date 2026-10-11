@@ -1,6 +1,6 @@
 """Takeover barriers: consent, resource closure, checkpoint ordering and replay."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,16 +8,14 @@ from typing import Annotated, Any
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock
 from uuid import uuid4
 
-import psycopg
 import pytest
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
-from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 
-from agent import impersonation
+from agent import impersonation, impersonation_process
 from agent.graph.exec._result import lifecycle_exception_from_name
 from agent.graph.exec.protocol import read_request, write_request
 from agent.state import BaseAgentState
@@ -27,12 +25,12 @@ from base.agents.impersonation.notes import HandoffNotes
 from base.agents.lifecycle import AgentImpersonation
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
 from base.clock import Clock, clock_config_from_boot
+from base.cluster.machine import MachineIdentity
 from base.config import settings
-from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.fixtures.configuration import snapshot_process_config
@@ -53,11 +51,13 @@ def gate_ctx(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> AvaContext:
     config = snapshot_process_config()
     return AvaContext(
         db=database,
         bus=event_bus,
+        machine=machine_identity,
         relays=relays,
         catalog=build_model_catalog(),
         clock_factory=lambda: Clock(clock_config_from_boot(config)),
@@ -105,7 +105,11 @@ def _session(status: str = "active", **values: Any) -> dict[str, Any]:
 
 @pytest.mark.parametrize("status", ["accepted", "active", "released", "expired"])
 async def test_hold_ends_before_claim_or_compaction(
-    monkeypatch: pytest.MonkeyPatch, status: str, gate_ctx: AvaContext
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    gate_ctx: AvaContext,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=_session(status)))
     decision = await impersonation.claim_gate(BaseAgentState(), 42, gate_ctx)
@@ -115,7 +119,7 @@ async def test_hold_ends_before_claim_or_compaction(
     guarded = impersonation.protect_native_hooks(hook)
     result = await guarded(
         BaseAgentState(),
-        placeholder_runtime(),
+        placeholder_runtime(database_gate=database_gate),
         {"configurable": {"thread_id": "42"}},
     )
     assert result.goto == END
@@ -128,6 +132,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     def add(left: int, right: int) -> int:
         return left + right
@@ -167,6 +172,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
             incarnation=incarnation,
             resources=None,
             notes=_notes(),
+            read_local_machine=machine_identity.name,
         )
     assert (await graph.aget_state(config)).values["counter"] == 3
     receipt.side_effect = None
@@ -179,6 +185,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
         incarnation=incarnation,
         resources=None,
         notes=_notes(),
+        read_local_machine=machine_identity.name,
     )
     assert (await graph.aget_state(config)).values["counter"] == 3
     assert receipt.call_count == 2
@@ -187,6 +194,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
 def test_accept_stops_exec_and_uses_captured_incarnation(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
+    machine_identity: MachineIdentity,
 ) -> None:
     from ava.impersonation import accept
 
@@ -196,7 +204,13 @@ def test_accept_stops_exec_and_uses_captured_incarnation(
     with pytest.raises(AgentImpersonation):
         accept("lease-1", "Hand the task to the external session.")
     accepted.assert_called_once_with(
-        ANY, ANY, "lease-1", 42, incarnation, "Hand the task to the external session."
+        ANY,
+        ANY,
+        "lease-1",
+        42,
+        incarnation,
+        "Hand the task to the external session.",
+        local_machine=machine_identity.name(),
     )
     assert isinstance(lifecycle_exception_from_name("AgentImpersonation"), AgentImpersonation)
 
@@ -214,135 +228,6 @@ def test_exec_envelope_carries_parent_incarnation(
         incarnation=incarnation,
     )
     assert read_request(path).incarnation == incarnation
-
-
-async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
-    from agent.db import claim_inbound_batch
-    from tests.fixtures.units import spawn_agent
-
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
-    for kind in ("chat", "compact_request", "cancel"):
-        db_conn.execute(
-            "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'wait',%s,'user')",
-            (agent_id, kind),
-        )
-    db_conn.commit()
-    batch = await claim_inbound_batch(
-        aops_pool, agent_id, lifecycle_only=True, incarnation=None, work=None
-    )
-    assert batch == []
-    assert db_conn.execute(
-        "SELECT kind FROM inbound_messages WHERE agent_id=%s AND status='pending' ORDER BY kind",
-        (agent_id,),
-    ).fetchall() == [("cancel",), ("chat",), ("compact_request",)]
-    db_conn.commit()
-    assert not await impersonation.lifecycle_ready(aops_pool, agent_id)
-    # If the external holder never acknowledges cancellation, the ordinary
-    # native claim after release/expiry still receives the durable request.
-    resumed = await claim_inbound_batch(aops_pool, agent_id, incarnation=None, work=None)
-    assert {item.kind for item in resumed} == {"cancel", "chat", "compact_request"}
-    assert db_conn.execute(
-        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='cancel'",
-        (agent_id,),
-    ).fetchone() == ("done",)
-
-
-@pytest.mark.parametrize("kind", ["restart", "terminate"])
-async def test_control_claim_records_superseded_accepted_intent(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    kind: str,
-    database: Database,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
-
-    from agent.db import claim_inbound_batch
-    from agent.ownership.hosted import admit_hosted_runtime
-    from base.cluster.machine import machine_name
-    from tests.fixtures.units import spawn_agent
-
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
-    owner = await admit_hosted_runtime(
-        aops_pool,
-        agent_id,
-        machine_name(),
-        uuid4(),
-        expected_from="idling",
-        db=database,
-    )
-    assert owner is not None
-    db_conn.execute(
-        "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'',%s,'user')",
-        (agent_id, kind),
-    )
-    db_conn.commit()
-    accepted = await claim_inbound_batch(
-        aops_pool, agent_id, lifecycle_only=True, incarnation=owner, work=None
-    )
-    assert len(accepted) == 1 and accepted[0].durable_lifecycle
-    replacement = RuntimeIncarnation(agent_id, uuid4(), uuid4())
-    db_conn.execute(
-        "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s WHERE id=%s",
-        (replacement.generation, replacement.owner, agent_id),
-    )
-    db_conn.commit()
-    assert (
-        await claim_inbound_batch(
-            aops_pool, agent_id, lifecycle_only=True, incarnation=replacement, work=None
-        )
-        == []
-    )
-    assert db_conn.execute(
-        "SELECT status,applied_at,target_generation,target_owner,payload->'lifecycle_result' "
-        "FROM inbound_messages WHERE agent_id=%s AND kind=%s",
-        (agent_id, kind),
-    ).fetchone() == (
-        "done",
-        None,
-        owner.generation,
-        owner.owner,
-        {"outcome": "superseded", "reason": "target_replaced"},
-    )
-    assert db_conn.execute(
-        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (None,)
-
-
-@pytest.mark.parametrize("kind", ["restart", "terminate"])
-async def test_control_claim_preserves_unaccepted_intent(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    kind: str,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
-    from agent.db import claim_inbound_batch
-    from tests.fixtures.units import spawn_agent
-
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
-    db_conn.execute(
-        "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'',%s,'user')",
-        (agent_id, kind),
-    )
-    db_conn.commit()
-    with pytest.raises(RuntimeError, match="lifecycle claim requires an admitted"):
-        await claim_inbound_batch(
-            aops_pool, agent_id, lifecycle_only=True, incarnation=None, work=None
-        )
-    assert db_conn.execute(
-        "SELECT status,claimed_at,payload->'lifecycle_result' "
-        "FROM inbound_messages WHERE agent_id=%s",
-        (agent_id,),
-    ).fetchone() == ("pending", None, None)
 
 
 # ── Relay establishment gate and supervision ────────────────────────────────
@@ -371,6 +256,7 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(
         impersonation, "native_status", AsyncMock(return_value=_relay_session("accepted"))
@@ -380,7 +266,7 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
     checkpoint = AsyncMock()
     monkeypatch.setattr("agent.impersonation_handoff.ensure_start_marker", checkpoint)
 
-    def refused(*_args: object) -> bool:
+    def refused(*_args: object, read_local_machine: Callable[[], str]) -> bool:
         return False
 
     monkeypatch.setattr(impersonation, "establish_relay", refused)
@@ -393,6 +279,7 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
         incarnation=incarnation,
         resources=None,
         notes=_notes(),
+        read_local_machine=machine_identity.name,
     )
     activate.assert_not_called()
     checkpoint.assert_awaited_once()
@@ -404,6 +291,7 @@ async def test_settle_checkpoint_activates_only_after_relay_ready(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(
         impersonation, "native_status", AsyncMock(return_value=_relay_session("accepted"))
@@ -423,6 +311,7 @@ async def test_settle_checkpoint_activates_only_after_relay_ready(
         incarnation=incarnation,
         resources=None,
         notes=_notes(),
+        read_local_machine=machine_identity.name,
     )
     checkpoint.assert_awaited_once()
     establish.assert_called_once()
@@ -437,6 +326,7 @@ def test_establish_relay_session_relay_requires_a_fresh_heartbeat(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     from datetime import UTC, datetime, timedelta
 
@@ -445,11 +335,31 @@ def test_establish_relay_session_relay_requires_a_fresh_heartbeat(
     stale = _relay_session(
         "accepted", provider=provider, relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5)
     )
-    assert impersonation.establish_relay(database, event_bus, stale, incarnation, relays) is False
+    assert (
+        impersonation.establish_relay(
+            database,
+            event_bus,
+            stale,
+            incarnation,
+            relays,
+            read_local_machine=machine_identity.name,
+        )
+        is False
+    )
     fail.assert_called_once()
     fail.reset_mock()
     fresh = _relay_session("accepted", provider=provider, relay_heartbeat_at=datetime.now(UTC))
-    assert impersonation.establish_relay(database, event_bus, fresh, incarnation, relays) is True
+    assert (
+        impersonation.establish_relay(
+            database,
+            event_bus,
+            fresh,
+            incarnation,
+            relays,
+            read_local_machine=machine_identity.name,
+        )
+        is True
+    )
     fail.assert_not_called()
 
 
@@ -459,17 +369,25 @@ def test_establish_relay_codex_provisions_spawns_and_waits_for_heartbeat(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     from datetime import UTC, datetime
 
     provision = Mock(return_value={"relay_generation": 1})
     monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
     spawn = Mock(return_value=MagicMock(poll=Mock(return_value=None)))
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     ready = {"status": "accepted", "relay_heartbeat_at": datetime.now(UTC)}
     monkeypatch.setattr("base.agents.impersonation.relay_get", Mock(return_value=ready))
     assert (
-        impersonation.establish_relay(database, event_bus, _relay_session(), incarnation, relays)
+        impersonation.establish_relay(
+            database,
+            event_bus,
+            _relay_session(),
+            incarnation,
+            relays,
+            read_local_machine=machine_identity.name,
+        )
         is True
     )
     provision.assert_called_once()
@@ -486,6 +404,7 @@ def test_establish_relay_codex_spawn_exit_rolls_back(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     child = MagicMock()
     child.poll.return_value = 5
@@ -493,11 +412,18 @@ def test_establish_relay_codex_spawn_exit_rolls_back(
     monkeypatch.setattr(
         "base.agents.impersonation.provision_relay", Mock(return_value={"relay_generation": 1})
     )
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", Mock(return_value=child))
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", Mock(return_value=child))
     fail = Mock()
     monkeypatch.setattr("base.agents.impersonation.fail_acceptance", fail)
     assert (
-        impersonation.establish_relay(database, event_bus, _relay_session(), incarnation, relays)
+        impersonation.establish_relay(
+            database,
+            event_bus,
+            _relay_session(),
+            incarnation,
+            relays,
+            read_local_machine=machine_identity.name,
+        )
         is False
     )
     fail.assert_called_once()
@@ -511,20 +437,28 @@ def test_establish_relay_codex_readiness_timeout_rolls_back(
     database: Database,
     event_bus: EventBus,
     relays: RelaySupervision,
+    machine_identity: MachineIdentity,
 ) -> None:
     child = MagicMock()
     child.poll.return_value = None
     monkeypatch.setattr(
         "base.agents.impersonation.provision_relay", Mock(return_value={"relay_generation": 1})
     )
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", Mock(return_value=child))
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", Mock(return_value=child))
     terminate = Mock()
     monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
     fail = Mock()
     monkeypatch.setattr("base.agents.impersonation.fail_acceptance", fail)
     monkeypatch.setattr(impersonation, "_RELAY_READY_TIMEOUT_S", 0.0)
     assert (
-        impersonation.establish_relay(database, event_bus, _relay_session(), incarnation, relays)
+        impersonation.establish_relay(
+            database,
+            event_bus,
+            _relay_session(),
+            incarnation,
+            relays,
+            read_local_machine=machine_identity.name,
+        )
         is False
     )
     terminate.assert_called_once()
@@ -546,12 +480,20 @@ async def test_missing_snapshot_cannot_kill_a_replacement_relay(
     conn.execute.return_value.fetchone.return_value = ("active",)
     db = MagicMock()
     db.connect.return_value.__enter__.return_value = conn
+    read_local_machine = Mock(side_effect=AssertionError("identity read before admission"))
     terminate = Mock()
     monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
     await impersonation.supervise_relay(
-        db, MagicMock(), None, 42, gate_ctx.relays, incarnation=None
+        db,
+        MagicMock(),
+        None,
+        42,
+        gate_ctx.relays,
+        incarnation=None,
+        read_local_machine=read_local_machine,
     )
     terminate.assert_not_called()
+    read_local_machine.assert_not_called()
     assert gate_ctx.relays.children[42].process is process
 
 
@@ -560,6 +502,7 @@ async def test_delayed_snapshot_cannot_retire_replacement_sender(
     monkeypatch: pytest.MonkeyPatch,
     gate_ctx: AvaContext,
     same_lease: bool,
+    machine_identity: MachineIdentity,
 ) -> None:
     session = _relay_session("active", relay_generation=1)
     process = MagicMock()
@@ -569,7 +512,13 @@ async def test_delayed_snapshot_cannot_retire_replacement_sender(
     terminate = Mock()
     monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
     await impersonation.supervise_relay(
-        MagicMock(), MagicMock(), session, 42, gate_ctx.relays, incarnation=None
+        MagicMock(),
+        MagicMock(),
+        session,
+        42,
+        gate_ctx.relays,
+        incarnation=None,
+        read_local_machine=machine_identity.name,
     )
     terminate.assert_not_called()
     assert gate_ctx.relays.children[42].process is process
@@ -603,7 +552,7 @@ async def test_claim_gate_recovers_stale_delivery_and_keeps_native_parked(
     monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
     new = MagicMock()
     spawn = Mock(return_value=new)
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     abort = Mock()
     monkeypatch.setattr("base.agents.impersonation.abort_lease", abort)
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
@@ -654,7 +603,7 @@ async def test_confirmed_child_exit_bypasses_fresh_heartbeat_and_startup_grace(
     monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
     new = MagicMock()
     spawn = Mock(return_value=new)
-    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     assert decision is not None and decision.goto == END
     assert provision.call_args.kwargs == {"expected_generation": 1}

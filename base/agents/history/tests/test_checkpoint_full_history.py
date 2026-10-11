@@ -22,10 +22,11 @@ from base.agents.history.checkpoint import (
 from base.agents.history.closing_request import ClosingRequest
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 
 
-def _db() -> Database:
-    return Database.from_settings()
+def _db(database_gate: ProcessDbGate) -> Database:
+    return Database.from_settings(gate=database_gate)
 
 
 def test_compact_boundary_lookup_uses_a_closed_autocommit_pool() -> None:
@@ -102,11 +103,13 @@ def _contents(messages: Sequence[BaseMessage]) -> list[str]:
     return [str(cast(object, cast(Any, message).content)) for message in messages]
 
 
-def test_load_full_history_returns_empty_without_checkpoint() -> None:
-    assert load_checkpoint_messages_full(_db(), 1) == []
+def test_load_full_history_returns_empty_without_checkpoint(database_gate: ProcessDbGate) -> None:
+    assert load_checkpoint_messages_full(_db(database_gate=database_gate), 1) == []
 
 
-def test_load_full_history_matches_latest_without_compaction(db_conn: psycopg.Connection) -> None:
+def test_load_full_history_matches_latest_without_compaction(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
     messages = [
         SystemMessage(content="system"),
         HumanMessage(content="task"),
@@ -114,12 +117,14 @@ def test_load_full_history_matches_latest_without_compaction(db_conn: psycopg.Co
     ]
     _put_checkpoint("2", messages, version="1")
 
-    assert _contents(load_checkpoint_messages_full(_db(), 2)) == _contents(
-        load_checkpoint_messages(_db(), 2)
-    )
+    assert _contents(
+        load_checkpoint_messages_full(_db(database_gate=database_gate), 2)
+    ) == _contents(load_checkpoint_messages(_db(database_gate=database_gate), 2))
 
 
-def test_load_full_history_stitches_compaction_segments(db_conn: psycopg.Connection) -> None:
+def test_load_full_history_stitches_compaction_segments(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
     first = [
         SystemMessage(content="system"),
         HumanMessage(content="original task"),
@@ -139,7 +144,7 @@ def test_load_full_history_stitches_compaction_segments(db_conn: psycopg.Connect
     ]
     _put_checkpoint("3", latest, version="2")
 
-    assert _contents(load_checkpoint_messages_full(_db(), 3)) == [
+    assert _contents(load_checkpoint_messages_full(_db(database_gate=database_gate), 3)) == [
         "system",
         "original task",
         "original answer",
@@ -149,7 +154,9 @@ def test_load_full_history_stitches_compaction_segments(db_conn: psycopg.Connect
     ]
 
 
-def test_load_full_history_stitches_multiple_compactions(db_conn: psycopg.Connection) -> None:
+def test_load_full_history_stitches_multiple_compactions(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
     _put_checkpoint(
         "5",
         [SystemMessage(content="system"), HumanMessage(content="first task")],
@@ -176,7 +183,7 @@ def test_load_full_history_stitches_multiple_compactions(db_conn: psycopg.Connec
         version="3",
     )
 
-    assert _contents(load_checkpoint_messages_full(_db(), 5)) == [
+    assert _contents(load_checkpoint_messages_full(_db(database_gate=database_gate), 5)) == [
         "system",
         "first task",
         "first summary",
@@ -186,7 +193,9 @@ def test_load_full_history_stitches_multiple_compactions(db_conn: psycopg.Connec
     ]
 
 
-def test_load_full_history_does_not_repeat_latest_boundary(db_conn: psycopg.Connection) -> None:
+def test_load_full_history_does_not_repeat_latest_boundary(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
     messages = [
         SystemMessage(content="system"),
         HumanMessage(content="task"),
@@ -199,10 +208,14 @@ def test_load_full_history_does_not_repeat_latest_boundary(db_conn: psycopg.Conn
         version="1",
     )
 
-    assert _contents(load_checkpoint_messages_full(_db(), 6)) == _contents(messages)
+    assert _contents(
+        load_checkpoint_messages_full(_db(database_gate=database_gate), 6)
+    ) == _contents(messages)
 
 
-def test_load_full_history_keeps_session_notes_and_summary(db_conn: psycopg.Connection) -> None:
+def test_load_full_history_keeps_session_notes_and_summary(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
     _put_checkpoint(
         "4",
         [
@@ -225,7 +238,7 @@ def test_load_full_history_keeps_session_notes_and_summary(db_conn: psycopg.Conn
         version="2",
     )
 
-    assert _contents(load_checkpoint_messages_full(_db(), 4)) == [
+    assert _contents(load_checkpoint_messages_full(_db(database_gate=database_gate), 4)) == [
         "system",
         "original task",
         "original answer",
@@ -237,7 +250,7 @@ def test_load_full_history_keeps_session_notes_and_summary(db_conn: psycopg.Conn
 
 
 def test_load_checkpoint_messages_segment_resolves_exact_boundary_id(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
     older_id = _put_checkpoint(
         "7",
@@ -261,20 +274,34 @@ def test_load_checkpoint_messages_segment_resolves_exact_boundary_id(
         version="3",
     )
 
-    assert list_compact_boundary_checkpoint_ids(_db(), 7) == [newer_id, older_id]
-    assert list_compact_boundary_checkpoint_ids(_db(), 7, limit=1) == [newer_id]
-    assert _contents(load_checkpoint_messages_segment(_db(), 7, newer_id)) == [
+    assert list_compact_boundary_checkpoint_ids(_db(database_gate=database_gate), 7) == [
+        newer_id,
+        older_id,
+    ]
+    assert list_compact_boundary_checkpoint_ids(_db(database_gate=database_gate), 7, limit=1) == [
+        newer_id
+    ]
+    assert _contents(
+        load_checkpoint_messages_segment(_db(database_gate=database_gate), 7, newer_id)
+    ) == [
         "newer summary",
         "newer segment",
     ]
-    assert _contents(load_checkpoint_messages_segment(_db(), 7, older_id)) == ["older segment"]
-    assert load_checkpoint_messages_segment(_db(), 7, current_id) == []
-    assert load_checkpoint_messages_segment(_db(), 7, "00000000-0000-0000-0000-000000000000") == []
-    assert load_checkpoint_message_count(_db(), 7) == 2
+    assert _contents(
+        load_checkpoint_messages_segment(_db(database_gate=database_gate), 7, older_id)
+    ) == ["older segment"]
+    assert load_checkpoint_messages_segment(_db(database_gate=database_gate), 7, current_id) == []
+    assert (
+        load_checkpoint_messages_segment(
+            _db(database_gate=database_gate), 7, "00000000-0000-0000-0000-000000000000"
+        )
+        == []
+    )
+    assert load_checkpoint_message_count(_db(database_gate=database_gate), 7) == 2
 
 
 def test_load_checkpoint_messages_segment_returns_empty_without_boundaries(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
     latest_id = _put_checkpoint(
         "8",
@@ -282,14 +309,14 @@ def test_load_checkpoint_messages_segment_returns_empty_without_boundaries(
         version="1",
     )
 
-    assert list_compact_boundary_checkpoint_ids(_db(), 8) == []
-    assert load_checkpoint_messages_segment(_db(), 8, latest_id) == []
-    assert load_checkpoint_message_count(_db(), 8) == 2
-    assert load_checkpoint_message_count(_db(), 9) == 0
+    assert list_compact_boundary_checkpoint_ids(_db(database_gate=database_gate), 8) == []
+    assert load_checkpoint_messages_segment(_db(database_gate=database_gate), 8, latest_id) == []
+    assert load_checkpoint_message_count(_db(database_gate=database_gate), 8) == 2
+    assert load_checkpoint_message_count(_db(database_gate=database_gate), 9) == 0
 
 
 def test_history_layout_records_each_segments_own_head_and_body_start(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
     """The stitched list drops the joins' SystemMessages; the layout keeps them."""
     _put_checkpoint(
@@ -314,7 +341,7 @@ def test_history_layout_records_each_segments_own_head_and_body_start(
         version="3",
     )
 
-    history = load_checkpoint_history_full(_db(), 7)
+    history = load_checkpoint_history_full(_db(database_gate=database_gate), 7)
 
     assert _contents(history.messages) == [
         "system-1",
@@ -333,20 +360,22 @@ def test_history_layout_records_each_segments_own_head_and_body_start(
 
 
 def test_history_layout_of_a_single_snapshot_and_of_no_checkpoint(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
-    assert load_checkpoint_history_full(_db(), 8).segment_starts == ()
+    assert load_checkpoint_history_full(_db(database_gate=database_gate), 8).segment_starts == ()
     _put_checkpoint(
         "8", [SystemMessage(content="system"), HumanMessage(content="task")], version="1"
     )
 
-    history = load_checkpoint_history_full(_db(), 8)
+    history = load_checkpoint_history_full(_db(database_gate=database_gate), 8)
 
     assert history.segment_starts == (1,)
     assert [head.content if head else None for head in history.segment_heads] == ["system"]
 
 
-def test_history_carries_each_sealed_segments_closing_request(db_conn: psycopg.Connection) -> None:
+def test_history_carries_each_sealed_segments_closing_request(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
     """A boundary's `compact_anchor` metadata comes back per segment; a boundary without one
     (every compaction before the anchor existed, every no-LLM compaction) and the open segment
     have None."""
@@ -371,7 +400,7 @@ def test_history_carries_each_sealed_segments_closing_request(db_conn: psycopg.C
     )
     _put_checkpoint("8", [HumanMessage(content="third task")], version="3")
 
-    history = load_checkpoint_history_full(_db(), 8)
+    history = load_checkpoint_history_full(_db(database_gate=database_gate), 8)
 
     assert history.segment_closings == (ClosingRequest(1234, 56, "m1"), None, None)
 

@@ -20,7 +20,6 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.tasks.notes import task_note_line
 from base.cluster import machines
-from base.cluster.machine import machine_name
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
@@ -165,7 +164,7 @@ async def pause_cluster_machine(
     Refuses (400) to pause the gateway's own machine — the gateway host must
     stay a cluster member for the cluster to answer anything.
     """
-    if name == machine_name():
+    if name == request.app.state.machine.name():
         raise HTTPException(
             status_code=400,
             detail=f"refusing to pause this gateway's own machine ({name!r}); the "

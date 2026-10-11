@@ -10,10 +10,14 @@ from uuid import UUID
 
 import pytest
 
+from base.agents.context.clients import DatabaseFactory
 from base.agents.impersonation.status import ImpersonationStatus
 from base.events.live import redis_listener
 from cli.commands.agents import impersonation_adapters as adapters
 from cli.commands.agents import impersonation_relay as relay
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 LEASE_ID = UUID("767fb040-aa54-42ae-b2c8-594039fbbf46")
 
@@ -145,7 +149,7 @@ class Listener:
 def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
     """Serve the fake inbox through the public relay calls `cmd_relay` reads it with."""
 
-    def lease(_db: object, _bus: object, *_args: object) -> dict[str, Any]:
+    def lease(_db: object, _bus: object, *_args: object, local_machine: str) -> dict[str, Any]:
         return {
             "session_id": 0,
             "id": str(LEASE_ID),
@@ -158,7 +162,7 @@ def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
             "start_message": inbox.start_message,
         }
 
-    def rows(_db: object, *_args: object) -> list[dict[str, Any]]:
+    def rows(_db: object, *_args: object, local_machine: str) -> list[dict[str, Any]]:
         return [
             {
                 "id": i,
@@ -174,13 +178,17 @@ def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
     monkeypatch.setattr("base.agents.impersonation.relay_get", lease)
     monkeypatch.setattr("base.agents.impersonation.relay_inbox", rows)
 
-    def beat(_db: object, *_args: object) -> None:
+    def beat(_db: object, *_args: object, local_machine: str) -> None:
         return None
 
     monkeypatch.setattr("base.agents.impersonation.relay_heartbeat", beat)
 
 
-def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_command_passes_remote_to_steer(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: DatabaseFactory,
+    command_runtime: CommandRuntime,
+) -> None:
     from cli.commands.agents import impersonation
     from cli.parsers import build_parser
 
@@ -213,7 +221,7 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
         return listener
 
     def reserve(
-        _db: object, _bus: object, _lease: str, _token: str, ids: list[int]
+        _db: object, _bus: object, _lease: str, _token: str, ids: list[int], *, local_machine: str
     ) -> frozenset[int]:
         for i in ids:
             inbox.messages[i] = replace(inbox.messages[i], delivery_attempts=1, delivery_due=False)
@@ -226,6 +234,8 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
         delivered.append((UUID(thread_id), endpoint))
 
     monkeypatch.setattr(adapters, "live_submit", deliver)
+    args.runtime = command_runtime
+    args.database_factory = operator_database
     assert args.func(args) == 0
     assert delivered == [(THREAD_ID, remote)]
     assert listener.closed
@@ -235,6 +245,8 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
 def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
     monkeypatch: pytest.MonkeyPatch,
     refuse: bool,
+    operator_database: DatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Bound host context and leave failed messages for the native handoff."""
     from cli.commands.agents import impersonation
@@ -266,7 +278,7 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
         return listener
 
     def reserve(
-        _db: object, _bus: object, _lease: str, _token: str, ids: list[int]
+        _db: object, _bus: object, _lease: str, _token: str, ids: list[int], *, local_machine: str
     ) -> frozenset[int]:
         for i in ids:
             inbox.messages[i] = replace(inbox.messages[i], delivery_attempts=1, delivery_due=False)
@@ -283,6 +295,8 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
 
     monkeypatch.setattr(adapters, "live_submit", deliver)
     args.codex_remote = "unix:///tmp/ava-codex.sock"
+    args.runtime = command_runtime
+    args.database_factory = operator_database
     assert args.func(args) == (1 if refuse else 0)
     if refuse:
         assert 5 in inbox.messages

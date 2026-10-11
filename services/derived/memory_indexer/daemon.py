@@ -1,42 +1,16 @@
 """Memory indexer daemon — `watchdog` Observer + Gemini embed + backend upsert.
 
-After startup:
-  1. Cold start: full scan `~/.ava/memory/**/*.md`, diff against the
-     backend index (mtime + content_hash + provider fingerprint), embed
-     missing / changed files, prune deleted entries.
-  2. Start watchdog Observer to monitor fs events, push dirty paths to
-     a queue.
-  3. Main loop drains the queue every second (set dedup), batch
-     embed + upsert / delete.
+Cold-start reconciliation embeds missing or changed Markdown rows and prunes
+removed entries. A watchdog Observer feeds a deduplicated dirty queue; failed
+reconciles retry with bounded backoff. Rows contain a description and body
+chunks, aggregated back to paths by search. Backend changes require restart.
 
-An incomplete reconcile retries on bounded backoff and never needs a restart.
+The gateway checkout refreshes hourly to bound stale indexing after missed
+arbiter refreshes. Failed refreshes log ERROR and retry on the next cycle.
+API key and provider configuration belong to the process configuration owner.
 
-Backed by `AVA_MEMORY_SEARCH_BACKEND` (default `numpy`). Switching
-backends takes a restart; the cold-start scan rebuilds the new index.
-
-Each file indexes as 0-or-1 description row (frontmatter `description`,
-embedded on its own so short entity-bearing lines are not diluted by a
-long body) + N body-chunk rows (~1800 chars each, ~200-char overlap,
-paragraph-boundary aware). The backend's `search_topk` aggregates chunk
-hits back to paths, so search callers see no difference.
-
-API key comes from env `GEMINI_API_KEY`. `~/.ava/.env` is already the
-single source of secrets.
-
-Usage:
-    .venv/bin/python -m services.derived.memory_indexer.daemon
-
-Kept alive by the watchdog via `services.derived.memory_indexer.healthcheck`
-(HTTP /healthz on :8105).
-
-Refresh safety net: once an hour the daemon fast-forwards the gateway
-checkout to origin/main itself. The intended path is the arbiter's
-post-merge `ava memory refresh` (bundled into `ava memory arbiter merge`),
-but when that step is skipped or fails, the checkout — and therefore the
-search index — silently rots (the 2026-06-22 → 2026-08-01 staleness
-incident: 6 weeks of merged notes never searchable). Fetch + fast-forward
-is cheap; when HEAD moves, the fs observer below re-embeds the changed
-files, and a pull failure is logged at ERROR and retried next cycle.
+Run: python -m services.derived.memory_indexer.daemon
+Health: HTTP /healthz on :8105.
 """
 
 from __future__ import annotations
@@ -46,7 +20,6 @@ import logging
 import os
 import queue
 import signal
-import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -58,20 +31,30 @@ import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.deploy.maintenance import admission
 from base.lm.plugin_providers import build_model_catalog
-from base.log import init_gateway_process
-from base.paths import gateway_memory_dir
+from base.log import prepare_process_logging
+from base.log.process import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.paths import ava_home, gateway_memory_dir
+from base.telemetry.delivery.receipts import DrainStatus
+from base.telemetry.emitter import build_pipeline
 from services.derived.memory_indexer import config as indexer_config
 from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.derived.memory_indexer.backends.factory import get_backend
 from services.derived.memory_indexer.backends.probe import probe_backend
+from services.derived.memory_indexer.checkout_refresh import refresh_gateway_checkout
 from services.derived.memory_indexer.chunking import _file_rows
 from services.derived.memory_indexer.config import MemoryIndexerInputs
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
@@ -81,17 +64,18 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.derived.memory_indexer.daemon")
 
 
-def _memory_root() -> Path:
+def _memory_root(*, roles: MachineRoles) -> Path:
     """The consolidated memory checkout this daemon indexes, resolved on use."""
-    return gateway_memory_dir()
+    return gateway_memory_dir(roles=roles)
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("memory_indexer")
+def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    runtime.mkdir(parents=True, exist_ok=True)
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("memory_indexer")
 
 
-def _pidfile() -> Path:
-    return _endpoint().pidfile
+def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
+    return _endpoint(config, runtime=runtime).pidfile
 
 
 _LOOP_INTERVAL_S = 1.0
@@ -145,22 +129,29 @@ class _MarkdownEventHandler(FileSystemEventHandler):
                 self._push(str(dest))
 
 
-def _write_pidfile() -> None:
-    if not acquire_pidfile(_pidfile(), "services.derived.memory_indexer.daemon"):
-        _log.info("[memory_indexer] daemon already running (pidfile=%s), exiting", _pidfile())
+def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    if not acquire_pidfile(
+        _pidfile(config, runtime=runtime), "services.derived.memory_indexer.daemon"
+    ):
+        _log.info(
+            "[memory_indexer] daemon already running (pidfile=%s), exiting",
+            _pidfile(config, runtime=runtime),
+        )
         sys.exit(1)
 
 
-def _remove_pidfile() -> None:
-    remove_pidfile(_pidfile())
+def _remove_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    remove_pidfile(_pidfile(config, runtime=runtime))
 
 
-def _is_running() -> bool:
+def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_pidfile(), "services.derived.memory_indexer.daemon")
+    return pidfile_holds_daemon(
+        _pidfile(config, runtime=runtime), "services.derived.memory_indexer.daemon"
+    )
 
 
 def _scan_disk(root: Path) -> dict[Path, float]:
@@ -236,7 +227,12 @@ def _embed_batches(
 
 
 def _process_paths(
-    backend: MemorySearchBackend, paths: set[Path], provider: EmbeddingProvider, liveness: Liveness
+    backend: MemorySearchBackend,
+    paths: set[Path],
+    provider: EmbeddingProvider,
+    liveness: Liveness,
+    *,
+    machine: MachineIdentity,
 ) -> None:
     """Process a batch of dirty paths: missing/foreign -> delete; else embed+upsert.
 
@@ -271,7 +267,7 @@ def _process_paths(
     Backends must be cross-thread safe (the HTTP client and the pgvector pool are).
     """
     liveness.beat()
-    root = _memory_root().resolve()
+    root = _memory_root(roles=machine.role()).resolve()
     to_delete, to_embed = _classify_dirty(backend, paths, provider, root)
 
     for p in to_delete:
@@ -415,7 +411,11 @@ def _reconcile_health(retry: _ReconcileRetrySchedule) -> dict[str, object]:
 
 
 def _reconcile(
-    backend: MemorySearchBackend, provider: EmbeddingProvider, liveness: Liveness
+    backend: MemorySearchBackend,
+    provider: EmbeddingProvider,
+    liveness: Liveness,
+    *,
+    machine: MachineIdentity,
 ) -> bool:
     """Diff disk vs index db; fill gaps at cold start and on scheduled follow-up passes.
 
@@ -438,11 +438,11 @@ def _reconcile(
     never split a file; its rows commit as one unit (issue #1946). An
     `EmbeddingAPIError` is logged and the remaining chunks are skipped.
     """
-    disk = _scan_disk(_memory_root())
+    disk = _scan_disk(_memory_root(roles=machine.role()))
     indexed = backend.all_meta()
     indexed_paths = {Path(p) for p in indexed}
     disk_paths = set(disk.keys())
-    root = _memory_root().resolve()
+    root = _memory_root(roles=machine.role()).resolve()
 
     dirty: set[Path] = set()
     # Changes / additions — mark dirty when mtime differs;
@@ -470,7 +470,7 @@ def _reconcile(
             for i in range(0, len(ordered), _RECONCILE_CHUNK_PATHS):
                 chunk = set(ordered[i : i + _RECONCILE_CHUNK_PATHS])
                 liveness.beat()  # per chunk: a rebuild outlives the liveness ceiling
-                _process_paths(backend, chunk, provider, liveness)
+                _process_paths(backend, chunk, provider, liveness, machine=machine)
                 liveness.beat()  # chunk committed -> the rebuild is progressing
         except EmbeddingAPIError as exc:
             _log.error(
@@ -481,48 +481,14 @@ def _reconcile(
     return True
 
 
-def _refresh_gateway_checkout() -> None:
-    """Fast-forward the gateway checkout to origin/main — hourly safety net.
-
-    The intended path for new merged notes to reach the index is the
-    arbiter's post-merge `ava memory refresh` (bundled into `ava memory
-    arbiter merge`). This catches the case where that step is skipped or
-    fails: fetch + ff-only merge is cheap, and when HEAD moves the fs
-    observer fires events that re-embed the changed files. A failure is
-    logged at ERROR and retried next cycle — a stale index can no longer
-    rot silently. Keep-local mode: `pull_main` is a no-op.
-    """
-    from base.deploy.git.memory_repo import gateway_memory_dir, pull_main
-
-    cwd = gateway_memory_dir()
-    try:
-        before = subprocess.check_output(  # noqa: S603 — argv is a static literal
-            ["git", "-C", str(cwd), "rev-parse", "HEAD"],
-            text=True,
-        ).strip()
-        head = pull_main()
-    except Exception as exc:
-        _log.error(
-            "[indexer] gateway checkout refresh failed: %r — the search index may be "
-            "stale; run `ava memory refresh`. Will retry next cycle.",
-            exc,
-        )
-        return
-    if head != before:
-        _log.info(
-            "[indexer] gateway checkout fast-forwarded %s → %s (post-merge refresh "
-            "was missed — new notes are now searchable)",
-            before[:8],
-            head[:8],
-        )
-
-
 async def _drain_loop(
     backend: MemorySearchBackend,
     dirty_queue: queue.Queue[Path],
     liveness: Liveness,
     provider: EmbeddingProvider,
     retry: _ReconcileRetrySchedule,
+    *,
+    machine: MachineIdentity,
 ) -> None:
     """Main loop: every _LOOP_INTERVAL_S drain queue, dedup, batch process.
 
@@ -541,13 +507,15 @@ async def _drain_loop(
         now = time.monotonic()
         if now >= next_checkout_refresh:
             next_checkout_refresh = now + _CHECKOUT_REFRESH_INTERVAL_S
-            await asyncio.to_thread(_refresh_gateway_checkout)
+            await asyncio.to_thread(refresh_gateway_checkout, machine=machine)
         # Waiting is safe: every loop tick keeps beating liveness until due.
         if retry.due():
             # Cancellation stays prompt; an in-flight to_thread worker finishes
             # in the background and is deliberately abandoned at exit (the
             # hard exit skips the executor join — see main()/_hard_exit).
-            complete = await asyncio.to_thread(_reconcile, backend, provider, liveness)
+            complete = await asyncio.to_thread(
+                _reconcile, backend, provider, liveness, machine=machine
+            )
             liveness.beat()  # the pass's tail must not stack with the next operation
             if complete:
                 retry.record_pass_complete()
@@ -563,7 +531,9 @@ async def _drain_loop(
         if not batch:
             continue
         try:
-            await asyncio.to_thread(_process_paths, backend, batch, provider, liveness)
+            await asyncio.to_thread(
+                _process_paths, backend, batch, provider, liveness, machine=machine
+            )
             liveness.beat()  # embed batch returned -> loop is making progress
         except EmbeddingAPIError as exc:
             # Name the blast radius: which/how many paths lost this round.
@@ -640,7 +610,14 @@ def _close_backend(backend: MemorySearchBackend) -> None:
         _log.warning("[indexer] backend close failed during shutdown", exc_info=True)
 
 
-async def run(*, config: ConfigBoot) -> None:
+async def run(
+    *,
+    config: ConfigBoot,
+    runtime: Path,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    machine: MachineIdentity,
+) -> None:
     """Write pidfile -> start healthz server -> cold-start -> drain loop.
 
     Both before cold-start — cold-start may take tens of seconds
@@ -649,12 +626,15 @@ async def run(*, config: ConfigBoot) -> None:
     Publish the pidfile before binding healthz so identity-aware probes can verify it.
     """
     inputs = MemoryIndexerInputs.from_boot(config)
-    if _is_running():
-        _log.info("[indexer] daemon already running (pidfile=%s), exiting", _pidfile())
+    if _is_running(config, runtime=runtime):
+        _log.info(
+            "[indexer] daemon already running (pidfile=%s), exiting",
+            _pidfile(config, runtime=runtime),
+        )
         sys.exit(1)
 
-    _write_pidfile()
-    _log.info("[indexer] pidfile written: %s", _pidfile())
+    _write_pidfile(config, runtime=runtime)
+    _log.info("[indexer] pidfile written: %s", _pidfile(config, runtime=runtime))
 
     # Fail fast before deriving liveness or binding healthz: an unknown
     # AVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.
@@ -680,23 +660,24 @@ async def run(*, config: ConfigBoot) -> None:
         base_s=inputs.retry_base(),
         cap_s=inputs.retry_cap(),
     )
-    endpoint = _endpoint()
+    endpoint = _endpoint(config, runtime=runtime)
     health = await start_health_server(
         "memory_indexer",
         endpoint.health_port,
         liveness=liveness,
         extra=lambda: _reconcile_health(retry),
+        image=image,
     )
     _log.info("[indexer] healthz listening on :%s", endpoint.health_port)
 
-    root = _memory_root()
+    root = _memory_root(roles=machine.role())
     root.mkdir(parents=True, exist_ok=True)
     # Preflight the selected backend BEFORE the retry loop: a backend that can
     # never work (fatal) fails fast with the actionable fix instead of a 30s
     # retry storm; a merely-unreachable one rides into the retry loop with its
     # message attached to the terminal error (CTO ruling 2026-08-30 direction ②).
-    database = Database.from_settings()
-    preflight = probe_backend(inputs.backend_name(), database, uri_reader=inputs.search_uri)
+    db = database()
+    preflight = probe_backend(inputs.backend_name(), db, uri_reader=inputs.search_uri)
     if preflight.fatal:
         _log.critical(
             "[indexer] %s backend preflight FAILED: %s",
@@ -712,7 +693,7 @@ async def run(*, config: ConfigBoot) -> None:
             preflight.message,
         )
     backend = await _connect_backend_with_retry(
-        database,
+        db,
         provider,
         name=inputs.backend_name(),
         uri_reader=inputs.search_uri,
@@ -727,16 +708,16 @@ async def run(*, config: ConfigBoot) -> None:
     _log.info("[indexer] watching %s", root)
 
     try:
-        if not await asyncio.to_thread(_reconcile, backend, provider, liveness):
+        if not await asyncio.to_thread(_reconcile, backend, provider, liveness, machine=machine):
             delay = retry.record_incomplete()
             _log.warning("[indexer] startup reconcile incomplete; retry scheduled in %.1fs", delay)
-        await _drain_loop(backend, dirty_queue, liveness, provider, retry=retry)
+        await _drain_loop(backend, dirty_queue, liveness, provider, retry=retry, machine=machine)
     finally:
         observer.stop()
         observer.join(timeout=5.0)
         _close_backend(backend)
         await stop_health_server(health)
-        _remove_pidfile()
+        _remove_pidfile(config, runtime=runtime)
         _log.info("[indexer] daemon stopped")
 
 
@@ -749,36 +730,65 @@ def main() -> None:
     """
     config = ConfigBoot()
     config.boot()
-    init_gateway_process(name="memory_indexer")
-    install_graceful_shutdown("memory_indexer")
+    machine = machine_from_boot(config)
+    process_home = ava_home().resolve()
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="memory_indexer")
+
+    def database() -> Database:
+        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
+
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     code = 0
-    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
-    # awaits `shutdown_default_executor`, joining the default executor's
-    # workers — a reconcile pass or embed batch among them — and a stop
-    # signal must never wait on those (see `_hard_exit`). The runner is
-    # therefore never closed: after the explicit drain below, teardown is
-    # skipped by the hard exit.
-    runner = asyncio.Runner()
     try:
-        runner.run(run(config=config))
-    except KeyboardInterrupt:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
-        _log.info("[indexer] received interrupt, shutting down")
-        # The signal path skips Runner's own cancellation, so drain the loop's
-        # tasks explicitly: run()'s finally still stops the observer, closes
-        # the backend and removes the pidfile. The executor is deliberately
-        # NOT drained.
-        failures = cancel_and_drain(runner)
-        if failures:
-            _log.error("[indexer] async shutdown failed: %r", failures)
+        init_gateway_process(
+            name="memory_indexer",
+            producer=lambda: pipeline,
+            machine_reader=machine.name,
+            image=image,
+        )
+        install_graceful_shutdown("memory_indexer")
+        # Keep executor joins outside the stop path: drain tasks explicitly,
+        # then hard-exit without closing Runner and its default executor.
+        runner = asyncio.Runner()
+        try:
+            runner.run(
+                run(
+                    config=config,
+                    runtime=process_home / "run",
+                    database=database,
+                    image=image,
+                    machine=machine,
+                )
+            )
+        except KeyboardInterrupt:
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
+            _log.info("[indexer] received interrupt, shutting down")
+            # The signal path skips Runner's own cancellation, so drain the loop's
+            # tasks explicitly: run()'s finally still stops the observer, closes
+            # the backend and removes the pidfile. The executor is deliberately
+            # NOT drained.
+            failures = cancel_and_drain(runner)
+            if failures:
+                _log.error("[indexer] async shutdown failed: %r", failures)
+                code = 1
+        except Exception:
+            _log.exception("[indexer] daemon crashed — uncaught exception escaped run()")
             code = 1
-    except Exception:
-        _log.exception("[indexer] daemon crashed — uncaught exception escaped run()")
-        code = 1
+        finally:
+            _remove_pidfile(config, runtime=process_home / "run")
     finally:
-        _remove_pidfile()
+        try:
+            drain = pipeline.stop(timeout=2)
+            if drain.status is DrainStatus.UNFINISHED:
+                _log.warning("event pipeline stop unfinished: %s", drain)
+        except Exception:
+            _log.exception("event pipeline stop failed")
+            code = 1
     _hard_exit(code)
 
 
 if __name__ == "__main__":
+    prepare_process_logging()
     main()

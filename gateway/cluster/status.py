@@ -28,15 +28,13 @@ from pydantic import ValidationError
 from base.agents.observation.evidence import MACHINE_OFFLINE_AFTER_FAILURES
 from base.api_contracts.status import MachineStatus
 from base.cluster.machine import (
-    is_agent_runner,
-    is_gateway,
-    is_observability_station,
-    machine_name,
+    MachineIdentity,
 )
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.deploy.git.cluster_drift import prod_source_head_sha
 from base.host.resource_sample import ResourceSample
+from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins import stats
 from base.telemetry.observability import cluster_label
 from gateway.cluster import _roster_rows, _stats_events, roster_probe
@@ -420,14 +418,14 @@ def _local_machine_status_blocking(
     stopped_at: datetime | None,
     *,
     is_staging: bool = False,
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> MachineStatus:
     """Sync lightweight row for a local machine without the agent-runner
     capability (pure gateway) — via to_thread: the paused flag (file read),
     prod-source HEAD (git rev-parse subprocess), the frozen process commit and
     the psutil resource snapshot must not run on the event loop."""
-    from base.native_process import loaded_commit as _process_sha
-
-    paused = cluster_is_paused(db)
+    paused = cluster_is_paused(db, machine_name=local_machine.name)
     return MachineStatus(
         name=name,
         serve_gateway="gateway" in role,
@@ -444,8 +442,8 @@ def _local_machine_status_blocking(
         stopped_at=stopped_at,
         is_staging=is_staging,
         head_sha=prod_source_head_sha(),
-        running_sha=_process_sha.get(),
-        schema_mismatch=schema_mismatch_status(db),
+        running_sha=image.sha,
+        schema_mismatch=schema_mismatch_status(db, local_machine=name),
         resource=_local_resource_sample(),
     )
 
@@ -456,7 +454,9 @@ async def gather_cluster_status(
     local_name: str,
     *,
     identity_log: roster_probe.IdentityMismatchLog,
+    image: LoadedCommit,
     snapshots: Mapping[str, Snapshot] | None = None,
+    local_machine: MachineIdentity,
 ) -> list[MachineStatus]:
     """The roster of the given machines.
 
@@ -499,6 +499,8 @@ async def gather_cluster_status(
                     description,
                     stopped_at,
                     is_staging=is_staging,
+                    image=image,
+                    local_machine=local_machine,
                 )
             )
         else:
@@ -538,7 +540,12 @@ async def gather_cluster_status(
 
 
 def _get_cluster_status(
-    db: Database, cur: Cursor, identity_log: roster_probe.IdentityMismatchLog
+    db: Database,
+    cur: Cursor,
+    identity_log: roster_probe.IdentityMismatchLog,
+    *,
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> ClusterPanel:
     """Assemble the cluster sub-section: SELECT the machines table (paused rows
     excluded — the cluster panel shows only active members; `ava cluster resume`
@@ -562,12 +569,18 @@ def _get_cluster_status(
         cur.fetchall()
     )
 
-    local_name = machine_name()
+    local_name = local_machine.name()
     snapshots = read_all(cur)
     machines = (
         asyncio.run(
             gather_cluster_status(
-                db, rows, local_name, identity_log=identity_log, snapshots=snapshots
+                db,
+                rows,
+                local_name,
+                identity_log=identity_log,
+                snapshots=snapshots,
+                image=image,
+                local_machine=local_machine,
             )
         )
         if rows
@@ -576,10 +589,10 @@ def _get_cluster_status(
 
     return ClusterPanel(
         current_machine=local_name,
-        current_serve_gateway=is_gateway(),
-        current_serve_agent_runner=is_agent_runner(),
-        current_serve_observability_station=is_observability_station(),
-        current_paused=cluster_is_paused(db),
+        current_serve_gateway=("gateway" in local_machine.role()),
+        current_serve_agent_runner=("agent-runner" in local_machine.role()),
+        current_serve_observability_station=("observability-station" in local_machine.role()),
+        current_paused=cluster_is_paused(db, machine_name=local_machine.name),
         machines=machines,
     )
 
@@ -612,7 +625,11 @@ def _compute_system_status(request: Request) -> SystemStatus:
     try:
         with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
             cluster = _get_cluster_status(
-                request.app.state.db, cur, request.app.state.identity_mismatch_log
+                request.app.state.db,
+                cur,
+                request.app.state.identity_mismatch_log,
+                image=request.app.state.process_image,
+                local_machine=request.app.state.machine,
             )
     except Exception:
         _log.exception("GET /api/status: cluster query failed")
@@ -620,11 +637,15 @@ def _compute_system_status(request: Request) -> SystemStatus:
         # does not lose the whole section.
         try:
             cluster = ClusterPanel(
-                current_machine=machine_name(),
-                current_serve_gateway=is_gateway(),
-                current_serve_agent_runner=is_agent_runner(),
-                current_serve_observability_station=is_observability_station(),
-                current_paused=cluster_is_paused(request.app.state.db),
+                current_machine=request.app.state.machine.name(),
+                current_serve_gateway=("gateway" in request.app.state.machine.role()),
+                current_serve_agent_runner=("agent-runner" in request.app.state.machine.role()),
+                current_serve_observability_station=(
+                    "observability-station" in request.app.state.machine.role()
+                ),
+                current_paused=cluster_is_paused(
+                    request.app.state.db, machine_name=request.app.state.machine.name
+                ),
                 machines=[],
             )
         except Exception:

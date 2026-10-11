@@ -31,13 +31,24 @@ RELAY_HEARTBEAT_STALE_SECONDS = 45.0
 _RELAY_FAILURE_STAMP_SECONDS = 600
 
 
-def relay_get(db: Database, bus: EventBus, lease_id: str, relay_token: str) -> dict[str, Any]:
+def relay_get(
+    db: Database,
+    bus: EventBus,
+    lease_id: str,
+    relay_token: str,
+    *,
+    local_machine: str,
+) -> dict[str, Any]:
     """Lease reads for the bound relay process, under its scoped credential."""
     from base.agents.impersonation import wake_agent
 
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        authenticate_relay(lease, relay_token)
+        authenticate_relay(
+            lease,
+            relay_token,
+            local_machine=local_machine,
+        )
         was_open = lease["status"] in OPEN
         result = public(expire(conn, lease))
     if was_open and result["status"] == ImpersonationStatus.EXPIRED:
@@ -46,14 +57,24 @@ def relay_get(db: Database, bus: EventBus, lease_id: str, relay_token: str) -> d
 
 
 def relay_inbox(
-    db: Database, lease_id: str, relay_token: str, *, limit: int = 100
+    db: Database,
+    lease_id: str,
+    relay_token: str,
+    *,
+    limit: int = 100,
+    local_machine: str,
 ) -> list[dict[str, Any]]:
     """Read the relay's bounded inbox page and durable attempt state."""
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        require_relay_active_locked(conn, lease, relay_token)
+        require_relay_active_locked(
+            conn,
+            lease,
+            relay_token,
+            local_machine=local_machine,
+        )
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT i.id,i.content,i.kind,i.source,i.payload,i.created_at,"
@@ -77,11 +98,21 @@ def relay_inbox(
     return messages
 
 
-def relay_heartbeat(db: Database, lease_id: str, relay_token: str) -> None:
+def relay_heartbeat(
+    db: Database,
+    lease_id: str,
+    relay_token: str,
+    *,
+    local_machine: str,
+) -> None:
     """Fresh liveness evidence from the bound relay, while the lease is open."""
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
-        authenticate_relay(lease, relay_token)
+        authenticate_relay(
+            lease,
+            relay_token,
+            local_machine=local_machine,
+        )
         if lease["status"] not in OPEN:
             raise ImpersonationError("Impersonation has ended")
         conn.execute(
@@ -138,12 +169,18 @@ def record_relay_identity(
     incarnation: RuntimeIncarnation,
     relay_token: str,
     identity: dict[str, Any],
+    *,
+    local_machine: str,
 ) -> None:
     """Persist a blocked child's birth before allowing it to read the relay credential."""
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
-        authenticate_relay(lease, relay_token)
+        authenticate_relay(
+            lease,
+            relay_token,
+            local_machine=local_machine,
+        )
         if lease["agent_id"] != incarnation.agent_id or lease["status"] not in (
             "accepted",
             "active",

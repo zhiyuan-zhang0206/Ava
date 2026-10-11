@@ -14,9 +14,10 @@ from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.incarnation.resources import ResourceBirth
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -24,13 +25,18 @@ from ops.agents.spawn import create_agent_row
 
 
 async def admit(
-    pool: AsyncConnectionPool, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> RuntimeIncarnation:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
-        machine=machine_name(),
+        machine=local_machine.name(),
         catalog=model_catalog,
         authority=config_authority,
     )
@@ -40,7 +46,12 @@ async def admit(
             (Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")), agent),
         )
     incarnation = await admit_hosted_runtime(
-        pool, agent, machine_name(), uuid4(), expected_from="idling", db=Database.from_settings()
+        pool,
+        agent,
+        local_machine.name(),
+        uuid4(),
+        expected_from="idling",
+        db=Database.from_settings(gate=database_gate),
     )
     assert incarnation is not None
     return incarnation

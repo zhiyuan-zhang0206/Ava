@@ -18,6 +18,7 @@ from psycopg_pool import ConnectionPool
 
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from services.upkeep.ttl_reaper import lifecycle_fences, sweep
 from services.upkeep.ttl_reaper.sweep import (
@@ -28,11 +29,11 @@ from services.upkeep.ttl_reaper.sweep import (
 
 
 @pytest.fixture()
-def reaper_pool() -> Iterator[ConnectionPool]:
+def reaper_pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
     """The reaper's own small pool (the functions take a ConnectionPool)."""
     import base.db
 
-    pool = base.db.pool(max_size=2)
+    pool = base.db.pool(max_size=2, gate=database_gate)
     yield pool
     pool.close()
 

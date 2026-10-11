@@ -5,15 +5,22 @@ import pytest
 
 import base.db
 from base.api_contracts.idempotency import keyed_headers
+from base.cluster.machine import MachineIdentity
+from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.schedules import receipts, router, session_control
 from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = client.post("/api/schedules", json={"name": "rollback", "script": "pass"}).json()[
             "id"
         ]
@@ -22,7 +29,10 @@ def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
         raise RuntimeError("receipt write failed")
 
     monkeypatch.setattr(receipts, "finish", fail)
-    with base.db.pool() as pool, pytest.raises(RuntimeError, match="receipt write failed"):
+    with (
+        base.db.pool(gate=database_gate) as pool,
+        pytest.raises(RuntimeError, match="receipt write failed"),
+    ):
         router._control_blocking(pool, sid, "restart", "restart")
     assert db_conn.execute(
         "SELECT desired_revision FROM schedules WHERE id = %s", (sid,)
@@ -31,8 +41,10 @@ def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
     assert db_conn.execute("SELECT count(*) FROM schedule_sync_requests").fetchone() == (0,)
 
 
-def test_receipt_replays_after_schedule_deletion(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client(app) as client:
+def test_receipt_replays_after_schedule_deletion(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = client.post("/api/schedules", json={"name": "deleted", "script": "pass"}).json()["id"]
         path = f"/api/schedules/{sid}/restart"
         headers = keyed_headers("before-delete")
@@ -44,9 +56,13 @@ def test_receipt_replays_after_schedule_deletion(db_conn: psycopg.Connection) ->
 
 
 def test_delete_cleanup_enqueue_failure_preserves_schedule(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = client.post(
             "/api/schedules", json={"name": "delete-rollback", "script": "pass"}
         ).json()["id"]
@@ -55,6 +71,9 @@ def test_delete_cleanup_enqueue_failure_preserves_schedule(
         raise RuntimeError("cleanup unavailable")
 
     monkeypatch.setattr(session_control, "enqueue_in_transaction", fail)
-    with base.db.pool() as pool, pytest.raises(RuntimeError, match="cleanup unavailable"):
+    with (
+        base.db.pool(gate=database_gate) as pool,
+        pytest.raises(RuntimeError, match="cleanup unavailable"),
+    ):
         router._delete_blocking(pool, sid)
     assert db_conn.execute("SELECT id FROM schedules WHERE id = %s", (sid,)).fetchone() == (sid,)

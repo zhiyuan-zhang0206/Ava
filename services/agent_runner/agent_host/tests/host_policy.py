@@ -3,8 +3,11 @@
 from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.agents.impersonation.notes import HandoffNotes
 from base.clock import Clock
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import settings
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
+from tests.fixtures.configuration import snapshot_process_config
 
 
 def configured_policy() -> HostPolicy:
@@ -33,3 +36,19 @@ def configured_policy() -> HostPolicy:
             window_row_cap=lambda: settings.daemon.inbound_reconcile_window_row_cap,
         ),
     )
+
+
+def configured_machine(*, name: str | None = None) -> MachineIdentity:
+    """Assemble a test host's machine from its current prepared configuration."""
+    machine = machine_from_boot(snapshot_process_config())
+    if name is not None:
+        machine.set(name=name)
+    return machine
+
+
+def assert_sdk_context(expected: object | None, *, bound: bool) -> None:
+    """Observe the existing SDK slot without resolving machine identity."""
+    import ava
+
+    assert getattr(ava, "context", None) is expected
+    assert hasattr(ava, "context") is bound

@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ava.gateway_client.transport import use_client
+from base.cluster.machine import MachineIdentity
 
 # ava.self.AGENT_ID is set by tests/fixtures/env_bootstrap.py (=1), no override here.
 from gateway.app import app
@@ -17,6 +18,7 @@ from tests.fixtures.gateway_config import gateway_test_client
 # gateway tests take them too); imported here so they register for this module's paths.
 from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
+from tests.path_scoped.gateway_tests import gateway_config_owner as gateway_config_owner
 
 # DB/Redis env (AVA_DB_URL / AVA_REDIS_URL) for spawned-subprocess inheritance is
 # synced by the `_provisioned_db` / `_provisioned_redis` session fixtures when a
@@ -51,9 +53,13 @@ class _TestClientTransport(httpx.BaseTransport):
 
 
 @pytest.fixture
-def gateway_client(db_conn: psycopg.Connection) -> Iterator[httpx.Client]:
+def gateway_client(
+    db_conn: psycopg.Connection,
+    gateway_config_owner: None,
+    machine_identity: MachineIdentity,
+) -> Iterator[httpx.Client]:
     """Point the SDK's gateway client at the in-process gateway app (a TestClient transport)."""
-    with gateway_test_client(app) as test_client:
+    with gateway_test_client(app, machine=machine_identity) as test_client:
         transport = _TestClientTransport(test_client)
         with (
             httpx.Client(

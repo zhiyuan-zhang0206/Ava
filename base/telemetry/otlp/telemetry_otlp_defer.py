@@ -157,7 +157,12 @@ class ChildDeferral:
                 if not snapshot:
                     self.active = False
                     return
-                if not self._bring_up():
+                try:
+                    ready = self._bring_up()
+                except BaseException:
+                    self._put_back(snapshot)
+                    raise
+                if not ready:
                     self._put_back(snapshot)
                     return
                 self.active = False

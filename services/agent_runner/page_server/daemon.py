@@ -23,6 +23,7 @@ import signal
 import sys
 import time
 import urllib.request
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,25 +32,30 @@ import psutil
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import machine_name, reachable_host
-from base.config import settings
-from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot, settings
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
-from base.log import init_gateway_process
+from base.log.process import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
 from base.sessions.backend import SessionBackend, get_shell_backend
 from base.sessions.page_session import page_session_name
 from base.sessions.pty import client as pty_client
 from base.sessions.record import SessionRecord
+from base.telemetry import build_pipeline
+from services.agent_runner.page_server import resources
 from services.agent_runner.page_server.config import PageServerConfig
-from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 from . import dead_pages
 from .degradation import (
@@ -75,14 +81,6 @@ def page_server_config() -> PageServerConfig:
     )
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("page_server")
-
-
-def _pidfile() -> Path:
-    return _endpoint().pidfile
-
-
 # A new pty session needs a short window to finish its interactive-shell startup
 # and receive its initial command before a health probe can make a decision.
 _SPAWN_VERIFY_TIMEOUT_S = 5.0
@@ -102,21 +100,6 @@ class _ServerHandle:
     token: str = field(repr=False)
     session_name: str
     last_launch_monotonic: float
-
-
-def _write_pidfile() -> None:
-    if not acquire_pidfile(_pidfile(), "services.agent_runner.page_server.daemon"):
-        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
-        sys.exit(1)
-
-
-def _remove_pidfile() -> None:
-    remove_pidfile(_pidfile())
-
-
-def _is_running() -> bool:
-    """Whether a daemon is already running (via its pidfile)."""
-    return pidfile_holds_daemon(_pidfile(), "services.agent_runner.page_server.daemon")
 
 
 def _open_rows(pool: ConnectionPool, host: str) -> list[_PageRow]:
@@ -619,17 +602,22 @@ def _reconcile_once(
 
 
 async def _reconcile_loop(
-    pool: ConnectionPool, liveness: LoopProgress, config: PageServerConfig, bus: EventBus
+    pool: ConnectionPool,
+    liveness: LoopProgress,
+    config: PageServerConfig,
+    bus: EventBus,
+    *,
+    local_machine: MachineIdentity,
 ) -> None:
     """Run page-shell reconciliation at the configured poll interval."""
-    host = reachable_host()
+    host = local_machine.host()
     managed: dict[tuple[int, str], _ServerHandle] = {}
     backoff: dict[tuple[int, str], float] = {}
     degraded: dict[tuple[int, str], _DegradedServeDir] = {}
     _log.info(
         "[page-server] daemon started, pid=%s, machine=%s, host=%s",
         os.getpid(),
-        machine_name(),
+        local_machine.name(),
         host,
     )
     while True:
@@ -651,17 +639,32 @@ async def _reconcile_loop(
             _log.exception("[page-server] poll iteration failed")
 
 
-async def run() -> None:
+async def run(
+    *,
+    process_config: ConfigBoot,
+    runtime: Path,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
+) -> None:
     """Start the daemon and keep its health endpoint alive while it reconciles."""
-    if _is_running():
-        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
+    if resources.is_running(process_config, runtime=runtime):
+        _log.info(
+            "[page-server] daemon already running (pidfile=%s), exiting",
+            resources.pidfile(process_config, runtime=runtime),
+        )
         sys.exit(1)
-    _write_pidfile()
+    resources.write_pidfile(process_config, runtime=runtime)
     liveness = LivenessGroup()
     reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
     dead_pages_progress = liveness.register("dead_show_pages", _DEAD_PAGES_LIVENESS_TIMEOUT_S)
-    health = await start_health_server("page_server", _endpoint().health_port, liveness=liveness)
-    db = Database.from_settings()
+    health = await start_health_server(
+        "page_server",
+        resources.endpoint(process_config, runtime=runtime).health_port,
+        liveness=liveness,
+        image=image,
+    )
+    db = database()
     pool = db.pool()
     config, bus = page_server_config(), EventBus.from_settings()
     try:
@@ -669,24 +672,43 @@ async def run() -> None:
         # a stalled loop cannot be masked by a busy sibling: a loop that raises cancels
         # its sibling and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(_reconcile_loop(pool, reconcile_progress, config, bus))
+            loops.create_task(
+                _reconcile_loop(pool, reconcile_progress, config, bus, local_machine=local_machine)
+            )
             loops.create_task(
                 dead_pages.dead_pages_loop(
-                    pool, db, reachable_host(), dead_pages_progress, config, bus
+                    pool, db, local_machine.host(), dead_pages_progress, config, bus
                 )
             )
     finally:
         await stop_health_server(health)
         pool.close()
-        _remove_pidfile()
+        resources.remove_pidfile(process_config, runtime=runtime)
 
 
 def main() -> None:
     """Initialize the daemon after verifying the database schema version."""
     from base.deploy.schema.migrations import assert_schema_current
 
-    assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="page_server")
+    image = LoadedCommit.capture()
+    machine_config = ConfigBoot()
+    machine_config.boot()
+    machine = machine_from_boot(machine_config)
+    process_home = ava_home().resolve()
+    assert_schema_current(machine_config.view.data_plane.db_url)
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="page_server", exempt=False)
+
+    def database() -> Database:
+        return Database(db_config_from_boot(machine_config), gate=gate, local_host=machine.host)
+
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    init_gateway_process(
+        name="page_server",
+        producer=lambda: pipeline,
+        machine_reader=machine.name,
+        image=image,
+    )
     install_graceful_shutdown("page_server")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
@@ -697,7 +719,15 @@ def main() -> None:
     # hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(
+            run(
+                process_config=machine_config,
+                runtime=process_home / "run",
+                database=database,
+                image=image,
+                local_machine=machine,
+            )
+        )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[page-server] interrupted, shutting down")
@@ -716,4 +746,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
     main()

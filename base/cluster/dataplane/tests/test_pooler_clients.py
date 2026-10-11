@@ -8,20 +8,27 @@ from psycopg import connect
 from psycopg.conninfo import conninfo_to_dict
 
 from base.cluster.dataplane import pooler
+from base.cluster.machine import MachineIdentity
 from tests._containers import postgres
 from tests.components.cli.test_pgbouncer_wire import (
     _SECRET,
     _pgbouncer_available,
     _pgbouncer_in_front,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 pytestmark = pytest.mark.skipif(
     not _pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"
 )
 
 
-def test_lists_the_open_clients_and_leaves_out_the_console() -> None:
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+def test_lists_the_open_clients_and_leaves_out_the_console(
+    *, machine_identity: MachineIdentity
+) -> None:
+    with (
+        postgres(machine_name=machine_identity.name) as pg_url,
+        _pgbouncer_in_front(pg_url) as pooled,
+    ):
         info = conninfo_to_dict(pooled)
         port = int(str(info["port"]))
         with (
@@ -42,8 +49,13 @@ def test_lists_the_open_clients_and_leaves_out_the_console() -> None:
     assert "db=" in found[0].describe() and "app=probe-" in found[0].describe()
 
 
-def test_an_unreadable_console_raises_instead_of_reading_as_no_clients() -> None:
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+def test_an_unreadable_console_raises_instead_of_reading_as_no_clients(
+    *, machine_identity: MachineIdentity
+) -> None:
+    with (
+        postgres(machine_name=machine_identity.name) as pg_url,
+        _pgbouncer_in_front(pg_url) as pooled,
+    ):
         port = int(str(conninfo_to_dict(pooled)["port"]))
         with pytest.raises(Exception, match=r"."):
             pooler.clients(port, "not-the-admin-password")

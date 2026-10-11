@@ -28,11 +28,16 @@ def paused_otlp_record(
     exporter = InMemoryLogRecordExporter()
     logger_provider = LoggerProvider()
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
-    backend = telemetry_otlp._OtlpBackend(
-        providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()]))
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True,
+        providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()])),
     )
     monkeypatch.setattr(backend, "_enabled", lambda: True)
-    monkeypatch.setattr(telemetry_otlp, "backend", backend)
+
+    def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
+        return backend
+
+    monkeypatch.setattr(telemetry_otlp, "OtlpBackend", build_backend)
 
     def no_sync(*_args: object, **_kwargs: object) -> telemetry.DrainResult:
         return telemetry.DrainResult(telemetry.DrainStatus.COMPLETED, telemetry.DrainPhase.DRAIN)

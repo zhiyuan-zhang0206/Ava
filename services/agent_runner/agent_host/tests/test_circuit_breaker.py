@@ -13,22 +13,30 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph import claim_node
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.state import AgentState, CircuitState
-from agent.tests.claim.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
+from agent.tests.claim.claim_support import (
+    _fake_llm,
+    insert_inbound_kind,
+    make_runtime,
+    thread_config,
+)
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
+from services.agent_runner.agent_host.tests.circuit_breaker.provider_failures import (
+    LONG_SUMMARY,
+)
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
-
-# A summary long enough to clear COMPACT_MIN_SUMMARY_CHARS.
-_LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
 class _RecordingPublisher:
@@ -59,7 +67,7 @@ def _overflow_state(breaker_reason: str | None = None) -> AgentState:
     )
 
 
-def _breaker_ctx() -> AvaContext:
+def _breaker_ctx(*, database_gate: ProcessDbGate) -> AvaContext:
     """An AvaContext for `_handle_fatal_llm_error` — no ops_pool, so the
     best-effort event-log write is skipped (unit tests have no DB)."""
     return AvaContext(
@@ -67,7 +75,7 @@ def _breaker_ctx() -> AvaContext:
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=configured_policy().clock_factory,
@@ -77,7 +85,9 @@ def _breaker_ctx() -> AvaContext:
 # ── breaker open (runloop `_handle_fatal_llm_error`) ──
 
 
-async def test_fatal_provider_error_opens_circuit_breaker(loguru_records) -> None:
+async def test_fatal_provider_error_opens_circuit_breaker(
+    loguru_records, *, database_gate: ProcessDbGate
+) -> None:
     """A permanent context-overflow rejection opens the breaker with the
     context_overflow reason and keeps halted=True — the next wake must not
     re-fire the doomed call."""
@@ -88,7 +98,9 @@ async def test_fatal_provider_error_opens_circuit_breaker(loguru_records) -> Non
         status=400,
         context_overflow=True,
     )
-    update = await _handle_fatal_llm_error(exc, _breaker_ctx(), agent_id=42)
+    update = await _handle_fatal_llm_error(
+        exc, _breaker_ctx(database_gate=database_gate), agent_id=42
+    )
 
     assert update["halted"] is True
     circuit = update["circuit"]
@@ -101,7 +113,7 @@ async def test_fatal_provider_error_opens_circuit_breaker(loguru_records) -> Non
     assert records[0]["extra"]["reason"] == "context_overflow"
 
 
-async def test_fatal_provider_error_billing_reason() -> None:
+async def test_fatal_provider_error_billing_reason(*, database_gate: ProcessDbGate) -> None:
     """A 402 billing rejection opens the breaker too (heartbeat re-fires stop),
     but with the billing reason — no forced compact is armed for it."""
     exc = FatalProviderError(
@@ -110,7 +122,9 @@ async def test_fatal_provider_error_billing_reason() -> None:
         provider="anthropic",
         status=402,
     )
-    update = await _handle_fatal_llm_error(exc, _breaker_ctx(), agent_id=42)
+    update = await _handle_fatal_llm_error(
+        exc, _breaker_ctx(database_gate=database_gate), agent_id=42
+    )
 
     circuit = update["circuit"]
     assert isinstance(circuit, CircuitState)
@@ -118,7 +132,9 @@ async def test_fatal_provider_error_billing_reason() -> None:
     assert circuit.reason == "billing"
 
 
-async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
+async def test_fatal_provider_error_emits_blocked_recovery_details(
+    *, database_gate: ProcessDbGate
+) -> None:
     """The live error tells the user that a permanent rejection blocked retries.
 
     Regression for #5759: an opaque error plus an ``idling`` status made a
@@ -130,7 +146,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
         llm=MagicMock(),
         event_publisher=cast(AgentEventPublisher, publisher),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=configured_policy().clock_factory,
@@ -162,6 +178,8 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A blocked descendant reports only metadata through immutable SPAWN lineage.
 
@@ -172,12 +190,26 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     model makes the vendor the billed DeepSeek account: the report must name
     both, vendor first (task #3916).
     """
-    ancestor_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    ancestor_id = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     terminated_parent_id = spawn_agent(
-        spawner=f"agent:{ancestor_id}", catalog=model_catalog, authority=config_authority
+        spawner=f"agent:{ancestor_id}",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     child_id = spawn_agent(
-        spawner=f"agent:{terminated_parent_id}", catalog=model_catalog, authority=config_authority
+        spawner=f"agent:{terminated_parent_id}",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -211,7 +243,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
@@ -249,11 +281,23 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A permanent overflow rejection also halts unattended retries."""
-    ancestor_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    ancestor_id = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     child_id = spawn_agent(
-        spawner=f"agent:{ancestor_id}", catalog=model_catalog, authority=config_authority
+        spawner=f"agent:{ancestor_id}",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -276,7 +320,7 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
@@ -289,16 +333,22 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
         assert cur.fetchone() == (1,)
 
 
-async def test_fatal_llm_stream_error_does_not_open_breaker() -> None:
+async def test_fatal_llm_stream_error_does_not_open_breaker(
+    *, database_gate: ProcessDbGate
+) -> None:
     """FatalLLMStreamError (retry cap) is not a permanent provider rejection —
     it only halts the turn; the breaker stays untouched."""
     exc = FatalLLMStreamError("retry cap exhausted")
-    update = await _handle_fatal_llm_error(exc, _breaker_ctx(), agent_id=42)
+    update = await _handle_fatal_llm_error(
+        exc, _breaker_ctx(database_gate=database_gate), agent_id=42
+    )
 
     assert update == {"halted": True}
 
 
-async def test_fatal_provider_error_does_not_reopen_already_open_breaker() -> None:
+async def test_fatal_provider_error_does_not_reopen_already_open_breaker(
+    *, database_gate: ProcessDbGate
+) -> None:
     """A second failure while the breaker is already open for the same reason
     skips the duplicate open write + event (the original opened_at survives) —
     one open event per incident, not one per failed wake."""
@@ -313,7 +363,9 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker() -> No
     async def _reader() -> CircuitState | None:
         return CircuitState(open=True, reason="billing", opened_at=opened_at)
 
-    update = await _handle_fatal_llm_error(exc, _breaker_ctx(), agent_id=42, circuit_reader=_reader)
+    update = await _handle_fatal_llm_error(
+        exc, _breaker_ctx(database_gate=database_gate), agent_id=42, circuit_reader=_reader
+    )
 
     assert update == {"halted": True}, (
         "the breaker is already open — the duplicate write must be skipped"
@@ -331,22 +383,26 @@ async def test_heartbeat_while_breaker_open_parks(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     reason: str,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Every permanent rejection blocks background model requests: the heartbeat is
     consumed without a note and parks at claim — no LLM call, no compact, no
     doomed re-fire."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason=reason)
-    fake_llm = _fake_llm(_LONG_SUMMARY)
+    fake_llm = _fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         state,
-        _make_runtime(
-            ops_pool=aops_pool,
-            llm=fake_llm,
-        ),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
+        thread_config(tid),
     )
 
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
@@ -366,22 +422,26 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A parked heartbeat must not bury a same-batch chat in either FIFO order."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     inbound_ids: dict[str, int] = {}
     for kind in (first_kind, second_kind):
         content = "real user work" if kind == "chat" else "Heartbeat."
-        inbound_ids[kind] = _insert_inbound_kind(db_conn, tid, content, kind, source="user")
+        inbound_ids[kind] = insert_inbound_kind(db_conn, tid, content, kind, source="user")
 
-    fake_llm = _fake_llm(_LONG_SUMMARY)
+    fake_llm = _fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         _overflow_state(breaker_reason="billing"),
-        _make_runtime(
-            ops_pool=aops_pool,
-            llm=fake_llm,
-        ),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
+        thread_config(tid),
     )
 
     assert cmd.goto == "before_llm"
@@ -402,12 +462,19 @@ async def test_claim_parks_idle_while_breaker_open(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     reason: str,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The claim no-batch branch parks every open breaker: a
     self-initiated continue-loop (the next graph invocation after the turn
     boundary) must not re-fire the doomed call. Hosted mode surfaces the park
     as END+turn_idle without blocking on the inbound wait."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
         halted=False,
@@ -415,8 +482,8 @@ async def test_claim_parks_idle_while_breaker_open(
     )
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(tid),
     )
 
     assert cmd.goto == "__end__"
@@ -428,18 +495,25 @@ async def test_claim_does_not_park_while_breaker_closed(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Control: with the breaker closed the same no-batch state routes to the
     LLM as before (the continue-working path)."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
         halted=False,
     )
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(tid),
     )
 
     assert cmd.goto == "before_llm"
@@ -451,22 +525,26 @@ async def test_heartbeat_normal_when_breaker_closed(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Breaker closed: the heartbeat check-in note is appended and the wake
     routes to the LLM as before — the gate only exists while the breaker is
     open."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state()  # breaker closed
-    fake_llm = _fake_llm(_LONG_SUMMARY)
+    fake_llm = _fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         state,
-        _make_runtime(
-            ops_pool=aops_pool,
-            llm=fake_llm,
-        ),
-        _config(tid),
+        make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
+        thread_config(tid),
     )
 
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
@@ -499,6 +577,7 @@ async def _reject_turn(
     *,
     publisher: _RecordingPublisher,
     exc: FatalProviderError | None = None,
+    database_gate: ProcessDbGate,
 ) -> None:
     await _handle_fatal_llm_error(
         exc if exc is not None else _permanent_rejection(),
@@ -507,7 +586,7 @@ async def _reject_turn(
             llm=MagicMock(),
             event_publisher=cast(AgentEventPublisher, publisher),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=configured_policy().clock_factory,
@@ -518,12 +597,27 @@ async def _reject_turn(
 
 
 def _spawn_child_under_idling_ancestor(
-    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db_conn: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> tuple[int, int]:
     """A live idling ancestor and its child; returns (ancestor_id, child_id)."""
-    ancestor_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    ancestor_id = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=local_machine,
+    )
     child_id = spawn_agent(
-        spawner=f"agent:{ancestor_id}", catalog=model_catalog, authority=config_authority
+        spawner=f"agent:{ancestor_id}",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=local_machine,
     )
     with db_conn.cursor() as cur:
         cur.execute(

@@ -2,7 +2,7 @@
 
 import uuid
 from collections.abc import Generator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any
 from unittest.mock import patch
 
@@ -12,12 +12,15 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
+from base.cluster.machine import MachineIdentity
+from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from tests.fixtures.configuration import snapshot_process_config
 
 __all__ = [
     "SPAWN_PATH",
     "create_mcp_client",
     "gateway_test_client",
+    "gateway_test_process",
     "post_spawn",
     "spawn_headers",
     "spawn_via_http",
@@ -27,17 +30,51 @@ SPAWN_PATH = "/api/keyed/v1/agents"
 
 
 @contextmanager
-def gateway_test_client(application: FastAPI, **kwargs: Any) -> Generator[TestClient]:
-    """Run the real Gateway lifespan with this test's current configuration inputs.
+def gateway_test_process(
+    application: FastAPI, *, machine: MachineIdentity, process: GatewayProcess | None = None
+) -> Generator[GatewayProcess]:
+    """Own one explicit entry, or borrow it across overlapping app lifespans.
 
-    Only assembled Gateway apps belong here. Startup-delivery tests and local
-    FastAPI stand-ins keep their own explicit composition boundaries. The client
-    is authenticated by default (`tests.fixtures.unit.gateway_auth`).
+    Each lifespan still owns its original pools and tasks. A compatible routing
+    app can borrow the same entry without replacing or closing its writer.
     """
-    from gateway import app as gateway_app
-
+    if process is None:
+        process = getattr(application.state, "gateway_process_input", None)
+    owned = process is None
+    if owned:
+        process = GatewayProcess(
+            config=snapshot_process_config(), image=LOADED_IMAGE, machine=machine
+        )
+    assert process is not None
     with (
-        patch.object(gateway_app, "ConfigBoot", snapshot_process_config),
+        process.lifetime() if owned else nullcontext(process),
+        patch.object(
+            application.state,
+            "gateway_process_input",
+            process,
+            create=not hasattr(application.state, "gateway_process_input"),
+        ),
+    ):
+        yield process
+
+
+@contextmanager
+def gateway_test_client(
+    application: FastAPI,
+    *,
+    machine: MachineIdentity,
+    process: GatewayProcess | None = None,
+    **kwargs: Any,
+) -> Generator[TestClient]:
+    """Run an assembled Gateway with this test's current explicit entry inputs.
+
+    Startup-delivery tests and local FastAPI stand-ins keep their own roots.
+    Borrowed entries retain their configuration and writer; only the outer
+    context closes resources it constructed. The client is authenticated by
+    default (`tests.fixtures.unit.gateway_auth`).
+    """
+    with (
+        gateway_test_process(application, machine=machine, process=process),
         TestClient(application, **kwargs) as client,
     ):
         yield client

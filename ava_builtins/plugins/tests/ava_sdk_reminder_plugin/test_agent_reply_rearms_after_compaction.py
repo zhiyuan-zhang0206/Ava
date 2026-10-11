@@ -28,10 +28,11 @@ from ava_builtins.plugins.tests.test_ava_sdk_reminder_plugin import (
     _loaded as _loaded,
 )
 from base.agents.messages.kwargs import ExecStatus
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 
 
-async def test_agent_reply_rearms_after_compaction(_loaded: Any):
+async def test_agent_reply_rearms_after_compaction(_loaded: Any, *, database_gate: ProcessDbGate):
     hook = _loaded.sdk_reminder_agent_reply_before_llm
     # agent_reply reminded last window (bookmark 0); compaction advanced to 1 ->
     # the set re-arms and the note fires again.
@@ -41,7 +42,7 @@ async def test_agent_reply_rearms_after_compaction(_loaded: Any):
         ava_sdk_reminder__last_seen_compact=0,
         compact=CompactState(version=1),
     )
-    result = await hook(state, _runtime(), _config())
+    result = await hook(state, _runtime(database_gate=database_gate), _config())
 
     assert result is not None
     [note] = result["messages"]
@@ -50,7 +51,7 @@ async def test_agent_reply_rearms_after_compaction(_loaded: Any):
     assert result["ava_sdk_reminder__reminded"] == {AGENT_REPLY_CATEGORY}
 
 
-async def test_agent_reply_user_inbound_is_noop(_loaded: Any):
+async def test_agent_reply_user_inbound_is_noop(_loaded: Any, *, database_gate: ProcessDbGate):
     hook = _loaded.sdk_reminder_agent_reply_before_llm
     state = _state(
         [
@@ -58,12 +59,12 @@ async def test_agent_reply_user_inbound_is_noop(_loaded: Any):
             inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
         ]
     )
-    result = await hook(state, _runtime(), _config())
+    result = await hook(state, _runtime(database_gate=database_gate), _config())
     assert result is None
 
 
 async def test_agent_reply_defers_when_compaction_fires(
-    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ):
     """When auto-compact would fire this same before_llm node run, the note is
     deferred (no inject, not marked) so it does not clobber / get clobbered by
@@ -79,12 +80,12 @@ async def test_agent_reply_defers_when_compaction_fires(
         _agent_inbound(source="agent:9"),
     ]
     state = _state(msgs)
-    result = await hook(state, _runtime(), _config())
+    result = await hook(state, _runtime(database_gate=database_gate), _config())
     assert result is None  # deferred; agent_reply not marked
 
 
 async def test_agent_reply_once_cadence_dedups_and_rearms(
-    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ):
     """`once_per_compaction` (the default, set explicitly here): a second inbound
     in the same window no-ops, and a compaction re-arms so the note fires again.
@@ -99,7 +100,7 @@ async def test_agent_reply_once_cadence_dedups_and_rearms(
         [AIMessage(content="prev", id="a0"), _agent_inbound(source="agent:9")],
         ava_sdk_reminder__reminded={AGENT_REPLY_CATEGORY},
     )
-    assert await hook(same_window, _runtime(), _config()) is None
+    assert await hook(same_window, _runtime(database_gate=database_gate), _config()) is None
 
     # Compaction advanced the version past the bookmark -> re-armed, fires again.
     after_compact = _state(
@@ -108,14 +109,14 @@ async def test_agent_reply_once_cadence_dedups_and_rearms(
         ava_sdk_reminder__last_seen_compact=0,
         compact=CompactState(version=1),
     )
-    result = await hook(after_compact, _runtime(), _config())
+    result = await hook(after_compact, _runtime(database_gate=database_gate), _config())
     assert result is not None
     assert result["ava_sdk_reminder__last_seen_compact"] == 1
     assert result["ava_sdk_reminder__reminded"] == {AGENT_REPLY_CATEGORY}
 
 
 async def test_agent_reply_every_time_fires_even_when_already_reminded(
-    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ):
     """`every_time`: the note fires on every agent inbound, even one already
     marked in the shared `reminded` set — and it does not touch that set (the
@@ -129,7 +130,7 @@ async def test_agent_reply_every_time_fires_even_when_already_reminded(
         [AIMessage(content="prev", id="a0"), _agent_inbound(source="agent:9")],
         ava_sdk_reminder__reminded={AGENT_REPLY_CATEGORY, "shell"},
     )
-    result = await hook(state, _runtime(), _config())
+    result = await hook(state, _runtime(database_gate=database_gate), _config())
 
     assert result is not None
     [note] = result["messages"]
@@ -141,7 +142,7 @@ async def test_agent_reply_every_time_fires_even_when_already_reminded(
 
 
 async def test_agent_reply_every_time_user_inbound_is_noop(
-    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ):
     """`every_time` still gates on an agent-sourced inbound — a user inbound
     never triggers the reminder."""
@@ -156,11 +157,11 @@ async def test_agent_reply_every_time_user_inbound_is_noop(
             inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
         ]
     )
-    assert await hook(state, _runtime(), _config()) is None
+    assert await hook(state, _runtime(database_gate=database_gate), _config()) is None
 
 
 async def test_agent_reply_every_time_still_defers_on_compaction(
-    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ):
     """`every_time` defers exactly like `once_per_compaction` when auto-compact
     fires the same turn — the note would be clobbered by the message replacement."""
@@ -175,7 +176,7 @@ async def test_agent_reply_every_time_still_defers_on_compaction(
         *(HumanMessage(content="x" * 200, id=f"h{i}") for i in range(5)),
         _agent_inbound(source="agent:9"),
     ]
-    assert await hook(_state(msgs), _runtime(), _config()) is None
+    assert await hook(_state(msgs), _runtime(database_gate=database_gate), _config()) is None
 
 
 @pytest.mark.parametrize(
@@ -199,6 +200,8 @@ async def test_defer_predicate_matches_real_gate(
     expect_fire,
     fake_cancel_event,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ):
     """`auto_compact_will_fire(state)` is the single shared gate the reminder plugins
     call; this pins it to the real `auto_compact_for_llm` firing across the
@@ -237,7 +240,7 @@ async def test_defer_predicate_matches_real_gate(
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]
 
     state = _state(msgs)
-    runtime = _runtime_for_runner()
+    runtime = _runtime_for_runner(database_gate=database_gate)
     runtime = replace(runtime, context=replace(runtime.context, catalog=model_catalog))
     predicate = auto_compact_will_fire(
         state, runtime.context.require_agent(), catalog=model_catalog
@@ -254,6 +257,8 @@ async def test_real_runner_compaction_wins_no_note(
     reminder_first,
     fake_cancel_event,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ):
     """Both hook orderings defer to the LLM compaction operation.
 
@@ -296,7 +301,7 @@ async def test_real_runner_compaction_wins_no_note(
         _agent_inbound(source="agent:9"),
     ]
     state = _state(msgs, compact=CompactState(version=0))
-    runtime = _runtime_for_runner()
+    runtime = _runtime_for_runner(database_gate=database_gate)
     runtime = replace(runtime, context=replace(runtime.context, catalog=model_catalog))
     cmd = await runner(state, runtime, _config())
 
@@ -324,7 +329,9 @@ async def test_real_runner_compaction_wins_no_note(
     assert AGENT_REPLY_CATEGORY not in update.get("ava_sdk_reminder__reminded", set())  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_after_exec_leaves_exec_output_untouched(_loaded: Any):
+async def test_after_exec_leaves_exec_output_untouched(
+    _loaded: Any, *, database_gate: ProcessDbGate
+):
     """The hint is a fresh system-note, not a rewrite of the exec-output
     message: the injected message is a new id-less HumanMessage (so the reducer
     appends it after the output rather than replacing it), and the real
@@ -349,7 +356,7 @@ async def test_after_exec_leaves_exec_output_untouched(_loaded: Any):
     )
     state = _state([HumanMessage(content="do it", id="h1"), ai, out])
 
-    result = await hook(state, _runtime(), _config())
+    result = await hook(state, _runtime(database_gate=database_gate), _config())
     assert result is not None
     [note] = result["messages"]
     # a fresh system-note (id-less -> the reducer appends), not the output message
@@ -404,7 +411,12 @@ def test_tail_has_agent_inbound_user_only_no_ai_false():
     ],
 )
 async def test_multiple_calls_match_results_by_id(
-    _loaded: Any, codes: list[str], outputs: list[str], expected: set[str]
+    _loaded: Any,
+    codes: list[str],
+    outputs: list[str],
+    expected: set[str],
+    *,
+    database_gate: ProcessDbGate,
 ):
     ai = AIMessage(
         content="",
@@ -415,7 +427,9 @@ async def test_multiple_calls_match_results_by_id(
     )
     results = [ToolMessage(content=output, tool_call_id=str(i)) for i, output in enumerate(outputs)]
     state = _state([ai, *results, HumanMessage(content="attachment")])
-    result = await _loaded.contribute().after_exec[0](state, _runtime(), _config())
+    result = await _loaded.contribute().after_exec[0](
+        state, _runtime(database_gate=database_gate), _config()
+    )
     assert result is not None
     assert result["ava_sdk_reminder__reminded"] == expected
     assert len(result["messages"]) == len(expected)

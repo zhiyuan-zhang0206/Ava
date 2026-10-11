@@ -19,6 +19,13 @@ owns its own boot at process entry and forwards remote-plane, retention and
 off-site readers to the dump API. Clock factories read that same boot at the
 original timezone decision, without caching a configuration snapshot.
 
+Schema admission, scheduler health ports and log database dials use that same
+scheduler boot. Endpoint tables are rebuilt at the original resource reads
+through `ServiceEndpoints.from_boot` with the root's runtime directory. The
+separate worker's log/work/scratch database factories read its own boot at each
+original dial decision; scratch handles replace only the requested URL. Neither
+entry recovers configuration from the legacy settings singleton.
+
 The kind's concurrency lock prevents overlapping controller commits. A busy
 lock defers the scheduler. A zero worker exit and object result precede
 `CompletedOperation.commit`: dump publication validates the name and digest,
@@ -45,3 +52,12 @@ owns PostgreSQL child cleanup. A failed stop preserves the scratch directory;
 no custom family/cwd scan authorizes deleting it.
 
 [[shutdown.ava.okf.md|Backup job shutdown]]
+
+## Process image and database admission
+
+The scheduler captures its loaded image once for logging and health. Each
+operation worker is a separate process: it captures its own image and shares
+one gate between its log database, dump handle and restored-checkpoint reader.
+The worker request carries no gate object. Scratch handles replace only the URL
+in the live dial configuration; publication, direct owner dials and cleanup
+retain their existing contracts.

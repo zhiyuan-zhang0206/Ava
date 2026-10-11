@@ -7,17 +7,26 @@ import multiprocessing
 import os
 import sys
 from datetime import UTC, datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-from unittest.mock import ANY, Mock
+from unittest.mock import ANY, Mock, patch
 
 import psycopg
 import pytest
 
 from base.config import settings
+from base.cluster.machine import MachineIdentity
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.native_process import code_version
+from base.native_process.loaded_commit import LoadedCommit
 from schedules.catchup import fire_slot_once
+from base.daemon.schedules.inputs import ScheduleInputs
+from schedules.entry import fresh_schedule_entry
+from schedules import entry as entry_owner
 
 _ROOT = Path(__file__).resolve().parents[2]
 _DAILY_SCRIPTS = ("c9-daily-report-schedule.py", "dev-ci-metrics-schedule.py")
@@ -69,6 +78,7 @@ def _claim_worker(
     ready: Any,
     start: Any,
     outcomes: Any,
+    database_gate: ProcessDbGate,
 ) -> None:
     os.environ["AVA_SCHEDULE_ID"] = str(schedule_id)
     ready.put(True)
@@ -76,7 +86,7 @@ def _claim_worker(
         outcomes.put("timeout")
         return
     claimed = fire_slot_once(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         datetime.fromisoformat(slot_iso),
         "payload",
         fire=lambda _slot, _payload: outcomes.put("fired"),
@@ -86,7 +96,9 @@ def _claim_worker(
 
 def test_concurrent_processes_execute_a_slot_at_most_once(
     db_conn: psycopg.Connection,
+    database_gate: ProcessDbGate,
 ) -> None:
+    assert database_gate.min_read_due(), "spawn copies a fresh admission budget"
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 9, 30, tzinfo=UTC))
     slot = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
     context = multiprocessing.get_context("spawn")
@@ -97,6 +109,7 @@ def test_concurrent_processes_execute_a_slot_at_most_once(
         context.Process(
             target=_claim_worker,
             args=(schedule_id, slot.isoformat(), ready, start, outcomes),
+            kwargs={"database_gate": database_gate},
         )
         for _ in range(2)
     ]
@@ -201,9 +214,64 @@ def test_cluster_timezone_follows_the_setting_when_it_is_read(
     assert cluster_timezone() == "America/Los_Angeles"
 
 
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "adversarial-eval-weekly-schedule.py",
+        "c9-daily-report-schedule.py",
+        "debt-sweep-daily-schedule.py",
+        "dev-ci-metrics-schedule.py",
+        "memory-steward-schedule.py",
+        "model-update-tracker-schedule.py",
+        "self-evolution-daily-schedule.py",
+        "self-evolution-weekly-schedule.py",
+        "trace-ship-tempo-schedule.py",
+    ],
+)
+def test_schedule_entry_retains_the_loaded_image_gate(
+    filename: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = _load_daily_script(filename)
+    image = LoadedCommit(source_root=tmp_path, sha="loaded-before-checkout-moved")
+    capture = Mock(return_value=image)
+    count = Mock(return_value=7)
+    database = Mock()
+    create = Mock(return_value=database)
+    consumer = Mock(side_effect=_LoopStoppedError)
+    monkeypatch.setattr(module.ava, "loaded_code_image", capture)
+    monkeypatch.setattr(entry_owner, "process_name", lambda: "schedule")
+    monkeypatch.setattr(code_version, "first_parent_count", count)
+    monkeypatch.setattr(entry_owner, "Database", create)
+    owner = "run_daily_loop" if filename in _DAILY_SCRIPTS else "fire_slot_once"
+    monkeypatch.setattr(module, owner, consumer)
+    if owner == "fire_slot_once":
+
+        def due_slot(*_args: object, **_kwargs: object) -> datetime:
+            return datetime.now(UTC) - timedelta(seconds=1)
+
+        monkeypatch.setattr(module, "next_fire", due_slot)
+    entry = getattr(module, "_main_loop", None) or module.main
+
+    with pytest.raises(_LoopStoppedError), patch.dict(os.environ), fresh_schedule_entry() as inputs:
+        entry(inputs=inputs)
+
+    capture.assert_called_once_with()
+    create.assert_called_once()
+    gate = create.call_args.kwargs["gate"]
+    assert isinstance(gate, ProcessDbGate)
+    assert consumer.call_args.args[0] is database
+    count.assert_not_called()
+    assert gate.application_name() == "ava:schedule:v7"
+    count.assert_called_once_with(tmp_path, image.sha)
+    gate.observe_minimum(7)
+    assert not gate.min_read_due()
+    assert gate.application_name() == "ava:schedule:v7"
+    count.assert_called_once()
+
+
 @pytest.mark.parametrize("filename", _DAILY_SCRIPTS)
 def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
-    filename: str, monkeypatch: pytest.MonkeyPatch
+    filename: str, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
 ) -> None:
     module = _load_daily_script(filename)
     host = sys.modules[module.run_daily_loop.__module__]
@@ -227,7 +295,11 @@ def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
     monkeypatch.setattr(host.time, "sleep", sleep)
 
     with pytest.raises(_LoopStoppedError):
-        module._main_loop()
+        module._main_loop(
+            inputs=ScheduleInputs(
+                Mock(), Mock(), module.ava.loaded_code_image(), machine=machine_identity
+            )
+        )
 
     assert [call.kwargs["after"] for call in next_fire_call.call_args_list] == [
         now - timedelta(minutes=2),
@@ -239,7 +311,7 @@ def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
 
 @pytest.mark.parametrize("filename", _DAILY_SCRIPTS)
 def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
-    filename: str, monkeypatch: pytest.MonkeyPatch
+    filename: str, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
 ) -> None:
     module = _load_daily_script(filename)
     host = sys.modules[module.run_daily_loop.__module__]
@@ -262,9 +334,21 @@ def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
     monkeypatch.setattr(host.time, "sleep", sleep)
 
     with pytest.raises(_LoopStoppedError):
-        module._main_loop()
+        module._main_loop(
+            inputs=ScheduleInputs(
+                Mock(), Mock(), module.ava.loaded_code_image(), machine=machine_identity
+            )
+        )
 
-    claim.assert_called_once_with(ANY, slot, None, fire=module._fire)
+    claim.assert_called_once_with(ANY, slot, None, fire=ANY)
+    fire = claim.call_args.kwargs["fire"]
+    if filename == "c9-daily-report-schedule.py":
+        assert isinstance(fire, partial)
+        assert fire.func is module._fire
+        assert callable(fire.keywords["producer"])
+        assert fire.keywords["image"] is module.ava.loaded_code_image()
+    else:
+        assert fire is module._fire
     sleep.assert_called_once_with(120)
 
 
@@ -276,7 +360,11 @@ def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
     ],
 )
 def test_restart_does_not_fire_a_slot_inside_the_previous_two_minutes(
-    filename: str, entry: str, cron: str, monkeypatch: pytest.MonkeyPatch
+    filename: str,
+    entry: str,
+    cron: str,
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
     module = _load_daily_script(filename)
     # Monday, thirty seconds after the missed 09:00 slot.
@@ -301,7 +389,11 @@ def test_restart_does_not_fire_a_slot_inside_the_previous_two_minutes(
     monkeypatch.setattr(module.time, "sleep", sleep)
 
     with pytest.raises(_LoopStoppedError):
-        getattr(module, entry)()
+        getattr(module, entry)(
+            inputs=ScheduleInputs(
+                Mock(), Mock(), module.ava.loaded_code_image(), machine=machine_identity
+            )
+        )
 
     claim.assert_not_called()
     sleep.assert_called_once_with(3600)

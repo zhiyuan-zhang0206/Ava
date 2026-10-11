@@ -14,7 +14,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from base.cluster.machine import machine_name
 from gateway.agents.creation import guarded_draft_key
 from gateway.agents.router import create_and_launch_agent
 from ops.rpc_schemas import SpawnAgentRequest
@@ -51,7 +50,7 @@ async def guarded_draft_guide(
     )
     spawned = await create_and_launch_agent(
         body_obj,
-        machine_name(),
+        request.app.state.machine.name(),
         request.app.state.db_pool,
         request.app.state.db,
         request.app.state.bus,

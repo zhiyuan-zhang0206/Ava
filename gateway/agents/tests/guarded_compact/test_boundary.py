@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
@@ -23,8 +24,11 @@ async def test_strict_target_rejects_before_creating_another_receipt(
     invalid: str,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
+    accepted = await admit(
+        db_conn, aops_pool, client, monkeypatch, catalog=model_catalog, database_gate=database_gate
+    )
     body = dict(accepted.target)
     if invalid == "protocol_bool":
         body["protocol"] = True
@@ -51,8 +55,11 @@ async def test_verified_principal_scope_key_and_changed_original_body(
     monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
+    accepted = await admit(
+        db_conn, aops_pool, client, monkeypatch, catalog=model_catalog, database_gate=database_gate
+    )
     for omitted in ("Idempotency-Key", "Idempotency-Scope"):
         headers = {k: v for k, v in accepted.headers.items() if k != omitted}
         assert (
@@ -91,8 +98,11 @@ async def test_path_bounds_before_domain_access(
     agent_id: int,
     *,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
+    accepted = await admit(
+        db_conn, aops_pool, client, monkeypatch, catalog=model_catalog, database_gate=database_gate
+    )
     path = f"/api/keyed/v1/agents/{agent_id}"
     assert client.get(path + "/compact-target", headers=accepted.headers).status_code == 422
     assert (

@@ -17,6 +17,7 @@ import pytest
 from base.config import ConfigBoot, settings
 from cli.commands.data_plane import walg as walg_cmd
 from cli.parsers import build_parser
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.backup.walg import config as walg_config
 from services.backup.walg import probe, state
 from services.backup.walg.check import Step
@@ -27,6 +28,7 @@ from services.backup.walg.tests.support import (
     archiving_postgres,
     make_sandbox,
 )
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 @pytest.fixture(autouse=True)
@@ -83,15 +85,21 @@ def test_the_parser_reaches_every_verb() -> None:
 
 
 def test_run_hands_the_tick_a_timestamping_reporter_and_returns_its_exit_code(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], operator_database: Any
 ) -> None:
+    database_for_url = operator_database.for_url
+
     def fake_tick(_db: object, report: Any, **_inputs: object) -> int:
+        assert _inputs["database_for_url"] is database_for_url
         report("skipped: postgres is not accepting connections")
         return 1
 
     monkeypatch.setattr(walg_cmd.tick, "run_tick", fake_tick)
 
-    assert walg_cmd.cmd_walg_run() == 1
+    assert (
+        walg_cmd.cmd_walg_run(database_factory=operator_database, database_for_url=database_for_url)
+        == 1
+    )
 
     out = capsys.readouterr().out
     assert re.fullmatch(
@@ -361,15 +369,18 @@ def test_restore_while_wal_g_is_off_says_so(
 
 
 def test_drill_hands_the_tick_module_a_timestamping_reporter_and_returns_its_exit_code(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], operator_database: Any
 ) -> None:
+    database_for_url = operator_database.for_url
+
     def fake_drill(report: Any, **_inputs: object) -> int:
+        assert _inputs["database_for_url"] is database_for_url
         report("drill: FAILED after 3s: recovery failed")
         return 1
 
     monkeypatch.setattr(walg_cmd.tick, "run_drill_now", fake_drill)
 
-    assert walg_cmd.cmd_walg_drill() == 1
+    assert walg_cmd.cmd_walg_drill(database_for_url=database_for_url) == 1
     assert re.fullmatch(
         r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z drill: FAILED after 3s: recovery failed\n",
         capsys.readouterr().out,

@@ -36,6 +36,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 from base.packages.extensions.install_registry import IGNORED_NAMES, tree_hash
 from base.packages.skills import scan
 
@@ -209,7 +211,12 @@ def scan_report(root: Path, name: str, *, accept_risk: bool) -> tuple[str, list[
 
 
 def _register_in_cluster(
-    packages: list[SkillPackage], *, source: str | None, ref: str | None
+    packages: list[SkillPackage],
+    *,
+    source: str | None,
+    ref: str | None,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentity,
 ) -> None:
     """Write every package to the cluster extension registry, or raise.
 
@@ -233,14 +240,12 @@ def _register_in_cluster(
     a fact about how this machine fetched it, and the cluster row is keyed by
     name and addressed by content.
     """
-    from base.cluster.machine import machine_name
-    from base.db import Database
     from base.packages.extensions import registry
 
     from ._pkg_source import looks_like_local_path
 
     origin = (
-        f"local:{machine_name()}" if source is None or looks_like_local_path(source) else source
+        f"local:{machine.name()}" if source is None or looks_like_local_path(source) else source
     )
     local = origin.startswith("local:")
     # A git ref pins a remote source; it says nothing about a local directory.
@@ -248,7 +253,7 @@ def _register_in_cluster(
     # The pool opens eagerly and owns worker threads; close it here rather
     # than letting ConnectionPool.__del__ run at interpreter exit (it then
     # joins its own worker and prints "cannot join current thread" noise).
-    with Database.from_settings().pool() as pool:
+    with database_factory().pool() as pool:
         for pkg in packages:
             registry.register_tree(
                 pool,
@@ -269,6 +274,8 @@ def install(
     accept_risk: bool = False,
     update_mode: str | None = None,
     check_every: int | None = None,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentity,
 ) -> list[tuple[Path, str]]:
     """Copy every package into the skills load dir and register it; return the
     installed `(destination, scan report)` pairs in the order given.
@@ -299,7 +306,9 @@ def install(
     # exactly the drift the registry exists to delete. The reverse gap (a row
     # whose content is not on this machine yet) is not a gap at all: it is what
     # materialization is for, on every machine including this one.
-    _register_in_cluster(packages, source=source, ref=ref)
+    _register_in_cluster(
+        packages, source=source, ref=ref, database_factory=database_factory, machine=machine
+    )
     dest_root.mkdir(parents=True, exist_ok=True)
     installed: list[tuple[Path, str]] = []
     for pkg, (report, accepted) in zip(packages, scanned, strict=True):

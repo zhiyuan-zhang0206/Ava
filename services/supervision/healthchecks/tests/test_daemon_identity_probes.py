@@ -11,13 +11,22 @@ in the roster (the per-module copies of this check died with the modules).
 from __future__ import annotations
 
 import importlib
+import inspect
+from collections.abc import Callable
 from functools import partial
+from pathlib import Path
 from typing import cast
 
+from base import paths
+from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
 from ops import roster
 from ops.roster.service_spec import ServiceSpec
+from services.agent_runner.agent_ops import boot as ops_boot
+from services.agent_runner.agent_ops import daemon as agent_ops
+from services.agent_runner.page_server import daemon as page_server
+from services.agent_runner.page_server import resources as page_resources
 
 
 def _standard_daemons() -> list[ServiceSpec]:
@@ -46,13 +55,31 @@ def test_every_standard_daemon_probe_is_scoped_to_its_name_url_and_pidfile() -> 
         )
 
 
-def test_every_standard_daemon_records_the_pidfile_its_probe_reads() -> None:
+def test_every_standard_daemon_records_the_pidfile_its_probe_reads(
+    process_config: ConfigBoot,
+) -> None:
     """The daemon writes the pidfile of its health name and the roster probe cross-checks
     that same file, so the two cannot drift apart (a hyphenated `agent-host.pid`
     once sat beside the underscored health name)."""
     for spec in _standard_daemons():
         module = importlib.import_module(spec.cmd.rsplit(" ", 1)[1])
+        # Resource operations are called at their actual definition owner.
+        if module is page_server:
+            operation = page_resources.pidfile
+        elif module is agent_ops:
+            operation = ops_boot.pidfile
+        else:
+            operation = module._pidfile
+        parameters = inspect.signature(operation).parameters
+        if not parameters:
+            actual = cast("Callable[[], Path]", operation)()
+        else:
+            assert set(parameters) == {"config", "runtime"}, spec.session
+            assert all(p.default is inspect.Parameter.empty for p in parameters.values()), (
+                spec.session
+            )
+            assert parameters["runtime"].kind is inspect.Parameter.KEYWORD_ONLY, spec.session
+            actual = operation(config=process_config, runtime=paths.run_dir())
         assert (
-            module._pidfile()
-            == ServiceEndpoints.from_settings().of(cast("str", spec.health_name)).pidfile
+            actual == ServiceEndpoints.from_settings().of(cast("str", spec.health_name)).pidfile
         ), spec.session

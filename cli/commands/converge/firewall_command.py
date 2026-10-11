@@ -19,16 +19,17 @@ from __future__ import annotations
 
 import sys
 
+from base.cluster.machine import MachineIdentity
 from base.host import macos_firewall as fw
 from cli.commands.converge.firewall import _report_missing, audit_this_host
 
 
-def cmd_firewall_status() -> int:
+def cmd_firewall_status(*, machine: MachineIdentity) -> int:
     """`ava firewall status` — audit the host and diff the manifest (read-only)."""
     from cli.commands import _repo
 
-    roles = _repo._roles_or_none()
-    audit = audit_this_host(frozenset(roles or ()))
+    roles = _repo._roles_or_none(machine=machine)
+    audit = audit_this_host(frozenset(roles or ()), machine=machine)
     print("→ firewall status")
     if audit.verdict is fw.FirewallVerdict.NOT_MACOS:
         print(f"  {audit.verdict.value}: {audit.detail}")
@@ -39,7 +40,7 @@ def cmd_firewall_status() -> int:
     if rules is None:
         print(f"  unreadable: could not read the allow list from {fw.SOCKETFILTERFW}")
         return 1
-    print(fw.render_manifest_status(rules))
+    print(fw.render_manifest_status(rules, machine=machine))
     stale = fw.stale_manifest_rules(rules)
     print(f"  stale rules: {len(stale)}")
     for path in stale:
@@ -55,7 +56,7 @@ def cmd_firewall_status() -> int:
     return 0
 
 
-def cmd_firewall_sync() -> int:
+def cmd_firewall_sync(*, machine: MachineIdentity) -> int:
     """`ava firewall sync` — apply the manifest now (repair + prune).
 
     Mutates directly first. On older macOS it retries with `sudo -n`; if both
@@ -63,8 +64,8 @@ def cmd_firewall_sync() -> int:
     """
     from cli.commands import _repo
 
-    roles = _repo._roles_or_none()
-    audit = audit_this_host(frozenset(roles or ()))
+    roles = _repo._roles_or_none(machine=machine)
+    audit = audit_this_host(frozenset(roles or ()), machine=machine)
     if audit.verdict not in (fw.FirewallVerdict.ALLOWED, fw.FirewallVerdict.RULES_MISSING):
         print(f"→ firewall sync: nothing to do ({audit.detail})")
         return 0
@@ -75,7 +76,7 @@ def cmd_firewall_sync() -> int:
         )
         return 1
     required = {p.resolve() for p in audit.missing}
-    required.update(fw.manifest_paths())
+    required.update(fw.manifest_paths(machine=machine))
     required = tuple(sorted(required, key=str))
     # Prune before adding so a stale rule's bundle identifier is free for the
     # replacement version's rule (macOS 15 ALF deduplicates by identifier).

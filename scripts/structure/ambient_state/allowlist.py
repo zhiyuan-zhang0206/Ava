@@ -51,9 +51,9 @@ SINK_FACADES: dict[str, str] = {
         "snapshot cursor and node-exit aggregate buffered for the log/event stream; "
         "written by node exits, read only by the flush that emits them"
     ),
-    "base/log/__init__.py": (
-        "the loguru sink facade: import-time reset and extra binding of the loguru global, "
-        "the sample counter and the event-sink handle; read only by the log pipeline itself"
+    "base/log/process.py": (
+        "the concrete loguru startup and sink facade: its idempotency guard, sample counter "
+        "and registered sink handle are read only by process logging initialization and delivery"
     ),
     "base/telemetry/emitter.py": (
         "the telemetry event pipeline: its state, failure counters and exit hook are written by "

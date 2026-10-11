@@ -18,9 +18,6 @@ from base.telemetry.otlp.tests.test_telemetry_otlp import (
     _bind_telemetry as _bind_telemetry,
 )
 from base.telemetry.otlp.tests.test_telemetry_otlp import (
-    _fresh_observability_export_gate as _fresh_observability_export_gate,
-)
-from base.telemetry.otlp.tests.test_telemetry_otlp import (
     _production_process_by_default as _production_process_by_default,
 )
 from base.telemetry.otlp.tests.test_telemetry_otlp import (
@@ -38,7 +35,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry(
     def reachable(_endpoint: str) -> bool:
         return True
 
-    monkeypatch.setattr(telemetry_otlp._OtlpBackend, "_endpoint_reachable", staticmethod(reachable))
+    monkeypatch.setattr(telemetry_otlp.OtlpBackend, "_endpoint_reachable", staticmethod(reachable))
     attempts: list[str] = []
 
     def boom(endpoint: str, **_receipts: Any) -> tuple[Any, Any]:
@@ -46,7 +43,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry(
         raise RuntimeError("collector unreachable")
 
     monkeypatch.setattr(telemetry_otlp, "_build_providers", boom)
-    backend = telemetry_otlp._OtlpBackend()
+    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
     assert backend.export_batch([_event()]) is None  # does not raise
     assert backend._logs is None
     assert backend.export_batch([_event()]) is None  # no per-batch retry
@@ -64,7 +61,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
     def reachable(_endpoint: str) -> bool:
         return True
 
-    monkeypatch.setattr(telemetry_otlp._OtlpBackend, "_endpoint_reachable", staticmethod(reachable))
+    monkeypatch.setattr(telemetry_otlp.OtlpBackend, "_endpoint_reachable", staticmethod(reachable))
     now = [100.0]
     monkeypatch.setattr(telemetry_otlp.time, "monotonic", lambda: now[0])
     emitted: list[tuple[str, dict[str, Any]]] = []
@@ -92,7 +89,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
         return logs, metrics
 
     monkeypatch.setattr(telemetry_otlp, "_build_providers", build)
-    backend = telemetry_otlp._OtlpBackend()
+    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
     try:
         assert backend._ensure() is False
         assert emitted == [
@@ -132,7 +129,7 @@ def test_backend_unreachable_probe_emits_specific_disabled_reason(
         return False
 
     monkeypatch.setattr(
-        telemetry_otlp._OtlpBackend, "_endpoint_reachable", staticmethod(unreachable)
+        telemetry_otlp.OtlpBackend, "_endpoint_reachable", staticmethod(unreachable)
     )
     emitted: list[tuple[str, dict[str, Any]]] = []
 
@@ -143,7 +140,7 @@ def test_backend_unreachable_probe_emits_specific_disabled_reason(
 
     monkeypatch.setattr(telemetry, "emit", capture_emit)
 
-    backend = telemetry_otlp._OtlpBackend()
+    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
     assert backend._ensure() is False
     assert emitted == [
         (
@@ -160,8 +157,10 @@ def test_queue_full_sheds_counted_not_blocking(monkeypatch) -> None:
     """The bounded queue sheds instead of blocking the caller when the worker
     cannot keep up — the isolation contract for a hung OTLP endpoint."""
     monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
-    backend = telemetry_otlp._OtlpBackend(providers=(None, None), queue_maxsize=1)
-    monkeypatch.setattr(telemetry_otlp._OtlpBackend, "_ensure", lambda _self: True)  # pyright: ignore[reportUnknownMemberType]
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True, providers=(None, None), queue_maxsize=1
+    )
+    monkeypatch.setattr(telemetry_otlp.OtlpBackend, "_ensure", lambda _self: True)  # pyright: ignore[reportUnknownMemberType]
     backend._queue.put_nowait(_event())  # fill the queue
     backend.export_batch([_event()])
     assert backend._dropped == 1
@@ -206,9 +205,16 @@ def test_pipeline_mirror_survives_otlp_failure(
     def boom(endpoint: str, **_receipts: Any) -> tuple[Any, Any]:
         raise RuntimeError("collector unreachable")
 
-    monkeypatch.setattr("base.telemetry.emitter.logs_dir", lambda: tmp_path)
+    monkeypatch.setattr("base.paths.logs_dir", lambda: tmp_path)
     monkeypatch.setattr(telemetry_otlp, "_build_providers", boom)  # pyright: ignore[reportUnknownMemberType]
-    monkeypatch.setattr(telemetry_otlp, "backend", telemetry_otlp._OtlpBackend())  # pyright: ignore[reportUnknownMemberType]
+    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
+
+    def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
+        return backend
+
+    monkeypatch.setattr(telemetry_otlp, "OtlpBackend", build_backend)  # pyright: ignore[reportUnknownMemberType]
+    pipeline = telemetry._state["pipeline"]
+    pipeline._exporter = backend
     telemetry.emit("log", "log", agent_id=_AGENT, attributes={"msg": "boom"})
     telemetry.sync()
 
@@ -226,7 +232,7 @@ def test_handshake_env_no_longer_gates_export(monkeypatch: pytest.MonkeyPatch) -
     must no longer disable OTLP — the export flag is the only authority."""
     monkeypatch.setenv("AVA_EXEC_REQUEST_FILE", "request.json")
     monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
-    assert telemetry_otlp._OtlpBackend._enabled() is True
+    assert telemetry_otlp.OtlpBackend(export_allowed=lambda: True)._enabled() is True
 
 
 def test_flush_force_flushes_sdk_batch_records(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -246,13 +252,15 @@ def test_flush_force_flushes_sdk_batch_records(monkeypatch: pytest.MonkeyPatch) 
     logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
     metric_provider = MeterProvider(metric_readers=[InMemoryMetricReader()])
     monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
-    backend = telemetry_otlp._OtlpBackend(providers=(logger_provider, metric_provider))
-    monkeypatch.setattr(telemetry_otlp, "backend", backend)
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True, providers=(logger_provider, metric_provider)
+    )
+
     try:
         backend.export_batch([_event(attributes={"fn": "files.read"})])
         # Without force_flush the in-memory batch exporter would stay empty
         # until its 5s schedule; the flush must surface the record now.
-        telemetry_otlp.flush()
+        backend.flush()
         assert len(log_exporter.get_finished_logs()) == 1
     finally:
         backend.shutdown()
@@ -272,16 +280,17 @@ def test_warmup_builds_backend_when_enabled(monkeypatch: pytest.MonkeyPatch) -> 
     log_exporter = InMemoryLogRecordExporter()
     logger_provider = LoggerProvider()
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(log_exporter))
-    backend = telemetry_otlp._OtlpBackend(
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True,
         providers=(
             logger_provider,
             MeterProvider(metric_readers=[InMemoryMetricReader()]),
-        )
+        ),
     )
-    monkeypatch.setattr(telemetry_otlp, "backend", backend)
+
     monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
     try:
-        telemetry_otlp.warmup()
+        backend.warmup()
         assert backend._logs is not None
     finally:
         backend.shutdown()

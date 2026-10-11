@@ -23,6 +23,7 @@ from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -72,7 +73,7 @@ def _empty_state() -> AgentState:
     return AgentState(messages=[], halted=False)
 
 
-def _empty_runtime() -> Runtime[AvaContext]:
+def _empty_runtime(database_gate: ProcessDbGate) -> Runtime[AvaContext]:
     """Test runtime — AvaContext fields are all mocks, hook doesn't touch them is fine."""
     ctx = AvaContext(
         ops_pool=make_fake_ops_pool(),
@@ -81,7 +82,7 @@ def _empty_runtime() -> Runtime[AvaContext]:
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -94,24 +95,26 @@ def _empty_config() -> RunnableConfig:
     return {"configurable": {"thread_id": "1"}}
 
 
-async def test_runner_pass_through_when_no_hooks():
+async def test_runner_pass_through_when_no_hooks(database_gate: ProcessDbGate):
     """No hooks — runner returns Command(update={}, goto=default_next)."""
-    cmd = await _runner()(_empty_state(), _empty_runtime(), _empty_config())
+    cmd = await _runner()(
+        _empty_state(), _empty_runtime(database_gate=database_gate), _empty_config()
+    )
     assert isinstance(cmd, Command)
     assert cmd.update == {}
     assert cmd.goto == "llm"
 
 
-async def test_runner_calls_all_hooks_in_given_order():
+async def test_runner_calls_all_hooks_in_given_order(database_gate: ProcessDbGate):
     """Multiple hooks — run in the order the runner was handed them, sequentially."""
     calls: list[str] = []
     runner = _runner(_RecordHook("a", calls), _RecordHook("b", calls))
 
-    await runner(_empty_state(), _empty_runtime(), _empty_config())
+    await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
     assert calls == ["a", "b"]
 
 
-async def test_runner_same_key_co_write_raises():
+async def test_runner_same_key_co_write_raises(database_gate: ProcessDbGate):
     """Two hooks write same key in one pass — fail-loud RuntimeError, naming both hooks (each `Hook.name`, default class name) + conflict key. Old last-wins silent merge would let one hook's `messages` silently overwrite another's (compaction full replace swallowing sibling's note is concrete scenario), so changed to raise; hooks sharing a node must sequence themselves (sibling defers when the other wants to write)."""
 
     class _HookFirst(Hook):
@@ -124,21 +127,21 @@ async def test_runner_same_key_co_write_raises():
 
     with pytest.raises(RuntimeError, match=r"both wrote key 'halted'") as exc:
         await _runner(_HookFirst(), _HookSecond())(
-            _empty_state(), _empty_runtime(), _empty_config()
+            _empty_state(), _empty_runtime(database_gate=database_gate), _empty_config()
         )
     # Error must name both hooks (class names) to facilitate locating coordination bug
     assert "_HookFirst" in str(exc.value)
     assert "_HookSecond" in str(exc.value)
 
 
-async def test_runner_reducer_key_co_write_allowed():
+async def test_runner_reducer_key_co_write_allowed(database_gate: ProcessDbGate):
     """Two hooks write same key with reducer (like messages) in one pass — allowed to merge, no raise. add_messages reducer ensures both hooks' messages are appended."""
     runner = _runner(
         _ReturnHook({"messages": [HumanMessage(content="from hook a")]}),
         _ReturnHook({"messages": [HumanMessage(content="from hook b")]}),
     )
 
-    cmd = await runner(_empty_state(), _empty_runtime(), _empty_config())
+    cmd = await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
     # Both messages should be in the update (reducer merged them)
     assert cmd.update is not None
     msgs = cmd.update.get("messages", [])
@@ -147,50 +150,50 @@ async def test_runner_reducer_key_co_write_allowed():
     assert msgs[1].content == "from hook b"
 
 
-async def test_runner_no_reducer_key_co_write_still_raises():
+async def test_runner_no_reducer_key_co_write_still_raises(database_gate: ProcessDbGate):
     """Key without reducer (like halted) still raises when both hooks write simultaneously — silent clobber protection unchanged."""
     runner = _runner(_ReturnHook({"halted": True}), _ReturnHook({"halted": False}))
 
     with pytest.raises(RuntimeError, match=r"both wrote key 'halted'"):
-        await runner(_empty_state(), _empty_runtime(), _empty_config())
+        await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
 
 
-async def test_runner_co_write_unknown_key_raises():
+async def test_runner_co_write_unknown_key_raises(database_gate: ProcessDbGate):
     """Key not in state schema (like typo) even if appears in both hooks simultaneously will raise — unknown key has no reducer, co-write is a bug."""
     runner = _runner(_ReturnHook({"typo_field": 1}), _ReturnHook({"typo_field": 2}))
 
     with pytest.raises(RuntimeError, match=r"both wrote key 'typo_field'"):
-        await runner(_empty_state(), _empty_runtime(), _empty_config())
+        await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
 
 
-async def test_runner_disjoint_keys_merge():
+async def test_runner_disjoint_keys_merge(database_gate: ProcessDbGate):
     """Two hooks write disjoint keys — normally merge into one update, no raise."""
     runner = _runner(_ReturnHook({"halted": True}), _ReturnHook({"goto": "custom"}))
 
-    cmd = await runner(_empty_state(), _empty_runtime(), _empty_config())
+    cmd = await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
     assert cmd.goto == "custom"
     assert cmd.update == {"halted": True}
 
 
-async def test_runner_skips_none_returns():
+async def test_runner_skips_none_returns(database_gate: ProcessDbGate):
     """observation hook returns None — runner skips, not merged into update."""
     runner = _runner(_ReturnHook(None), _ReturnHook({"halted": True}))
 
-    cmd = await runner(_empty_state(), _empty_runtime(), _empty_config())
+    cmd = await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
     assert cmd.update == {"halted": True}
 
 
-async def test_hook_can_override_goto():
+async def test_hook_can_override_goto(database_gate: ProcessDbGate):
     """hook update sets 'goto' → runner uses it instead of default_next.
     'goto' does not enter update fields (popped), used only for routing."""
     runner = _runner(_ReturnHook({"goto": "custom_target", "halted": True}))
 
-    cmd = await runner(_empty_state(), _empty_runtime(), _empty_config())
+    cmd = await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
     assert cmd.goto == "custom_target"
     assert cmd.update == {"halted": True}  # goto was popped, only halted remains
 
 
-async def test_runner_propagates_hook_exceptions():
+async def test_runner_propagates_hook_exceptions(database_gate: ProcessDbGate):
     """fail-fast — hook raises error lets graph explode, no catch."""
 
     class _BoomHook(Hook):
@@ -199,7 +202,7 @@ async def test_runner_propagates_hook_exceptions():
 
     runner = _runner(_BoomHook())
     with pytest.raises(RuntimeError, match="plugin bug"):
-        await runner(_empty_state(), _empty_runtime(), _empty_config())
+        await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
 
 
 def test_registry_routes_each_hook_to_its_declared_point():
@@ -217,7 +220,7 @@ def test_registry_routes_each_hook_to_its_declared_point():
     assert list(registry.hooks("after_init")) == []
 
 
-async def test_runner_is_a_function_of_the_hooks_it_was_built_with():
+async def test_runner_is_a_function_of_the_hooks_it_was_built_with(database_gate: ProcessDbGate):
     """The hook list is read once, at build: changing the source list afterwards does not change
     what the already-built runner runs. The registry is a value, not a live global."""
     calls: list[str] = []
@@ -225,11 +228,11 @@ async def test_runner_is_a_function_of_the_hooks_it_was_built_with():
     runner = make_hook_runner("before_llm", "llm", source)
 
     source.append((None, _RecordHook("late", calls)))
-    await runner(_empty_state(), _empty_runtime(), _empty_config())
+    await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
     assert calls == ["built"]
 
 
-async def test_hook_can_read_agent_id_from_config():
+async def test_hook_can_read_agent_id_from_config(database_gate: ProcessDbGate):
     """hook reads agent_id via config — verifies LangGraph automatically passes config into hook."""
     from base.agents.context import agent_id_from_config
 
@@ -241,7 +244,11 @@ async def test_hook_can_read_agent_id_from_config():
             return None
 
     runner = _runner(_CaptureTid())
-    await runner(_empty_state(), _empty_runtime(), {"configurable": {"thread_id": "42"}})
+    await runner(
+        _empty_state(),
+        _empty_runtime(database_gate=database_gate),
+        {"configurable": {"thread_id": "42"}},
+    )
     assert seen == [42]
 
 
@@ -268,19 +275,19 @@ def activations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, st
 
 
 async def test_plugin_hook_state_update_records_activation(
-    activations: list[tuple[str, str, str, str]],
+    activations: list[tuple[str, str, str, str]], database_gate: ProcessDbGate
 ):
     """A plugin hook that returned a state update acted on the turn — the record
     names the keys it wrote, which is also how the `state` surface is covered
     (plugin state writes travel through hook returns)."""
     await _runner(_ReturnHook({"halted": True}), plugin="myplugin")(
-        _empty_state(), _empty_runtime(), _empty_config()
+        _empty_state(), _empty_runtime(database_gate=database_gate), _empty_config()
     )
     assert activations == [("myplugin", "hooks", "before_llm", "_ReturnHook wrote halted")]
 
 
 async def test_each_hook_is_attributed_to_the_plugin_it_was_paired_with(
-    activations: list[tuple[str, str, str, str]],
+    activations: list[tuple[str, str, str, str]], database_gate: ProcessDbGate
 ):
     """The plugin name rides the `(plugin, hook)` pair, so two plugins' hooks at one edge are
     attributed separately, and a framework hook (None) between them records nothing."""
@@ -294,7 +301,7 @@ async def test_each_hook_is_attributed_to_the_plugin_it_was_paired_with(
         ],
     )
 
-    await runner(_empty_state(), _empty_runtime(), _empty_config())
+    await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
     assert [(plugin, detail) for plugin, _, _, detail in activations] == [
         ("alpha", "_ReturnHook wrote goto"),
         ("beta", "_ReturnHook wrote messages"),
@@ -302,23 +309,29 @@ async def test_each_hook_is_attributed_to_the_plugin_it_was_paired_with(
 
 
 async def test_plugin_hook_returning_none_records_nothing(
-    activations: list[tuple[str, str, str, str]],
+    activations: list[tuple[str, str, str, str]], database_gate: ProcessDbGate
 ):
     """Pure observation stays free — a None return is not an activation."""
     await _runner(_ReturnHook(None), plugin="myplugin")(
-        _empty_state(), _empty_runtime(), _empty_config()
+        _empty_state(), _empty_runtime(database_gate=database_gate), _empty_config()
     )
     assert activations == []
 
 
-async def test_framework_hook_records_nothing(activations: list[tuple[str, str, str, str]]):
+async def test_framework_hook_records_nothing(
+    activations: list[tuple[str, str, str, str]], database_gate: ProcessDbGate
+):
     """Framework hooks carry no plugin name, so they are absent from the attribution
     ledger and from activation telemetry alike."""
-    await _runner(_ReturnHook({"halted": True}))(_empty_state(), _empty_runtime(), _empty_config())
+    await _runner(_ReturnHook({"halted": True}))(
+        _empty_state(), _empty_runtime(database_gate=database_gate), _empty_config()
+    )
     assert activations == []
 
 
-async def test_activation_key_matches_the_ledger_entry(monkeypatch: pytest.MonkeyPatch):
+async def test_activation_key_matches_the_ledger_entry(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+):
     """The whole point of reusing `(plugin, surface, identifier)`: an activation
     joins onto the `Contribution` the same declaration yields, with no second
     identifier space to keep in sync."""
@@ -336,18 +349,20 @@ async def test_activation_key_matches_the_ledger_entry(monkeypatch: pytest.Monke
     ledger = registry.records("myplugin")
 
     runner = make_hook_runner("before_exec", "exec", list(registry.hooks("before_exec")))
-    await runner(_empty_state(), _empty_runtime(), _empty_config())
+    await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
     assert [(c.plugin, c.surface, c.identifier) for c in ledger] == recorded
 
 
-async def test_runner_emits_one_hook_timing_event_per_pass(loguru_records: list[dict[str, Any]]):
+async def test_runner_emits_one_hook_timing_event_per_pass(
+    loguru_records: list[dict[str, Any]], database_gate: ProcessDbGate
+):
     """Every hook-runner pass logs one `hook_timing` event carrying per-hook
     durations — the sub-span replacement that makes a slow before_llm /
     before_exec node attributable to its hook from the events alone (the
     node span has no sub-spans and is otherwise a black box)."""
     runner = _runner(_RecordHook("a", []), _ReturnHook({"halted": True}))
 
-    await runner(_empty_state(), _empty_runtime(), _empty_config())
+    await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
 
     timing = [r for r in loguru_records if r["extra"].get("event") == "hook_timing"]
     assert len(timing) == 1
@@ -359,9 +374,11 @@ async def test_runner_emits_one_hook_timing_event_per_pass(loguru_records: list[
     assert all(isinstance(ms, float) and ms >= 0 for ms in hook_ms.values())
 
 
-async def test_runner_skips_hook_timing_on_empty_pass(loguru_records: list[dict[str, Any]]):
+async def test_runner_skips_hook_timing_on_empty_pass(
+    loguru_records: list[dict[str, Any]], database_gate: ProcessDbGate
+):
     """No hooks → no `hook_timing` event (an empty pass has nothing
     to attribute; the event would be pure noise)."""
-    await _runner()(_empty_state(), _empty_runtime(), _empty_config())
+    await _runner()(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
 
     assert not [r for r in loguru_records if r["extra"].get("event") == "hook_timing"]

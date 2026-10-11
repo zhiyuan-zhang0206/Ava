@@ -19,9 +19,9 @@ from psycopg_pool import AsyncConnectionPool
 import base.agents.history.inbound_sideload as sideload_mod
 from base.agents.history.inbound_sideload import sideload_committed_ids
 from base.agents.history.tests.test_inbound_sideload_failures import _read_inputs
-from services.agent_runner.agent_host.recovery.tests.test_reconcile_after_abort import (
-    _insert_checkpoint,
-    _insert_write,
+from services.agent_runner.agent_host.recovery.tests.checkpoint_inputs import (
+    insert_checkpoint,
+    insert_write,
 )
 
 
@@ -39,10 +39,10 @@ async def test_sideload_decode_failure_keeps_its_traceback(
         [HumanMessage(content="x", additional_kwargs={"ava_inbound_id": 7})]
     )
     checkpoint_id = "e0000000-0000-6000-8000-00000000000b"
-    _insert_checkpoint(
+    insert_checkpoint(
         db_conn, agent, checkpoint_id, datetime.now(UTC).isoformat(), messages_version="v0"
     )
-    _insert_checkpoint(
+    insert_checkpoint(
         db_conn,
         agent,
         "f0000000-0000-6000-8000-00000000000b",
@@ -50,7 +50,7 @@ async def test_sideload_decode_failure_keeps_its_traceback(
         parent_id=checkpoint_id,
         messages_version="v1",
     )
-    _insert_write(db_conn, agent, checkpoint_id, idx=0, type_tag=str(type_tag), blob=bytes(blob))
+    insert_write(db_conn, agent, checkpoint_id, idx=0, type_tag=str(type_tag), blob=bytes(blob))
 
     def _boom(_value: Any, _ids: set[int]) -> None:
         raise RuntimeError("decode down")

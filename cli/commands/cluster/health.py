@@ -22,14 +22,18 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import httpx
 import psycopg
 import redis.exceptions
 
 from base import telemetry
+from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from cli.commands.cluster._provider_guard import run_provider_guard
+from cli.database.runtime import CommandRuntime
 
 # Default thresholds. Overridable via CLI flags; the cron wrapper's
 # defaults are set at registration time.
@@ -77,13 +81,12 @@ def _gateway_liveness_with_retry() -> bool:
     return False
 
 
-def _data_plane_abnormal() -> bool:
+def _data_plane_abnormal(*, database_factory: DatabaseFactory) -> bool:
     """True when either dependency behind the gateway is currently unreachable."""
-    from base.db import Database
     from base.events.live.bus import EventBus
 
     try:
-        with Database.from_settings().connect(autocommit=True):
+        with database_factory().connect(autocommit=True):
             pass
     except (psycopg.Error, OSError):
         return True
@@ -98,15 +101,14 @@ def _data_plane_abnormal() -> bool:
     return False
 
 
-def _agent_population(min_agents: int) -> bool:
+def _agent_population(min_agents: int, *, database_factory: DatabaseFactory) -> bool:
     """Check that at least `min_agents` agents are in running/idling status.
 
     Queries the central DB directly — the probe runs on the gateway machine
     and has DB access. A cluster with zero live agents is effectively dead."""
-    from base.db import Database
 
     try:
-        with Database.from_settings().connect(autocommit=True) as conn, conn.cursor() as cur:
+        with database_factory().connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now()"
@@ -123,14 +125,15 @@ def _agent_population(min_agents: int) -> bool:
         return False
 
 
-def _agent_population_failure_class(min_agents: int) -> str | None:
+def _agent_population_failure_class(
+    min_agents: int, *, database_factory: DatabaseFactory
+) -> str | None:
     """Classify observed low population against DB availability and local intent."""
-    from base.db import Database
     from base.deploy.lifecycle import service_selection
     from base.deploy.maintenance import pause_owner
 
     try:
-        with Database.from_settings().connect(autocommit=True) as conn, conn.cursor() as cur:
+        with database_factory().connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now()"
@@ -193,7 +196,7 @@ def _alert_only_failure(check: str, message: str) -> int:
     return 1
 
 
-def _schema_health() -> bool:
+def _schema_health(*, database_factory: DatabaseFactory) -> bool:
     """Check that the applied schema version matches the required version.
 
     Reuses the existing `check_schema_version` invariant that every daemon
@@ -205,7 +208,6 @@ def _schema_health() -> bool:
     must not fire a false schema alert while code and DB are actually in sync
     (2026-08-03: probe alerted "applied version behind required" on a
     connection error during a pgbouncer flake)."""
-    from base.db import Database
     from base.deploy.schema.migrations import (
         CodeBehindSchema,
         SchemaVersionMismatch,
@@ -215,7 +217,7 @@ def _schema_health() -> bool:
     try:
         # check_schema_version expects a connection; connect+check inline
 
-        with Database.from_settings().connect(autocommit=True) as conn:
+        with database_factory().connect(autocommit=True) as conn:
             check_schema_version(conn)
         return True
     except (CodeBehindSchema, SchemaVersionMismatch):
@@ -228,7 +230,7 @@ def _schema_health() -> bool:
         return True
 
 
-def _service_probes() -> list[str]:
+def _service_probes(*, machine: MachineIdentity) -> list[str]:
     """Probe every service this host's roles should be running; return the failing
     services, each annotated with why (empty = all responding).
 
@@ -247,7 +249,7 @@ def _service_probes() -> list[str]:
     from base.deploy.lifecycle.service_selection import read_selection
     from ops.spec import services_for_capabilities_annotated
 
-    roles = _repo_commands._roles_or_none()
+    roles = _repo_commands._roles_or_none(machine=machine)
     if roles is None:
         return ["service roster unavailable"]
     try:
@@ -255,7 +257,7 @@ def _service_probes() -> list[str]:
     except (OSError, ValueError, RuntimeError, TypeError) as exc:
         return [f"service selection unavailable ({exc})"]
     failing: list[str] = []
-    for spec, gate_reason in services_for_capabilities_annotated(roles):
+    for spec, gate_reason in services_for_capabilities_annotated(roles, machine=machine):
         if gate_reason is not None or not selection.enabled(spec.session):
             continue
         probe = _probe_commands.probe_service(spec)
@@ -264,7 +266,7 @@ def _service_probes() -> list[str]:
     return failing
 
 
-def _redis_bridge_probe() -> str | None:
+def _redis_bridge_probe(*, machine: MachineIdentity, config: ConfigBoot) -> str | None:
     """End-to-end Redis relay failure text, or None when healthy/not required.
 
     Gateway-only and alert-only: a failed host listener is an
@@ -275,12 +277,12 @@ def _redis_bridge_probe() -> str | None:
     """
     import cli.commands._repo as _repo_commands
 
-    roles = _repo_commands._roles_or_none()
+    roles = _repo_commands._roles_or_none(machine=machine)
     if roles is None or "gateway" not in roles:
         return None
     from cli.commands.converge.redis_bridge import probe_redis_bridge
 
-    status = probe_redis_bridge()
+    status = probe_redis_bridge(machine=machine, config=config)
     if not status.required:
         return None
     if not status.serving:
@@ -404,6 +406,9 @@ def run_health_probe(
     *,
     agent_min: int | None = None,
     check_schema: bool = True,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], Any],
+    command: CommandRuntime,
 ) -> int:
     """Return 0 for healthy, 1 for unhealthy, and 2 for a checkout refusal.
 
@@ -421,10 +426,14 @@ def run_health_probe(
         print(f"health-probe refused: {refusal}", file=sys.stderr)
         return 2
 
-    telemetry.init_telemetry(process="cli-health-probe")
+    telemetry.init_telemetry(
+        process="cli-health-probe", pipeline=producer(), machine_reader=command.machine.name
+    )
     rc = _observe_cluster_health(
         agent_min=agent_min,
         check_schema=check_schema,
+        database_factory=database_factory,
+        command=command,
     )
     _report_ran(unhealthy_checks=rc)
     return rc
@@ -434,6 +443,8 @@ def _observe_cluster_health(
     *,
     agent_min: int | None,
     check_schema: bool,
+    database_factory: DatabaseFactory,
+    command: CommandRuntime,
 ) -> int:
     """Observe one health round and report the first failed check."""
     # Check disk before gateway liveness: a full data volume can keep the
@@ -445,7 +456,9 @@ def _observe_cluster_health(
 
     # 1. Gateway liveness (primary signal)
     if not _gateway_liveness_with_retry():
-        failure_class = "environment" if _data_plane_abnormal() else "code"
+        failure_class = (
+            "environment" if _data_plane_abnormal(database_factory=database_factory) else "code"
+        )
         return _unhealthy(
             "gateway_liveness",
             "FAIL: gateway liveness — health endpoint unreachable or non-200",
@@ -461,32 +474,37 @@ def _observe_cluster_health(
         from base.config import settings
 
         agent_min = settings.daemon.health_probe_agent_min
-    if not _agent_population(agent_min):
+    if not _agent_population(agent_min, database_factory=database_factory):
         return _unhealthy(
             "agent_population",
             f"FAIL: agent population — fewer than {agent_min} agent(s) running/idling",
-            failure_class=_agent_population_failure_class(agent_min) or "code",
+            failure_class=_agent_population_failure_class(
+                agent_min, database_factory=database_factory
+            )
+            or "code",
         )
     print(f"  ✓ agent population (>= {agent_min})")
 
     # 3. Schema health
     if check_schema:
-        if not _schema_health():
+        if not _schema_health(database_factory=database_factory):
             return _unhealthy(
                 "schema",
                 "FAIL: schema health — applied version behind required (CodeBehindSchema)",
             )
         print("  ✓ schema health")
 
-    return _check_alert_only_health()
+    return _check_alert_only_health(database_factory=database_factory, command=command)
 
 
-def _check_alert_only_health() -> int:
+def _check_alert_only_health(*, database_factory: DatabaseFactory, command: CommandRuntime) -> int:
     """Observe the remaining service, host, and provider health signals."""
 
     # 5. Per-service health and the host-level Redis bridge.
-    failing = _service_probes() + [
-        failure for failure in (_redis_bridge_probe(),) if failure is not None
+    failing = _service_probes(machine=command.machine) + [
+        failure
+        for failure in (_redis_bridge_probe(machine=command.machine, config=command.config),)
+        if failure is not None
     ]
     if failing:
         return _alert_only_failure(
@@ -501,7 +519,7 @@ def _check_alert_only_health() -> int:
     # 6b. WAL archiving — alert-only, same class as checks 5 and 6: a stuck or
     # misconfigured archiver is fixed by repairing the archive path, not by rolling
     # code back. Silent unless AVA_WALG_CONFIG_FILE switches WAL-G on.
-    config = ConfigBoot()
+    config = command.config
 
     def path_reader() -> Path | None:
         if not config.prepared:
@@ -540,7 +558,9 @@ def _check_alert_only_health() -> int:
     print("  ✓ source tree integrity")
 
     # 9-10. Provider account guard — alert-only, like checks 5-8 (see `_provider_guard`).
-    if (guard_rc := run_provider_guard(report=_report_failing)) is not None:
+    if (
+        guard_rc := run_provider_guard(report=_report_failing, database_factory=database_factory)
+    ) is not None:
         return guard_rc
 
     return 0
@@ -550,9 +570,15 @@ def cmd_health_probe(
     *,
     agent_min: int | None = None,
     check_schema: bool = True,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], Any],
+    command: CommandRuntime,
 ) -> int:
     """Report cluster health through exit status, diagnostics, and `health_probe_failing` events."""
     return run_health_probe(
         agent_min=agent_min,
         check_schema=check_schema,
+        database_factory=database_factory,
+        producer=producer,
+        command=command,
     )

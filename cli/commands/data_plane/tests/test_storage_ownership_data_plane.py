@@ -2,6 +2,7 @@
 
 import signal
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import DEFAULT, Mock
@@ -14,10 +15,16 @@ from redis.asyncio import Redis as AsyncRedis
 from base.cluster import ownership
 from base.cluster import postgres as pg
 from base.cluster.dataplane import pooler as base_pooler
+from base.cluster.machine import MachineIdentity
 from base.native_process.ownership import OwnedProcess
+from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests._containers import redis_server
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 _UNUSED_ADMIN = "unused-admin-credential"
 
@@ -36,7 +43,10 @@ def pg_data(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def test_foreign_redis_keeps_acl_and_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """A foreign Redis that even accepts this home's admin password is not ours:
     native ownership refuses before any ACL or config effect."""
@@ -51,7 +61,10 @@ def test_foreign_redis_keeps_acl_and_config(
         with redis.Redis.from_url(url, decode_responses=True) as client:  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
             client.config_set("requirepass", "admin")  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
             before = client.execute_command("ACL", "LIST")  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
-            assert instance.start_redis(port, "admin", "runtime", "unowned") == 1
+            assert (
+                instance.start_redis(port, "admin", "runtime", "unowned", machine=command_machine)
+                == 1
+            )
             assert client.execute_command("ACL", "LIST") == before  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
     assert config.read_text() == "original config\n"
 
@@ -60,17 +73,22 @@ def test_foreign_postgres_listener_refuses_before_hba_or_initdb(
     pg_data: Path,
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(instance, "_pg_data_dir", lambda: pg_data)
     monkeypatch.setattr(ownership, "strict_listeners_on", lambda _port: [123])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(instance, "_ensure_pg_data", lambda: pytest.fail("must not initialize"))
     with pytest.raises(RuntimeError, match="no owned data-plane process"):
-        instance._start_pg(15433, retained_children=retained_children)
+        instance._start_pg(15433, retained_children=retained_children, machine=command_machine)
     assert not (pg_data / "pg_hba.conf").exists()
 
 
 def test_foreign_pooler_listener_refuses_before_config_or_signal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(base_pooler, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(pooler, "pgbouncer_bin", lambda: __file__)
@@ -83,11 +101,15 @@ def test_foreign_pooler_listener_refuses_before_config_or_signal(
             db_name="ava",
             userlist=b"",
             admin_password=_UNUSED_ADMIN,
+            machine=command_machine,
         )
 
 
 def test_pooler_birth_change_prevents_reload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(base_pooler, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(pooler, "pgbouncer_bin", lambda: __file__)
@@ -98,7 +120,12 @@ def test_pooler_birth_change_prevents_reload(
     )
     monkeypatch.setattr(ownership, "require_listener", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(pooler, "_write_config", lambda **_kw: False)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-    monkeypatch.setattr(base_pooler, "pgbouncer_public_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+
+    def listener_reachable(_listen_port: int, _role: str, *, machine: MachineIdentity) -> bool:
+        assert machine is command_machine
+        return True
+
+    monkeypatch.setattr(base_pooler, "pgbouncer_public_listener_reachable", listener_reachable)
     monkeypatch.setattr(
         pooler,
         "psutil",
@@ -115,11 +142,13 @@ def test_pooler_birth_change_prevents_reload(
             db_name="ava",
             userlist=b"",
             admin_password=_UNUSED_ADMIN,
+            machine=command_machine,
         )
 
 
 def test_redis_maintenance_reconnect_cannot_shutdown_another_connection(
     monkeypatch: pytest.MonkeyPatch,
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     from base.config import settings
     from cli.commands.data_plane import maintenance_stop as plane
@@ -150,7 +179,7 @@ def test_redis_maintenance_reconnect_cannot_shutdown_another_connection(
             directory = Path(str(client.config_get("dir")["dir"]))  # pyright: ignore[reportUnknownMemberType] — redis stubs
             monkeypatch.setattr(ownership, "redis_data_dir", lambda: directory)
             with pytest.raises(RuntimeError, match="connection changed"):
-                plane.stop(3)
+                plane.stop(3, producer=operator_pipeline)
             assert client.ping(), "the server must survive lost connection custody"  # pyright: ignore[reportUnknownMemberType] — redis stubs
 
 
@@ -201,8 +230,12 @@ def _assert_warm_pg_repeat(
     first: OwnedProcess,
     persisted: bytes,
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
-    assert instance._start_pg(port, retained_children=retained_children) == 0
+    assert (
+        instance._start_pg(port, retained_children=retained_children, machine=command_machine) == 0
+    )
     repeated = ownership.postgres(data)
     assert repeated is not None and first.same_birth(repeated)
     assert pg.receipt_path(data).read_bytes() == persisted
@@ -212,6 +245,9 @@ def test_real_owned_postgres_resume_and_fast_stop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """The ordinary producer supplies all custody; no test-only receipt adoption."""
     import psycopg
@@ -220,21 +256,31 @@ def test_real_owned_postgres_resume_and_fast_stop(
 
     data, port = _private_pg_configuration(tmp_path, monkeypatch)
     try:
-        assert instance._start_pg(port, retained_children=retained_children) == 0
+        assert (
+            instance._start_pg(port, retained_children=retained_children, machine=command_machine)
+            == 0
+        )
         first, persisted = _assert_pg_birth(data, port)
         with psycopg.connect(instance.pg_admin_url(port), autocommit=True) as conn:
             ownership.require_postgres_connection(conn, data)
             row = conn.execute("SELECT system_identifier FROM pg_control_system()").fetchone()
             assert row is not None
             system_id = row[0]
-            _assert_warm_pg_repeat(data, port, first, persisted, retained_children)
-            assert plane.stop(10, retained_children=retained_children) == ["postgres"]
+            _assert_warm_pg_repeat(
+                data, port, first, persisted, retained_children, command_machine=command_machine
+            )
+            assert plane.stop(
+                10, retained_children=retained_children, producer=operator_pipeline
+            ) == ["postgres"]
             assert not first.live() and ownership.postgres(data) is None
             assert pg.receipt_path(data).read_bytes() == persisted
             with pytest.raises(psycopg.OperationalError):
                 conn.execute("SELECT 1")
-        assert plane.stop(2, retained_children=retained_children) == []
-        assert instance._start_pg(port, retained_children=retained_children) == 0
+        assert plane.stop(2, retained_children=retained_children, producer=operator_pipeline) == []
+        assert (
+            instance._start_pg(port, retained_children=retained_children, machine=command_machine)
+            == 0
+        )
         second, _receipt = _assert_pg_birth(data, port)
         assert not first.same_birth(second)
         with psycopg.connect(instance.pg_admin_url(port), autocommit=True) as conn:
@@ -254,6 +300,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
 def test_pg_native_signal_failure_is_not_reported_as_stopped(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     import asyncio
 
@@ -280,7 +327,14 @@ def test_pg_native_signal_failure_is_not_reported_as_stopped(
     client = AsyncRedis(port=_free_port())
     with pytest.raises(RuntimeError, match="native custody lost"):
         asyncio.run(
-            plane._request_stop("postgres", owner, client, plane.deadline_after(3), save=True)
+            plane._request_stop(
+                "postgres",
+                owner,
+                client,
+                plane.deadline_after(3),
+                save=True,
+                producer=operator_pipeline,
+            )
         )
     assert seen == [owner]
 
@@ -289,6 +343,8 @@ def test_pgdata_symlink_cannot_adopt_another_homes_receipt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     foreign = tmp_path / "foreign/pg"
     foreign.mkdir(parents=True)
@@ -305,7 +361,7 @@ def test_pgdata_symlink_cannot_adopt_another_homes_receipt(
         instance, "_ensure_pg_data", Mock(side_effect=AssertionError("initdb effect"))
     )
     with pytest.raises(RuntimeError, match="symlink"):
-        instance._start_pg(15433, retained_children=retained_children)
+        instance._start_pg(15433, retained_children=retained_children, machine=command_machine)
     assert hba.read_text() == "foreign authority\n"
 
 
@@ -313,10 +369,15 @@ def test_real_stopped_postmaster_cannot_pass_warm_readiness(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     data, port = _private_pg_configuration(tmp_path, monkeypatch)
     try:
-        assert instance._start_pg(port, retained_children=retained_children) == 0
+        assert (
+            instance._start_pg(port, retained_children=retained_children, machine=command_machine)
+            == 0
+        )
         owner, before = _assert_pg_birth(data, port)
         assert owner.send_signal(signal.SIGSTOP)
         try:
@@ -325,11 +386,17 @@ def test_real_stopped_postmaster_cannot_pass_warm_readiness(
                 context.setattr(instance, "_PG_PROBE_TIMEOUT_S", 0.1)
                 _forbid_new_pg_admission(context)
                 with pytest.raises(RuntimeError, match="did not become ready"):
-                    instance._start_pg(port, retained_children=retained_children)
+                    instance._start_pg(
+                        port,
+                        retained_children=retained_children,
+                        machine=command_machine,
+                    )
             assert owner.live() and pg.receipt_path(data).read_bytes() == before
         finally:
             owner.send_signal(signal.SIGCONT)
-        _assert_warm_pg_repeat(data, port, owner, before, retained_children)
+        _assert_warm_pg_repeat(
+            data, port, owner, before, retained_children, command_machine=command_machine
+        )
     finally:
         pg.stop(data, timeout=10, retained_children=retained_children)
 
@@ -338,6 +405,8 @@ def test_real_interrupted_admission_completes_same_postmaster(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     data, port = _private_pg_configuration(tmp_path, monkeypatch)
     protocol = instance._pg_running
@@ -351,16 +420,25 @@ def test_real_interrupted_admission_completes_same_postmaster(
         with monkeypatch.context() as context:
             context.setattr(instance, "_pg_running", interrupted)
             with pytest.raises(KeyboardInterrupt, match="before admission"):
-                instance._start_pg(port, retained_children=retained_children)
+                instance._start_pg(
+                    port, retained_children=retained_children, machine=command_machine
+                )
         captured = pg._read(data)
         assert captured is not None and captured.state == "captured"
         owner = captured.process()
         with monkeypatch.context() as context:
             _forbid_new_pg_admission(context)
-            assert instance._start_pg(port, retained_children=retained_children) == 0
+            assert (
+                instance._start_pg(
+                    port, retained_children=retained_children, machine=command_machine
+                )
+                == 0
+            )
         admitted, persisted = _assert_pg_birth(data, port)
         assert owner.same_birth(admitted)
-        _assert_warm_pg_repeat(data, port, owner, persisted, retained_children)
+        _assert_warm_pg_repeat(
+            data, port, owner, persisted, retained_children, command_machine=command_machine
+        )
     finally:
         pg.stop(data, timeout=10, retained_children=retained_children)
 

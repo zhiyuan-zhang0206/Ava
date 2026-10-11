@@ -17,13 +17,13 @@ from uuid import uuid4
 
 import ava
 from ava.sdk_surface import process_context
-from ava.sdk_surface import settings as sdk_settings
 from base.agents import impersonation as control
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.clock import Clock, clock_config_from_boot
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
@@ -78,10 +78,7 @@ def _deliver_telemetry_before_detach(*, clients: ClientSet) -> None:
                 "external attachment: ordinary telemetry delivery is unfinished; "
                 "queued records may be lost or land later"
             )
-        if "base.telemetry.otlp.telemetry_otlp" in sys.modules:
-            from base.telemetry.otlp import telemetry_otlp
-
-            telemetry_otlp.finalize()
+        clients.finalize_events()
     except Exception:
         logger.opt(exception=True).warning(
             "external attachment: telemetry delivery before detach failed; "
@@ -103,7 +100,9 @@ def _refuse_unless_attachable() -> AvaContext | None:
     return bound
 
 
-def _attachment_database(bound: AvaContext | None, *, config: ConfigBoot | None) -> DatabaseFactory:
+def _attachment_database(
+    bound: AvaContext | None, *, config: ConfigBoot | None, machine: MachineIdentity
+) -> DatabaseFactory:
     """Borrow an existing owner's factory or create this attachment's fresh gate.
 
     Independently opened attachments do not share a check timestamp. A factory
@@ -116,7 +115,7 @@ def _attachment_database(bound: AvaContext | None, *, config: ConfigBoot | None)
         raise RuntimeError("an independent attachment needs its configuration owner")
     version = CodeVersion(ava.loaded_code_image())
     gate = ProcessDbGate(version=version.get, process="unknown")
-    return lambda: Database(db_config_from_boot(config), gate=gate)
+    return lambda: Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
 
 
 class Attachment:
@@ -173,14 +172,24 @@ class Attachment:
             if bound is not None
             else (lambda: Clock(clock_config_from_boot(cast(ConfigBoot, config))))
         )
-        self._database = _attachment_database(bound, config=config)
+        self._machine = (
+            bound.require_machine()
+            if bound is not None
+            else machine_from_boot(cast(ConfigBoot, config))
+        )
+        self._database = _attachment_database(bound, config=config, machine=self._machine)
         if session_id is not None:
             from base.agents.impersonation.sessions import private_id
 
-            self.lease_id = private_id(self._database(), cast(int, agent_id), session_id)
+            self.lease_id = private_id(
+                self._database(),
+                cast(int, agent_id),
+                session_id,
+                local_machine=self._machine.name(),
+            )
         if bound is None:
             self._own_clients = process_context.process_clients(
-                database=self._database, config=config
+                database=self._database, config=config, machine=self._machine
             )
         lease = self._lease()
         self.agent_id = int(lease["agent_id"])
@@ -191,8 +200,12 @@ class Attachment:
         # state fields registered — the surface-only default would silently
         # drop them (review finding, #2616).
         self._bind_borrowed_context()
-        ava.ensure_plugins_loaded(surface=False, config=config, clock_factory=self._clock_factory)
-        self._bind_catalog()
+        ava.initialize_context(
+            ava.context,
+            surface=False,
+            config=config,
+            clock_factory=self._clock_factory,
+        )
         if config is None:
             from ava.sdk_surface.settings import config_authority
 
@@ -255,12 +268,9 @@ class Attachment:
     def _new_context(self) -> AvaContext:
         if self._own_clients is None:
             raise RuntimeError("an unbound attachment has no owned clients")
-        return AvaContext(clients=self._own_clients, clock_factory=self._clock_factory)
-
-    def _bind_catalog(self) -> None:
-        """Attach the installed catalog after identity and native plugin registration."""
-        context = ava.context
-        ava.bind_context(dataclasses.replace(context, catalog=sdk_settings.model_catalog()))
+        return AvaContext(
+            clients=self._own_clients, clock_factory=self._clock_factory, machine=self._machine
+        )
 
     def admit_sdk_call(self) -> Any:
         """Snapshot this call's original gate before its body can run."""
@@ -284,8 +294,10 @@ class Attachment:
         return capture_local_event(event, gate=self._event_gate)
 
     def _lease(self) -> dict[str, Any]:
-        lease = control.require_active(self._database(), self.lease_id, process_metadata())
-        if lease["machine"] != machine_name():
+        lease = control.require_active(
+            self._database(), self.lease_id, process_metadata(), local_machine=self._machine.name()
+        )
+        if lease["machine"] != self._machine.name():
             raise RuntimeError(f"external SDK must run on agent machine {lease['machine']!r}")
         return lease
 
@@ -320,6 +332,7 @@ class Attachment:
                 process_metadata(),
                 encoded,
                 expected_version=self._version,
+                local_machine=self._machine.name(),
             )
             self._version += 1
             ava.state_update.clear()

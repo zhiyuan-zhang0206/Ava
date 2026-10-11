@@ -19,11 +19,7 @@ from pathlib import Path
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.db import Database
 from ops.rpc_schemas import LaunchAgentRequest
-
-_db = Database.from_settings
-
 
 _REPO = Path(__file__).resolve().parents[4]
 
@@ -97,7 +93,7 @@ def test_a_wedged_arm_does_not_hold_the_process_exit(tmp_path: Path) -> None:
     `shutdown(wait=False)` + `sys.exit(0)` was still alive minutes later.
 
     Nothing in-process can assert that: the failure IS the interpreter refusing to
-    stop. So this drives the daemon's own `_op_thread_pool` / `_shutdown_op_pool` /
+    stop. So this drives the boot owner's `op_thread_pool` / `shutdown_op_pool` /
     shared `_hard_exit` alias in a real subprocess with a genuinely stuck arm, and asserts the
     process is gone. It fails by timing out against the pre-fix code.
     """
@@ -105,13 +101,22 @@ def test_a_wedged_arm_does_not_hold_the_process_exit(tmp_path: Path) -> None:
     script = textwrap.dedent(f"""
         import pathlib, sys, time
         sys.path.insert(0, {str(_REPO)!r})
-        from services.agent_runner.agent_ops import daemon
+        from base.config import ConfigBoot
+        from base.config.service_read import ConfigAuthority
+        from services.agent_runner.agent_ops import boot, daemon
 
-        pool = daemon._op_thread_pool()
+        config = ConfigBoot()
+        config.boot()
+        runtime = config.ensure_eager()
+        authority = ConfigAuthority(
+            runtime, runtime if runtime.profile is None else config.complete_read_model(),
+            pathlib.Path({str(tmp_path)!r}) / ".env",
+        )
+        pool = boot.op_thread_pool(authority=authority)
         pool.submit(lambda: (pathlib.Path({str(ready)!r}).write_text("1"), time.sleep(3600)))
         while not pathlib.Path({str(ready)!r}).exists():
             time.sleep(0.01)
-        daemon._shutdown_op_pool(pool)
+        boot.shutdown_op_pool(pool)
         daemon._hard_exit(0)
     """)
     started = time.monotonic()

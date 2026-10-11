@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
+from base.db import Database
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from services.agent_runner.agent_ops import daemon
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.asyncio
@@ -19,6 +24,10 @@ async def test_launch_dispatch(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     pool: ConnectionPool = ConnectionPool(open=False)
     dispatch_pool: ConnectionPool = pool
@@ -30,8 +39,10 @@ async def test_launch_dispatch(
         body: LaunchAgentRequest,
         received_pool: object,
         *,
+        local_machine: str,
         catalog: ModelCatalog,
     ) -> SpawnedAgent:
+        assert local_machine == machine_identity.name()
         seen.append((body.agent_id, received_pool))
         return SpawnedAgent(id=body.agent_id)
 
@@ -45,6 +56,9 @@ async def test_launch_dispatch(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert (status, result) == ("completed", {"id": 777})
     assert seen == [(777, pool)]

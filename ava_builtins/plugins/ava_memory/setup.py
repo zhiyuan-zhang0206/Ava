@@ -27,6 +27,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from base.cluster.machine import MachineIdentity
 from base.log import logger
 
 _TEMPLATE_DIR = Path(__file__).parent / "template"
@@ -74,49 +75,48 @@ def _arm_hooks(pool: Path) -> bool:
     return True
 
 
-def _ensure_memory_repo() -> None:
+def _ensure_memory_repo(*, machine: MachineIdentity) -> None:
     """Run init() if the memory pool is not a git repo. If already init'd but on the wrong branch, fail loud."""
     from base.deploy.git.memory_repo import branch_name, init, is_initialized
     from base.paths import memory_dir
 
     if is_initialized():
         # init() validates branch on re-call (raises on mismatch); call it once to trigger the check.
-        init()
+        init(machine=machine)
         return
 
-    branch = branch_name()
+    branch = branch_name(machine=machine)
     print(f"    first-time setup: bring up memory pool -> {memory_dir()} on branch {branch!r}")
     try:
-        init()
+        init(machine=machine)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
         raise RuntimeError(_classify_git_init_error(stderr, e.returncode)) from e
     print("    memory pool ready")
 
 
-def _ensure_gateway_memory_repo() -> None:
-    """Run init_gateway() to set up the gateway's consolidated memory checkout
+def _ensure_gateway_memory_repo(*, machine: MachineIdentity) -> None:
+    """Run init_gateway(machine=machine) to set up the gateway's consolidated memory checkout
     on `main`. Only runs when this unit carries the gateway capability.
 
     On a combined unit (gateway+agent-runner) this initializes the separate
     $AVA_HOME/gateway/memory checkout; on a gateway-only unit it initializes
     the same path as the agent-runner checkout (memory_dir()).
     """
-    from base.cluster.machine import is_gateway
     from base.deploy.git.memory_repo import gateway_is_initialized, init_gateway
     from base.paths import gateway_memory_dir
 
-    if not is_gateway():
+    if "gateway" not in machine.role():
         return
 
-    gmd = gateway_memory_dir()
-    if gateway_is_initialized():
-        init_gateway()  # validates branch on re-call; gateway auto-switches to main
+    gmd = gateway_memory_dir(roles=machine.role())
+    if gateway_is_initialized(machine=machine):
+        init_gateway(machine=machine)  # validates branch on re-call; gateway auto-switches to main
         return
 
     print(f"    first-time setup: clone gateway memory pool -> {gmd} on branch 'main'")
     try:
-        init_gateway()
+        init_gateway(machine=machine)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
         raise RuntimeError(_classify_git_init_error(stderr, e.returncode)) from e
@@ -152,7 +152,7 @@ def _classify_git_init_error(stderr: str, returncode: int) -> str:
     return f"{header}(unrecognized failure shape — paste the stderr above into the runbook 'Secondary host bring-up' troubleshooting section)"
 
 
-def scaffold() -> None:
+def scaffold(*, machine: MachineIdentity) -> None:
     """Bring this cluster's memory pool up during explicit initialization.
 
     Three things, in order: the agent-runner's authoring checkout, the gateway's
@@ -165,8 +165,8 @@ def scaffold() -> None:
     """
     from base.paths import memory_dir
 
-    _ensure_memory_repo()
-    _ensure_gateway_memory_repo()
+    _ensure_memory_repo(machine=machine)
+    _ensure_gateway_memory_repo(machine=machine)
 
     pool = memory_dir()
     if not (pool / ".git").is_dir():

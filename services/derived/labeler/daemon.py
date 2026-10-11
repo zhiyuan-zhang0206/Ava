@@ -21,13 +21,15 @@ import os
 import signal
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import psycopg
 from loguru import logger
 from psycopg_pool import ConnectionPool
 
-from base.config import settings
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot, settings
 from base.config.domains.lm import LmSettings
 from base.config.profiles import PROCESS_PROFILES, profile_unknown_error
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -35,12 +37,18 @@ from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
-from base.log import init_gateway_process
+from base.log.process import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.paths import ava_home
+from base.telemetry import build_pipeline
 from services.derived.labeler.config import LabelerConfig
 from services.derived.labeler.labeler import generate_label_async
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -80,12 +88,13 @@ def labeler_model_overrides(*, profile: str | None, lm: LmSettings) -> ModelOver
     )
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("labeler")
+def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    runtime.mkdir(parents=True, exist_ok=True)
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("labeler")
 
 
-def _pidfile() -> Path:
-    return _endpoint().pidfile
+def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
+    return _endpoint(config, runtime=runtime).pidfile
 
 
 # Per-agent failure backoff. A trusted transient provider failure or an empty /
@@ -234,22 +243,27 @@ def _select_unlabeled(cur: psycopg.Cursor, cooling: list[int]) -> list[tuple[int
     return cur.fetchall()
 
 
-def _write_pidfile() -> None:
-    if not acquire_pidfile(_pidfile(), "services.derived.labeler.daemon"):
-        _log.info("[labeler] daemon already running (pidfile=%s), exiting", _pidfile())
+def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    if not acquire_pidfile(_pidfile(config, runtime=runtime), "services.derived.labeler.daemon"):
+        _log.info(
+            "[labeler] daemon already running (pidfile=%s), exiting",
+            _pidfile(config, runtime=runtime),
+        )
         sys.exit(1)
 
 
-def _remove_pidfile() -> None:
-    remove_pidfile(_pidfile())
+def _remove_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    remove_pidfile(_pidfile(config, runtime=runtime))
 
 
-def _is_running() -> bool:
+def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_pidfile(), "services.derived.labeler.daemon")
+    return pidfile_holds_daemon(
+        _pidfile(config, runtime=runtime), "services.derived.labeler.daemon"
+    )
 
 
 async def _dispatch_loop(
@@ -313,22 +327,33 @@ async def _dispatch_loop(
                 backoff.clear(tid)
 
 
-async def run() -> None:
-    """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
-    if _is_running():
-        _log.info("[labeler] daemon already running (pidfile=%s), exiting", _pidfile())
+async def run(
+    *,
+    process_config: ConfigBoot,
+    runtime: Path,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+) -> None:
+    """Start the daemon: pidfile -> healthz server -> connect DB -> enter main loop."""
+    if _is_running(process_config, runtime=runtime):
+        _log.info(
+            "[labeler] daemon already running (pidfile=%s), exiting",
+            _pidfile(process_config, runtime=runtime),
+        )
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
-    _write_pidfile()
-    _log.info("[labeler] pidfile written: %s", _pidfile())
+    _write_pidfile(process_config, runtime=runtime)
+    _log.info("[labeler] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    endpoint = _endpoint()
-    health = await start_health_server("labeler", endpoint.health_port, liveness=liveness)
+    endpoint = _endpoint(process_config, runtime=runtime)
+    health = await start_health_server(
+        "labeler", endpoint.health_port, liveness=liveness, image=image
+    )
     _log.info("[labeler] healthz listening on :%s", endpoint.health_port)
 
-    db = Database.from_settings()
+    db = database()
     pool = db.pool()
     try:
         await _dispatch_loop(
@@ -344,7 +369,7 @@ async def run() -> None:
     finally:
         pool.close()
         await stop_health_server(health)
-        _remove_pidfile()
+        _remove_pidfile(process_config, runtime=runtime)
         _log.info("[labeler] daemon stopped")
 
 
@@ -357,9 +382,26 @@ def main() -> None:
     """
     from base.deploy.schema.migrations import assert_schema_current
 
+    image = LoadedCommit.capture()
+    machine_config = ConfigBoot()
+    machine_config.boot()
+    machine = machine_from_boot(machine_config)
+    process_home = ava_home().resolve()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
-    assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="labeler")
+    assert_schema_current(machine_config.view.data_plane.db_url)
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="labeler")
+
+    def database() -> Database:
+        return Database(db_config_from_boot(machine_config), gate=gate, local_host=machine.host)
+
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    init_gateway_process(
+        name="labeler",
+        producer=lambda: pipeline,
+        machine_reader=machine.name,
+        image=image,
+    )
     install_graceful_shutdown("labeler")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
@@ -369,7 +411,14 @@ def main() -> None:
     # teardown is skipped by the hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run())
+        runner.run(
+            run(
+                process_config=machine_config,
+                runtime=process_home / "run",
+                database=database,
+                image=image,
+            )
+        )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[labeler] interrupted, shutting down")
@@ -385,9 +434,12 @@ def main() -> None:
         _log.exception("[labeler] daemon crashed — uncaught exception escaped run()")
         code = 1
     finally:
-        _remove_pidfile()
+        _remove_pidfile(machine_config, runtime=process_home / "run")
     _hard_exit(code)
 
 
 if __name__ == "__main__":
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
     main()

@@ -2,6 +2,8 @@
 
 The model chooses to pause by construction. Real telemetry, observer delivery,
 SDK calls, checkpoints and recovery are exercised; model judgment is not.
+All peers explicitly use the same fixed-price model, so a real UTC tariff
+transition cannot move the threshold away from the scripted six-call budget.
 """
 
 from __future__ import annotations
@@ -9,6 +11,9 @@ from __future__ import annotations
 import json
 
 from tests.e2e.fakes.scenario_recording import RecordingModel, exec_call, say, scratch_root
+
+# This accounting scenario must not cross a real UTC daily price boundary.
+BUDGET_MODEL = "qwen3.8-max"
 
 
 def state_file(agent_id: int) -> str:
@@ -35,7 +40,7 @@ def _prepare_code(role: str, agent_id: int) -> str:
             f"path = Path({state_file(agent_id)!r})\n"
             "state = json.loads(path.read_text())\n"
             "if state['status'] == 'running':\n"
-            "    peer = ava.agents.spawn(prompt=state['remaining'].pop(0), idempotency_key=str(uuid4()))\n"
+            f"    peer = ava.agents.spawn(prompt=state['remaining'].pop(0), config_overlay={{'llm_model': {BUDGET_MODEL!r}}}, idempotency_key=str(uuid4()))\n"
             "    state['peers'].append(peer)\n"
             "    write_text_atomic(path, json.dumps(state))\n"
         )
@@ -50,7 +55,7 @@ def _prepare_code(role: str, agent_id: int) -> str:
     else:
         code += (
             "if aid == int((root / 'owner').read_text()):\n"
-            "    state['peers'] = [ava.agents.spawn(prompt='Preserve a partial result and wait.', idempotency_key=str(uuid4()))]\n"
+            f"    state['peers'] = [ava.agents.spawn(prompt='Preserve a partial result and wait.', config_overlay={{'llm_model': {BUDGET_MODEL!r}}}, idempotency_key=str(uuid4()))]\n"
             "    write_text_atomic(root / f'{aid}.json', json.dumps(state))\n"
         )
     return code

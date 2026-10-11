@@ -16,6 +16,9 @@ from typing import Any
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock, clock_config_from_boot
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -83,6 +86,7 @@ def process_clients(
     database: DatabaseFactory | None = None,
     mcp_timeout_seconds: Callable[[], float] | None = None,
     config: ConfigBoot | None = None,
+    machine: MachineIdentity | None = None,
 ) -> ClientSet:
     """Build lazy process clients without reading their configuration or credentials.
 
@@ -94,6 +98,7 @@ def process_clients(
     from ava.sdk_surface.settings import database_factory
 
     owner = config if config is not None else ConfigBoot()
+    identity = machine if machine is not None else machine_from_boot(owner)
 
     def read_config() -> ConfigBoot:
         if config is None:
@@ -107,11 +112,15 @@ def process_clients(
     )
 
     def pipeline() -> Any:
+        from base.host.env.dotenv_boot import resolve_ava_home
         from base.telemetry import build_pipeline
 
-        return build_pipeline(database=make_database)
+        read_config()
+        return build_pipeline(database=make_database, machine=identity, home=resolve_ava_home())
 
-    database_builder = database if database is not None else database_factory(config=owner)
+    database_builder = (
+        database if database is not None else database_factory(config=owner, machine=identity)
+    )
 
     def default_database() -> Any:
         read_config()
@@ -151,14 +160,26 @@ def context_from_description(
     config: ConfigBoot | None = None,
 ) -> AvaContext:
     """Rebuild an execution context without copying its host's live clients or secrets."""
+    owner = config if config is not None else ConfigBoot()
+    if config is None:
+        owner.read_process_environment()
+    machine = machine_from_boot(owner)
     return AvaContext.from_description(
         description,
-        clients=process_clients(gateway_url=description["gateway_url"], config=config),
+        clients=process_clients(
+            gateway_url=description["gateway_url"], config=owner, machine=machine
+        ),
+        machine=machine,
         original_incarnation=original_incarnation,
     )
 
 
-def launched_context() -> AvaContext | None:
+def has_launched_identity() -> bool:
+    """Inspect the launched identity channel without constructing a context."""
+    return "AVA_AGENT_ID" in os.environ  # env-ok: launched script identity channel
+
+
+def launched_context(*, config: ConfigBoot | None = None) -> AvaContext | None:
     """Construct a launched script's context from its explicit environment channel.
 
     The SDK entry rejects shared-host startup posture before calling this.
@@ -169,6 +190,13 @@ def launched_context() -> AvaContext | None:
     raw = os.environ.get("AVA_AGENT_ID")  # env-ok: launched script identity channel
     if raw is None:
         return None
+    if config is None:
+        config = ConfigBoot()
+    config.read_process_environment()
+    machine = machine_from_boot(config)
     return AvaContext(
-        identity=AgentIdentity(agent_id=int(raw), owns_loop=False), clients=process_clients()
+        identity=AgentIdentity(agent_id=int(raw), owns_loop=False),
+        clients=process_clients(config=config, machine=machine),
+        machine=machine,
+        clock_factory=lambda: Clock(clock_config_from_boot(config)),
     )

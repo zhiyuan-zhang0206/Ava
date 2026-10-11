@@ -495,7 +495,9 @@ def test_child_boot_timing_emits_ready_duration(
 
     monkeypatch.setattr(exec_child.time, "perf_counter", lambda: 100.25)
 
-    exec_child._emit_child_boot_timing(exec_child._import_runtime(100.0))
+    from base.agents.context.clients import ClientSet
+
+    exec_child._emit_child_boot_timing(exec_child._import_runtime(100.0), clients=ClientSet())
 
     [record] = [
         record for record in loguru_records if record["extra"].get("event") == "exec_child_boot"
@@ -584,10 +586,24 @@ def test_child_overlay_phases_framework_then_plugin(
         results.append(_payload)
 
     def fake_plugins_loaded(
-        *, surface: bool = True, config: object, clock_factory: object, producer: object
+        *,
+        surface: bool = True,
+        config: object,
+        clock_factory: object,
+        producer: object,
+        context: object,
+        machine: object,
     ) -> None:
         # Stateless request (fake_read_request: state=None) -> the surface load.
-        assert surface is True
+        assert all(
+            (
+                surface is True,
+                context is ava.context,
+                machine is ava.context.machine,
+                clock_factory is ava.context.clock_factory,
+                callable(producer),
+            )
+        )
         events.append("plugins")
 
     monkeypatch.setattr(protocol, "read_request", fake_read_request)
@@ -628,13 +644,6 @@ def test_child_overlay_phases_framework_then_plugin(
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGTERM, old_sigterm)
 
-    assert events == [
-        "apply:framework",
-        "plugins",
-        "apply:plugin",
-        "sdk_disable",
-        "eval_isolation",
-    ]
     (result,) = results
     assert (result.kind, result.code_reached, result.exc_type, result.full_traceback) == (
         "done",
@@ -642,6 +651,13 @@ def test_child_overlay_phases_framework_then_plugin(
         None,
         None,
     )
+    assert events == [
+        "apply:framework",
+        "plugins",
+        "apply:plugin",
+        "sdk_disable",
+        "eval_isolation",
+    ]
 
 
 def _declare_machine_name(tmp_path: Path) -> None:

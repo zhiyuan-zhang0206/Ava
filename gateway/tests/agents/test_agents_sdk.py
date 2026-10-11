@@ -6,157 +6,25 @@ low-level lifecycle contracts live in ops/agents/tests/test_agents_internals.py.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 import ava
 from ava import gateway_client
 from ava.agents import AgentNotFound, ForkSourceEmpty, TerminateResult
-from ava.gateway_client.transport import use_client
 from ava.sdk_surface.install import Installation
 from base.agents import ShellSessionKillTiming
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
-from base.db import Database
-from base.events.live.bus import EventBus
-from base.lm.plugin_providers import build_model_catalog
-from tests.fixtures.configuration import snapshot_process_config
+from base.db.code_version_gate import ProcessDbGate
+from gateway.tests.agents.sdk_support import inbound_rows, spawn_agent
+from gateway.tests.agents.sdk_support import sdk_via_gateway as sdk_via_gateway
 from tests.fixtures.pin_agent import pin_agent
-
-
-def _spawn_agent(*, config_authority: ConfigAuthority) -> int:
-    """Setup helper — a row for the SDK's self identity (Task #1236 split: the
-    row is created by create_agent_row; nothing launches, these tests only need
-    the row to exist)."""
-    from base.cluster.machine import machine_name
-    from ops.agents.spawn import create_agent_row
-
-    agent_id, _, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(),
-        EventBus.from_settings(),
-        machine=machine_name(),
-        catalog=build_model_catalog(),
-        authority=config_authority,
-    )
-    return agent_id
-
-
-@pytest.fixture(autouse=True)
-def _sdk_via_inprocess_gateway(
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-    event_bus: EventBus,
-    model_installation: Installation,
-    config_authority: ConfigAuthority,
-):
-    """SDK ↔ Gateway path in-process test apparatus:
-    1. monkeypatch session noop — spawn / resurrect / respawn don't really start child python
-    2. TestClient(app) starts lifespan (build db_pool etc.), mount it as ava SDK's
-       httpx client — SDK calls go through ASGI directly into gateway endpoint, real DB real logic,
-       not bound to TCP port
-    """
-    monkeypatch.setattr(
-        ava,
-        "__plugin_installation__",
-        replace(model_installation, authority=config_authority),
-        raising=False,
-    )
-    from base.cluster import machines as _machines
-    from base.cluster.machine import machine_name
-    from gateway.agents import forward as _agents_forward_router
-    from gateway.agents import router as _agents_router
-    from gateway.app import app
-    from ops.lifecycle import launch_agent_op, lifecycle_op
-    from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-
-    # POST /api/agents always forwards the launch to a runner's ops server over
-    # HTTP, even for the co-located box. There is no live ops server in-process,
-    # so stand in for the runner's ops daemon: dispatch launch_agent_op in-process
-    # against the gateway's db_pool (exactly what the daemon does on receiving the
-    # forwarded op), so the SDK spawn yields a real local agent row.
-    async def _in_process_forward(
-        _db: object, target: str, body: LaunchAgentRequest
-    ) -> SpawnedAgent:
-        return await launch_agent_op(
-            database, event_bus, body, app.state.db_pool, catalog=build_model_catalog()
-        )
-
-    # Same pattern for lifecycle ops (terminate / resurrect / restart): the
-    # runner's ops daemon dispatches lifecycle_op in-process; mirror that here
-    # so a forwarded local lifecycle call executes against the test DB.
-    async def _in_process_lifecycle(
-        _db: object, target: str, path: str, json_body: dict[str, Any]
-    ) -> dict[str, Any]:
-        # model_dump mirrors the daemon serializing the response model onto the wire.
-        return (
-            await lifecycle_op(
-                database,
-                event_bus,
-                path,
-                json_body,
-                app.state.db_pool,
-                catalog=build_model_catalog(),
-            )
-        ).model_dump(mode="json")
-
-    # post_agents reads the target's capability from the registry; the SDK targets
-    # the local machine, so resolve it to agent-runner as register_self would.
-    real_lookup_role = _machines.lookup_role
-
-    def _lookup_role(_db: Database, name: str) -> list[str]:
-        if name == machine_name():
-            return ["gateway", "agent-runner"]
-        return real_lookup_role(_db, name)
-
-    # The spawn preflight also reads the pause latch for the same target; the
-    # local machine is never paused in tests, so stub it alongside the role.
-    real_is_paused = _machines.is_paused
-
-    def _is_paused(_db: Database, name: str) -> bool:
-        if name == machine_name():
-            return False
-        return real_is_paused(_db, name)
-
-    # Mock all API keys so spawn validation passes — these tests exercise
-    # the full gateway spawn path, which validates model config before forwarding.
-    from pydantic import SecretStr
-
-    from base.config import settings as _settings
-
-    for _attr in (
-        "anthropic_api_key",
-        "deepseek_api_key",
-        "gemini_api_key",
-        "openai_api_key",
-        "xiaomi_api_key",
-        "moonshot_api_key",
-        "zhipu_api_key",
-        "dashscope_api_key",
-    ):
-        monkeypatch.setattr(_settings.lm, _attr, SecretStr("sk-test"))
-
-    monkeypatch.setattr(_settings.data_plane, "cluster_secret", "sdk-test-secret")
-    from gateway import app as gateway_app
-
-    monkeypatch.setattr(gateway_app, "ConfigBoot", snapshot_process_config)
-    with (
-        TestClient(
-            app,
-            base_url="http://test-gateway",
-            headers={"Authorization": "Bearer sdk-test-secret"},
-        ) as tc,
-        use_client(tc),
-    ):
-        monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _in_process_forward)
-        monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)
-        monkeypatch.setattr(_machines, "lookup_role", _lookup_role)
-        monkeypatch.setattr(_machines, "is_paused", _is_paused)
-        yield
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _agent_spawner(db: psycopg.Connection, agent_id: int) -> str:
@@ -167,24 +35,25 @@ def _agent_spawner(db: psycopg.Connection, agent_id: int) -> str:
     return row[0]
 
 
-def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple]:
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT content, kind, source FROM inbound_messages "
-            "WHERE agent_id = %s ORDER BY id ASC",
-            (agent_id,),
-        )
-        return cur.fetchall()
-
-
 class TestSpawn:
     def test_public_creation_key_recovers_birth_and_rejects_changed_body(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
-        pin_agent(_spawn_agent(config_authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         first = ava.agents.spawn(prompt="one goal", idempotency_key="public-create-a")
         assert ava.agents.spawn(prompt="one goal", idempotency_key="public-create-a") == first
-        assert _inbound_rows(db_conn, first) == [("one goal", "chat", f"agent:{ava.self.AGENT_ID}")]
+        assert inbound_rows(db_conn, first) == [("one goal", "chat", f"agent:{ava.self.AGENT_ID}")]
         assert ava.agents.spawn(prompt="one goal", idempotency_key="public-create-b") != first
         from httpx2 import HTTPStatusError
 
@@ -192,31 +61,54 @@ class TestSpawn:
             ava.agents.spawn(prompt="different", idempotency_key="public-create-a")
 
     def test_spawn_no_prompt_just_lifecycle(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """ava.agents.spawn() without prompt — only starts lifecycle, no inbound posted."""
-        pin_agent(_spawn_agent(config_authority=config_authority))  # self identity
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )  # self identity
 
         child_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         assert _agent_spawner(db_conn, child_id) == f"agent:{ava.self.AGENT_ID}"
-        assert _inbound_rows(db_conn, child_id) == []
+        assert inbound_rows(db_conn, child_id) == []
 
     def test_spawn_with_prompt_inserts_inbound_with_agent_source(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """spawn(prompt=...) together INSERT chat inbound (source='agent:{ava.self.AGENT_ID}')."""
-        pin_agent(_spawn_agent(config_authority=config_authority))  # self identity
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )  # self identity
 
         child_id = ava.agents.spawn(prompt="\u53bb\u67e5 X", idempotency_key=str(uuid4()))
 
-        assert _inbound_rows(db_conn, child_id) == [
+        assert inbound_rows(db_conn, child_id) == [
             ("\u53bb\u67e5 X", "chat", f"agent:{ava.self.AGENT_ID}"),
         ]
 
-    def test_spawn_defaults_machine_to_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_spawn_defaults_machine_to_local(
+        self, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    ) -> None:
         """When machine omitted, SDK defaults to local machine (ava.self.MACHINE_SPEC), gateway receives explicit target, no longer falls back to gateway's own machine."""
-        from base.cluster.machine import machine_name
 
         captured: dict[str, Any] = {}
 
@@ -237,7 +129,7 @@ class TestSpawn:
         monkeypatch.setattr(ava.gateway_client, "spawn", _fake_spawn)
 
         assert ava.agents.spawn(idempotency_key=str(uuid4())) == 999
-        assert captured["machine"] == machine_name()
+        assert captured["machine"] == machine_identity.name()
 
     def test_spawn_explicit_machine_passthrough(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Explicit machine passthrough unchanged, not overridden by local default."""
@@ -302,11 +194,22 @@ class TestSpawn:
 
 class TestSpawnFork:
     def test_fork_resolves_latest_checkpoint(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """ava.agents.spawn(fork_from=N) internally resolves latest checkpoint
         (done by gateway, SDK unaware of ckpt id)."""
-        pin_agent(_spawn_agent(config_authority=config_authority))  # self identity
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )  # self identity
         source = ava.agents.spawn(idempotency_key=str(uuid4()))
         # construct chain a < b < c (lex order corresponds to time order)
         with db_conn.cursor() as cur:
@@ -330,7 +233,12 @@ class TestSpawnFork:
         assert row == (source, "ck-c")
 
     def test_fork_no_checkpoint_raises_fork_source_empty(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """fork_from source has no checkpoint → ForkSourceEmpty.
 
@@ -338,7 +246,13 @@ class TestSpawnFork:
         ForkSourceEmpty → handler converts to 409 + reason="fork_source_empty" → SDK
         `raise_from_response` reverse lookup rebuild.
         """
-        pin_agent(_spawn_agent(config_authority=config_authority))  # self identity
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )  # self identity
         empty_source = ava.agents.spawn(idempotency_key=str(uuid4()))  # spawn without checkpoint
         _ = db_conn  # truncate side-effect via fixture
 
@@ -346,12 +260,23 @@ class TestSpawnFork:
             ava.agents.spawn(fork_from=empty_source, idempotency_key=str(uuid4()))
 
     def test_fork_with_prompt_inserts_fork_identity_then_chat_inbound(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """ava.agents.spawn(prompt=..., fork_from=source) first posts fork identity inbound
         (kind='fork', source=f"agent:{source}"), then prompt's chat inbound —
         claim side first dispatches identity marker to fix "who am I", then processes prompt."""
-        pin_agent(_spawn_agent(config_authority=config_authority))  # self identity
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )  # self identity
         source = ava.agents.spawn(idempotency_key=str(uuid4()))
         # give source a checkpoint
         with db_conn.cursor() as cur:
@@ -368,7 +293,7 @@ class TestSpawnFork:
 
         # fork first posts an identity inbound (kind='fork', source=fork source agent) in spawn transaction, then prompt's chat inbound —
         # claim side dispatches identity marker first to fix "who am I", then processes prompt.
-        assert _inbound_rows(db_conn, new_id) == [
+        assert inbound_rows(db_conn, new_id) == [
             ("", "fork", f"agent:{source}"),
             ("\u7ee7\u7eed\u5427", "chat", f"agent:{ava.self.AGENT_ID}"),
         ]
@@ -376,9 +301,20 @@ class TestSpawnFork:
 
 class TestTerminate:
     def test_message_is_queued_before_terminate_with_agent_source(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
-        pin_agent(_spawn_agent(config_authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         result = ava.agents.terminate(peer_id, message="record the partial result")
@@ -389,16 +325,27 @@ class TestTerminate:
         assert result == TerminateResult.ENQUEUED
         assert result.status is TerminateResult.ENQUEUED
         assert result.open_tasks is None
-        assert _inbound_rows(db_conn, peer_id) == [
+        assert inbound_rows(db_conn, peer_id) == [
             ("record the partial result", "chat", f"agent:{ava.self.AGENT_ID}"),
             ("", "terminate", f"agent:{ava.self.AGENT_ID}"),
         ]
 
     def test_kill_all_shell_sessions_rides_the_sdk_body_end_to_end(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """On a live peer the graceful terminate records the kill for its exit."""
-        pin_agent(_spawn_agent(config_authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         result = ava.agents.terminate(peer_id, kill_all_shell_sessions=True)
         assert result.shell_sessions == ava.agents.ShellSessionsKill(
@@ -410,11 +357,22 @@ class TestTerminate:
         ).fetchone() == ({"kill_all_shell_sessions": True},)
 
     def test_terminate_reports_open_tasks_hint_with_truncation(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """`open_tasks` rides the SDK result: the agent's open tasks (newest
         first), truncated to five rows plus `more`; done/cancelled excluded."""
-        pin_agent(_spawn_agent(config_authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute(
@@ -517,16 +475,24 @@ class TestSendMessage:
         config_authority: ConfigAuthority,
         monkeypatch: pytest.MonkeyPatch,
         model_installation: Installation,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """send_message purely INSERT inbound — no status check, no wait, no SendResult return."""
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(_spawn_agent(config_authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         result = ava.agents.send_message(peer_id, "you got mail")
         assert result is None
 
-        assert _inbound_rows(db_conn, peer_id) == [
+        assert inbound_rows(db_conn, peer_id) == [
             ("you got mail", "chat", f"agent:{ava.self.AGENT_ID}"),
         ]
 
@@ -537,11 +503,19 @@ class TestSendMessage:
         config_authority: ConfigAuthority,
         monkeypatch: pytest.MonkeyPatch,
         model_installation: Installation,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """send_message to terminated agent also INSERT inbound.
         SDK doesn't care about target state — purely send message, auto-resurrect is gateway-side detail."""
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(_spawn_agent(config_authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
@@ -550,7 +524,7 @@ class TestSendMessage:
         result = ava.agents.send_message(peer_id, "still works")
         assert result is None
         # Chat inbound was inserted — that's all the SDK cares about.
-        rows = _inbound_rows(db_conn, peer_id)
+        rows = inbound_rows(db_conn, peer_id)
         assert ("still works", "chat", f"agent:{ava.self.AGENT_ID}") in rows
 
     def test_send_message_to_nonexistent_raises(
@@ -570,10 +544,18 @@ class TestSendMessage:
         config_authority: ConfigAuthority,
         monkeypatch: pytest.MonkeyPatch,
         model_installation: Installation,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """send_message only INSERT inbound, doesn't modify agents.status."""
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(_spawn_agent(config_authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         ava.agents.send_message(peer_id, "hi")
 
@@ -665,11 +647,19 @@ class TestSendMessage:
         config_authority: ConfigAuthority,
         monkeypatch: pytest.MonkeyPatch,
         model_installation: Installation,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """End-to-end: the trailing-comma tuple lands as the string it wraps,
         never as a JSON array (which the gateway would reject 422)."""
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        pin_agent(_spawn_agent(config_authority=config_authority))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
 
         # Runtime value of `("you got " "mail",)`: implicit concatenation plus
@@ -677,123 +667,6 @@ class TestSendMessage:
         content: object = ("you got mail",)
         ava.agents.send_message(peer_id, content)  # pyright: ignore[reportArgumentType]
 
-        assert _inbound_rows(db_conn, peer_id) == [
+        assert inbound_rows(db_conn, peer_id) == [
             ("you got mail", "chat", f"agent:{ava.self.AGENT_ID}"),
         ]
-
-
-class TestSendSystemNote:
-    def test_send_system_note_inserts_system_note_inbound_with_task_tag(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
-    ) -> None:
-        """send_system_note posts a kind='system_note' inbound (agent source +
-        task note tag) — never a peer chat row."""
-        pin_agent(_spawn_agent(config_authority=config_authority))
-        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
-
-        inbound_id = ava.agents.send_system_note(
-            peer_id,
-            'Task #1 "t" is now assigned to you (by agent #1).',
-            idempotency_key=str(uuid4()),
-        )
-        assert isinstance(inbound_id, int)
-
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT content, kind, source, payload FROM inbound_messages WHERE agent_id = %s",
-                (peer_id,),
-            )
-            rows = cur.fetchall()
-        assert len(rows) == 1
-        content, kind, source, payload = rows[0]
-        assert kind == "system_note"
-        assert source == f"agent:{ava.self.AGENT_ID}"
-        assert "assigned to you" in content
-        assert payload == {"note_tag": "task", "delivery_resurrect": True}
-
-    def test_send_system_note_preserves_explicit_task_id(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
-    ) -> None:
-        pin_agent(_spawn_agent(config_authority=config_authority))
-        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO agent_tasks (title, description, created_by, owner) "
-                "VALUES ('task note target', 'd', 'user', %s) RETURNING id",
-                (peer_id,),
-            )
-            row = cur.fetchone()
-        assert row is not None
-        task_id = row[0]
-        db_conn.commit()
-
-        ava.agents.send_system_note(
-            peer_id,
-            'Task #42 "t" is now assigned to you.',
-            task_id=task_id,
-            idempotency_key=str(uuid4()),
-        )
-
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT payload FROM inbound_messages WHERE agent_id = %s", (peer_id,))
-            row = cur.fetchone()
-        assert row is not None
-        assert row[0] == {"note_tag": "task", "task_id": task_id, "delivery_resurrect": True}
-
-    def test_send_system_note_to_terminated_is_fine(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
-    ) -> None:
-        """A note with resurrect=True (task assignment) reaches a terminated
-        agent — auto-resurrect is the gateway delivery detail, the SDK just
-        posts the note and returns its id."""
-        pin_agent(_spawn_agent(config_authority=config_authority))
-        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
-        db_conn.commit()
-
-        inbound_id = ava.agents.send_system_note(
-            peer_id, 'Task #1 "t" is now assigned to you.', idempotency_key=str(uuid4())
-        )
-        assert isinstance(inbound_id, int)
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT kind FROM inbound_messages WHERE agent_id = %s", (peer_id,))
-            kinds = [row[0] for row in cur.fetchall()]
-        assert "system_note" in kinds
-
-    def test_send_system_note_normalizes_tuple_content(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
-    ) -> None:
-        """Same trailing-comma class as send_message — a one-element tuple
-        unwraps to the note text instead of 422ing the gateway."""
-        pin_agent(_spawn_agent(config_authority=config_authority))
-        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
-
-        # Runtime value of `("Task #1 is now " "assigned to you.",)`: implicit
-        # concatenation plus trailing comma.
-        content: object = ("Task #1 is now assigned to you.",)
-        inbound_id = ava.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
-        assert isinstance(inbound_id, int)
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (peer_id,))
-            rows = cur.fetchall()
-        assert len(rows) == 1
-        assert rows[0][0] == "Task #1 is now assigned to you."
-
-    def test_send_system_note_rejects_multi_element_content(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
-    ) -> None:
-        """A multi-element tuple is a coding mistake — TypeError, never joined."""
-        pin_agent(_spawn_agent(config_authority=config_authority))
-        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
-
-        content: object = ("Task #1 is now ", "assigned to you.")
-        with pytest.raises(TypeError, match="content must be a string"):
-            ava.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
-
-    def test_send_system_note_to_nonexistent_raises(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
-    ) -> None:
-        pin_agent(_spawn_agent(config_authority=config_authority))
-        with pytest.raises(AgentNotFound):
-            ava.agents.send_system_note(9999, "ghost", idempotency_key=str(uuid4()))

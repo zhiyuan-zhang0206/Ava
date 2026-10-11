@@ -8,6 +8,7 @@ import socket
 import struct
 import threading
 import weakref
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -15,19 +16,23 @@ from typing import Any
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.daemon.health import stop_health_server
 from base.daemon.http_transport import start_daemon_http
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
 from base.lm.catalog import ModelCatalog
-from services.agent_runner.agent_ops import daemon, health
+from base.native_process.loaded_commit import LoadedCommit
+from services.agent_runner.agent_ops import boot, daemon, health
 from services.agent_runner.agent_ops import maintenance as activity
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
@@ -35,6 +40,10 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
     op_executor: ThreadPoolExecutor,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     requests: activity.RequestTokens = set()
@@ -43,7 +52,10 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
     entered = asyncio.Event()
     count = 0
 
-    async def dispatch(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, object]]:
+    async def dispatch(
+        *_args: Any, local_machine: MachineIdentity, **_kwargs: Any
+    ) -> tuple[str, dict[str, object]]:
+        del local_machine
         nonlocal count
         index = count
         count += 1
@@ -70,6 +82,9 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
                 executor=op_executor,
                 catalog=model_catalog,
                 authority=config_authority,
+                database=ops_database,
+                image=ops_image,
+                local_machine=machine_identity,
             )
         )
         for _ in range(2)
@@ -93,6 +108,9 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
+            local_machine=machine_identity,
         )
         assert status == 200
         assert b'"status": "failed"' in body
@@ -106,7 +124,12 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
 
 
 async def test_cancelled_same_kind_await_does_not_hide_running_executor(
-    monkeypatch: pytest.MonkeyPatch, config_authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     requests: activity.RequestTokens = set()
@@ -116,8 +139,16 @@ async def test_cancelled_same_kind_await_does_not_hide_running_executor(
     finish = [threading.Event(), threading.Event()]
 
     def arm(
-        _kind: str, payload: dict[str, Any], *, pool: ConnectionPool, authority: ConfigAuthority
+        _kind: str,
+        payload: dict[str, Any],
+        *,
+        pool: ConnectionPool,
+        authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+        local_machine: MachineIdentity,
     ) -> tuple[str, dict[str, object]]:
+        del local_machine
         assert pool is dispatch_pool
         index = int(payload["index"])
         entered[index].set()
@@ -137,6 +168,9 @@ async def test_cancelled_same_kind_await_does_not_hide_running_executor(
                     pool=dispatch_pool,
                     executor=executor,
                     authority=config_authority,
+                    database=ops_database,
+                    image=ops_image,
+                    local_machine=machine_identity,
                 )
             )
             for index in range(2)
@@ -200,26 +234,38 @@ async def test_server_close_after_client_reset_is_not_request_completion() -> No
 
 
 @pytest.fixture
-def held(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database: Database) -> None:
+def held(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    database: Database,
+    machine_identity: MachineIdentity,
+) -> None:
     """A stopped generation: the update hold is published and the host is paused."""
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "serving.json")
     pause_owner.begin_maintenance("update", WHEN)
     pause_owner.change_maintenance(
         "update", WHEN, MaintenanceHold(), MaintenanceHold(MaintenancePhase.STOPPED)
     )
-    host_deploy_state.set_posture(database, "paused")
+    host_deploy_state.set_posture(database, "paused", machine=machine_identity.name())
     start_serving.begin_start()
 
 
 @pytest.mark.usefixtures("held")
 async def test_real_ops_status_reports_the_hold_without_releasing_it(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     # Real dispatch, executor, PostgreSQL posture and journal; no service is launched.
     requests: activity.RequestTokens = set()
     workers: activity.WorkerFutures = set()
     with (
-        Database.from_settings().pool(min_size=1, max_size=2) as pool,
+        Database.from_settings(gate=database_gate).pool(min_size=1, max_size=2) as pool,
         ThreadPoolExecutor(max_workers=2) as executor,
     ):
         dispatch_pool: ConnectionPool = pool
@@ -236,6 +282,9 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
                 executor=executor,
                 catalog=model_catalog,
                 authority=config_authority,
+                database=ops_database,
+                image=ops_image,
+                local_machine=machine_identity,
             )
             assert status == 200
             return json.loads(raw)
@@ -247,7 +296,12 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
 
 
 async def test_active_ops_share_health_and_cleanup_within_one_daemon(
-    monkeypatch: pytest.MonkeyPatch, config_authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     workers: activity.WorkerFutures = set()
@@ -257,8 +311,16 @@ async def test_active_ops_share_health_and_cleanup_within_one_daemon(
     finish = [threading.Event(), threading.Event()]
 
     def arm(
-        _kind: str, payload: dict[str, Any], *, pool: ConnectionPool, authority: ConfigAuthority
+        _kind: str,
+        payload: dict[str, Any],
+        *,
+        pool: ConnectionPool,
+        authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+        local_machine: MachineIdentity,
     ) -> tuple[str, dict[str, object]]:
+        del local_machine
         assert pool is dispatch_pool
         index = int(payload["index"])
         entered[index].set()
@@ -280,6 +342,9 @@ async def test_active_ops_share_health_and_cleanup_within_one_daemon(
                     pool=dispatch_pool,
                     executor=executor,
                     authority=config_authority,
+                    database=ops_database,
+                    image=ops_image,
+                    local_machine=machine_identity,
                 )
             )
             for index, kind in enumerate(("config_read", "inventory_read"))
@@ -326,13 +391,26 @@ async def test_worker_future_is_retained_until_completion_and_isolated_per_daemo
 
 
 async def test_op_invocations_dispatch_on_their_own_executor(
-    monkeypatch: pytest.MonkeyPatch, config_authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
 
     def arm(
-        _kind: str, _payload: dict[str, Any], *, pool: ConnectionPool, authority: ConfigAuthority
+        _kind: str,
+        _payload: dict[str, Any],
+        *,
+        pool: ConnectionPool,
+        authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+        local_machine: MachineIdentity,
     ) -> tuple[str, dict[str, object]]:
+        del local_machine
         assert pool is dispatch_pool
         return "completed", {"thread": threading.current_thread().name}
 
@@ -349,8 +427,11 @@ async def test_op_invocations_dispatch_on_their_own_executor(
             pool=dispatch_pool,
             executor=first,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
+            local_machine=machine_identity,
         )
-        daemon._shutdown_op_pool(first)
+        boot.shutdown_op_pool(first)
         second_result = await daemon._run_arm(
             "status_probe",
             {},
@@ -359,6 +440,9 @@ async def test_op_invocations_dispatch_on_their_own_executor(
             pool=dispatch_pool,
             executor=second,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
+            local_machine=machine_identity,
         )
     first_thread = first_result[1]["thread"]
     second_thread = second_result[1]["thread"]

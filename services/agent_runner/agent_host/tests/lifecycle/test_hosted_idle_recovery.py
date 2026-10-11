@@ -15,16 +15,19 @@ from base.agents.incarnation.resources import (
     IncarnationResources,
     ResourceProcess,
 )
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import pause_owner
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.recovery.tests.helpers import admit as _admit
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from tests.components.base.poll_until import poll_until_async
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _accept_model(**_kwargs: object) -> None:
@@ -77,9 +80,16 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
     tmp_path: Path,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(
-        aops_pool, model_catalog=model_catalog, config_authority=config_authority
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     db_conn.execute(
@@ -93,8 +103,9 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
         graph=AsyncMock(),
         checkpointer=AsyncMock(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        machine=configured_machine(),
     )
     assert await host.pending_inbound_wakes(60) == []
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()

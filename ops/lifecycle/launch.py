@@ -7,7 +7,6 @@ import asyncio
 from psycopg_pool import ConnectionPool
 
 from base.agents import ForkSourceEmpty
-from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
@@ -25,6 +24,7 @@ async def launch_agent_op(
     db_pool: ConnectionPool,
     *,
     catalog: ModelCatalog,
+    local_machine: str,
 ) -> SpawnedAgent:
     """Validate a gateway-created row and wake its host without changing identity.
 
@@ -43,12 +43,14 @@ async def launch_agent_op(
         model=settings.lm.llm_model,
         config=resolve_agent_config_pins(body.config, body.birth_config),
     )
-    await asyncio.to_thread(_validate_launch_row, db_pool, body)
+    await asyncio.to_thread(_validate_launch_row, db_pool, body, local_machine=local_machine)
     publish_inbound_wake(db, bus, body.agent_id, "0")
     return SpawnedAgent(id=body.agent_id)
 
 
-def _validate_launch_row(db_pool: ConnectionPool, body: LaunchAgentRequest) -> None:
+def _validate_launch_row(
+    db_pool: ConnectionPool, body: LaunchAgentRequest, *, local_machine: str
+) -> None:
     """A stale attempt cannot wake an identity now placed somewhere else."""
     with db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -56,7 +58,7 @@ def _validate_launch_row(db_pool: ConnectionPool, body: LaunchAgentRequest) -> N
             (body.agent_id,),
         )
         row = cur.fetchone()
-    if row is None or row != (machine_name(), body.launch_attempt_id, "idling"):
+    if row is None or row != (local_machine, body.launch_attempt_id, "idling"):
         raise ValueError(f"agent {body.agent_id} launch attempt is stale or misplaced")
 
 

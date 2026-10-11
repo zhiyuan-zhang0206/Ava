@@ -40,24 +40,34 @@ import ava
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.context import AvaContext
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
+from base.cluster.machine import MachineIdentity
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import HostPolicy, TurnOutcome
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import (
+    assert_sdk_context,
+    configured_machine,
+    configured_policy,
+)
+from services.agent_runner.agent_host.tests.runtime.observation import HostTurnObservation
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
-def _host(*, catalog: ModelCatalog, **kwargs: Any) -> AgentHost:
+def _host(
+    *, catalog: ModelCatalog, database_gate: ProcessDbGate, machine: MachineIdentity, **kwargs: Any
+) -> AgentHost:
     """An `AgentHost` on this box with the handles the tests share."""
     return AgentHost(
         policy=kwargs.pop("policy", configured_policy()),
-        machine="this-box",
+        machine=machine,
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=catalog,
         **kwargs,
     )
@@ -245,26 +255,6 @@ class _Publisher:
     async def aclose(self) -> None: ...
 
 
-class _Observation:
-    """What one turn saw from inside a node task."""
-
-    def __init__(
-        self,
-        agent_id: int | None,
-        model: str,
-        plugin_marker: str,
-        llm: _Model,
-        publisher: _Publisher,
-        ops_pool: object,
-    ) -> None:
-        self.agent_id = agent_id
-        self.model = model
-        self.plugin_marker = plugin_marker
-        self.llm = llm
-        self.publisher = publisher
-        self.ops_pool = ops_pool
-
-
 class _FakeGraph:
     """Stands in for the compiled graph.
 
@@ -274,7 +264,7 @@ class _FakeGraph:
 
     def __init__(self, results: dict[int, list[dict[str, Any]]]) -> None:
         self._results = results
-        self.observations: list[_Observation] = []
+        self.observations: list[HostTurnObservation] = []
         self.gates: dict[int, asyncio.Event] = {}
         self.arrived: dict[int, asyncio.Event] = {}
 
@@ -284,16 +274,17 @@ class _FakeGraph:
     def arrival(self, agent_id: int) -> asyncio.Event:
         return self.arrived.setdefault(agent_id, asyncio.Event())
 
-    async def _observe(self, _agent_id: int, context: AvaContext) -> _Observation:
+    async def _observe(self, _agent_id: int, context: AvaContext) -> HostTurnObservation:
         agent = context.require_agent()
         plugin_cfg = cast(_HostPluginConfig, agent.plugin_config("hostplug"))
-        return _Observation(
+        return HostTurnObservation(
             agent_id=context.require_identity().agent_id,
             model=agent.brain.llm_model,
             plugin_marker=plugin_cfg.marker,
             llm=cast(_Model, context.llm),
             publisher=cast(_Publisher, context.event_publisher),
             ops_pool=context.ops_pool,
+            machine=context.require_machine(),
         )
 
     async def ainvoke(
@@ -389,7 +380,12 @@ def _stub_host_transitions(
 
 @pytest.fixture
 def wired(
-    monkeypatch: pytest.MonkeyPatch, host_plugin: dict[str, BaseModel], model_catalog: ModelCatalog
+    machine_identity: MachineIdentity,
+    monkeypatch: pytest.MonkeyPatch,
+    host_plugin: dict[str, BaseModel],
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> _Build:
     """An `AgentHost` over fakes, with the per-agent build stubbed.
 
@@ -466,6 +462,8 @@ def wired(
 
     monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", _no_force)
 
+    machine_identity.set(name="this-box")
+
     def _build(
         rows: dict[int, _Row],
         results: dict[int, list[dict[str, Any]]] | None = None,
@@ -482,6 +480,8 @@ def wired(
             plugin_configs=host_plugin,
             catalog=model_catalog if catalog is None else catalog,
             policy=policy if policy is not None else configured_policy(),
+            database_gate=database_gate,
+            machine=machine_identity,
         )
         return host, graph, pool
 
@@ -493,13 +493,20 @@ def wired(
 
 class TestPendingInboundBackstop:
     async def test_stale_running_rows_qualified_by_the_scan(
-        self, *, model_catalog: ModelCatalog
+        self, *, model_catalog: ModelCatalog, database_gate: ProcessDbGate
     ) -> None:
         """The hosted dispatcher scans only this machine's runnable rows. A
         fresh pending inbound wakes its agent; database timestamps identify backlog, while current turn progress must
         independently authorize cancellation."""
         pool = _PendingScanPool([(17, True), (23, False)])
-        host = _host(catalog=model_catalog, pool=pool, checkpointer=object(), graph=object())
+        host = _host(
+            catalog=model_catalog,
+            pool=pool,
+            checkpointer=object(),
+            graph=object(),
+            database_gate=database_gate,
+            machine=configured_machine(name="this-box"),
+        )
 
         candidates = await host.pending_inbound_wakes(180.0)
 
@@ -519,7 +526,7 @@ class TestPendingInboundBackstop:
         assert "pending.status='pending'" in pool.sql
 
     async def test_scan_uses_the_reserved_control_pool(
-        self, *, model_catalog: ModelCatalog
+        self, *, model_catalog: ModelCatalog, database_gate: ProcessDbGate
     ) -> None:
         """Turn-query saturation must not starve the durable recovery scan."""
 
@@ -534,6 +541,8 @@ class TestPendingInboundBackstop:
             control_pool=cast(AsyncConnectionPool[Any], control_pool),
             checkpointer=object(),
             graph=object(),
+            database_gate=database_gate,
+            machine=configured_machine(name="this-box"),
         )
 
         candidates = await host.pending_inbound_wakes(180.0)
@@ -572,7 +581,9 @@ class TestSettlementReconciles:
         drive: _Drive,
         order: list[str],
     ) -> None:
-        host, _, _ = wired({1: _Row()})
+        host, _, _ = wired(
+            {1: _Row()},
+        )
 
         async def settle_and_stamp(
             _pool: object,
@@ -681,21 +692,18 @@ class TestSettlementReconciles:
         assert order == ["settle", "reconcile-turn"]
 
 
-def _assert_sdk_context(expected: AvaContext | None, *, bound: bool) -> None:
-    assert getattr(ava, "context", None) is expected
-    assert hasattr(ava, "context") is bound
-
-
 class TestConcurrentAgentIsolation:
     @pytest.mark.parametrize("sdk_bound", [False, True])
     async def test_two_overlapping_turns_each_see_their_own_everything(
-        self, wired: _Build, sdk_bound: bool
+        self,
+        wired: _Build,
+        sdk_bound: bool,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The load-bearing test of the whole hosted model.
 
-        Both turns are held INSIDE the graph at the same time, so neither can
-        pass by running to completion before the other starts — which is exactly
-        how a process-per-agent assumption would sneak through.
+        Both turns stay inside the graph concurrently; sequential completion
+        cannot hide process-per-agent assumptions.
         """
         if sdk_bound:
             pin_agent(999)
@@ -705,26 +713,30 @@ class TestConcurrentAgentIsolation:
             11: _Row(overlay={"llm_model": "model-for-11", "marker": "plug-for-11"}),
             22: _Row(overlay={"llm_model": "model-for-22", "marker": "plug-for-22"}),
         }
-        host, graph, _ = wired(rows)
+        host, graph, _ = wired(
+            rows,
+        )
         graph.gate(11)
         graph.gate(22)
 
         child_context = getattr(ava, "context", None)
-        _assert_sdk_context(child_context, bound=sdk_bound)
+        assert_sdk_context(child_context, bound=sdk_bound)
         t1 = asyncio.create_task(host.run_turn(11))
         t2 = asyncio.create_task(host.run_turn(22))
         await asyncio.wait_for(graph.arrival(11).wait(), 2)
         await asyncio.wait_for(graph.arrival(22).wait(), 2)
 
-        _assert_sdk_context(child_context, bound=sdk_bound)
+        assert_sdk_context(child_context, bound=sdk_bound)
         # Both are parked in their own turn right now — overlap is real.
         graph.gates[11].set()
         graph.gates[22].set()
         await asyncio.wait_for(asyncio.gather(t1, t2), 2)
-        _assert_sdk_context(child_context, bound=sdk_bound)
+        assert_sdk_context(child_context, bound=sdk_bound)
 
         seen = {o.agent_id: o for o in graph.observations}
         assert set(seen) == {11, 22}, "identity must not leak between concurrent turns"
+        assert seen[11].machine is machine_identity
+        assert seen[22].machine is machine_identity
         assert seen[11].model == "model-for-11"
         assert seen[22].model == "model-for-22"
         assert seen[11].plugin_marker == "plug-for-11"
@@ -735,9 +747,14 @@ class TestConcurrentAgentIsolation:
         assert seen[11].publisher.agent_id == 11
         assert seen[22].publisher.agent_id == 22
 
-    async def test_nothing_leaks_after_a_turn_ends(self, wired: _Build) -> None:
+    async def test_nothing_leaks_after_a_turn_ends(
+        self,
+        wired: _Build,
+    ) -> None:
         """Host turns carry their identity explicitly and never change the shared SDK slot."""
-        host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
+        host, _, _ = wired(
+            {11: _Row(overlay={"llm_model": "model-for-11"})},
+        )
         child_context = getattr(ava, "context", None)
         await asyncio.wait_for(host.run_turn(11), 2)
         assert getattr(ava, "context", None) is child_context

@@ -325,24 +325,27 @@ def test_help_still_renders_when_skills_is_disabled() -> None:
 def test_env_disable_refuses_a_framework_module() -> None:
     """Disabling framework code (identity, the surface machinery) would break the
     framework, not scope the agent's view — the SDK install fails fast instead."""
-    code, _out, err = _run("", env_disable="agent_identity")
+    code, _out, err = _run("", env_disable="sdk_surface.agent_identity")
     assert code != 0
-    assert "ValueError" in err and "framework module ava.sdk_surface.agent_identity" in err, err
+    assert "ValueError" in err, err
+    assert "entry 'sdk_surface.agent_identity' names the framework module ava.sdk_surface" in err, (
+        err
+    )
 
 
 def test_runtime_disable_refuses_a_framework_module_and_its_members() -> None:
     code, out, err = _run("""
         from ava.sdk_surface.sdk_disable import apply_sdk_disable
-        for entry in ("sdk_surface", "agent_identity.agent_id"):
+        for entry in ("sdk_surface", "sdk_surface.agent_identity.agent_id"):
             try:
                 apply_sdk_disable([entry])
             except ValueError as exc:
-                print("refused", entry, "framework module" in str(exc))
+                print("refused", entry, "framework module ava.sdk_surface" in str(exc))
     """)
     assert code == 0, err
     assert out.splitlines()[:2] == [
         "refused sdk_surface True",
-        "refused agent_identity.agent_id True",
+        "refused sdk_surface.agent_identity.agent_id True",
     ], out
 
 

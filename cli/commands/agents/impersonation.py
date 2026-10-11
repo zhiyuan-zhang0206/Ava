@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from base.agents.context.clients import DatabaseFactory
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -168,7 +169,13 @@ def _dsh_relay_stub() -> Path:
 
 
 async def _wait_inbox(
-    db: Database, lease_id: str, caller: dict[str, Any], limit: int, wait: float
+    db: Database,
+    lease_id: str,
+    caller: dict[str, Any],
+    limit: int,
+    wait: float,
+    *,
+    local_machine: str,
 ) -> list[dict[str, Any]]:
     from base.agents import impersonation as control
     from base.config import settings
@@ -176,14 +183,18 @@ async def _wait_inbox(
 
     if not math.isfinite(wait) or wait < 0:
         raise ValueError("--wait must be finite and nonnegative")
-    lease = await asyncio.to_thread(control.require_active, db, lease_id, caller)
+    lease = await asyncio.to_thread(
+        control.require_active, db, lease_id, caller, local_machine=local_machine
+    )
     listener = RedisInboundListener(settings.data_plane.redis_url, lease["agent_id"])
     try:
         if wait:
             await listener.ensure_listening()
         deadline = time.monotonic() + wait
         while True:
-            messages = await asyncio.to_thread(control.inbox, db, lease_id, caller, limit=limit)
+            messages = await asyncio.to_thread(
+                control.inbox, db, lease_id, caller, limit=limit, local_machine=local_machine
+            )
             remaining = deadline - time.monotonic()
             if messages or remaining <= 0:
                 return messages
@@ -217,7 +228,7 @@ def _run_local(args: argparse.Namespace) -> int:
     return 0
 
 
-def _send(args: argparse.Namespace) -> int:
+def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     """`impersonate send` — one message to another agent as the leased identity.
 
     Attested through the session's caller-presence rule; the delivered source is
@@ -231,16 +242,18 @@ def _send(args: argparse.Namespace) -> int:
 
     content = sys.stdin.read() if args.content == "-" else args.content
     caller = process_metadata()
-    db = Database.from_settings()
-    lease_id = sessions.private_id(db, args.agent_id, args.session_id)
-    lease = control.require_active(db, lease_id, caller)
+    db = database_factory()
+    lease_id = sessions.private_id(
+        db, args.agent_id, args.session_id, local_machine=args.runtime.machine.name()
+    )
+    lease = control.require_active(db, lease_id, caller, local_machine=args.runtime.machine.name())
     source = f"agent:{lease['agent_id']}"
     status = send_agent_message(args.target_agent_id, content, source=source)
     _emit({"status": status, "to": args.target_agent_id, "source": source})
     return 0
 
 
-def _request(args: argparse.Namespace) -> int:
+def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     """`impersonate request` — create the lease, then hand its relay the credential."""
     from base.agents.impersonation import sessions
     from base.agents.impersonation.host_transport import require_control_endpoint
@@ -255,7 +268,7 @@ def _request(args: argparse.Namespace) -> int:
     if args.relay_provider == "codex":
         endpoint = require_control_endpoint(endpoint)
     response = sessions.request(
-        Database.from_settings(),
+        database_factory(),
         EventBus.from_settings(),
         args.agent_id,
         authority=ConfigAuthority(
@@ -272,6 +285,7 @@ def _request(args: argparse.Namespace) -> int:
         thread_id=args.relay_thread_id,
         codex_remote=endpoint,
         batch_window_seconds=args.relay_batch_window_seconds,
+        local_machine=args.runtime.machine.name(),
     )
     if dsh_stub is not None:
         _write_relay_stub(
@@ -306,42 +320,97 @@ def _request(args: argparse.Namespace) -> int:
     return 0
 
 
-def _dispatch(args: argparse.Namespace) -> int:
+def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     from base.agents import impersonation as control
     from base.agents.impersonation import sessions
     from base.agents.impersonation.history import public_session, say
     from base.native_process.ownership import process_metadata
 
     command = args.impersonation_cmd
-    db = Database.from_settings()
+    db = database_factory()
     bus = EventBus.from_settings()
     if command == "request":
-        return _request(args)
+        return _request(args, database_factory=database_factory)
     if command == "list":
         _emit(sessions.list_sessions(db, args.agent_id, before=args.before, limit=args.limit))
         return 0
     if command == "send":
-        return _send(args)
+        return _send(args, database_factory=database_factory)
     caller = process_metadata()
-    args.lease_id = sessions.private_id(db, args.agent_id, args.session_id)
+    args.lease_id = sessions.private_id(
+        db, args.agent_id, args.session_id, local_machine=args.runtime.machine.name()
+    )
     if command == "status":
-        _emit(public_session(control.get(db, bus, args.lease_id, caller)))
+        _emit(
+            public_session(
+                control.get(
+                    db, bus, args.lease_id, caller, local_machine=args.runtime.machine.name()
+                )
+            )
+        )
     elif command == "renew":
-        _emit(public_session(control.renew(db, bus, args.lease_id, caller, ttl_seconds=args.ttl)))
+        _emit(
+            public_session(
+                control.renew(
+                    db,
+                    bus,
+                    args.lease_id,
+                    caller,
+                    ttl_seconds=args.ttl,
+                    local_machine=args.runtime.machine.name(),
+                )
+            )
+        )
     elif command == "release":
         summary = sys.stdin.read() if args.summary == "-" else args.summary
-        _emit(public_session(control.release(db, bus, args.lease_id, caller, summary)))
+        _emit(
+            public_session(
+                control.release(
+                    db,
+                    bus,
+                    args.lease_id,
+                    caller,
+                    summary,
+                    local_machine=args.runtime.machine.name(),
+                )
+            )
+        )
     elif command == "inbox":
-        _emit(asyncio.run(_wait_inbox(db, args.lease_id, caller, args.limit, args.wait)))
+        _emit(
+            asyncio.run(
+                _wait_inbox(
+                    db,
+                    args.lease_id,
+                    caller,
+                    args.limit,
+                    args.wait,
+                    local_machine=args.runtime.machine.name(),
+                )
+            )
+        )
     elif command == "ack":
-        control.ack(db, bus, args.lease_id, caller, args.message_ids)
+        control.ack(
+            db,
+            bus,
+            args.lease_id,
+            caller,
+            args.message_ids,
+            local_machine=args.runtime.machine.name(),
+        )
         _emit({"acknowledged": args.message_ids})
     elif command == "say":
         content = sys.stdin.read() if args.content == "-" else args.content
         _emit(
             {
                 "seq": say(
-                    db, bus, args.lease_id, caller, content, phase=args.phase, message_key=args.key
+                    db,
+                    bus,
+                    args.lease_id,
+                    caller,
+                    content,
+                    phase=args.phase,
+                    message_key=args.key,
+                    local_machine=args.runtime.machine.name(),
                 )
             }
         )
@@ -352,10 +421,10 @@ def _dispatch(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_impersonate(args: argparse.Namespace) -> int:
+def cmd_impersonate(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     """Run one command, with operational errors confined to stderr."""
     try:
-        return _dispatch(args)
+        return _dispatch(args, database_factory=database_factory)
     except (RuntimeError, ValueError, OSError) as exc:
         print(f"impersonation: {exc}", file=sys.stderr)
         return 1

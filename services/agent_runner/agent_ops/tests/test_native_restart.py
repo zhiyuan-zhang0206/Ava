@@ -1,5 +1,6 @@
 """Only the guarded restart receipt owns replay after an Ops response is lost."""
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -11,15 +12,19 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartOperation,
     NativeRestartRequest,
 )
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from ops.lifecycle.native_restart import restart_native_work_op
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_request_identity import pool as pool
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_merged_effort_refusal_has_no_restart_or_config_effects(
@@ -29,8 +34,10 @@ async def test_merged_effort_refusal_has_no_restart_or_config_effects(
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    _inc, target = await managed_work(db_conn, aops_pool)
+    _inc, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     db_conn.execute(
         "UPDATE agents_meta SET birth_config=%s::jsonb WHERE id=%s",
         ('{"llm_model":"deepseek-flash","reasoning_effort":"max"}', target.agent_id),
@@ -64,8 +71,13 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    _inc, target = await managed_work(db_conn, aops_pool)
+    _inc, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     request = NativeRestartRequest(target=target)
     operation = NativeRestartOperation(operation_key="domain-ops", request=request)
     packet = {
@@ -76,9 +88,10 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
     result: dict[str, object] | None = None
     injected = False
 
-    async def lose_response(*args: Any, **kwargs: Any) -> Any:
+    async def lose_response(*args: Any, local_machine: MachineIdentity, **kwargs: Any) -> Any:
+        assert local_machine is machine_identity
         nonlocal result, injected
-        status, result = await actual(*args, **kwargs)
+        status, result = await actual(*args, local_machine=local_machine, **kwargs)
         assert status is OpStatus.COMPLETED
         if not injected:
             injected = True
@@ -97,6 +110,9 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
+            local_machine=machine_identity,
         )
     original = result
     assert original is not None
@@ -113,6 +129,9 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert status is OpStatus.COMPLETED and recovered == original
     assert db_conn.execute(
@@ -130,6 +149,9 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
+        local_machine=machine_identity,
     )
     assert status is OpStatus.FAILED
     assert result == {"error": "guarded restart envelope identity differs"}

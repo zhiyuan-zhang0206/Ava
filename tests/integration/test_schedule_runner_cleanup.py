@@ -16,6 +16,28 @@ import pytest
 
 from base.config import settings
 
+_SCHEDULE_INPUTS = """
+from functools import partial
+from base.config import ConfigBoot
+from base.cluster.machine.boot import machine_from_boot
+from base.paths import ava_home
+from base.agents.context.clients import ClientSet
+from base.daemon.schedules.inputs import ScheduleInputs
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry.emitter import build_pipeline
+config = ConfigBoot()
+config.read_process_environment()
+machine = machine_from_boot(config)
+image = LoadedCommit.capture()
+gate = ProcessDbGate(process="schedule-cleanup-test", version=CodeVersion(image).get)
+database = partial(Database.from_settings, gate=gate)
+clients = ClientSet(database=database, pipeline_factory=partial(build_pipeline, database=database, machine=machine, home=ava_home()))
+inputs = ScheduleInputs(database, clients.event_pipeline, image, machine=machine)
+"""
+
 
 def _await_file(path: Path) -> None:
     deadline = time.monotonic() + 15
@@ -190,7 +212,7 @@ def test_runner_hard_exit_child_ownership(
     code = (
         setup + "from gateway.schedules import runner as r; import ava; "
         "from services.wake.schedule_manager.runner import run; "
-        "ava.ensure_plugins_loaded = lambda: None; "
+        "ava.ensure_plugins_loaded = lambda **_inputs: None; "
         "from base.config import settings; "
         "settings.gateway.schedule_stall_timeout_seconds = 0.15; "
         "settings.gateway.schedule_stall_check_interval_seconds = 0.02; "
@@ -226,7 +248,7 @@ def test_runner_hard_exit_child_ownership(
 @pytest.mark.parametrize("blocked_write", ["error", "run", "complete"])
 def test_stall_exit_bounds_failure_records(tmp_path: Path, blocked_write: str) -> None:
     """A blocked DB write cannot keep a stalled runner alive past the record budget."""
-    code = (
+    code = _SCHEDULE_INPUTS + (
         "from gateway.schedules import runner as r\n"
         "from pathlib import Path\n"
         "import threading, time\n"
@@ -240,7 +262,7 @@ def test_stall_exit_bounds_failure_records(tmp_path: Path, blocked_write: str) -
         "    threading.Event().wait()\n"
         "r._record_error = record_error\n"
         "r._record_run_end = record_run_end\n"
-        "r._stall_action(None, 1, 'test stall', 1)\n"
+        "r._stall_action(database(), 1, 'test stall', 1)\n"
     )
     if blocked_write == "complete":
         code = _completion_during_stall_source(tmp_path)
@@ -260,7 +282,7 @@ def test_stall_exit_bounds_failure_records(tmp_path: Path, blocked_write: str) -
 
 def _completion_during_stall_source(root: Path) -> str:
     """The script returns while a real stall recorder is blocked; hard exit still wins."""
-    return (
+    return _SCHEDULE_INPUTS + (
         "from gateway.schedules import runner as r\n"
         "from pathlib import Path\n"
         "import ava, runpy, time\n"
@@ -284,5 +306,5 @@ def _completion_during_stall_source(root: Path) -> str:
         "r._record_error = record_error\n"
         "runpy.run_path = script\n"
         "r._finish_completed = lambda *_args: (root / 'completed').touch()\n"
-        "raise SystemExit(r._run(None, 1, bind_actor=lambda *_args: None, load_plugins=ava.ensure_plugins_loaded))\n"
+        "raise SystemExit(r._run(database(), 1, bind_actor=lambda *_args: None, load_plugins=ava.ensure_plugins_loaded, inputs=inputs))\n"
     )

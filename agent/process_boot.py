@@ -12,11 +12,13 @@ task #3585).
 
 import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import ava
 from ava.sdk_surface import sdk_disable
 from ava_builtins.plugins.ava_memory.sdk import MemoryMatch
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.log import logger
@@ -71,7 +73,7 @@ def _isolated_memory_search(_query: str, _k: int = 5) -> list[MemoryMatch]:
     return []
 
 
-def init_process_scope() -> None:
+def init_process_scope(*, machine: MachineIdentity, home: Path) -> None:
     """Process-scope boot: start OTLP trace init.
 
     Only the cheap decisions (disk guards + collector preflight) run here;
@@ -89,7 +91,7 @@ def init_process_scope() -> None:
     """
     from base.telemetry.tracing import initialize_tracing
 
-    initialize_tracing()
+    initialize_tracing(machine=machine, home=home)
 
 
 def land_cluster_extensions(db: Database) -> None:

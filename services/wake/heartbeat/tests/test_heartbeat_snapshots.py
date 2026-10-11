@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from ops.cluster.rpc import ClusterOpUnreachable
 from services.wake.heartbeat import daemon as heartbeat_daemon
@@ -21,8 +22,8 @@ from services.wake.heartbeat.liveness import _probe_machine, run_liveness_pass
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool]:
-    p = base.db.pool(max_size=2)
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+    p = base.db.pool(max_size=2, gate=database_gate)
     try:
         yield p
     finally:
@@ -88,13 +89,13 @@ def _judged(conn: psycopg.Connection) -> list[str]:
 
 
 def test_a_probed_machine_is_snapshotted_with_its_status(
-    db_conn: psycopg.Connection, pool: ConnectionPool
+    db_conn: psycopg.Connection, pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     _machine(db_conn, "runner-1")
 
     asyncio.run(
         run_liveness_pass(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": _status("runner-1")}),
@@ -105,12 +106,12 @@ def test_a_probed_machine_is_snapshotted_with_its_status(
 
 
 def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
-    db_conn: psycopg.Connection, pool: ConnectionPool
+    db_conn: psycopg.Connection, pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     _machine(db_conn, "runner-1")
     asyncio.run(
         run_liveness_pass(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": _status("runner-1")}),
@@ -119,7 +120,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
 
     asyncio.run(
         run_liveness_pass(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": None}),
@@ -129,7 +130,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
 
     asyncio.run(
         run_liveness_pass(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": None}),
@@ -139,7 +140,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
 
     asyncio.run(
         run_liveness_pass(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": _status("runner-1")}),
@@ -149,12 +150,12 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
 
 
 def test_a_reachable_answer_that_is_not_a_cluster_status_clears_the_status(
-    db_conn: psycopg.Connection, pool: ConnectionPool
+    db_conn: psycopg.Connection, pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     _machine(db_conn, "runner-1")
     asyncio.run(
         run_liveness_pass(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": _status("runner-1")}),
@@ -163,7 +164,7 @@ def test_a_reachable_answer_that_is_not_a_cluster_status_clears_the_status(
 
     asyncio.run(
         run_liveness_pass(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": {"result": "?"}}),
@@ -174,7 +175,7 @@ def test_a_reachable_answer_that_is_not_a_cluster_status_clears_the_status(
 
 
 def test_staging_and_stopped_hosts_are_snapshotted_but_not_judged(
-    db_conn: psycopg.Connection, pool: ConnectionPool
+    db_conn: psycopg.Connection, pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     """The roster shows them, so it needs their status; the liveness grading and the
     offline alert stay with the rollout targets."""
@@ -184,7 +185,9 @@ def test_staging_and_stopped_hosts_are_snapshotted_but_not_judged(
     probe = _Probe({"target": _status("target"), "laptop": _status("laptop"), "retired": None})
 
     asyncio.run(
-        run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=probe)
+        run_liveness_pass(
+            Database.from_settings(gate=database_gate), pool, EventBus.from_settings(), probe=probe
+        )
     )
 
     assert sorted(probe.calls) == ["laptop", "retired", "target"]  # each dialed once
@@ -195,7 +198,7 @@ def test_staging_and_stopped_hosts_are_snapshotted_but_not_judged(
 
 
 def test_paused_and_non_runner_machines_are_not_probed(
-    db_conn: psycopg.Connection, pool: ConnectionPool
+    db_conn: psycopg.Connection, pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     _machine(db_conn, "target")
     _machine(db_conn, "held", paused=True)
@@ -203,7 +206,9 @@ def test_paused_and_non_runner_machines_are_not_probed(
     probe = _Probe({"target": _status("target")})
 
     asyncio.run(
-        run_liveness_pass(Database.from_settings(), pool, EventBus.from_settings(), probe=probe)
+        run_liveness_pass(
+            Database.from_settings(gate=database_gate), pool, EventBus.from_settings(), probe=probe
+        )
     )
 
     assert probe.calls == ["target"]
@@ -211,7 +216,7 @@ def test_paused_and_non_runner_machines_are_not_probed(
 
 
 def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """The roster renders from the snapshot, so the heartbeat service must write it
     at once rather than leave the roster empty for a pass interval."""
@@ -230,7 +235,7 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             heartbeat_daemon._liveness_loop(
-                Database.from_settings(),
+                Database.from_settings(gate=database_gate),
                 cast(ConnectionPool, object()),
                 EventBus.from_settings(),
                 LoopProgress("liveness", 60.0),
@@ -241,7 +246,7 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
 
 
 def test_a_failing_pass_waits_out_the_interval_before_retrying(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     events: list[str] = []
 
@@ -260,7 +265,7 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying(
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             heartbeat_daemon._liveness_loop(
-                Database.from_settings(),
+                Database.from_settings(gate=database_gate),
                 cast(ConnectionPool, object()),
                 EventBus.from_settings(),
                 LoopProgress("liveness", 60.0),

@@ -347,8 +347,12 @@ def test_resurrects_line_allows_every_hit(
     assert "all allowed" in out
 
 
-def test_resurrects_sha_allows_only_that_commit_s_hits(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("declared_paths", ["", "a.py", "b.py", "a.py b.py"])
+def test_resurrects_sha_and_optional_paths_constrain_the_same_hit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    declared_paths: str,
 ) -> None:
     repo = _init_repo(tmp_path / "repo")
     _write(repo, "a.py", "def handle(payload):\n" + _BLOCK_A + "    return payload\n")
@@ -361,12 +365,14 @@ def test_resurrects_sha_allows_only_that_commit_s_hits(
     _git(repo, "checkout", "-q", "-b", "feature")
     _write(repo, "a.py", "def handle(payload):\n" + _BLOCK_A + "    return payload\n")
     _write(repo, "b.py", "def handle(payload):\n" + _BLOCK_B + "    return payload\n")
-    _commit(repo, "restore both\n\nResurrects: " + first[:9], days_ago=0.1)
+    _commit(repo, f"restore both\n\nResurrects: {first[:9]} {declared_paths}", days_ago=0.1)
     code, out, err = _check(repo, monkeypatch, capsys)
     assert code == 1
-    assert "ALLOWED a.py" in out
+    allows_first = declared_paths != "b.py"
+    assert ("ALLOWED a.py" in out) == allows_first
+    assert ("HIT a.py" in out) != allows_first
     assert "HIT b.py" in out
-    assert "matched no hit" not in err  # the declaration was used
+    assert ("matched no hit" in err) != allows_first
 
 
 def test_resurrects_path_allows_only_matching_hits(
@@ -593,6 +599,86 @@ def test_incomplete_prefix_still_participates_in_a_restored_block(
         "    old_policy = resolve_old_policy(config),\n)\n"
     )
     code, out, _err, deleting = _restore_after_delete(
+        _init_repo(tmp_path / "repo"), monkeypatch, capsys, block=block
+    )
+    assert code == 1
+    assert "3 dead line(s)" in out
+    assert f"deleted by {deleting[:9]}" in out
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:",
+        "async def restore_deleted_watchdog_fields(config: Config):",
+        "class DeletedDeliveryWatchdogContract(BaseContract):",
+        "except (AvaAgentError, ClientMessageConflictError) as exc:",
+        "except* (AvaAgentError, ClientMessageConflictError) as errors:",
+        "except DeletedDeliveryWatchdogError as exc:",
+        'monkeypatch.setattr(hc, "init_gateway_process", Mock())',
+        'result = lookup("deleted_delivery_watchdog_contract")',
+        "pytest.raises(psycopg.errors.ReadOnlySqlTransaction),",
+    ],
+)
+def test_a_declaration_string_or_type_reference_is_not_a_solo_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], line: str
+) -> None:
+    code, out, _, _ = _restore_after_delete(
+        _init_repo(tmp_path / "repo"), monkeypatch, capsys, block=line + "\n"
+    )
+    assert code == 0, out
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "restore_deleted_watchdog_fields(config)",
+        "watchdog.deleted_delivery_watchdog_contract = value",
+        "return settings.AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS",
+        'raise psycopg.errors.ReadOnlySqlTransaction("write denied")',
+        "def restore_deleted_watchdog_fields(config): return restore_old_fields(config)",
+        "except restore_deleted_watchdog_errors(config):",
+        "except errors[deleted_delivery_watchdog_index]:",
+        "except DeletedDeliveryWatchdogError: restore_old_fields(config)",
+        "if restore_deleted_watchdog_fields(config):",
+        "with restore_deleted_watchdog_fields(config):",
+        "return _validated_bootstrap_payload(resp.json())",
+        "totals = _llm_totals_from_models(agg.llm_by_model, agg.llm_costs)",
+    ],
+)
+def test_a_distinctive_call_assignment_or_inline_body_still_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], line: str
+) -> None:
+    code, out, _, _ = _restore_after_delete(
+        _init_repo(tmp_path / "repo"), monkeypatch, capsys, block=line + "\n"
+    )
+    assert code == 1, out
+
+
+def test_non_solo_fragments_still_prove_a_deleted_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    block = (
+        "def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:\n"
+        '    monkeypatch.setattr(hc, "init_gateway_process", Mock())\n'
+        "    pytest.raises(psycopg.errors.ReadOnlySqlTransaction),\n"
+    )
+    code, out, _, _ = _restore_after_delete(
+        _init_repo(tmp_path / "repo"), monkeypatch, capsys, block=block
+    )
+    assert code == 1
+    assert "3 dead line(s)" in out
+
+
+def test_exception_handler_header_still_participates_in_a_deleted_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    block = (
+        "except (AvaAgentError, ClientMessageConflictError) as exc:\n"
+        "    record = serialize_error(exc)\n"
+        "    emit = publish_error(record)\n"
+    )
+    code, out, _, deleting = _restore_after_delete(
         _init_repo(tmp_path / "repo"), monkeypatch, capsys, block=block
     )
     assert code == 1

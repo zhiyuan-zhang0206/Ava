@@ -28,16 +28,12 @@ import base.deploy.state.host_deploy_state
 from base.agents import ShellKillMode
 from base.api_contracts.status import PausedReason, SchemaMismatchStatus
 from base.clock import Clock
-from base.cluster.machine import (
-    is_agent_runner,
-    is_gateway,
-    is_observability_station,
-    machine_name,
-)
+from base.cluster.machine import MachineIdentity
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample
+from base.native_process.loaded_commit import LoadedCommit
 from base.sessions.page_session import is_page_label
 from ops.cluster import pause as cluster_pause
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
@@ -140,11 +136,11 @@ def _count_agent_shells(sessions: list[SessionInfo]) -> int:
     return sum(1 for s in sessions if re.search(r"-agent-(\d+)-shell-", s.name))
 
 
-def _count_local_agents(conn: Any) -> int:
+def _count_local_agents(conn: Any, *, local_machine: str) -> int:
     """Count this machine's retained agent identities through the snapshot connection."""
     row = conn.execute(
         "SELECT count(*) FROM agents_meta WHERE machine=%s AND status<>'terminated'",
-        (machine_name(),),
+        (local_machine,),
     ).fetchone()
     if row is None:
         raise RuntimeError("local agent count returned no row")
@@ -413,8 +409,7 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
 
 
 def _read_deploy_snapshot(
-    db: Database,
-    pool: Any | None,
+    db: Database, pool: Any | None, *, local_machine: MachineIdentity
 ) -> tuple[
     base.deploy.state.host_deploy_state.HostDeployState | None,
     int,
@@ -428,9 +423,15 @@ def _read_deploy_snapshot(
             else pool.connection(timeout=_POOL_BORROW_TIMEOUT_S)
         )
         with connection as conn:
-            state = base.deploy.state.host_deploy_state.read(db, conn=conn)
-            agent_count = _count_local_agents(conn) if is_agent_runner() else 0
-            schema_status = schema_mismatch_status(db, conn=conn)
+            state = base.deploy.state.host_deploy_state.read(db, local_machine.name(), conn=conn)
+            agent_count = (
+                _count_local_agents(conn, local_machine=local_machine.name())
+                if ("agent-runner" in local_machine.role())
+                else 0
+            )
+            schema_status = schema_mismatch_status(
+                db, conn=conn, local_machine=local_machine.name()
+            )
         return state, agent_count, schema_status
     except Exception as exc:  # status degrades when the central DB is unavailable
         # Deploy state and agent count share one bounded connection. During a
@@ -442,7 +443,7 @@ def _read_deploy_snapshot(
             0,
             SchemaMismatchStatus(
                 kind="unavailable",
-                machine=machine_name(),
+                machine=local_machine.name(),
                 detail=f"schema comparison unavailable: status database snapshot failed ({type(exc).__name__})",
             ),
         )
@@ -462,6 +463,8 @@ def _read_resource_sample() -> ResourceSample | None:
 def _paused_reason(
     db: Database,
     state: base.deploy.state.host_deploy_state.HostDeployState | None,
+    *,
+    local_machine: MachineIdentity,
 ) -> PausedReason | None:
     """The first true clause of the `paused` verdict, in its own clause order.
 
@@ -477,7 +480,7 @@ def _paused_reason(
 
     if state is None:
         return "no_state"
-    if cluster_pause.is_paused(db, state):
+    if cluster_pause.is_paused(db, state, machine_name=local_machine.name):
         return "business_pause"
     if admission.held():
         return "maintenance"
@@ -496,20 +499,21 @@ def _supervisor_online() -> bool | None:
         return None
 
 
-def status_snapshot(db: Database, pool: Any | None = None) -> ClusterStatus:
+def status_snapshot(
+    db: Database, pool: Any | None = None, *, image: LoadedCommit, local_machine: MachineIdentity
+) -> ClusterStatus:
     """Assemble this host's cluster state — used by `/api/cluster/status`.
 
-    When setup is missing, base/cluster/machine.py's machine_name /
-    machine_role raise specific exceptions; this function passes them
+    When setup is missing, the supplied machine owner's independent name and
+    role readers raise specific exceptions; this function passes them
     through and FastAPI surfaces as default 500 (admin endpoint, not
     consumed by SDK).
     """
     from base.deploy.git.cluster_drift import prod_source_head_sha
-    from base.native_process import loaded_commit as _process_sha
 
     agent_host_alive = (
         check_pidfile(str(ServiceEndpoints.from_settings().of("agent_host").pidfile))[0]
-        if is_agent_runner()
+        if ("agent-runner" in local_machine.role())
         else None
     )
     supervisor_alive = _supervisor_online()
@@ -523,20 +527,22 @@ def status_snapshot(db: Database, pool: Any | None = None) -> ClusterStatus:
     # of those independent operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
         resource_future = executor.submit(_read_resource_sample)
-        state, agent_count, schema_status = _read_deploy_snapshot(db, pool)
+        state, agent_count, schema_status = _read_deploy_snapshot(
+            db, pool, local_machine=local_machine
+        )
         resource = resource_future.result()
     # One source of truth for the pair: `paused` is exactly "a clause fired",
     # so the bool can never drift from its reason.
-    paused_reason = _paused_reason(db, state)
+    paused_reason = _paused_reason(db, state, local_machine=local_machine)
     return ClusterStatus(
-        machine_name=machine_name(),
-        serve_gateway=is_gateway(),
-        serve_agent_runner=is_agent_runner(),
-        serve_observability_station=is_observability_station(),
+        machine_name=local_machine.name(),
+        serve_gateway=("gateway" in local_machine.role()),
+        serve_agent_runner=("agent-runner" in local_machine.role()),
+        serve_observability_station=("observability-station" in local_machine.role()),
         paused=paused_reason is not None,
         paused_reason=paused_reason,
         head_sha=prod_source_head_sha(),
-        running_sha=_process_sha.get(),
+        running_sha=image.sha,
         schema_mismatch=schema_status,
         shell_count=shell_count,
         agent_host_online=agent_host_alive,

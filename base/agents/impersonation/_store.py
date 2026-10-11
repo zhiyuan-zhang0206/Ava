@@ -18,7 +18,6 @@ from psycopg.types.json import Jsonb
 from base.agents import AgentStatus
 from base.agents.impersonation.status import OPEN, ImpersonationStatus, LeaseRecord, parse_lease
 from base.agents.messages.caller_identity import caller_payload
-from base.cluster.machine import machine_name
 from base.native_process import native_boot_id
 from base.native_process.ownership import OwnedProcess
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -67,8 +66,12 @@ def public(lease: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def local(lease: Mapping[str, Any]) -> None:
-    if lease["machine"] != machine_name():
+def local(
+    lease: Mapping[str, Any],
+    *,
+    local_machine: str,
+) -> None:
+    if lease["machine"] != local_machine:
         raise ImpersonationError("Impersonation is limited to the agent's own machine")
 
 
@@ -304,10 +307,18 @@ def verify_caller(lease: Mapping[str, Any], caller: object) -> None:
     )
 
 
-def authenticate(lease: Mapping[str, Any], caller: object) -> None:
+def authenticate(
+    lease: Mapping[str, Any],
+    caller: object,
+    *,
+    local_machine: str,
+) -> None:
     """Attested controller authority: caller presence plus same-machine placement."""
     verify_caller(lease, caller)
-    local(lease)
+    local(
+        lease,
+        local_machine=local_machine,
+    )
 
 
 def require_native(conn: psycopg.Connection, incarnation: RuntimeIncarnation) -> dict[str, Any]:
@@ -427,7 +438,13 @@ def expire(conn: psycopg.Connection, lease: LeaseRecord) -> LeaseRecord:
 
 
 def validate_active(
-    lease: LeaseRecord, caller: object, *, fresh: bool, machine: str, status: AgentStatus
+    lease: LeaseRecord,
+    caller: object,
+    *,
+    fresh: bool,
+    machine: str,
+    status: AgentStatus,
+    local_machine: str,
 ) -> None:
     """Validate either a joined read snapshot or rows already locked for mutation."""
     if lease["status"] != ImpersonationStatus.ACTIVE or not fresh:
@@ -437,10 +454,20 @@ def validate_active(
         )
     if machine != lease["machine"] or status not in (AgentStatus.RUNNING, AgentStatus.IDLING):
         raise ImpersonationError("Agent placement or lifecycle changed")
-    authenticate(lease, caller)
+    authenticate(
+        lease,
+        caller,
+        local_machine=local_machine,
+    )
 
 
-def require_active_locked(conn: psycopg.Connection, lease: LeaseRecord, caller: object) -> None:
+def require_active_locked(
+    conn: psycopg.Connection,
+    lease: LeaseRecord,
+    caller: object,
+    *,
+    local_machine: str,
+) -> None:
     # Do not persist expiration here and then raise (which would roll it back).
     # The native boundary/get reconciler persists it independently.
     meta = lock_agent(conn, lease["agent_id"])
@@ -451,6 +478,7 @@ def require_active_locked(conn: psycopg.Connection, lease: LeaseRecord, caller: 
         fresh=fresh == (True,),
         machine=meta["machine"],
         status=AgentStatus(meta["status"]),
+        local_machine=local_machine,
     )
 
 
@@ -482,21 +510,37 @@ def validate_relay_spec(
         )
 
 
-def authenticate_relay(lease: Mapping[str, Any], relay_token: str) -> None:
+def authenticate_relay(
+    lease: Mapping[str, Any],
+    relay_token: str,
+    *,
+    local_machine: str,
+) -> None:
     """The relay's scoped credential: inbox/delivery/beat, never controller authority."""
     if lease["relay_token_hash"] is None or not hmac.compare_digest(
         lease["relay_token_hash"], token_hash(relay_token)
     ):
         raise ImpersonationError("Invalid relay token")
-    local(lease)
+    local(
+        lease,
+        local_machine=local_machine,
+    )
 
 
 def require_relay_active_locked(
-    conn: psycopg.Connection, lease: LeaseRecord, relay_token: str
+    conn: psycopg.Connection,
+    lease: LeaseRecord,
+    relay_token: str,
+    *,
+    local_machine: str,
 ) -> None:
     meta = lock_agent(conn, lease["agent_id"])
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
-    authenticate_relay(lease, relay_token)
+    authenticate_relay(
+        lease,
+        relay_token,
+        local_machine=local_machine,
+    )
     if lease["status"] != ImpersonationStatus.ACTIVE or fresh != (True,):
         raise ImpersonationError("Impersonation is not active or its TTL has expired")
     if meta["machine"] != lease["machine"] or AgentStatus(meta["status"]) not in (

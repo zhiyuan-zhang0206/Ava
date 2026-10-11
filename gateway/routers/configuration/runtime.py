@@ -40,7 +40,7 @@ from base.api_contracts.config import (
     ResolvedConfigView,
     ResolvedFieldView,
 )
-from base.cluster.machine import MachineRole, machine_name
+from base.cluster.machine import MachineIdentity, MachineRole
 from base.config import env_override_values, field_domain, get_config_metadata, settings
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import ConfigPatchPlan, split_reducer_patch
@@ -76,14 +76,14 @@ def _request_actor(request: Request) -> tuple[str | None, str | None]:
     return actor, trace_id if isinstance(trace_id, str) else None
 
 
-def _assert_machine_known(target: str, pool: ConnectionPool) -> None:
+def _assert_machine_known(target: str, pool: ConnectionPool, *, local_machine_name: str) -> None:
     """404 if `target` is not in the machines table — distinguishes a typo'd
     machine name from a registered-but-offline host (which 503s on timeout).
 
     Skips the lookup for `target == machine_name()` (this host always exists,
     even before its own startup UPSERT lands).
     """
-    if target == machine_name():
+    if target == local_machine_name:
         return
 
     with pool.connection() as conn, conn.cursor() as cur:
@@ -92,7 +92,9 @@ def _assert_machine_known(target: str, pool: ConnectionPool) -> None:
             raise HTTPException(status_code=404, detail=f"unknown machine: {target!r}")
 
 
-def _target_capabilities(target: str, db: Database) -> list[MachineRole]:
+def _target_capabilities(
+    target: str, db: Database, *, local_machine: MachineIdentity
+) -> list[MachineRole]:
     """The target machine's capability set (`gateway` / `agent-runner` /
     `observability-station`) — what the panel uses to pick which capability
     sections a remote view renders.
@@ -103,10 +105,8 @@ def _target_capabilities(target: str, db: Database) -> list[MachineRole]:
     unregistered name resolves to an empty set (the read still works, the panel just
     shows the common section).
     """
-    if target == machine_name():
-        from base.cluster.machine import machine_role
-
-        return cast("list[MachineRole]", sorted(machine_role()))
+    if target == local_machine.name():
+        return cast("list[MachineRole]", sorted(local_machine.role()))
     from base.cluster.machines import MachineNotRegistered, lookup_role
 
     try:
@@ -118,7 +118,7 @@ def _target_capabilities(target: str, db: Database) -> list[MachineRole]:
 
 
 async def _dispatch_config_read(
-    target: str, *, db: Database, authority: ConfigAuthority
+    target: str, *, db: Database, authority: ConfigAuthority, local_machine: MachineIdentity
 ) -> ConfigReadResult:
     """Run config_read on `target` via its ops server — one uniform path.
 
@@ -160,18 +160,20 @@ async def _dispatch_config_read(
     # (the same structural exception as the roster's lightweight local row). A
     # REMOTE machine without agent-runner is unreachable by construction: never
     # silently answer it with THIS host's config.
-    if target != machine_name():
+    if target != local_machine.name():
         raise HTTPException(
             status_code=503,
             detail=f"machine {target!r} has no agent-runner ops server — its config cannot be read",
         )
     return ConfigReadResult.model_validate(
-        await asyncio.to_thread(host_config.config_read_op, authority=authority)
+        await asyncio.to_thread(
+            host_config.config_read_op, authority=authority, local_machine=local_machine.name()
+        )
     )
 
 
 async def _dispatch_config_audit_read(
-    target: str, last: int, *, db: Database
+    target: str, last: int, *, db: Database, local_machine: MachineIdentity
 ) -> ConfigAuditReadResult:
     """Run config_audit_read on `target` via its ops server — one uniform path.
 
@@ -206,7 +208,7 @@ async def _dispatch_config_audit_read(
                 detail=f"machine {target!r} config audit read failed: {exc.result!r}",
             ) from exc
         return ConfigAuditReadResult.model_validate(wire)
-    if target != machine_name():
+    if target != local_machine.name():
         raise HTTPException(
             status_code=503,
             detail=(
@@ -215,7 +217,9 @@ async def _dispatch_config_audit_read(
             ),
         )
     return ConfigAuditReadResult.model_validate(
-        await asyncio.to_thread(host_config.config_audit_read_op, last)
+        await asyncio.to_thread(
+            host_config.config_audit_read_op, last, local_machine=local_machine.name()
+        )
     )
 
 
@@ -228,6 +232,7 @@ async def _dispatch_config_write(
     local: bool = False,
     actor: str | None = None,
     trace_id: str | None = None,
+    local_machine: MachineIdentity,
 ) -> ConfigWriteOpResult:
     """Run config_write on `target` via its ops server — one uniform path.
 
@@ -275,7 +280,7 @@ async def _dispatch_config_write(
     # not-yet-registered local host) may be written in-process — it runs no ops
     # server. A remote machine without agent-runner is unreachable by
     # construction and must never be silently redirected onto THIS host's .env.
-    if target != machine_name():
+    if target != local_machine.name():
         raise HTTPException(
             status_code=503,
             detail=f"machine {target!r} has no agent-runner ops server — its config cannot be written",
@@ -288,6 +293,7 @@ async def _dispatch_config_write(
             local=local,
             actor=actor,
             trace_id=trace_id,
+            local_machine=local_machine.name(),
         )
     )
 
@@ -323,11 +329,19 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
     machine-addressed view (`?machine=<name>`, even == this gateway on a dual-role
     box) deltas against that host's remotely-writable host set.
     """
-    await asyncio.to_thread(check_env_integrity)
-    target = machine or machine_name()
-    await asyncio.to_thread(_assert_machine_known, target, request.app.state.db_pool)
+    await asyncio.to_thread(check_env_integrity, machine_reader=request.app.state.machine.name)
+    target = machine or request.app.state.machine.name()
+    await asyncio.to_thread(
+        _assert_machine_known,
+        target,
+        request.app.state.db_pool,
+        local_machine_name=request.app.state.machine.name(),
+    )
     read = await _dispatch_config_read(
-        target, db=request.app.state.db, authority=request.app.state.config_authority
+        target,
+        db=request.app.state.db,
+        authority=request.app.state.config_authority,
+        local_machine=request.app.state.machine,
     )
     host_fields = read.host_fields
 
@@ -404,7 +418,9 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
     return ConfigView(
         fields=fields,
         raw_overrides=raw_overrides,
-        machine_capabilities=_target_capabilities(target, request.app.state.db),
+        machine_capabilities=_target_capabilities(
+            target, request.app.state.db, local_machine=request.app.state.machine
+        ),
     )
 
 
@@ -435,19 +451,34 @@ async def get_config_audit(
 
         runners = await asyncio.to_thread(list_agent_runners, request.app.state.db)
         names = [name for name, _url in runners]
-        if machine_name() not in names:
-            names.append(machine_name())
+        if request.app.state.machine.name() not in names:
+            names.append(request.app.state.machine.name())
         results = await asyncio.gather(
             *(
-                _dispatch_config_audit_read(name, effective_last, db=request.app.state.db)
+                _dispatch_config_audit_read(
+                    name,
+                    effective_last,
+                    db=request.app.state.db,
+                    local_machine=request.app.state.machine,
+                )
                 for name in names
             )
         )
     else:
-        target = machine or machine_name()
-        await asyncio.to_thread(_assert_machine_known, target, request.app.state.db_pool)
+        target = machine or request.app.state.machine.name()
+        await asyncio.to_thread(
+            _assert_machine_known,
+            target,
+            request.app.state.db_pool,
+            local_machine_name=request.app.state.machine.name(),
+        )
         results = [
-            await _dispatch_config_audit_read(target, effective_last, db=request.app.state.db)
+            await _dispatch_config_audit_read(
+                target,
+                effective_last,
+                db=request.app.state.db,
+                local_machine=request.app.state.machine,
+            )
         ]
 
     records: list[dict[str, object]] = []
@@ -569,6 +600,7 @@ async def _put_local(
     has_cluster_patch: bool,
     actor: str | None,
     trace_id: str | None,
+    local_machine: MachineIdentity,
 ) -> tuple[ConfigWriteOpResult, list[str]]:
     """The Cluster-view PUT: host fields first, then (when they applied) the cluster `.env`."""
     # Host first: if a host field is rejected the write returns applied=False
@@ -583,6 +615,7 @@ async def _put_local(
         local=True,
         actor=actor,
         trace_id=trace_id,
+        local_machine=local_machine,
     )
     cluster_changed: set[str] = set()
     if host_result.applied and has_cluster_patch:
@@ -685,9 +718,14 @@ async def put_config(
     verdicts; the returned ConfigWriteResult surfaces them so the frontend can
     show inline failures + the per-machine restart banner.
     """
-    target = machine or machine_name()
+    target = machine or request.app.state.machine.name()
     actor, trace_id = _request_actor(request)
-    await asyncio.to_thread(_assert_machine_known, target, request.app.state.db_pool)
+    await asyncio.to_thread(
+        _assert_machine_known,
+        target,
+        request.app.state.db_pool,
+        local_machine_name=request.app.state.machine.name(),
+    )
 
     metas = {m.name: m for m in get_config_metadata(authority=request.app.state.config_authority)}
     plan = ConfigPatchPlan.parse(body, metas, is_remote=machine is not None)
@@ -712,6 +750,7 @@ async def put_config(
             has_cluster_patch=has_cluster_patch,
             actor=actor,
             trace_id=trace_id,
+            local_machine=request.app.state.machine,
         )
     else:
         # Remote target: cluster config is machine-independent; only host fields
@@ -727,6 +766,7 @@ async def put_config(
             authority=request.app.state.config_authority,
             actor=actor,
             trace_id=trace_id,
+            local_machine=request.app.state.machine,
         )
         restart_required = host_result.restart_required
 

@@ -43,6 +43,7 @@ import logging
 import os
 import sys
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 
 import psycopg
@@ -50,7 +51,8 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base import telemetry
-from base.config import settings
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
     Liveness,
@@ -59,15 +61,20 @@ from base.daemon.health import (
 )
 from base.daemon.shutdown import install_graceful_shutdown
 from base.db import Database, insert_inbound_message_in_transaction, publish_inbound_wake
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
-from base.log import init_gateway_process
+from base.log.process import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.config_registration import (
     disk_image_path,
     read_config_image,
     read_service_config,
 )
+from base.paths import ava_home
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
@@ -300,7 +307,9 @@ async def _dispatch_loop(
         await _sleep_with_liveness(liveness, interval)
 
 
-async def run(config: FleetConfig) -> None:
+async def run(
+    config: FleetConfig, *, database: Callable[[], Database], image: LoadedCommit
+) -> None:
     if _is_running():
         _log.info(
             "[task-maintenance] daemon already running (pidfile=%s), exiting",
@@ -314,10 +323,12 @@ async def run(config: FleetConfig) -> None:
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     endpoint = _endpoint()
-    health = await start_health_server("task_maintenance", endpoint.health_port, liveness=liveness)
+    health = await start_health_server(
+        "task_maintenance", endpoint.health_port, liveness=liveness, image=image
+    )
     _log.info("[task-maintenance] healthz listening on :%s", endpoint.health_port)
 
-    db = Database.from_settings()
+    db = database()
     pool = db.pool()
     try:
         await _dispatch_loop(pool, db, EventBus.from_settings(), liveness, config=config)
@@ -331,14 +342,30 @@ async def run(config: FleetConfig) -> None:
 def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
-    assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="task_maintenance")
+    image = LoadedCommit.capture()
+    boot = ConfigBoot()
+    boot.boot()
+    machine = machine_from_boot(boot)
+    assert_schema_current(boot.view.data_plane.db_url)
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="task_maintenance", exempt=False)
+
+    def database() -> Database:
+        return Database(db_config_from_boot(boot), gate=gate, local_host=machine.host)
+
+    pipeline = telemetry.build_pipeline(database=database, machine=machine, home=ava_home())
+    init_gateway_process(
+        name="task_maintenance",
+        producer=lambda: pipeline,
+        machine_reader=machine.name,
+        image=image,
+    )
     install_graceful_shutdown("task_maintenance")
     try:
         config = read_service_config("ava_fleet", FleetConfig)
         if config is None:
             config = read_config_image(FleetConfig, disk_image_path("ava_fleet"))
-        asyncio.run(run(config))
+        asyncio.run(run(config, database=database, image=image))
     except KeyboardInterrupt:
         _log.info("[task-maintenance] interrupted, shutting down")
     except Exception:
@@ -349,4 +376,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
     main()

@@ -8,9 +8,9 @@ YAML-indentation contract between template and generator is covered.
 
 from __future__ import annotations
 
-import os
 import platform
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -18,13 +18,12 @@ from urllib.parse import urlsplit
 import pytest
 import yaml
 
-from base.config import ConfigBoot
 from base.deploy.release import collector_artifact as artifact
 from cli.commands.observability import otel_collector as oc
-
-
-def _fail_ensure_otel_collector(*_args: object, **_kwargs: object) -> None:
-    pytest.fail("must skip")
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_platform_tag_maps_machines(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,7 +42,13 @@ def test_platform_tag_maps_machines(monkeypatch: pytest.MonkeyPatch) -> None:
         assert artifact.platform_tag() == expected
 
 
-def test_generate_config_bakes_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_generate_config_bakes_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
     """Fan-out endpoints + retention are baked from settings; the template's
     placeholders are all consumed (no dangling $TOKEN)."""
     repo = tmp_path / "repo"
@@ -63,7 +68,13 @@ def test_generate_config_bakes_settings(monkeypatch: pytest.MonkeyPatch, tmp_pat
     )
     monkeypatch.setattr("base.config.settings.observability.trace_retention_days", 7)
 
-    out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
+    out = oc.generate_config(
+        repo,
+        Path("/home/u/.ava"),
+        roles=None,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+    )
     assert "ava_home: /home/u/.ava" in out
     assert "tempo: http://10.0.0.2:14318" in out
     assert "loki: http://10.0.0.2:3100/otlp" in out
@@ -73,7 +84,11 @@ def test_generate_config_bakes_settings(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
 
 def test_generate_config_two_state_observability_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """AVA_OBSERVABILITY_URL set -> the gateway collector's LGTM fan-out points
     at the observatory station; unset -> the per-service settings URLs (loopback
@@ -98,7 +113,13 @@ def test_generate_config_two_state_observability_url(
     # with the cluster bearer, so the secret must be set (empty fails closed).
     monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", "cluster-token")
 
-    out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
+    out = oc.generate_config(
+        repo,
+        Path("/home/u/.ava"),
+        roles=None,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+    )
     # WP4: a remote observatory is reached through the station's ONE
     # bearer-authenticated OTLP ingress, never the direct backend /otlp paths.
     assert "loki: http://10.0.0.46:4318" in out
@@ -106,13 +127,23 @@ def test_generate_config_two_state_observability_url(
     assert "tempo: http://127.0.0.1:14318" in out
 
     monkeypatch.setattr("base.config.settings.observability.observability_url", "")
-    out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
+    out = oc.generate_config(
+        repo,
+        Path("/home/u/.ava"),
+        roles=None,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+    )
     assert "loki: http://127.0.0.1:3100/otlp" in out
     assert "prom: http://127.0.0.1:9090/api/v1/otlp" in out
 
 
 def test_write_config_preserves_user_edited_config(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A hand-edited config.yaml survives the next converge with a warning —
     the content-hash guard protects user edits (web-sources precedent)."""
@@ -131,7 +162,10 @@ def test_write_config_preserves_user_edited_config(
 
 
 def test_write_config_records_and_accepts_converge_output(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """After converge wrote a config, a re-render of the same content is a
     no-op; a re-render with NEW content replaces it (only user edits are
@@ -145,7 +179,11 @@ def test_write_config_records_and_accepts_converge_output(
 
 
 def test_ensure_skips_download_when_version_matches(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A version-matching binary is kept (no download); the config is still
     regenerated each converge."""
@@ -178,12 +216,24 @@ def test_ensure_skips_download_when_version_matches(
     )
     monkeypatch.setattr("base.config.settings.observability.trace_retention_days", 3)
 
-    oc.ensure_otel_collector(repo, tmp_path, roles=None)
+    oc.ensure_otel_collector(
+        repo,
+        tmp_path,
+        roles=None,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+    )
     assert downloaded == []
     assert (tmp_path / "otel-collector/config.yaml").exists()
 
 
-def test_ensure_downloads_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_ensure_downloads_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
     """No binary -> download + verify run; the config is written after."""
     (tmp_path / "otel-collector").mkdir(parents=True)
     repo = tmp_path / "repo"
@@ -210,12 +260,24 @@ def test_ensure_downloads_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path
     )
     monkeypatch.setattr("base.config.settings.observability.trace_retention_days", 3)
 
-    oc.ensure_otel_collector(repo, tmp_path, roles=None)
+    oc.ensure_otel_collector(
+        repo,
+        tmp_path,
+        roles=None,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+    )
     assert len(downloaded) == 1
     assert (tmp_path / "otel-collector/config.yaml").exists()
 
 
-def test_unsupported_platform_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_unsupported_platform_skips(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
     """No pinned tag -> warn + skip, never download."""
     monkeypatch.setattr(artifact, "platform_tag", lambda: None)
     downloaded: list[str] = []
@@ -224,7 +286,13 @@ def test_unsupported_platform_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         "download_and_verify",
         lambda _t, _d: downloaded.append(_t),  # pyright: ignore[reportUnknownArgumentType]
     )
-    oc.ensure_otel_collector(tmp_path / "repo", tmp_path, roles=None)
+    oc.ensure_otel_collector(
+        tmp_path / "repo",
+        tmp_path,
+        roles=None,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+    )
     assert downloaded == []
 
 
@@ -264,6 +332,8 @@ def _render_real_template(
     self_metrics_port: int = 8888,
     otlp_enabled: bool = True,
     observability_url: str = "",
+    operator_database: Callable[[], Any],
+    command_runtime: CommandRuntime,
 ) -> dict[str, Any]:
     """Render the shipped template for `roles` and parse it as YAML."""
     _local_data_plane(monkeypatch)
@@ -280,10 +350,12 @@ def _render_real_template(
     )
     monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", otlp_enabled)
     monkeypatch.setattr("base.config.settings.observability.observability_url", observability_url)
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: machine_host)
-    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "test-machine")
+    command_runtime.machine.set(host=machine_host)
+    command_runtime.machine.set(name="test-machine")
     repo = Path(__file__).resolve().parents[4]
-    out = oc.generate_config(repo, _HOME, roles)
+    out = oc.generate_config(
+        repo, _HOME, roles, database_factory=operator_database, machine=command_runtime.machine
+    )
     # No placeholder left unconsumed. (A literal dollar survives on purpose:
     # the network-interface exclusion regexp's end-anchor, written $$ in the
     # template.)
@@ -295,12 +367,20 @@ def _render_real_template(
 
 def test_gateway_config_trace_mirror_rotation_policy(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The trace mirror's file exporter rotates by size with bounded backups:
     small segments (64 MiB — the structural bound on the ACTIVE file, since
     the file exporter exposes no time-based rotation) and a bounded number of
     backups; day retention comes from $RETENTION_DAYS (the cluster setting)."""
-    cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
+    cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"gateway", "agent-runner"}),
+        operator_database=operator_database,
+        command_runtime=command_runtime,
+    )
     rotation = cfg["exporters"]["file/traces"]["rotation"]
     assert rotation["max_megabytes"] == 64
     assert rotation["max_backups"] == 24
@@ -318,6 +398,9 @@ def test_gateway_config_trace_mirror_rotation_policy(
 def test_file_storage_caps_queue_bytes_in_every_shape(
     monkeypatch: pytest.MonkeyPatch,
     roles: frozenset[str],
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The persistent sending queues carry a byte cap in every shape.
 
@@ -327,7 +410,9 @@ def test_file_storage_caps_queue_bytes_in_every_shape(
     minimum disk. At the cap the collector rejects the newest write, the same
     counted loss path as a request-full queue.
     """
-    cfg = _render_real_template(monkeypatch, roles)
+    cfg = _render_real_template(
+        monkeypatch, roles, operator_database=operator_database, command_runtime=command_runtime
+    )
     assert cfg["extensions"]["file_storage"] == {
         "directory": "/home/u/.ava/otel-collector/queue",
         "create_directory": True,
@@ -338,6 +423,9 @@ def test_file_storage_caps_queue_bytes_in_every_shape(
 
 def test_gateway_config_scrapes_this_clusters_own_data_plane(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A gateway-capable unit owns Postgres+Redis, so its sidecar carries the
     postgresql + redis receivers. Postgres is dialed DIRECT (never the pooler)
@@ -347,7 +435,12 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     from base.db.pg_admin import pg_socket_path
 
     monkeypatch.setattr("base.config.settings.data_plane.db_url", _DELIVERED)
-    cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
+    cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"gateway", "agent-runner"}),
+        operator_database=operator_database,
+        command_runtime=command_runtime,
+    )
     rendered = yaml.safe_dump(cfg)
     assert "generation-login-password" not in rendered and "ava_g3_gateway" not in rendered
     receivers = cfg["receivers"]
@@ -372,12 +465,17 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
 
 def test_gateway_config_skips_postgres_receiver_when_otlp_export_is_disabled(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """Disabling OTLP export keeps Redis metrics but prevents PostgreSQL receiver startup."""
     cfg = _render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
         otlp_enabled=False,
+        operator_database=operator_database,
+        command_runtime=command_runtime,
     )
 
     assert "postgresql" not in cfg["receivers"]
@@ -387,6 +485,9 @@ def test_gateway_config_skips_postgres_receiver_when_otlp_export_is_disabled(
 
 def test_remote_managed_plane_omits_the_postgres_receiver(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A remote-managed plane has no owner-only socket or monitoring role on
     this host (its provider monitors it), so only Redis is scraped; the
@@ -399,11 +500,17 @@ def test_remote_managed_plane_omits_the_postgres_receiver(
     monkeypatch.setattr("base.config.settings.data_plane.redis_admin_password", "abc")
     monkeypatch.setattr("base.config.settings.gateway.gateway_url", "http://localhost:8000")
     monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", "")
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "localhost")
-    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "test-machine")
+    command_runtime.machine.set(host="localhost")
+    command_runtime.machine.set(name="test-machine")
     repo = Path(__file__).resolve().parents[4]
 
-    rendered = oc.generate_config(repo, _HOME, frozenset({"gateway", "agent-runner"}))
+    rendered = oc.generate_config(
+        repo,
+        _HOME,
+        frozenset({"gateway", "agent-runner"}),
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+    )
     cfg = yaml.safe_load(rendered)
 
     assert "provider-password" not in rendered
@@ -418,12 +525,20 @@ def test_remote_managed_plane_omits_the_postgres_receiver(
 
 def test_runner_config_has_host_metrics_but_no_data_plane_receivers(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A pure agent-runner's DB/Redis URLs point at the GATEWAY's data plane.
     Scraping from there would duplicate the gateway's own series under a
     second `host` / `machine_name` identity, so the two receivers are omitted
     entirely — host metrics, which ARE this machine's, stay."""
-    cfg = _render_real_template(monkeypatch, frozenset({"agent-runner"}))
+    cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"agent-runner"}),
+        operator_database=operator_database,
+        command_runtime=command_runtime,
+    )
     assert "postgresql" not in cfg["receivers"]
     assert "redis" not in cfg["receivers"]
     assert "host_metrics" in cfg["receivers"]
@@ -433,19 +548,36 @@ def test_runner_config_has_host_metrics_but_no_data_plane_receivers(
     ]
 
 
-def test_unconfigured_unit_has_no_data_plane_receivers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unconfigured_unit_has_no_data_plane_receivers(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
     """roles=None is a unit converge has not configured yet — there are no
     cluster URLs to read, so nothing data-plane is rendered."""
-    cfg = _render_real_template(monkeypatch, None)
+    cfg = _render_real_template(
+        monkeypatch, None, operator_database=operator_database, command_runtime=command_runtime
+    )
     assert "postgresql" not in cfg["receivers"]
     assert "redis" not in cfg["receivers"]
 
 
-def test_infra_metrics_ride_their_own_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_infra_metrics_ride_their_own_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
     """App metrics arrive over OTLP already carrying machine/agent_id
     attributes and must not be relabelled; the host-identity processors
     therefore sit on the infra pipeline only."""
-    cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+    cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"gateway"}),
+        operator_database=operator_database,
+        command_runtime=command_runtime,
+    )
     pipelines = cfg["service"]["pipelines"]
     assert pipelines["metrics"]["receivers"] == ["otlp", "otlp/remote"]
     assert "transform/host_label" not in pipelines["metrics"]["processors"]
@@ -453,17 +585,37 @@ def test_infra_metrics_ride_their_own_pipeline(monkeypatch: pytest.MonkeyPatch) 
     assert "resource_detection/host" in pipelines["metrics/infra"]["processors"]
 
 
-def test_infra_pipeline_stamps_machine_name(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_infra_pipeline_stamps_machine_name(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
     """Infra datapoints keep physical host identity and gain Ava roster identity."""
-    cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+    cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"gateway"}),
+        operator_database=operator_database,
+        command_runtime=command_runtime,
+    )
     statements = cfg["processors"]["transform/host_label"]["metric_statements"][0]["statements"]
     assert 'set(attributes["host"], resource.attributes["host.name"])' in statements
     assert 'set(attributes["machine_name"], "test-machine")' in statements
 
 
-def test_collector_self_metrics_reader_is_per_unit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collector_self_metrics_reader_is_per_unit(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
     """Each unit binds and scrapes its own configurable collector metrics port."""
-    default_cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+    default_cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"gateway"}),
+        operator_database=operator_database,
+        command_runtime=command_runtime,
+    )
     default_reader = default_cfg["service"]["telemetry"]["metrics"]["readers"][0]["pull"][
         "exporter"
     ]["prometheus"]
@@ -473,6 +625,8 @@ def test_collector_self_metrics_reader_is_per_unit(monkeypatch: pytest.MonkeyPat
         monkeypatch,
         frozenset({"gateway"}),
         self_metrics_port=8889,
+        operator_database=operator_database,
+        command_runtime=command_runtime,
     )
     override_reader = override_cfg["service"]["telemetry"]["metrics"]["readers"][0]["pull"][
         "exporter"
@@ -482,18 +636,36 @@ def test_collector_self_metrics_reader_is_per_unit(monkeypatch: pytest.MonkeyPat
     assert override_scrape[0]["static_configs"] == [{"targets": ["localhost:8889"]}]
 
 
-def test_collector_internal_logs_are_warn_level(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collector_internal_logs_are_warn_level(
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
     """Exporter retry notices stay out of service stdout while warnings remain."""
-    cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+    cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"gateway"}),
+        operator_database=operator_database,
+        command_runtime=command_runtime,
+    )
     assert cfg["service"]["telemetry"]["logs"]["level"] == "warn"
 
 
 def test_logs_merge_event_and_filelog_transforms_before_batch(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The logs pipeline promotes bounded event dimensions and labels tailed
     session files before the final batch processor."""
-    cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
+    cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"gateway", "agent-runner"}),
+        operator_database=operator_database,
+        command_runtime=command_runtime,
+    )
 
     processor = cfg["processors"]["transform/promote_event_labels"]
     assert processor["error_mode"] == "ignore"
@@ -541,8 +713,16 @@ def test_logs_merge_event_and_filelog_transforms_before_batch(
 
 def test_local_otlp_pipelines_drop_mismatched_cluster_resources(
     monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
-    cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+    cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"gateway"}),
+        operator_database=operator_database,
+        command_runtime=command_runtime,
+    )
 
     processor = cfg["processors"]["filter/cluster_allow"]
     expected = [
@@ -559,111 +739,6 @@ def test_local_otlp_pipelines_drop_mismatched_cluster_resources(
         assert pipelines[name]["processors"][:2] == ["memory_limiter", "filter/cluster_allow"]
     assert "filter/cluster_allow" not in pipelines["metrics/infra"]["processors"]
     assert "filter/cluster_allow" not in pipelines["traces/remote"]["processors"]
-
-
-def test_non_lgtm_gateway_converge_skips_collector_install(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    home = tmp_path / ".ava-preview"
-    home.mkdir()
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    ctx = oc.ConvergeCtx(
-        repo=Path(__file__).resolve().parents[4],
-        ava_home=home,
-        roles=frozenset({"gateway", "agent-runner"}),
-        config=ConfigBoot(),
-    )
-
-    def must_not_install(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("a non-LGTM gateway must not install a collector")
-
-    monkeypatch.setattr(oc, "ensure_otel_collector", must_not_install)
-
-    oc.ensure_otel_collector_step(ctx)
-
-    assert not (home / "otel-collector").exists()
-    err = capsys.readouterr().err
-    assert "gateway" in err
-    assert "lgtm-host" in err
-    assert "collector skipped" in err
-
-
-def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """An explicit AVA_TELEMETRY_OTLP_ENDPOINT override opens the converge
-    step on a non-LGTM gateway: the operator opted into explicit export, so
-    the local sidecar is installed instead of skipped/reaped."""
-    home = tmp_path / ".ava-preview"
-    home.mkdir()
-    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
-    ctx = oc.ConvergeCtx(
-        repo=Path(__file__).resolve().parents[4],
-        ava_home=home,
-        roles=frozenset({"gateway"}),
-        config=ConfigBoot(),
-    )
-
-    installed: list[tuple[object, object, object]] = []
-    monkeypatch.setattr(
-        oc,
-        "ensure_otel_collector",
-        lambda *args: installed.append(args),  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    oc.ensure_otel_collector_step(ctx)
-
-    assert len(installed) == 1
-    assert installed[0][1] == home
-
-
-def test_collector_preparation_never_controls_a_running_service_tree(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    ctx = oc.ConvergeCtx(
-        repo=Path(__file__).resolve().parents[4],
-        ava_home=home,
-        roles=frozenset({"gateway"}),
-        config=ConfigBoot(),
-    )
-
-    def no_root_control() -> None:
-        pytest.fail("Preparation cannot independently reconcile a live root")
-
-    monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
-    monkeypatch.setattr("cli.commands.lifecycle.root_driver.root_client", no_root_control)
-    oc.ensure_otel_collector_step(ctx)
-
-
-def test_non_lgtm_gateway_reports_and_preserves_residual_config(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    home = tmp_path / ".ava-preview"
-    collector = home / "otel-collector"
-    collector.mkdir(parents=True)
-    config = collector / "config.yaml"
-    config.write_text("stale: true\n", encoding="utf-8")
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    ctx = oc.ConvergeCtx(
-        repo=Path(__file__).resolve().parents[4],
-        ava_home=home,
-        roles=frozenset({"gateway"}),
-        config=ConfigBoot(),
-    )
-
-    monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
-    oc.ensure_otel_collector_step(ctx)
-
-    assert config.read_text(encoding="utf-8") == "stale: true\n"
-    assert "stale/residual" in capsys.readouterr().err
 
 
 # -- issue #172: bounded, loud download -------------------------------------

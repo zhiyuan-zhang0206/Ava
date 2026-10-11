@@ -14,6 +14,8 @@ import ava
 from agent import state as state_module
 from ava import external
 from ava.sdk_surface.install import Installation
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
@@ -66,7 +68,10 @@ def attached_runtime(
     }
     staged: list[dict[str, Any]] = []
     snapshot = ExampleState(sample__seen={"native"})
-    pin_agent(None, owns_loop=True)
+    machine_config = ConfigBoot()
+    machine_config.read_process_environment()
+    machine_config.set_field("machine_name", "local-runner")
+    pin_agent(None, owns_loop=True, machine=machine_from_boot(machine_config))
     ava.unbind_exec_turn()
     request.addfinalizer(ava.unbind_exec_turn)
 
@@ -98,14 +103,16 @@ def attached_runtime(
         """Accept the `surface` kwarg attach passes (ignored)."""
 
     monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
-    monkeypatch.setattr(external, "machine_name", lambda: "local-runner")
 
     def load(_agent_id: int, *, database: Database) -> tuple[ExampleState, dict[str, Any], None]:
         return snapshot.model_copy(deep=True), {"llm_model": "external-test"}, None
 
     monkeypatch.setattr(external, "load_snapshot", load)
 
-    def require(_db: Database, lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+    def require(
+        _db: Database, lease_id: str, attesting: dict[str, Any], *, local_machine: str
+    ) -> dict[str, Any]:
+        assert local_machine == lease["machine"]
         assert lease_id == "lease"
         assert attesting == {"pid": 777}
         if lease["status"] != "active":
@@ -119,8 +126,9 @@ def attached_runtime(
         delta: dict[str, Any],
         *,
         expected_version: int,
+        local_machine: str,
     ) -> None:
-        require(db, lease_id, attesting)
+        require(db, lease_id, attesting, local_machine=local_machine)
         if expected_version != lease["delta_version"]:
             raise RuntimeError("stale version")
         staged.append(delta)

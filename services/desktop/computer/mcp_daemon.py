@@ -76,11 +76,16 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from base.config import settings
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot, settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.log import logger
-from base.paths import computer_mcp_socket
-from base.telemetry import audit_events
+from base.log.process import init_gateway_process
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.paths import ava_home, computer_mcp_socket
+from base.telemetry import audit_events, build_pipeline
 
 from ..permissions_helper import client as helper
 from ..permissions_helper.client import PermissionsHelperError
@@ -591,9 +596,9 @@ def _tracked_client(
     return task
 
 
-async def run(sock: str | None = None) -> None:
+async def run(sock: str | None = None, *, database: Callable[[], Database]) -> None:
     config = computer_use_config()
-    daemon = ComputerMcpDaemon(config, Database.from_settings(), sock)
+    daemon = ComputerMcpDaemon(config, database(), sock)
     path = Path(daemon._sock)
     if await _socket_in_use(path):
         logger.error(
@@ -637,11 +642,29 @@ async def run(sock: str | None = None) -> None:
 
 
 def main() -> None:
-    from base.log import init_gateway_process
+    image = LoadedCommit.capture()
+    machine_config = ConfigBoot()
+    machine_config.boot()
+    machine = machine_from_boot(machine_config)
+    process_home = ava_home().resolve()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="computer-mcp")
 
-    init_gateway_process(name="computer-mcp")
-    asyncio.run(run())
+    def database() -> Database:
+        return Database.from_settings(gate=gate, local_host=machine.host)
+
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    init_gateway_process(
+        name="computer-mcp",
+        producer=lambda: pipeline,
+        machine_reader=machine.name,
+        image=image,
+    )
+    asyncio.run(run(database=database))
 
 
 if __name__ == "__main__":
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
     main()

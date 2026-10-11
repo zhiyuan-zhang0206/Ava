@@ -16,6 +16,7 @@ import os
 import shutil
 
 import base.host.proc
+from base.cluster.machine import MachineIdentity
 
 
 class ListenerDiscoveryError(RuntimeError):
@@ -202,7 +203,7 @@ def _lsof_listener_name_addrs(port: int) -> set[str]:
 LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
 
 
-def serves_off_box() -> bool:
+def serves_off_box(*, machine: MachineIdentity) -> bool:
     """Whether this host declares a reachable address other machines can dial.
 
     The single predicate behind every off-box listener decision (data plane,
@@ -210,12 +211,10 @@ def serves_off_box() -> bool:
     --machine-host`) is not a loopback alias. The default `localhost` is the
     single box, which listens on loopback alone.
     """
-    from base.cluster import machine
-
-    return machine.reachable_host() not in LOOPBACK_ALIASES
+    return machine.host() not in LOOPBACK_ALIASES
 
 
-def bind_addrs() -> list[str]:
+def bind_addrs(*, machine: MachineIdentity) -> list[str]:
     """Loopback plus this host's reachable address, de-duplicated (loopback alone
     when reachable resolves to localhost — the single-box default).
 
@@ -224,11 +223,9 @@ def bind_addrs() -> list[str]:
     `localhost` keeps every data-plane listener on loopback, and declaring a
     private-network address adds that one address. Postgres and its pooler
     authenticate (SCRAM) whatever they bind. The reachable address is an identity
-    field read from the home's own `.env`, never from a parent process's
+    field of the caller-supplied `machine`, never read from a parent process's
     environment."""
-    from base.cluster import machine
-
-    host = machine.reachable_host()
+    host = machine.host()
     out = ["127.0.0.1"]
     if host not in LOOPBACK_ALIASES:
         out.append(host)

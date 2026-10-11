@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host.env import audit, runtime_config
 from gateway.app import app
@@ -23,9 +23,12 @@ from gateway.routers.tests.test_config_api import (
 )
 from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import ConfigAuditReadResult
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
-def test_get_explicit_self_is_host_view_not_cluster(_clean_overrides: Path) -> None:
+def test_get_explicit_self_is_host_view_not_cluster(
+    _clean_overrides: Path, *, machine_identity: MachineIdentity
+) -> None:
     """GET `?machine=<self>` is a host view: raw_overrides is the remote_writable
     host set, so a writable-but-not-remote_writable field
     (cross_machine_transfer_backend) that the Cluster view exposes is ABSENT here —
@@ -33,7 +36,7 @@ def test_get_explicit_self_is_host_view_not_cluster(_clean_overrides: Path) -> N
     runtime_config.write_fields({"cross_machine_transfer_backend": "none"}, set())
     with TestClient(app) as client:
         cluster = client.get("/api/config").json()["raw_overrides"]
-        host = client.get(f"/api/config?machine={machine_name()}").json()["raw_overrides"]
+        host = client.get(f"/api/config?machine={machine_identity.name()}").json()["raw_overrides"]
     assert (
         cluster.get("cross_machine_transfer_backend") == "none"
     )  # writable -> Cluster view exposes it
@@ -163,13 +166,13 @@ def test_put_remote_unknown_machine_404(_clean_overrides: Path) -> None:
     assert "unknown machine" in resp.json()["detail"]
 
 
-def test_self_machine_name_is_known_without_a_row() -> None:
+def test_self_machine_name_is_known_without_a_row(*, machine_identity: MachineIdentity) -> None:
     """Sanity: the resolved self machine_name is treated as known even with no
     machines row (the GET/PUT self path must not 404)."""
     # machine_name() resolves to this process's identity; _assert_machine_known
     # short-circuits it. A bare self GET already exercises this, but assert the
     # name is non-empty so the short-circuit is meaningful.
-    assert machine_name()
+    assert machine_identity.name()
 
 
 def test_request_actor_reads_only_middleware_state() -> None:
@@ -263,7 +266,7 @@ def test_get_config_audit_default_last_comes_from_display_config(
 
 
 def test_get_config_audit_reads_own_records(
-    _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
+    _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """A self audit read returns this box's newest records, tagged with its machine."""
     from base.agents import MachineNotRegistered
@@ -288,7 +291,7 @@ def test_get_config_audit_reads_own_records(
     assert resp.status_code == 200, resp.text
     records = resp.json()["records"]
     assert records[-1]["site"] == "test-self"
-    assert records[-1]["machine"] == machine_name()
+    assert records[-1]["machine"] == machine_identity.name()
     changed = records[-1]["changed"]
     assert changed[0]["alias"] == "AVA_MODEL"
     assert changed[0]["new"] == "audit-self"
@@ -296,10 +299,10 @@ def test_get_config_audit_reads_own_records(
 
 @pytest.mark.asyncio
 async def test_get_config_audit_all_merges_runners_newest_first(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """machine=all fans out to the runners + this box, merges ts-desc, caps at last."""
-    stamp = {"m1": "01", "m2": "02", machine_name(): "00"}
+    stamp = {"m1": "01", "m2": "02", machine_identity.name(): "00"}
     called: list[str] = []
 
     async def _fake_dispatch(
@@ -335,4 +338,4 @@ async def test_get_config_audit_all_merges_runners_newest_first(
     assert resp.status_code == 200, resp.text
     records = resp.json()["records"]
     assert [record["machine"] for record in records] == ["m2", "m1"]
-    assert machine_name() in called
+    assert machine_identity.name() in called

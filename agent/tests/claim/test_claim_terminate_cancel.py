@@ -18,32 +18,40 @@ from agent.tests.claim.claim_status_support import _await_status, _set_agent_sta
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from agent.tests.claim.claim_support import (
     _await_inbound_visible,
-    _config,
-    _insert_inbound_kind,
-    _make_runtime,
+    insert_inbound_kind,
+    make_runtime,
+    thread_config,
 )
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
 async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """terminate inbound → claim appends lifecycle marker (HumanMessage containing
     'Termination was accepted from {source}' text + ava_msg_type='lifecycle' metadata)
     + goto END with exit_requested=True, so the per-turn runloop returns
     (instead of re-invoking) and the process exits naturally."""
     tid = running_agent()
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -73,6 +81,8 @@ async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """One graph invocation = one TURN: a claim pass that finds nothing to do
     AFTER this invocation already routed work (turn_active=True) ends the
@@ -80,12 +90,17 @@ async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
     instead of blocking in _wait_for_batch — that is what closes the per-turn
     root span at the turn boundary. Would hang here if it blocked, so a plain
     return IS the lock."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=True),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -100,6 +115,8 @@ async def test_claim_hosted_ends_turn_instead_of_parking(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Hosted mode has no process to park: a fresh invocation (turn_active=False)
     that finds nothing must goto END with `turn_idle`, not enter the IDLING wait.
@@ -109,12 +126,17 @@ async def test_claim_hosted_ends_turn_instead_of_parking(
     `exit_requested` stays False: an idle agent is not a terminated one — the
     host drops the task and re-creates it on the next wake.
     """
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -129,19 +151,26 @@ async def test_claim_hosted_never_enters_idling_status(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """The hosted claim branch never writes status: `_wait_for_batch` would flip
     to IDLING before it blocks, while the host owns running/idling around the
     task itself. A direct hosted claim therefore leaves its running row alone."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (tid,))
     db_conn.commit()
 
     await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -163,19 +192,26 @@ async def test_claim_hosted_still_dispatches_an_available_batch(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Hosted mode changes only the empty-batch branch. When the first SELECT
     finds work, dispatch is byte-for-byte the process path — the turn runs, and
     `turn_idle` is NOT set (the host must re-invoke, not end the task)."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     insert_inbound_message(
         db_conn, tid, "hello", kind="chat", source="user", bus=event_bus, database=database
     )
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -191,18 +227,25 @@ async def test_claim_cancel_kind_halts_to_idle_without_marker(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """cancel inbound → pause: halted=True + re-enter CLAIM (-> idle), NOT END
     (process stays alive). No lifecycle marker (a pause leaves no trace); a
     Cancelled SSE is emitted so the live UI clears turn-active state."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
-    _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     pub = MagicMock()
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, event_publisher=pub),
-        _config(
+        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -225,6 +268,8 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """User sends a chat, then clicks Stop while the agent's code is executing;
     both land pending and are claimed in one batch (the interrupt aborts the
@@ -235,13 +280,18 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     co-batched chat in state.messages (surfaced to the UI via InboundCommitted)
     until some later inbound happened to arrive — "message picked up but the
     agent never continued"."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     # chat first (older id), then cancel — the real sequence: message queued,
     # then Stop pressed mid-execution.
     insert_inbound_message(
         db_conn, tid, "please also do X", source="user", bus=event_bus, database=database
     )
-    cancel_id = _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    cancel_id = insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     await _await_inbound_visible(aops_pool, cancel_id)
     pub = MagicMock()
 
@@ -249,8 +299,8 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
         # non-empty state = an in-flight turn (not cold start); the exec/llm
         # node already aborted and returned here with halted=True.
         AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="earlier")]),
-        _make_runtime(ops_pool=aops_pool, event_publisher=pub),
-        _config(
+        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -275,14 +325,21 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Same as above but the cancel is the OLDER row (user clicks Stop, then
     sends a new message while both are still pending). The wake decision is
     order-independent — a chat anywhere in the cancel batch means new intent to
     process, so goto=before_llm + halted=False regardless of insertion order."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     # cancel first (older id), then chat
-    _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     chat_id = insert_inbound_message(
         db_conn, tid, "new instruction", source="user", bus=event_bus, database=database
     )
@@ -290,8 +347,8 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="earlier")]),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -305,7 +362,12 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
 
 
 async def test_claim_cancel_batched_with_terminate_terminate_wins(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """cancel + terminate in the same claim batch (user clicks Stop then
     Terminate before claim runs) → terminate WINS: goto END (process exits), not
@@ -314,13 +376,13 @@ async def test_claim_cancel_batched_with_terminate_terminate_wins(
     precedence inversion."""
     tid = running_agent()
     # insertion order shouldn't matter; put cancel first to make the override tempting
-    _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -340,17 +402,20 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """settings.general.message_timestamps=False → the lifecycle marker has no leading
     timestamp; it starts straight at `[system]` with no stray space."""
     monkeypatch.setattr(settings.general, "message_timestamps", False)
     tid = running_agent()
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
         AgentState(),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -359,17 +424,22 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
 
 
 async def test_claim_terminate_self_renders_by_yourself(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """source='self' (ava.self.terminate() suicide) → marker text spells 'by yourself'
     instead of 'by self', more accurately expressing 'agent shuts itself down' semantics."""
     tid = running_agent()
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -385,6 +455,9 @@ async def test_claim_self_terminate_retains_peer_chat_for_successor(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Accepting self termination never acknowledges an unseen peer message."""
     tid = running_agent()
@@ -396,13 +469,13 @@ async def test_claim_self_terminate_retains_peer_chat_for_successor(
         bus=event_bus,
         database=database,
     )
-    terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
+    terminate_id = insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
     await _await_inbound_visible(aops_pool, terminate_id)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -423,6 +496,9 @@ async def test_claim_self_terminate_retains_older_user_chat(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """An older user chat remains durable without vetoing the accepted command."""
     tid = running_agent()
@@ -430,12 +506,12 @@ async def test_claim_self_terminate_retains_older_user_chat(
         db_conn, tid, "queued before the suicide", source="user", bus=event_bus, database=database
     )
     await _await_inbound_visible(aops_pool, chat_id)
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -454,10 +530,13 @@ async def test_claim_external_terminate_retains_newer_chat(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Newer chat does not replace an accepted lifecycle command or get lost."""
     tid = running_agent()
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     chat_id = insert_inbound_message(
         db_conn, tid, "message after the kill", source="user", bus=event_bus, database=database
     )
@@ -465,8 +544,8 @@ async def test_claim_external_terminate_retains_newer_chat(
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -485,6 +564,9 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Regression guard: a deliberate external kill is NOT vetoed by chats that
     predate it — the actor decided with the pending queue visible, so the
@@ -496,12 +578,12 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
         db_conn, tid, "old message before the kill", source="user", bus=event_bus, database=database
     )
     await _await_inbound_visible(aops_pool, chat_id)
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -515,24 +597,24 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
 
 
 async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ):
     """Hosted restart: goto END with `restart_requested` (not `exit_requested`),
     leaves lifecycle application to the host after the acceptance checkpoint
     has been flushed."""
-    from agent.tests.claim.test_inbound_ownership import _admit, _agent
+    from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 
-    tid = _agent(db_conn)
-    owner = await _admit(aops_pool, tid)
-    restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
+    tid = agent_row(db_conn)
+    owner = await _admit(aops_pool, tid, database_gate=database_gate)
+    restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
 
-    runtime = _make_runtime(ops_pool=aops_pool)
+    runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
     runtime = Runtime(context=replace(runtime.context, original_incarnation=owner))
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
         runtime,
-        _config(tid),
+        thread_config(tid),
     )
 
     assert cmd.goto == END
@@ -549,19 +631,24 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
 
 
 async def test_claim_restart_before_terminate_preserves_serial_order(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """The active restart is not discarded by a later termination request."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     # Later termination remains pending for the admitted successor.
-    _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
-    terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    insert_inbound_kind(db_conn, tid, "", "restart", source="user")
+    terminate_id = insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -574,7 +661,12 @@ async def test_claim_restart_before_terminate_preserves_serial_order(
 
 
 async def test_claim_terminate_before_restart_completed_still_exits(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """terminate arrives first in the agent downtime window (smaller id, ordered earlier in batch),
     boot batch [terminate, restart_completed] → goto must be END. Lock down 'boot marker must not
@@ -582,13 +674,13 @@ async def test_claim_terminate_before_restart_completed_still_exits(
     next_goto=BEFORE_LLM; this ordering would consume the terminate but the agent wakes up alive
     (ordering-dependent bug)."""
     tid = running_agent()
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
-    _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -605,22 +697,27 @@ async def test_claim_terminate_before_restart_completed_still_exits(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_cancel_batched_with_restart_idle_restart_silent(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """cancel + restart in the same batch (user clicks Stop then Restart) → restart wins over cancel:
     exits normally via restart; the Cancelled event for cancel is still emitted (frontend clears
     turn-active), the pause intent is absorbed into 'silent idle after restart' (halted=True preserved)."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
-    restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
+    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
     pub = MagicMock()
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool, event_publisher=pub),
-        _config(
+        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -639,7 +736,12 @@ async def test_claim_cancel_batched_with_restart_idle_restart_silent(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_terminate_then_restart_preserves_serial_order(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """An owned runtime accepts the first lifecycle command, not latest-wins.
 
@@ -649,14 +751,14 @@ async def test_claim_terminate_then_restart_preserves_serial_order(
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     # A later restart cannot replace the active command pointer.
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
-    restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -669,16 +771,21 @@ async def test_claim_terminate_then_restart_preserves_serial_order(
 
 
 async def test_claim_terminate_external_source_renders_source_verbatim(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """source='agent:42' (another agent triggering terminate) → marker uses 'by agent:42'
     as-is, does not go through _by_who's self special case."""
     tid = running_agent()
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="agent:42")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="agent:42")
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )

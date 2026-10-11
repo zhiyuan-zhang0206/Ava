@@ -18,12 +18,15 @@ import psycopg
 import pytest
 
 from base.agents.birth_config import set_cluster_default_model
+from base.cluster.machine import MachineIdentity
 from base.config import frozen_field_names
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents.spawn import create_agent_row
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _spawn_agent(
@@ -32,19 +35,20 @@ def _spawn_agent(
     config: dict[str, object] | None = None,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
     **kw: Any,
 ) -> int:
     """Test setup helper — the #1236 split collapsed for setup: create_agent_row
     (gateway-side, the main data-plane identity) + `_launch_agent_process`
     (runner-side; the autouse guard spy records the launch so tests can assert
     the stamp rides out to the child)."""
-    from base.cluster.machine import machine_name
 
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner=spawner,
-        machine=machine_name(),
+        machine=local_machine.name(),
         config=config,
         **kw,
         catalog=model_catalog,
@@ -85,9 +89,15 @@ class TestSpawnStamping:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         agent_id = _spawn_agent(
-            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+            spawner="test",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         assert set(_birth_config(db_conn, agent_id) or {}) == frozen_field_names()
 
@@ -97,12 +107,16 @@ class TestSpawnStamping:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         agent_id = _spawn_agent(
             spawner="test",
             config={"llm_model": "claude-sonnet-5"},
             config_authority=config_authority,
             model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         stamped = _birth_config(db_conn, agent_id) or {}
         assert "llm_model" not in stamped
@@ -114,12 +128,18 @@ class TestSpawnStamping:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         with db_conn.cursor() as cur:
             set_cluster_default_model(cur, "claude-sonnet-5", updated_by="test")
         db_conn.commit()
         agent_id = _spawn_agent(
-            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+            spawner="test",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         assert (_birth_config(db_conn, agent_id) or {})["llm_model"] == "claude-sonnet-5"
 
@@ -129,10 +149,16 @@ class TestSpawnStamping:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The whole point of the feature, end to end."""
         agent_id = _spawn_agent(
-            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+            spawner="test",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         born_with = (_birth_config(db_conn, agent_id) or {})["llm_model"]
         with db_conn.cursor() as cur:
@@ -153,11 +179,17 @@ class TestReplayOnWake:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         from ops.agents.wake import resurrect_agent
 
         agent_id = _spawn_agent(
-            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+            spawner="test",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         stamp = _birth_config(db_conn, agent_id)
         with db_conn.cursor() as cur:
@@ -169,7 +201,13 @@ class TestReplayOnWake:
                 (agent_id,),
             )
         db_conn.commit()
-        resurrect_agent(database, event_bus, agent_id, resurrected_by="user")
+        resurrect_agent(
+            database,
+            event_bus,
+            agent_id,
+            resurrected_by="user",
+            local_machine=machine_identity.name(),
+        )
         assert _birth_config(db_conn, agent_id) == stamp
 
 
@@ -180,9 +218,15 @@ class TestForkInheritance:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         parent = _spawn_agent(
-            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+            spawner="test",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         ckpt = _first_checkpoint(db_conn, parent)
         with db_conn.cursor() as cur:
@@ -194,6 +238,8 @@ class TestForkInheritance:
             fork_checkpoint=ckpt,
             config_authority=config_authority,
             model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         assert _birth_config(db_conn, child) == _birth_config(db_conn, parent)
 
@@ -203,11 +249,17 @@ class TestForkInheritance:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A pre-column agent (or one the migration backfill skipped) has NULL. Its
         fork must still come out fully stamped rather than inherit the hole."""
         parent = _spawn_agent(
-            spawner="test", config_authority=config_authority, model_catalog=model_catalog
+            spawner="test",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         ckpt = _first_checkpoint(db_conn, parent)
         with db_conn.cursor() as cur:
@@ -219,5 +271,7 @@ class TestForkInheritance:
             fork_checkpoint=ckpt,
             config_authority=config_authority,
             model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
         )
         assert set(_birth_config(db_conn, child) or {}) == frozen_field_names()

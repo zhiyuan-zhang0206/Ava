@@ -1,12 +1,9 @@
-"""Path / role helpers + preflight checks used by every cmd_*.
+"""Path / role helpers and preflight checks used by CLI commands.
 
-This module owns:
-- `_roles_or_none()` capability read
-- repo root + memory-pool / frontend / schema / gateway / register
-  preflight checks reused by `start`, `status`, `update`, `cluster`, etc.
-
-The service roster (`ServiceSpec`, `build_services()`, the capability filters)
-lives in `ops.roster` / `ops.spec`; callers import it from there.
+This module owns the capability read, repo root, and memory-pool / frontend /
+schema / gateway / register preflight checks. Service declarations and roster
+selection are defined in ops.roster.service_spec, ops.roster, and ops.spec;
+callers import those definitions directly.
 """
 
 from __future__ import annotations
@@ -19,23 +16,24 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
 from base.sessions.env_forwarding import frontend_toolchain_env
 from cli.commands._setup import SetupValues
+from cli.database.runtime import CommandRuntime
 
 
-def _roles_or_none() -> MachineRoles | None:
+def _roles_or_none(*, machine: MachineIdentity) -> MachineRoles | None:
     """Read the capability set; on missing or invalid value return None — the
     explicit "this host's role is not resolvable yet" state, distinct from a
     (never-valid) empty capability set. stop/status/converge should not be
     blocked by unfinished setup, so they treat None conservatively."""
-    from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
+    from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing
 
     try:
-        return machine_role()
+        return machine.role()
     except (MachineRoleMissing, MachineRoleInvalid):
         return None
 
@@ -278,7 +276,9 @@ def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIG
         time.sleep(wait_s)
 
 
-def _register_machine_or_die(db: Database, resolved: SetupValues, roles: MachineRoles) -> int:
+def _register_machine_or_die(
+    db: Database, resolved: SetupValues, roles: MachineRoles, *, command: CommandRuntime
+) -> int:
     """UPSERT this host into the machines table with typed error handling.
 
     The dial URL comes from `base.cluster.machines.unit_dial_url(roles)` — the one
@@ -288,15 +288,32 @@ def _register_machine_or_die(db: Database, resolved: SetupValues, roles: Machine
     Failure modes get targeted hints + non-zero exit (a half-registered host
     silently breaks cross-machine orchestration; we'd rather fail loud on
     `ava start`). The ops daemon's equivalent call is deliberately non-fatal
-    instead — see `services/agent_runner/agent_ops/daemon.py:_register_boot`.
+    instead — see `services/agent_runner/agent_ops/boot.py:register_boot`.
     """
     import psycopg
 
     from base.cluster.machines import LoopbackDialUrlRefused, register_self, unit_dial_url
+    from base.daemon.endpoints import ServiceEndpoints
+    from base.paths import ava_home
 
-    url = unit_dial_url(roles)
+    url = unit_dial_url(
+        roles,
+        host=command.machine.host(),
+        ops_port=ServiceEndpoints.from_settings().of("ops").health_port,
+        gateway_port=command.config.view.gateway.gateway_port,
+        telemetry_otlp_port=command.config.view.observability.telemetry_otlp_port,
+        gateway=command.config.view.gateway.gateway_url,
+    )
     try:
-        register_self(db, url=url)
+        register_self(
+            db,
+            url=url,
+            name=command.machine.name(),
+            roles=roles,
+            description=command.machine.description(),
+            home=str(ava_home()),
+            gateway=command.config.view.gateway.gateway_url,
+        )
     except LoopbackDialUrlRefused as e:
         print(
             f"  ✗ {e}",
@@ -325,7 +342,7 @@ def _register_machine_or_die(db: Database, resolved: SetupValues, roles: Machine
     return 0
 
 
-def _preflight_probes(db: Database) -> int:
+def _preflight_probes(db: Database, *, command: CommandRuntime) -> int:
     """Run gateway and DB reachability checks BEFORE stopping services.
 
     Designed for `ava restart` and the fleet update (self-update leg): validate
@@ -344,7 +361,7 @@ def _preflight_probes(db: Database) -> int:
     from cli.commands._setup import _collect_setup_values, _missing_setup_message
 
     # Resolve setup from the home's persisted env/files (read-only, no writes).
-    resolved, missing = _collect_setup_values()
+    resolved, missing = _collect_setup_values(config=command.config)
     if missing:
         print(_missing_setup_message(missing), file=sys.stderr)
         return 1
@@ -353,7 +370,7 @@ def _preflight_probes(db: Database) -> int:
     roles: MachineRoles = frozenset(roles_raw.split(",")) if roles_raw else frozenset()
 
     print("\n→ preflight: register machine in central DB")
-    rc = _register_machine_or_die(db, resolved, roles)
+    rc = _register_machine_or_die(db, resolved, roles, command=command)
     if rc != 0:
         print("  ✗ preflight failed: cannot register machine — host still serving", file=sys.stderr)
         return rc

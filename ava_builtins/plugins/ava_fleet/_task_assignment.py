@@ -2,11 +2,11 @@
 
 from typing import Any
 
+import ava.self
 from ava.gateway_client import transport
 from ava.sdk_surface.agent_identity import require_lease_free_agent_id
 from base.agents.tasks.model import Task, validate_task_snapshot
 from base.agents.tasks.priority import validate_priority, validate_remind_interval_seconds
-from base.cluster import machine as cluster_machine
 
 from .task_registry import TaskAssignment
 
@@ -51,7 +51,7 @@ def create_and_assign_guarded(
         },
         "agent": {
             "label": label,
-            "machine": machine if machine is not None else cluster_machine.machine_name(),
+            "machine": machine if machine is not None else ava.self.MACHINE_SPEC.name,
             "config": overlay,
         },
     }

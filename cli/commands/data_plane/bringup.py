@@ -22,7 +22,9 @@ from urllib.parse import urlsplit
 
 import psycopg
 
+from base.agents.context.clients import DatabaseFactory
 from base.cluster.authority.model import Generation
+from base.cluster.machine import MachineIdentity
 from base.cluster.record import ClusterRecord
 from base.config import settings
 from base.host.net.url_secret import url_host
@@ -33,6 +35,8 @@ from ops.roster.service_spec import DbAccess
 def ensure_gateway_data_plane(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentity,
 ) -> int:
     """Bring up owned storage, or probe an explicitly remote-managed plane.
 
@@ -72,7 +76,7 @@ def ensure_gateway_data_plane(
         # traceback from the first migration.
         host = url_host(settings.data_plane.db_url)
         print(f"\n→ data plane remote-managed ({host}) — skipping local instance bring-up")
-        pg_ok, pg_line = remote_pg_reachable()
+        pg_ok, pg_line = remote_pg_reachable(database_factory=database_factory)
         if not pg_ok:
             print(
                 f"  ✗ remote data plane unreachable: {pg_line}\n"
@@ -105,6 +109,7 @@ def ensure_gateway_data_plane(
         redis_password=redis_password_from_env(),
         redis_user=redis_identity(),
         retained_children=retained_children,
+        machine=machine,
     )
 
 
@@ -113,7 +118,7 @@ def remote_plane_host() -> str:
     return url_host(settings.data_plane.db_url)
 
 
-def remote_pg_reachable() -> tuple[bool, str]:
+def remote_pg_reachable(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
     """Probe a remote-managed Postgres through its own AVA_DB_URL.
 
     The two-stage shape of the local probe, minus the local machinery:
@@ -122,12 +127,11 @@ def remote_pg_reachable() -> tuple[bool, str]:
     line. Bounded by the connect keepalives (5s connect timeout). Returns
     (ok, detail) and never raises.
     """
-    from base.db import Database
 
     host = url_host(settings.data_plane.db_url)
     port = urlsplit(settings.data_plane.db_url).port or 5432
     try:
-        with Database.from_settings().connect() as conn:
+        with database_factory().connect() as conn:
             conn.execute("select 1")
         return True, f"postgres ({host}:{port})"
     except Exception as exc:
@@ -246,7 +250,7 @@ def prepare_gateway_schema() -> None:
     )
 
 
-def prepare_memory_vectors() -> None:
+def prepare_memory_vectors(*, database_factory: DatabaseFactory) -> None:
     """Create or rebuild the pgvector memory table when that backend is selected.
 
     The table is a derived cache keyed to the embedding provider's dimension.
@@ -254,7 +258,6 @@ def prepare_memory_vectors() -> None:
     A local plane writes it acting as the schema owner, before the runner grants
     refresh; a remote-managed plane uses its provider URL, like its migrations.
     """
-    from base.db import Database
 
     if settings.services.memory_search_backend != "pgvector":
         return
@@ -264,7 +267,7 @@ def prepare_memory_vectors() -> None:
 
     dim = get_descriptor(settings.services.embedding_backend).dim
     if settings.data_plane.is_remote:
-        with Database.from_settings().connect(direct=True) as conn:
+        with database_factory().connect(direct=True) as conn:
             prepare_table(conn, dim)
         return
     with local_owner_authority().session() as conn:
@@ -364,7 +367,14 @@ def api_delivery(cls: DbAccess) -> dict[str, str]:
     return {API_TOKEN_ENV: api_token(ava_home().resolve(), cls)}
 
 
-def _ensure_pooler(rec: ClusterRecord, database: str, home: Path, generation: Generation) -> None:
+def _ensure_pooler(
+    rec: ClusterRecord,
+    database: str,
+    home: Path,
+    generation: Generation,
+    *,
+    machine: MachineIdentity,
+) -> None:
     """Serve exactly `generation` through the owned pooler (restart on change)."""
     if not settings.data_plane.pgbouncer_enabled:
         return
@@ -377,6 +387,7 @@ def _ensure_pooler(rec: ClusterRecord, database: str, home: Path, generation: Ge
         db_name=database,
         userlist=render_userlist(home, generation),
         admin_password=read_pooler_admin(home).password,
+        machine=machine,
     )
     if rc:
         raise RuntimeError("pooler did not become ready")
@@ -458,7 +469,12 @@ def _admitted_generation(
     return ledger.active
 
 
-def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
+def complete_gateway_data_plane(
+    *,
+    refresh_schema: bool = True,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentity,
+) -> None:
     """Grant the final schema, establish the write generation, start the pooler,
     then verify consumer credentials.
 
@@ -478,7 +494,7 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
 
     if settings.data_plane.is_remote:
         if refresh_schema:
-            prepare_memory_vectors()
+            prepare_memory_vectors(database_factory=database_factory)
         from base.cluster.derive import runner_db_url_projection
 
         urls = [settings.data_plane.db_url, runner_db_url_projection()]
@@ -502,7 +518,7 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
                 base_admin_url=pg_admin_url(rec.ports["postgres"]),
                 expected_data_dir=ava_home() / "pg",
             )
-            prepare_memory_vectors()
+            prepare_memory_vectors(database_factory=database_factory)
         birth = needs_provision(ava_home())
         if not birth and authority.load_ledger(home) is None:
             raise RuntimeError(legacy_home_refusal(home))
@@ -511,7 +527,7 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
                 generation = _birth_generation(conn, home, database)
             else:
                 generation = _admitted_generation(conn, home, database, refresh=refresh_schema)
-            _ensure_pooler(rec, database, home, generation)
+            _ensure_pooler(rec, database, home, generation, machine=machine)
             prove_generation_logins(home, generation, endpoint)
             if authority.require_ledger(home).active is None:
                 verified = authority.verify_generation(conn, home)

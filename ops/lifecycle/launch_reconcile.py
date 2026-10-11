@@ -4,7 +4,6 @@ import asyncio
 
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import machine_name
 from base.db import Database, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
@@ -12,14 +11,24 @@ from ops.rpc_schemas.launch_retry import LaunchReconciled, LaunchReconcileReques
 
 
 async def reconcile_launch_op(
-    db: Database, bus: EventBus, body: LaunchReconcileRequest, pool: ConnectionPool
+    db: Database,
+    bus: EventBus,
+    body: LaunchReconcileRequest,
+    pool: ConnectionPool,
+    *,
+    local_machine: str,
 ) -> LaunchReconciled:
     """Repeat a wake hint without inserting a prompt, rotating or forcing a host."""
-    return await asyncio.to_thread(_reconcile, db, bus, body, pool)
+    return await asyncio.to_thread(_reconcile, db, bus, body, pool, local_machine=local_machine)
 
 
 def _reconcile(
-    db: Database, bus: EventBus, body: LaunchReconcileRequest, pool: ConnectionPool
+    db: Database,
+    bus: EventBus,
+    body: LaunchReconcileRequest,
+    pool: ConnectionPool,
+    *,
+    local_machine: str,
 ) -> LaunchReconciled:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -27,7 +36,7 @@ def _reconcile(
             (body.launch_attempt_id,),
         )
         receipt = cur.fetchone()
-        if receipt is None or receipt[1] != machine_name():
+        if receipt is None or receipt[1] != local_machine:
             raise ValueError("launch retry receipt is missing or belongs to another machine")
         agent_id, target = receipt
         cur.execute(

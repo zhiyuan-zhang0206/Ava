@@ -13,13 +13,17 @@ from fastapi.testclient import TestClient
 import ava
 import ava.agents
 from ava.gateway_client import spawn, transport
+from ava.sdk_surface import agent_identity
 from base.agents import GatewayUnavailable
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from gateway.agents import router as agent_router
 from gateway.agents.tests.creation.test_guarded_creation import PATH, SECRET
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.retry_waits import retry_waits as retry_waits
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 
@@ -70,6 +74,8 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     sdk_http: MagicMock,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     target = client
     lose = True
@@ -94,7 +100,13 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
     row = db_conn.execute("SELECT id FROM agents").fetchone()
     assert row is not None
     original = row[0]
-    with TestClient(_older(), headers={"Authorization": f"Bearer {SECRET}"}) as old:
+    assert isinstance(client.app, FastAPI)
+    with gateway_test_client(
+        _older(),
+        process=client.app.state.gateway_process_input,
+        headers={"Authorization": f"Bearer {SECRET}"},
+        machine=machine_identity,
+    ) as old:
         target = old
         with pytest.raises(httpx.HTTPStatusError) as error:
             _sdk()
@@ -123,8 +135,16 @@ def test_old_router_never_accepts_or_falls_back(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     sdk_http: MagicMock,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    with TestClient(_older(), headers={"Authorization": f"Bearer {SECRET}"}) as old:
+    assert isinstance(client.app, FastAPI)
+    with gateway_test_client(
+        _older(),
+        process=client.app.state.gateway_process_input,
+        headers={"Authorization": f"Bearer {SECRET}"},
+        machine=machine_identity,
+    ) as old:
         http = sdk_http
 
         def submit(path: str, **kwargs: Any) -> httpx.Response:
@@ -174,10 +194,10 @@ def test_changed_sdk_context_same_principal_key_conflicts(
         return _response(client.post(path, **kwargs))
 
     http.post.side_effect = submit
-    monkeypatch.setattr(ava.sdk_surface.agent_identity, "require_actor", lambda: "user")
-    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "local-test")
+    monkeypatch.setattr(agent_identity, "require_actor", lambda: "user")
+    ava.context.require_machine().set(name="local-test")
     original = ava.agents.spawn(prompt="same raw inputs", idempotency_key="context")
-    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "another-machine")
+    ava.context.require_machine().set(name="another-machine")
     with pytest.raises(httpx.HTTPStatusError) as changed:
         ava.agents.spawn(prompt="same raw inputs", idempotency_key="context")
     assert changed.value.response.status_code == 409

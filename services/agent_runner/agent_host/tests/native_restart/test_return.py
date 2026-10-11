@@ -14,14 +14,17 @@ from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (
-    _blocked_host,
+    blocked_host,
 )
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("first", ["cancel", "restart"])
@@ -34,9 +37,13 @@ async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
     fault_site: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
+    machine_identity.set(name="claim-test")
     async with hosted_scope() as resources:
-        incarnation, initial = await managed_work(db_conn, aops_pool)
+        incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
         _insert(db_conn, initial.agent_id)
         entered, release = asyncio.Event(), asyncio.Event()
         calls = 0
@@ -48,8 +55,12 @@ async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
             await release.wait()
             return Command(update={"halted": True, "turn_idle": True}, goto="__end__")
 
-        graph, _saver, host, ctx = await _blocked_host(
-            aops_pool, model, model_catalog=model_catalog
+        graph, _saver, host, ctx = await blocked_host(
+            aops_pool,
+            model,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            machine=machine_identity,
         )
         ctx = replace(ctx, original_incarnation=incarnation, hosted_resources=resources)
         faults = _install_faults(monkeypatch, initial.agent_id, fault_site)
@@ -124,12 +135,16 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
     site: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
+    machine_identity.set(name="claim-test")
     async with hosted_scope() as resources:
         from agent.ownership.hosted import apply_hosted_lifecycle
         from agent.tests.claim.test_inbound_ownership import _admit
 
-        incarnation, initial = await managed_work(db_conn, aops_pool)
+        incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
         _insert(db_conn, initial.agent_id)
         entered, release = asyncio.Event(), asyncio.Event()
         calls = 0
@@ -142,8 +157,12 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
             await release.wait()
             return Command(update={"halted": True, "turn_idle": True}, goto="__end__")
 
-        _graph, _saver, host, ctx = await _blocked_host(
-            aops_pool, model, model_catalog=model_catalog
+        _graph, _saver, host, ctx = await blocked_host(
+            aops_pool,
+            model,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            machine=machine_identity,
         )
         ctx = replace(ctx, original_incarnation=incarnation, hosted_resources=resources)
 
@@ -154,7 +173,9 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
                 if site != "before_apply":
                     await apply_hosted_lifecycle(pool, token, **kwargs)
                 if site == "after_observe_cleanup":
-                    successor = await _admit(aops_pool, initial.agent_id)
+                    successor = await _admit(
+                        aops_pool, initial.agent_id, database_gate=database_gate
+                    )
                     assert successor != incarnation
                     db_conn.execute(
                         "DELETE FROM inbound_messages WHERE id=%s", (kwargs["expected_command_id"],)

@@ -3416,7 +3416,7 @@ export interface paths {
          * Get Memory Pool
          * @description Download the consolidated memory pool as a git bundle.
          *
-         *     Serves `gateway_memory_dir()` — the consolidated checkout on `main` — as a
+         *     Serves the request-owned memory checkout on `main` as a
          *     `git bundle` of HEAD (full real ancestry, so a bootstrapped machine branch
          *     is a true descendant of `main` and converges cleanly when a memory remote
          *     is configured later). A fresh agent-runner whose memory remote is not

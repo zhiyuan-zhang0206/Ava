@@ -2,16 +2,29 @@
 
 from __future__ import annotations
 
+import json
 import plistlib
+import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
+from base.cluster.ports import new_home_ports
 from base.config import ConfigBoot
+from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
 from cli.commands.converge import redis_bridge as bridge
 from cli.commands.converge.spec import ConvergeCtx
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.redis_bridge import relay
+from tests.fixtures.configuration import snapshot_process_config
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 class _StopTestError(RuntimeError):
@@ -188,6 +201,9 @@ def test_unchanged_loaded_job_is_not_restarted(
 def test_converge_retires_stale_bridge_when_it_is_no_longer_required(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     installed = home / "redis-bridge" / "relay.py"
@@ -206,14 +222,25 @@ def test_converge_retires_stale_bridge_when_it_is_no_longer_required(
             loaded = False
         return type("Result", (), {"returncode": 0 if loaded else 1, "stderr": ""})()
 
-    def _not_required(_home: Path) -> None:
-        return None
+    def _not_required(
+        _home: Path, *, machine: MachineIdentity, read_config: Callable[[], ConfigBoot]
+    ) -> None:
+        assert machine is command_runtime.machine
+        assert read_config() is command_runtime.config
 
     monkeypatch.setattr(bridge.sys, "platform", "darwin")
     monkeypatch.setattr(bridge, "_bridge_config", _not_required)
     monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
     monkeypatch.setattr(bridge, "_launchctl", _launchctl)
-    ctx = ConvergeCtx(repo=tmp_path / "repo", ava_home=home, roles=None, config=ConfigBoot())
+    ctx = ConvergeCtx(
+        repo=tmp_path / "repo",
+        ava_home=home,
+        roles=None,
+        config=command_runtime.config,
+        machine=command_runtime.machine,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
 
     bridge.ensure_redis_bridge(ctx)
 
@@ -248,6 +275,7 @@ def test_retire_preserves_artifacts_when_launchd_job_does_not_exit(
 def test_probe_uses_authenticated_redis_ping_through_bridge(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    command_runtime: CommandRuntime,
 ) -> None:
     calls: list[tuple[str, dict[str, float]]] = []
 
@@ -262,19 +290,21 @@ def test_probe_uses_authenticated_redis_ping_through_bridge(
         calls.append((url, kwargs))
         return _Client()
 
-    def _config(_home: Path) -> bridge.RedisBridgeConfig:
+    def _config(
+        _home: Path, *, machine: MachineIdentity, read_config: Callable[[], ConfigBoot]
+    ) -> bridge.RedisBridgeConfig:
+        assert machine is command_runtime.machine
+        assert read_config() is command_runtime.config
         return bridge.RedisBridgeConfig("10.64.0.7", 16380)
 
     monkeypatch.setattr(bridge, "_bridge_config", _config)
     monkeypatch.setattr(bridge, "_job_loaded", lambda: True)
-    monkeypatch.setattr(
-        bridge.settings.data_plane,
-        "redis_url",
-        "redis://ava:secret@127.0.0.1:16380/0",
-    )
+    command_runtime.config.set_field("redis_url", "redis://ava:secret@127.0.0.1:16380/0")
     monkeypatch.setattr("redis.Redis.from_url", _from_url)
 
-    status = bridge.probe_redis_bridge(tmp_path)
+    status = bridge.probe_redis_bridge(
+        tmp_path, machine=command_runtime.machine, config=command_runtime.config
+    )
 
     assert status.serving
     assert status.supervised
@@ -289,6 +319,7 @@ def test_probe_uses_authenticated_redis_ping_through_bridge(
 def test_probe_does_not_accept_a_loaded_job_when_ping_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    command_runtime: CommandRuntime,
 ) -> None:
     class _DeadClient:
         def ping(self) -> None:
@@ -297,19 +328,21 @@ def test_probe_does_not_accept_a_loaded_job_when_ping_fails(
         def close(self) -> None:
             return
 
-    def _config(_home: Path) -> bridge.RedisBridgeConfig:
+    def _config(
+        _home: Path, *, machine: MachineIdentity, read_config: Callable[[], ConfigBoot]
+    ) -> bridge.RedisBridgeConfig:
+        assert machine is command_runtime.machine
+        assert read_config() is command_runtime.config
         return bridge.RedisBridgeConfig("10.64.0.7", 16380)
 
     monkeypatch.setattr(bridge, "_bridge_config", _config)
     monkeypatch.setattr(bridge, "_job_loaded", lambda: True)
-    monkeypatch.setattr(
-        bridge.settings.data_plane,
-        "redis_url",
-        "redis://ava:secret@127.0.0.1:16380/0",
-    )
+    command_runtime.config.set_field("redis_url", "redis://ava:secret@127.0.0.1:16380/0")
     monkeypatch.setattr("redis.Redis.from_url", lambda *_a, **_kw: _DeadClient())  # pyright: ignore[reportUnknownArgumentType]
 
-    status = bridge.probe_redis_bridge(tmp_path)
+    status = bridge.probe_redis_bridge(
+        tmp_path, machine=command_runtime.machine, config=command_runtime.config
+    )
 
     assert status.required
     assert not status.serving
@@ -320,28 +353,23 @@ def test_probe_does_not_accept_a_loaded_job_when_ping_fails(
 def test_probe_reports_unconfigured_when_registry_record_is_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(bridge.sys, "platform", "darwin")
-    monkeypatch.setattr(bridge.settings.data_plane, "cluster_secret", "cluster-secret")
-    monkeypatch.setattr(
-        bridge.settings.data_plane,
-        "db_url",
-        "postgresql://ava@127.0.0.1:6433/ava",
-    )
-    monkeypatch.setattr(
-        bridge.settings.data_plane,
-        "redis_url",
-        "redis://ava:secret@127.0.0.1:6380/0",
-    )
+    command_runtime.config.set_field("cluster_secret", "cluster-secret")
+    command_runtime.config.set_field("db_url", "postgresql://ava@127.0.0.1:6433/ava")
+    command_runtime.config.set_field("redis_url", "redis://ava:secret@127.0.0.1:6380/0")
 
     def _missing_record(_home: Path) -> None:
         return None
 
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.64.0.7")
+    command_runtime.machine.set(host="10.64.0.7")
     monkeypatch.setattr("base.cluster.get_record", _missing_record)
     monkeypatch.setattr(bridge, "_job_loaded", lambda: False)
 
-    status = bridge.probe_redis_bridge(tmp_path)
+    status = bridge.probe_redis_bridge(
+        tmp_path, machine=command_runtime.machine, config=command_runtime.config
+    )
 
     assert status.required
     assert not status.serving
@@ -366,14 +394,27 @@ def test_bridge_step_is_gateway_prod_host_only() -> None:
 def test_ensure_bridge_uses_resolved_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    command_runtime: CommandRuntime,
 ) -> None:
     ctx = ConvergeCtx(
-        repo=tmp_path / "repo", ava_home=tmp_path / "home", roles=None, config=ConfigBoot()
+        repo=tmp_path / "repo",
+        ava_home=tmp_path / "home",
+        roles=None,
+        config=command_runtime.config,
+        machine=command_runtime.machine,
+        database_factory=operator_database,
+        producer=operator_pipeline,
     )
     config = bridge.RedisBridgeConfig("10.64.0.7", 16380)
     calls: list[tuple[Path, Path, bridge.RedisBridgeConfig]] = []
 
-    def _config(_home: Path) -> bridge.RedisBridgeConfig:
+    def _config(
+        _home: Path, *, machine: MachineIdentity, read_config: Callable[[], ConfigBoot]
+    ) -> bridge.RedisBridgeConfig:
+        assert machine is ctx.machine
+        assert read_config() is ctx.config
         return config
 
     def _ensure(
@@ -387,3 +428,98 @@ def test_ensure_bridge_uses_resolved_config(
     bridge.ensure_redis_bridge(ctx)
 
     assert calls == [(ctx.ava_home, ctx.repo, config)]
+
+
+def test_unsupported_platform_does_not_read_the_relay_owner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def forbidden_host() -> str:
+        pytest.fail("An unsupported platform must not read machine identity")
+
+    config = ConfigBoot()
+    machine = machine_from_boot(config)
+    monkeypatch.setattr(machine, "host", forbidden_host)
+    monkeypatch.setattr(bridge.sys, "platform", "linux")
+    status = bridge.probe_redis_bridge(tmp_path, machine=machine, config=config)
+    assert not status.required
+    assert not config.prepared
+
+
+def test_remote_relay_does_not_read_machine_host(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command_runtime: CommandRuntime,
+) -> None:
+    def forbidden_host() -> str:
+        pytest.fail("A remote relay must not read machine identity")
+
+    command_runtime.config.set_field("db_url", "postgresql://ava@192.0.2.10:6433/ava")
+    command_runtime.config.set_field("redis_url", "redis://ava:secret@127.0.0.1:6380/0")
+    monkeypatch.setattr(command_runtime.machine, "host", forbidden_host)
+    monkeypatch.setattr(bridge.sys, "platform", "darwin")
+    status = bridge.probe_redis_bridge(
+        tmp_path, machine=command_runtime.machine, config=command_runtime.config
+    )
+    assert not status.required
+
+
+def test_probe_uses_each_owners_live_url_and_recorded_port(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command_runtime: CommandRuntime,
+) -> None:
+    second_config = snapshot_process_config()
+    second = CommandRuntime(config=second_config, machine=machine_from_boot(second_config))
+    urls: list[str] = []
+    closed: list[str] = []
+
+    class Client:
+        def __init__(self, url: str) -> None:
+            self.url = url
+
+        def ping(self) -> bool:
+            return True
+
+        def close(self) -> None:
+            closed.append(self.url)
+
+    def from_url(url: str, **_kwargs: object) -> Client:
+        urls.append(url)
+        return Client(url)
+
+    def launchctl(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(arguments, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bridge.sys, "platform", "darwin")
+    monkeypatch.setattr(bridge.subprocess, "run", launchctl)
+    monkeypatch.setattr("redis.Redis.from_url", from_url)
+    for index, command in enumerate((command_runtime, second)):
+        command.config.set_field("db_url", "postgresql://ava@127.0.0.1:6433/ava")
+        command.config.set_field("cluster_secret", "bearer")
+        command.config.set_field("machine_host", f"10.64.0.{index + 7}")
+        command.config.set_field(
+            "redis_url", f"redis://ava:secret{index}@127.0.0.1:{17380 + index}/0"
+        )
+        command.machine.reset()
+        home = tmp_path / str(index)
+        home.mkdir()
+        ports = new_home_ports()
+        ports["redis"] = 17380 + index
+        (home / "start-intent.json").write_text(
+            json.dumps(
+                {"record": {"ports": ports, "gateway_home": str(home), "created_at": "test"}}
+            )
+        )
+        status = bridge.probe_redis_bridge(home, machine=command.machine, config=command.config)
+        assert status.endpoint == f"10.64.0.{index + 7}:{17380 + index}"
+        assert status.serving
+    command_runtime.config.set_field("redis_url", "redis://ava:changed@127.0.0.1:17380/1")
+    assert bridge.probe_redis_bridge(
+        tmp_path / "0", machine=command_runtime.machine, config=command_runtime.config
+    ).serving
+    assert urls == [
+        "redis://ava:secret0@10.64.0.7:17380/0",
+        "redis://ava:secret1@10.64.0.8:17381/0",
+        "redis://ava:changed@10.64.0.7:17380/1",
+    ]
+    assert closed == urls

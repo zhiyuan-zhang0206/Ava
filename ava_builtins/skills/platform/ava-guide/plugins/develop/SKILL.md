@@ -29,8 +29,8 @@ An external plugin is a directory `~/.ava/plugins/<name>/` with a `plugin.py`
 (entry point; hooks / SDK namespaces / services are declared from
 here), an `ava-plugin.json` manifest (required: identity, `version`, an
 `engines.ava` range, and the `contributions` it declares, which must match what
-its `contribute()` returns; a plugin without one is refused at load), and optionally `setup.py` (idempotent `scaffold()`, run by explicit
-`ava memory init`),
+its `contribute()` returns; a plugin without one is refused at load), and optionally `setup.py` (idempotent `scaffold(*, machine: MachineIdentity)`, run by explicit
+`ava memory init` with its invocation-owned machine),
 `skills/` (skill dirs converge syncs into the load dir), and `default_config.py` (the config class, declared by its own `contribute()` returning `PluginContributions(config=Cls)`).
 Plugin discovery is a filesystem scan — a hand-placed directory is found; no
 registration step is needed to develop. Look at a builtin under

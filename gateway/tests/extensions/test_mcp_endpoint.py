@@ -505,10 +505,8 @@ def test_cluster_status_reports_this_host(monkeypatch: pytest.MonkeyPatch) -> No
     # Pure-gateway branch: no ops server stand-in exists for status_probe, so
     # the tool takes the local snapshot path (the same branch a gateway-only
     # host serves).
-    from gateway.cluster import router as _cluster_router
-
-    monkeypatch.setattr(_cluster_router, "is_agent_runner", lambda: False)
     with TestClient(app) as client:
+        app.state.machine.set(role="gateway")
         token = _create_token(client)
         payload = _tool_result(_tool_call(client, token, "cluster_status", {}))
     assert payload["machine_name"]

@@ -20,13 +20,16 @@ from base.agents.context import AvaContext
 from base.agents.incarnation.resources import ResourceProcess
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.clock import Clock
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.impersonation_support import recorded_tree
 
 
@@ -91,6 +94,8 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Issue #2052: an accepted (not yet active) lease whose accepting
     incarnation died restarts at 'requested' under the successor admission —
@@ -98,12 +103,16 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents import impersonation as leases
     from base.agents.messages.caller_identity import CallerIdentity
-    from base.cluster.machine import machine_name
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     first = await admit_hosted_runtime(
-        aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling", db=database
+        aops_pool, agent_id, machine_identity.name(), uuid4(), expected_from="idling", db=database
     )
     assert first is not None
     lease = leases.request(
@@ -117,8 +126,17 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
         authority=config_authority,
+        local_machine=machine_identity.name(),
     )
-    leases.accept(database, event_bus, lease["id"], agent_id, first, "Handoff brief")
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        agent_id,
+        first,
+        "Handoff brief",
+        local_machine=machine_identity.name(),
+    )
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at = clock_timestamp() - interval '1 second', "
         "incarnation_resources=jsonb_set(incarnation_resources,'{host_process}',%s) "
@@ -127,7 +145,7 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     )
     db_conn.commit()
     successor = await admit_hosted_runtime(
-        aops_pool, agent_id, machine_name(), uuid4(), expected_from="running", db=database
+        aops_pool, agent_id, machine_identity.name(), uuid4(), expected_from="running", db=database
     )
     assert successor is not None
     assert db_conn.execute(
@@ -169,6 +187,7 @@ async def test_activation_waits_for_resource_closure(
     )
     activate = Mock(return_value=_session())
     monkeypatch.setattr("base.agents.impersonation.activate", activate)
+    read_local_machine = Mock(side_effect=AssertionError("identity read before resource closure"))
     resources = HostedTurnResources(unresolved={Path("request"): object()})
     with pytest.raises(RuntimeError, match="unresolved native exec"):
         await impersonation.settle_checkpoint(
@@ -180,6 +199,7 @@ async def test_activation_waits_for_resource_closure(
             incarnation=incarnation,
             resources=resources,
             notes=_notes(),
+            read_local_machine=read_local_machine,
         )
     activate.assert_not_called()
     assert not await impersonation.settle_checkpoint(
@@ -192,5 +212,7 @@ async def test_activation_waits_for_resource_closure(
         incarnation=incarnation,
         resources=resources,
         notes=_notes(),
+        read_local_machine=read_local_machine,
     )
     activate.assert_not_called()
+    read_local_machine.assert_not_called()

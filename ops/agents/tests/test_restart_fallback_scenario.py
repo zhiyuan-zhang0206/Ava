@@ -10,13 +10,14 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.plugin_providers import build_model_catalog
 from ops.agents.spawn import create_agent_row
 from tests.e2e.fakes.scenarios import lifecycle_restart
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("status", ["claimed", "done"])
@@ -27,12 +28,13 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id, _birth, _prompt_id, _attempt_id = create_agent_row(
         database,
         event_bus,
         spawner="test",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         catalog=build_model_catalog(),
         authority=config_authority,
     )
@@ -73,12 +75,13 @@ def test_pending_request_does_not_select_post_request_script(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id, _birth, _prompt_id, _attempt_id = create_agent_row(
         database,
         event_bus,
         spawner="test",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         catalog=build_model_catalog(),
         authority=config_authority,
     )

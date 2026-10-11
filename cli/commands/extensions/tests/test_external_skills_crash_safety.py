@@ -1,18 +1,30 @@
+"""Atomic skill publication: unsafe paths refuse before writes; crashes recover."""
+
 from __future__ import annotations
 
 import importlib
 import json
+import os
 import stat
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import cleanup as bridge_cleanup
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
+from cli.tests.bootstrap.command_inputs import command_config_machine as command_config_machine
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from tests.factories.external_skills import client_home, skill_ctx, skill_source, target_path
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 SKILL = "operating-ava-cluster"
 
@@ -23,7 +35,14 @@ def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(module, "_SKILL_NAMES", ("operating-ava-cluster",))
 
 
-def _world(tmp_path: Path) -> tuple[Path, Path, ConvergeCtx]:
+def _world(
+    tmp_path: Path,
+    *,
+    operator_database: Callable[[], Any],
+    producer: Callable[[], EventPipeline],
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+) -> tuple[Path, Path, ConvergeCtx]:
+    config, machine = command_config_machine
     repo = tmp_path / "repo"
     source = repo / "ava_builtins" / "skills" / "platform" / SKILL
     source.mkdir(parents=True)
@@ -36,7 +55,15 @@ def _world(tmp_path: Path) -> tuple[Path, Path, ConvergeCtx]:
     return (
         source,
         client,
-        ConvergeCtx(repo=repo, ava_home=ava_home, roles=None, config=ConfigBoot()),
+        ConvergeCtx(
+            repo=repo,
+            ava_home=ava_home,
+            roles=None,
+            config=config,
+            database_factory=operator_database,
+            producer=producer,
+            machine=machine,
+        ),
     )
 
 
@@ -56,9 +83,19 @@ def _residues(client: Path) -> list[Path]:
 
 
 def test_restart_reconciles_stage_published_before_post_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    _, client, context = _world(tmp_path)
+    _, client, context = _world(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
     target = _target(client)
     original_rename = bridge.rename_no_replace
     interrupted = False
@@ -95,9 +132,19 @@ def test_restart_reconciles_stage_published_before_post_write(
 
 
 def test_restart_reconciles_claim_before_post_write_and_preserves_late_target(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = _target(client)
     installed_before = _ledger(context)["installed"]
@@ -138,9 +185,19 @@ def test_restart_reconciles_claim_before_post_write_and_preserves_late_target(
 
 
 def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     outside = tmp_path / "outside.md"
@@ -183,9 +240,19 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
 
 
 def test_restart_reconciles_cleanup_claim_before_post_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
@@ -241,9 +308,19 @@ def test_unsupported_cleanup_never_changes_directory_permissions(
 
 
 def test_restart_does_not_adopt_ambiguous_per_file_claim(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
@@ -284,9 +361,19 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
 
 
 def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_preserve = bridge_cleanup.preserve_claimed_tree
@@ -322,9 +409,19 @@ def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
 
 
 def test_per_file_claim_failure_is_terminal_after_private_root_claim(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
@@ -386,9 +483,19 @@ def test_cleanup_preserves_late_replacement_after_final_file_verification(
 
 
 def test_converge_terminally_records_post_verification_replacement(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    source, client, context = _world(tmp_path)
+    source, client, context = _world(
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     outside = tmp_path / "outside.md"
@@ -424,3 +531,230 @@ def test_converge_terminally_records_post_verification_replacement(
 
     assert late_replacement.is_symlink()
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
+
+
+@pytest.mark.parametrize("linked_component", ["client-home", "skills-root"])
+def test_linked_external_roots_are_rejected_without_following(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    linked_component: str,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+) -> None:
+    repo = tmp_path / "repo"
+    skill_source(repo)
+    host_home = tmp_path / "host-home"
+    host_home.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    client = host_home / ".codex"
+    if linked_component == "client-home":
+        client.symlink_to(outside, target_is_directory=True)
+    else:
+        client.mkdir()
+        (client / "skills").symlink_to(outside, target_is_directory=True)
+    bridge.converge_external_agent_skill(
+        skill_ctx(
+            repo,
+            tmp_path,
+            operator_database=operator_database,
+            producer=operator_pipeline,
+            command_config_machine=command_config_machine,
+        ),
+        host_home=host_home,
+    )
+
+    assert not (outside / SKILL).exists()
+    assert "Codex" in capsys.readouterr().err
+
+
+def test_linked_host_home_is_rejected_without_inspection(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+) -> None:
+    repo = tmp_path / "repo"
+    skill_source(repo)
+    outside_home = tmp_path / "outside-home"
+    (outside_home / ".codex").mkdir(parents=True)
+    linked_home = tmp_path / "linked-home"
+    linked_home.symlink_to(outside_home, target_is_directory=True)
+
+    bridge.converge_external_agent_skill(
+        skill_ctx(
+            repo,
+            tmp_path,
+            operator_database=operator_database,
+            producer=operator_pipeline,
+            command_config_machine=command_config_machine,
+        ),
+        host_home=linked_home,
+    )
+
+    assert not (outside_home / ".codex" / "skills").exists()
+    assert "host home" in capsys.readouterr().err
+
+
+def test_source_tree_link_is_fatal_before_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+) -> None:
+    repo = tmp_path / "repo"
+    source = skill_source(repo)
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside\n")
+    (source / "references" / "linked.md").symlink_to(outside)
+    client = client_home(tmp_path)
+    with pytest.raises(RuntimeError, match="source"):
+        bridge.converge_external_agent_skill(
+            skill_ctx(
+                repo,
+                tmp_path,
+                operator_database=operator_database,
+                producer=operator_pipeline,
+                command_config_machine=command_config_machine,
+            ),
+            host_home=client.parent,
+        )
+
+    assert not target_path(client, tmp_path).exists()
+
+
+def test_source_path_component_link_is_fatal_before_copy(
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+) -> None:
+    repo = tmp_path / "repo"
+    actual_agents = tmp_path / "actual-agents"
+    source = actual_agents / "skills" / SKILL
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("operator\n")
+    repo.mkdir()
+    (repo / "ava_builtins").symlink_to(actual_agents, target_is_directory=True)
+    client = client_home(tmp_path)
+
+    with pytest.raises(RuntimeError, match="source"):
+        bridge.converge_external_agent_skill(
+            skill_ctx(
+                repo,
+                tmp_path,
+                operator_database=operator_database,
+                producer=operator_pipeline,
+                command_config_machine=command_config_machine,
+            ),
+            host_home=client.parent,
+        )
+
+    assert not target_path(client, tmp_path).exists()
+
+
+def test_cleanup_retains_private_residue_without_path_unlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+) -> None:
+    repo = tmp_path / "repo"
+    source = skill_source(repo)
+    client = client_home(tmp_path)
+    context = skill_ctx(
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    target = target_path(client, tmp_path)
+    (source / "SKILL.md").write_text("operator v2\n")
+    original_unlink = Path.unlink
+    unlink_attempts = 0
+
+    def forbid_cleanup_unlink(path: Path, missing_ok: bool = False) -> None:
+        nonlocal unlink_attempts
+        if "-retained-previous-" in str(path):
+            unlink_attempts += 1
+            raise AssertionError(f"cleanup attempted pathname unlink: {path.name}")
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", forbid_cleanup_unlink)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    assert unlink_attempts == 0
+    ledger = json.loads(
+        (context.ava_home / "configs" / "external-agent-skills" / "codex.json").read_text()
+    )
+    assert ledger["transaction"] is None
+    assert ledger["garbage"] == []
+    assert [item["kind"] for item in ledger["retained"]] == ["previous"]
+    assert ledger["retained"][0]["location"] == "retained"
+
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    assert (target / "SKILL.md").read_text() == "operator v2\n"
+    assert list(target.parent.glob(f".{SKILL}.ava-*")) == []
+
+
+def test_cleanup_rejects_same_content_hard_link_without_changing_outside_inode(
+    tmp_path: Path,
+) -> None:
+    residue = tmp_path / "residue"
+    residue.mkdir()
+    residue_file = residue / "SKILL.md"
+    residue_file.write_text("operator\n")
+    residue_file.chmod(0o444)
+    manifest = bridge_fs.tree_manifest(residue)
+    residue_file.unlink()
+    outside = tmp_path / "outside.md"
+    outside.write_text("operator\n")
+    outside.chmod(0o444)
+    os.link(outside, residue_file)
+    outside_before = outside.stat()
+
+    with pytest.raises(bridge_fs.ClientConflictError, match="link"):
+        bridge_fs.remove_manifest_subset(residue, manifest)
+
+    assert residue_file.exists()
+    assert outside.exists()
+    assert residue_file.stat().st_ino == outside_before.st_ino
+    assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
+
+
+def test_path_and_open_handle_metadata_variants_are_not_a_source_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_file = tmp_path / "SKILL.md"
+    source_file.write_text("operator\n")
+    real_fstat = bridge_fs.os.fstat
+
+    def fstat_with_platform_metadata(fd: int) -> SimpleNamespace:
+        current = real_fstat(fd)
+        return SimpleNamespace(
+            st_ctime_ns=current.st_ctime_ns + 1,
+            st_dev=current.st_dev,
+            st_ino=current.st_ino,
+            st_mode=current.st_mode,
+            st_mtime_ns=current.st_mtime_ns,
+            st_nlink=current.st_nlink,
+            st_size=current.st_size,
+        )
+
+    monkeypatch.setattr(bridge_fs.os, "fstat", fstat_with_platform_metadata)
+
+    data, mode = bridge_fs.read_regular(source_file, source=True)
+
+    assert data == b"operator\n"
+    assert mode == stat.S_IMODE(source_file.stat().st_mode)

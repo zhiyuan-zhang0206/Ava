@@ -38,7 +38,11 @@ from agent.graph.exec.protocol import (
     write_request,
     write_result,
 )
+from base.cluster.machine import MachineIdentity
+from base.db import Database
+from base.paths import ava_home
 from tests.fixtures.pin_agent import exec_context
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @patch.dict(os.environ)
@@ -144,34 +148,46 @@ def test_request_envelope_round_trip(tmp_path: Path) -> None:
     assert payload.materialize_state() == state  # exact, typed (messages back as instances)
 
 
-def test_request_envelope_transfers_emit_size_and_serialize_time(tmp_path: Path) -> None:
+def test_request_envelope_transfers_emit_size_and_serialize_time(
+    tmp_path: Path, database: Database, machine_identity: MachineIdentity
+) -> None:
     """Request writes and reads record the final envelope size and their own
     serialization cost in the durable event stream."""
     from base import telemetry
-    from base.log import add_event_sink, logger
+    from base.log import logger
+    from base.log.process import add_event_sink
 
     events_before = len(_exec_envelope_events())
-    sink_id = add_event_sink(process="test-exec-envelope")
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity, home=ava_home()
+    )
+    sink_id = add_event_sink(
+        process="test-exec-envelope",
+        producer=lambda: pipeline,
+        machine_reader=machine_identity.name,
+    )
     try:
-        path = make_request_path(tmp_path, agent_id=7)
-        write_request(
-            path,
-            code="print('hi')",
-            context=_context_description(7),
-            timeout_s=1.0,
-            state=_make_state_dump(),
-            incarnation=None,
-        )
-        read_request(path)
+        with logger.contextualize(agent_id=7):
+            path = make_request_path(tmp_path, agent_id=7)
+            write_request(
+                path,
+                code="print('hi')",
+                context=_context_description(7),
+                timeout_s=1.0,
+                state=_make_state_dump(),
+                incarnation=None,
+            )
+            read_request(path)
 
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            telemetry.flush()
-            if len(_exec_envelope_events()) >= events_before + 2:
-                break
-            time.sleep(0.05)
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                telemetry.flush()
+                if len(_exec_envelope_events()) >= events_before + 2:
+                    break
+                time.sleep(0.05)
     finally:
         logger.remove(sink_id)
+        pipeline.stop(timeout=2)
 
     events = _exec_envelope_events()[events_before:]
     assert len(events) >= 2
@@ -372,13 +388,18 @@ def test_writer_killed_before_commit_leaves_no_envelope_at_all(
         "import agent.graph.exec.protocol as protocol\n"
         "def die(*_args, **_kwargs):\n"
         "    os._exit(9)\n"
-        f"{kill_point} = die\n"
+        "if sys.argv[2] == 'os.replace':\n"
+        "    os.replace = die\n"
+        "elif sys.argv[2] == 'os.fsync':\n"
+        "    os.fsync = die\n"
+        "else:\n"
+        "    raise ValueError('Unknown envelope kill point')\n"
         "protocol.write_request(Path(sys.argv[1]), code='x=1', "
         "context={'identity': {'agent_id': 7, 'owns_loop': True, 'actor': None}}, "
         "timeout_s=1.0, state=None, incarnation=None)\n"
     )
     completed = subprocess.run(  # noqa: S603 — our own venv python running a fixed in-test script
-        [sys.executable, "-c", script, str(path)], check=False
+        [sys.executable, "-c", script, str(path), kill_point], check=False
     )
 
     assert completed.returncode == 9

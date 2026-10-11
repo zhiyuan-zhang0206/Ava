@@ -17,7 +17,12 @@ from pathlib import Path
 import pytest
 
 from base.host.env.dotenv_boot import home_checkout_error
+from base.paths import ava_home
 from cli import fleet_update, init_intent, preflight, start_intent
+from cli.database import OperatorDatabaseFactory, operator_event_pipeline
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _home_with_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -164,8 +169,15 @@ def test_gate_passes_everything_for_a_home_without_a_source(
 
 
 def test_start_refuses_a_foreign_checkout_before_reading_the_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
+    producer = operator_event_pipeline(
+        operator_database, machine=command_runtime.machine, home=ava_home()
+    )
     home = _home_with_source(tmp_path, monkeypatch)
     monkeypatch.setattr(start_intent, "_checkout", lambda: tmp_path / "dev")
 
@@ -173,9 +185,14 @@ def test_start_refuses_a_foreign_checkout_before_reading_the_home(
         raise AssertionError("a refused start must not reach the home's admission")
 
     monkeypatch.setattr(start_intent, "require_initialized", _never_reached)
-    args = argparse.Namespace()
+    args = argparse.Namespace(runtime=command_runtime)
 
-    assert start_intent.run_start(args, retained_children=[]) == 1
+    assert (
+        start_intent.run_start(
+            args, retained_children=[], database_factory=operator_database, producer=producer
+        )
+        == 1
+    )
 
     assert "source checkout" in capsys.readouterr().err
     assert sorted(path.name for path in home.iterdir()) == ["source"], "nothing may be written"

@@ -1,70 +1,46 @@
-"""Explicit machine-role fixtures; callers opt in from their local conftest."""
+"""Explicit machine owners; each consumer supplies its fixture to its real root."""
 
-import contextlib
-from collections.abc import Generator, Iterator
+from typing import Protocol
 
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 
-@contextlib.contextmanager
-def _machine_identity(*, role: str, name: str | None = None) -> Generator[None]:
-    """Switch this process's resolved machine identity, restoring on exit.
+__all__ = ["MachineIdentitySetter", "machine_identity", "runner_unit", "set_machine_identity"]
 
-    Injects via base.cluster.machine.set_identity so every `from base.cluster.machine import
-    machine_role` / `machine_name` call site sees the new value without
-    per-module patching. `name=None` leaves machine_name as-is — no injection; it
-    resolves lazily from settings if not yet cached, otherwise
-    returns the already-cached value. The finally block resets the holder, so the
-    session default is restored — no per-field save/restore is needed because the
-    holder re-resolves lazily after reset.
-    """
-    from base.cluster.machine import reset_identity, set_identity
 
-    if name is None:
-        set_identity(role=role)  # pyright: ignore[reportArgumentType]  # str passthrough to MachineRole literal
-    else:
-        set_identity(role=role, name=name)  # pyright: ignore[reportArgumentType]
-    try:
-        yield
-    finally:
-        reset_identity()
+class MachineIdentitySetter(Protocol):
+    """A test's own identity, returned so its consumer can borrow it explicitly."""
+
+    def __call__(self, *, role: str, name: str | None = None) -> MachineIdentity: ...
 
 
 @pytest.fixture
-def set_machine_identity() -> Iterator[object]:
-    """Factory: switch machine role (and optionally name) at the source via
-    base.cluster.machine.set_identity.
+def machine_identity(process_config: ConfigBoot) -> MachineIdentity:
+    """Own independent field caches; construction does not resolve configuration."""
+    return machine_from_boot(process_config)
 
-        def test_x(set_machine_identity, db_conn):
-            set_machine_identity(role="gateway", name="cloud-test")
 
-    May be called more than once within a test to flip roles; the last call
-    wins, and the holder is reset at teardown (restoring the session default).
-    """
-    from base.cluster.machine import reset_identity, set_identity
+@pytest.fixture
+def set_machine_identity(machine_identity: MachineIdentity) -> MachineIdentitySetter:
+    """Set this test's owner and return it; other roots keep their own identities."""
 
-    def _set(role: str, name: str | None = None) -> None:
+    def configure(*, role: str, name: str | None = None) -> MachineIdentity:
         if name is None:
-            set_identity(role=role)  # pyright: ignore[reportArgumentType]
+            machine_identity.set(role=role)
         else:
-            set_identity(role=role, name=name)  # pyright: ignore[reportArgumentType]
+            machine_identity.set(role=role, name=name)
+        return machine_identity
 
-    try:
-        yield _set
-    finally:
-        reset_identity()
+    return configure
 
 
 @pytest.fixture
-def runner_unit(db_conn: psycopg.Connection) -> Iterator[None]:
-    """The agent-runner unit (agent-runner): role='agent-runner', holds a
-    gateway_url pointing at the gateway, no local gateway/docker.
-
-    This is the SDK side — spawn_agent takes the local-spawn path here. Matches
-    the session default role, but as an explicit opt-in so a test declares it is
-    the runner unit rather than relying on the global default.
-    """
-    _ = db_conn  # per-test truncate side effect
-    with _machine_identity(role="agent-runner"):
-        yield
+def runner_unit(db_conn: psycopg.Connection, machine_identity: MachineIdentity) -> MachineIdentity:
+    """Supply an agent-runner owner after the database fixture's per-test cleanup."""
+    _ = db_conn
+    machine_identity.set(role="agent-runner")
+    return machine_identity

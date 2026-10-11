@@ -24,6 +24,7 @@ from psycopg_pool import ConnectionPool
 from ava_builtins.plugins.ava_fleet.task_maintenance import escalation
 from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import _run_escalate
 from base.api_contracts.idempotency import keyed_headers
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -198,7 +199,9 @@ def test_delegator_escalation_rearms_after_owner_update(
     assert len(_inbound_messages(db_conn, parent_owner)) == 2
 
 
-def test_gateway_patch_clears_escalation_marker(db_conn: psycopg.Connection) -> None:
+def test_gateway_patch_clears_escalation_marker(
+    db_conn: psycopg.Connection, machine_identity: MachineIdentity
+) -> None:
     """The gateway update() path clears the marker with the reminder counters —
     the same reset as the SDK path (test_update_resets_reminder_count)."""
     owner = _make_agent(db_conn)
@@ -210,7 +213,7 @@ def test_gateway_patch_clears_escalation_marker(db_conn: psycopg.Connection) -> 
             (tid,),
         )
     db_conn.commit()
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine_identity) as client:
         resp = client.patch(
             f"/api/tasks/{tid}", json={"priority": "P1"}, headers=keyed_headers(str(uuid4()))
         )

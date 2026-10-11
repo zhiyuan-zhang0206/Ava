@@ -14,6 +14,9 @@ dependencies as `runtime.context.X`:
 - **`identity`**: who the run acts as (`AgentIdentity`);
 - **`clients`**: the lazily-built connections the process holds (SQL, Redis, gateway HTTP, and the
   SDK layer's own), closed with `close()`.
+- **`machine`**: the composition root's lazy `MachineIdentity`, shared with its database,
+  logger and event pipeline. It can be supplied without an agent or live clients;
+  `require_machine()` rejects a context that did not receive one.
 - **host-held state** the graph reads or writes across turns: `turn_progress`, `relays`.
   The host builds each once and hands the same object to every turn it runs;
   a context built without them (the eval driver, a test) carries private ones.
@@ -42,9 +45,12 @@ from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
 from base.clock import Clock
+from base.cluster.machine import MachineIdentity
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
+
+__all__ = ["AvaContext", "agent_id_from_config"]
 
 # The handle types are annotations only: the exec child builds this same type from its request
 # envelope, and its start must not import psycopg / redis / langchain for handles it never holds.
@@ -113,6 +119,15 @@ class AvaContext:
 
     clock_factory: Callable[[], Clock] | None = None
     """Build the current clock from this process owner's configuration at each use."""
+
+    machine: MachineIdentity | None = None
+    """Machine identity retained by the composition root; independent of agent identity."""
+
+    def require_machine(self) -> MachineIdentity:
+        """Read this root's machine owner; partial contexts fail without a fallback."""
+        if self.machine is None:
+            raise RuntimeError("this AvaContext carries no MachineIdentity (ctx.machine is None)")
+        return self.machine
 
     def require_clock(self) -> Clock:
         """Read the process owner's current clock; a partial context fails at first use."""
@@ -193,6 +208,7 @@ class AvaContext:
         description: dict[str, Any],
         *,
         clients: ClientSet,
+        machine: MachineIdentity,
         original_incarnation: RuntimeIncarnation | None = None,
     ) -> Self:
         """Rebuild identity with clients and original admission supplied by the child's root."""
@@ -200,6 +216,7 @@ class AvaContext:
             identity=AgentIdentity.from_description(description["identity"]),
             original_incarnation=original_incarnation,
             clients=clients,
+            machine=machine,
         )
 
     def plugin_registry(self) -> ExtensionRegistry:

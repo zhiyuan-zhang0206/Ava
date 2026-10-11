@@ -25,7 +25,7 @@ import socket
 import subprocess
 import tempfile
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import closing, contextmanager
 from pathlib import Path
 
@@ -67,7 +67,7 @@ def _wait_port(port: int, timeout: float = 30.0, host: str = "127.0.0.1") -> Non
 
 
 @contextmanager
-def postgres() -> Generator[str]:
+def postgres(*, machine_name: Callable[[], str]) -> Generator[str]:
     """A throwaway Postgres cluster with db/schema.sql + checkpoint tables + all
     pending migrations applied, ready for the test suite. Yields a psycopg
     connection URL.
@@ -81,18 +81,12 @@ def postgres() -> Generator[str]:
     keeps every future migration covered without special-casing any one of them.
     """
     from base.deploy.schema.migrations import apply_pending_migrations
-    from base.native_process import code_version
 
-    # Every pooled dial of this process carries its code version
-    # (`base.db.code_version_gate`). Resolve it now, at provisioning, so the first
-    # dial cannot land inside a test that fakes `subprocess.run` and cache a
-    # git answer that is not this checkout's.
-    code_version.get()
     with throwaway_postgres(schema_sql=_SCHEMA_SQL.read_text()) as url:
         # Non-autocommit conn: apply_pending_migrations manages its own
         # per-migration transactions + advisory lock.
         with psycopg.connect(url) as conn:
-            apply_pending_migrations(conn)
+            apply_pending_migrations(conn, machine_name=machine_name)
         yield url
 
 

@@ -19,8 +19,10 @@ from pydantic import ValidationError
 
 from base.agents import ResurrectResult, TerminateResult
 from base.agents.messages.inbound import InboundKind
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -34,10 +36,11 @@ from ops.rpc_schemas import (
     SpawnAgentRequest,
     TerminateAgentRequest,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
-def _db() -> Database:
-    return Database.from_settings()
+def _db(*, database_gate: ProcessDbGate) -> Database:
+    return Database.from_settings(gate=database_gate)
 
 
 class TestSpawnAgentRequestSourceValidation:
@@ -230,11 +233,18 @@ async def test_restart_agent_op_terminated_short_circuits(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from ops.tests.pool_support import make_test_pool
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
     db_conn.commit()
     wake = AsyncMock()
@@ -260,6 +270,8 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
     stub_pool: MagicMock,
     database: Database,
     event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The runner reparses forwarded restart bodies before any DB write."""
     with pytest.raises(ValidationError):
@@ -270,6 +282,7 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
             {"config_overlay": {"definitely_not_a_config_field": "x"}},
             stub_pool,
             catalog=build_model_catalog(),  # type: ignore[arg-type]
+            local_machine=machine_identity.name(),
         )
 
 
@@ -278,12 +291,18 @@ async def test_resurrect_agent_op_alive_returns_already_alive(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents import AgentStatus
 
     monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.RUNNING)
     resp = await lifecycle.resurrect_agent_op(
-        database, event_bus, 9, ResurrectAgentRequest(prompt="test")
+        database,
+        event_bus,
+        9,
+        ResurrectAgentRequest(prompt="test"),
+        local_machine=machine_identity.name(),
     )
     assert resp.status == "already_alive"
 
@@ -293,6 +312,8 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The internal guarded path treats a stale chat as an expected no-launch
     race, while leaving the still-terminated status for its caller to return."""
@@ -315,6 +336,7 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
         ResurrectAgentRequest(resurrected_by="system"),
         trigger_inbound_id=123,
         trigger_inbound_kind=InboundKind.CHAT,
+        local_machine=machine_identity.name(),
     )
     assert resp.status == "already_alive"
 
@@ -344,7 +366,12 @@ async def test_terminate_agent_op_terminated_short_circuits(
 
 @pytest.mark.asyncio
 async def test_lifecycle_op_parses_path_to_terminate(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    stub_pool: MagicMock,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
 
     captured: dict[str, object] = {}
@@ -364,6 +391,7 @@ async def test_lifecycle_op_parses_path_to_terminate(
         {"source": "user"},
         stub_pool,
         catalog=build_model_catalog(),  # type: ignore[arg-type]
+        local_machine=machine_identity.name(),
     )
     # lifecycle_op now returns the per-action response model (not its dict form).
     assert result.status == "enqueued"
@@ -373,7 +401,11 @@ async def test_lifecycle_op_parses_path_to_terminate(
 
 @pytest.mark.asyncio
 async def test_lifecycle_op_unparseable_path_raises(
-    stub_pool: MagicMock, database: Database, event_bus: EventBus
+    stub_pool: MagicMock,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     with pytest.raises(ValueError, match="lifecycle path not recognized"):
         await lifecycle.lifecycle_op(
@@ -383,12 +415,17 @@ async def test_lifecycle_op_unparseable_path_raises(
             {},
             stub_pool,
             catalog=build_model_catalog(),  # type: ignore[arg-type]
+            local_machine=machine_identity.name(),
         )
 
 
 @pytest.mark.asyncio
 async def test_guarded_resurrect_path_requires_trigger(
-    stub_pool: MagicMock, database: Database, event_bus: EventBus
+    stub_pool: MagicMock,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The new internal path fails closed when its CAS evidence is missing."""
     with pytest.raises(ValueError, match="requires trigger inbound"):
@@ -399,12 +436,17 @@ async def test_guarded_resurrect_path_requires_trigger(
             {"resurrected_by": "system"},
             stub_pool,
             catalog=build_model_catalog(),  # type: ignore[arg-type]
+            local_machine=machine_identity.name(),
         )
 
 
 @pytest.mark.asyncio
 async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
-    stub_pool: MagicMock, database: Database, event_bus: EventBus
+    stub_pool: MagicMock,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A mismatched path/guard pair cannot silently fall back to an
     unconditional manual resurrect."""
@@ -418,12 +460,18 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
             trigger_inbound_id=99,
             trigger_inbound_kind=InboundKind.CHAT,
             catalog=build_model_catalog(),
+            local_machine=machine_identity.name(),
         )
 
 
 @pytest.mark.asyncio
 async def test_explicit_resurrect_dispatches_manual_op(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    stub_pool: MagicMock,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The explicit unguarded path is the only runner path used by a new
     gateway for a deliberate manual or system lifecycle resurrection."""
@@ -438,7 +486,9 @@ async def test_explicit_resurrect_dispatches_manual_op(
         *,
         trigger_inbound_id: int | None = None,
         trigger_inbound_kind: str | None = None,
+        local_machine: str,
     ) -> ResurrectAgentResponse:
+        del local_machine
         captured.update(
             agent_id=agent_id,
             resurrected_by=body.resurrected_by,
@@ -456,6 +506,7 @@ async def test_explicit_resurrect_dispatches_manual_op(
         {"resurrected_by": "user"},
         stub_pool,
         catalog=build_model_catalog(),  # type: ignore[arg-type]
+        local_machine=machine_identity.name(),
     )
 
     assert result.status == "spawned"

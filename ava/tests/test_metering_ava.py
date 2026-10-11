@@ -45,8 +45,10 @@ from base import telemetry
 from base.agents.sdk import call_policy as sdk_call_policy
 sdk_call_policy.policy = lambda owner: sdk_call_policy.SamplingPolicy()
 rows = []
-def capture(*args, producer, **kwargs):
+def capture(*args, producer, machine_reader, **kwargs):
     assert callable(producer)
+    assert callable(machine_reader)
+    assert machine_reader() == ava.context.require_machine().name()
     rows.append(kwargs)
 telemetry.emit = capture
 assert ava.files.read(sys.argv[1]) == "hello"

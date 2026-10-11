@@ -11,10 +11,13 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 import ava
 from base.agents.lifecycle import SystemHalt
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.tests.fakes import patch_sync_redis
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.pin_agent import pin_agent
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -38,10 +41,19 @@ def test_compact_survives_publish_failure(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A throwing redis on the CompactRequest publish must not stop compact from
     committing its compact_summary inbound and raising SystemHalt."""
-    pin_agent(spawn_agent(catalog=model_catalog, authority=config_authority))  # self identity
+    pin_agent(
+        spawn_agent(
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
+        )
+    )  # self identity
 
     # Only the CompactRequest publish (EventBus.publish_best_effort_sync → sync_redis) is
     # broken; the self-inbound wake uses ava.REDIS directly and is already
@@ -63,9 +75,19 @@ def test_compact_survives_publish_failure(
 
 
 def test_compact_records_its_audit_fact_with_the_summary_inbound(
-    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db_conn: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     pin_agent(agent_id)
 
     with pytest.raises(SystemHalt):
@@ -85,8 +107,15 @@ def test_compact_whose_audit_fact_cannot_be_recorded_commits_no_summary(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     pin_agent(agent_id)
 
     def refuse(_conn: object, _event: object) -> None:

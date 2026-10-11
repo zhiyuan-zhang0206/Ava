@@ -6,13 +6,18 @@ import os
 import sys
 import time
 import types
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import DbConfig
 from services.supervision.ava_root.health import HealthMonitor
 from services.supervision.ava_root.manifest import (
     ROOT_ID,
@@ -25,6 +30,7 @@ from services.supervision.ava_root.supervisor import Supervisor
 from services.supervision.ava_root.wiring import WiringContext
 from services.supervision.ava_root_glue import drill, glue
 from services.supervision.ava_root_glue.diagnostics import Diagnostic, RootHealthRounds
+from tests.fixtures.configuration import snapshot_process_config
 
 _SLEEPER = [sys.executable, "-u", "-c", "import time; time.sleep(60)"]
 
@@ -61,10 +67,13 @@ def _context(tmp_path: Path, registry: UnitRegistry) -> WiringContext:
 
 @pytest.fixture(autouse=True)
 def _no_host_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
-    def empty(_requested: set[str]) -> list[Diagnostic]:
+    def empty(
+        _requested: set[str], *, database: Callable[[], Database], machine: MachineIdentity
+    ) -> list[Diagnostic]:
         return []
 
     monkeypatch.setattr(glue, "build_diagnostics", empty)
+    monkeypatch.setattr(glue, "ConfigBoot", snapshot_process_config)
 
 
 async def test_reference_wiring_registers_gated_specs(
@@ -271,3 +280,40 @@ def test_static_probe_references_are_read_only() -> None:
 
     with pytest.raises(TypeError):
         operator.setitem(cast(Any, glue.STATIC_PROBES), "svc-host", "wiring_fixture_probe:probe")
+
+
+async def test_reference_station_and_writer_share_one_entry_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+) -> None:
+    gates: list[ProcessDbGate] = []
+
+    readers: list[Callable[[], str]] = []
+    machines: list[MachineIdentity] = []
+
+    def make_database(
+        config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+    ) -> Database:
+        gates.append(gate)
+        readers.append(local_host)
+        return database
+
+    def diagnostics(
+        _requested: set[str], *, database: Callable[[], Database], machine: MachineIdentity
+    ) -> list[Diagnostic]:
+        machines.append(machine)
+        assert database() is database_handle
+        assert database() is database_handle
+        return []
+
+    database_handle = database
+    monkeypatch.setattr(glue, "Database", make_database)
+    monkeypatch.setattr(glue, "build_diagnostics", diagnostics)
+    monkeypatch.setattr(glue, "build_services", lambda: ())
+    rounds = glue.build_wiring(_context(tmp_path, _registry(())))[0]
+    assert isinstance(rounds, RootHealthRounds)
+    assert len(gates) == 2 and gates[0] is gates[1]
+    assert len(machines) == 1
+    assert readers == [machines[0].host, machines[0].host]
+    await rounds.stop()

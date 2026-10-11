@@ -7,11 +7,15 @@ an ensure, start, stop, launchd repair, or session command.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.daemon.health import DaemonProbe
+from base.db import Database
 from base.native_process.os_platform import is_macos
 from services.supervision.ava_root_glue.diagnostics import Diagnostic
 
@@ -67,7 +71,7 @@ def redis_acl() -> DaemonProbe:
     return protocol_probe.probe_protocol(ping)
 
 
-def pgbouncer() -> DaemonProbe:
+def pgbouncer(*, machine: MachineIdentity) -> DaemonProbe:
     from base.cluster import get_record
     from base.cluster.authority import POOLER_ADMIN, AuthorityRefusedError, read_pooler_admin
     from base.cluster.dataplane import pooler
@@ -85,7 +89,9 @@ def pgbouncer() -> DaemonProbe:
 
     def protocol() -> DaemonProbe:
         loopback = pooler.pgbouncer_listener_reachable(port, admin_password)
-        public = loopback and pooler.pgbouncer_public_listener_reachable(port, POOLER_ADMIN)
+        public = loopback and pooler.pgbouncer_public_listener_reachable(
+            port, POOLER_ADMIN, machine=machine
+        )
         if loopback and public:
             return DaemonProbe.up("native pooler admin console and required listeners answered")
         return DaemonProbe.down(f"pooler listener failure: loopback={loopback}, public={public}")
@@ -124,15 +130,16 @@ def browser_reach() -> DaemonProbe:
 class StationProbe:
     """Gateway-only remote protocol observation."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, database: Callable[[], Database]) -> None:
         from services.wake.heartbeat import station_probe
 
         self._module = station_probe
+        self._database = database
 
     def probe(self) -> DaemonProbe:
         if not settings.data_plane.cluster_secret:
             return DaemonProbe.unavailable("station probe lacks its authentication credential")
-        target = self._module.resolve_target()
+        target = self._module.resolve_target(database=self._database)
         if target is None:
             return DaemonProbe.unavailable("configured station target could not be resolved")
         if self._module._station_answers(target.url):
@@ -191,10 +198,10 @@ class LokiReport:
         )
 
 
-def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
+def build_diagnostics(
+    requested: set[str], *, database: Callable[[], Database], machine: MachineIdentity
+) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
-    from base.cluster.machine import is_gateway
-
     checks: list[Diagnostic] = []
     if is_macos():
         checks.append(Diagnostic("brew-pin", brew_pins))
@@ -203,13 +210,13 @@ def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
         from services.supervision.healthchecks.permissions_helper import episode_reporter, probe
 
         checks.append(Diagnostic("permissions-helper", probe, report=episode_reporter()))
-    if is_gateway():
+    if "gateway" in machine.role():
         if not settings.data_plane.is_remote:
             checks.append(Diagnostic("redis-acl", redis_acl))
             if settings.data_plane.pgbouncer_enabled:
-                checks.append(Diagnostic("pgbouncer", pgbouncer))
+                checks.append(Diagnostic("pgbouncer", partial(pgbouncer, machine=machine)))
         if settings.observability.observability_url.strip():
-            station = StationProbe()
+            station = StationProbe(database=database)
             checks.append(Diagnostic("observatory-station", station.probe))
     if "browser" in requested:
         checks.append(
