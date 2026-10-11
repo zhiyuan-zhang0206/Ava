@@ -9,8 +9,9 @@ from pathlib import Path
 import pytest
 
 from base.host.system import boot_unit
-from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
+from base.host.system.boot_policy import BOOT_MAX_ATTEMPTS, BOOT_RETRY_INTERVAL_S
 from base.host.system.boot_unit import (
+    START_LIMIT_INTERVAL_S,
     START_TIMEOUT_S,
     BootUnitContext,
     install,
@@ -49,11 +50,14 @@ def ctx(tmp_path: Path) -> BootUnitContext:
 
 def test_render_unit_states_the_boot_policy(ctx: BootUnitContext) -> None:
     unit = render_unit(ctx)
-    # systemd is the retry supervisor: retry on failure, no attempt cap, one
+    # systemd is the retry supervisor: retry on failure, a finite attempt budget, one
     # bounded attempt -- the platform-agnostic policy of base/host/system/boot_policy.py.
     assert "Restart=on-failure" in unit
     assert f"RestartSec={BOOT_RETRY_INTERVAL_S}" in unit
-    assert "StartLimitIntervalSec=0" in unit
+    assert f"StartLimitBurst={BOOT_MAX_ATTEMPTS}" in unit
+    assert f"StartLimitIntervalSec={START_LIMIT_INTERVAL_S}" in unit
+    assert "StartLimitIntervalSec=0" not in unit  # 0 disables the limit: unbounded restarts
+    assert "start" in unit and '"--boot"' in unit
     assert f"TimeoutStartSec={START_TIMEOUT_S}" in unit
     assert "RuntimeMaxSec" not in unit
     assert "Type=forking" in unit and "GuessMainPID=no" in unit

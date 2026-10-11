@@ -211,9 +211,9 @@ def print_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
 def report_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
     """Emit one `service_start_unready` event per unavailable optional service.
 
-    The tier's second rail: the demotion must not go silent. The boot job's
-    uncapped 60 s retries repeat the event while the failure stays open; it
-    stops once a start finds the service up.
+    The tier's second rail: the demotion must not go silent. Every start that
+    finds the service unready repeats the event; it stops once a start finds the
+    service up.
     """
     for spec in specs:
         telemetry.emit(

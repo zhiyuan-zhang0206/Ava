@@ -1,7 +1,7 @@
 """Boot-time autostart registration (`base.host.system.autostart`).
 
 Pins the properties that matter for reboot survival without recursion:
-- the macOS plist runs a bare `ava start` at load (RunAtLoad — identity is the
+- the macOS plist runs `ava start --boot` at load (RunAtLoad — identity is the
   home path, no name flag exists) with a PATH that includes Homebrew's bin
   (launchd's minimal PATH omits it, which is what made a bare `ava start` fail
   to find the repo's tools at boot);
@@ -37,8 +37,8 @@ def test_plist_runs_ava_start_at_load() -> None:
     xml = autostart._autostart_plist_content()
     assert "<string>com.ava.autostart</string>" in xml
     assert "<key>RunAtLoad</key>" in xml and "<true/>" in xml
-    # ProgramArguments == a bare `ava start` — no name flag exists (path-only).
-    for token in ("/Users/x/.local/bin/ava", "<string>start</string>"):
+    # ProgramArguments == `ava start --boot` — no name flag exists (path-only).
+    for token in ("/Users/x/.local/bin/ava", "<string>start</string>", "<string>--boot</string>"):
         assert token in xml
     assert "--cluster" not in xml
 
@@ -87,8 +87,8 @@ def test_register_macos_idempotent_no_rewrite(
 # --- the retry policy, per platform ---------------------------------------
 #
 # One behaviour -- re-run `ava start` every BOOT_RETRY_INTERVAL_S seconds until
-# it exits 0 -- stated three ways, because only launchd can retry a boot job for
-# us. A boot job that gives up after one failure is what the 2026-07-28 incident
+# it exits 0, at most BOOT_MAX_ATTEMPTS times -- stated per platform, because only
+# launchd can retry a boot job for us (and it has no attempt limit: `--boot` counts). A boot job that gives up after one failure is what the 2026-07-28 incident
 # was: `ava start` raced the VPN interface, exited 1, and nothing tried again.
 
 

@@ -23,7 +23,7 @@ from pathlib import Path
 from loguru import logger
 
 from base.host.atomic_io import write_text_atomic
-from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
+from base.host.system.boot_policy import BOOT_MAX_ATTEMPTS, BOOT_RETRY_INTERVAL_S
 from base.native_process.os_platform import is_linux
 from base.native_process.ownership import OwnedProcess
 
@@ -31,6 +31,10 @@ SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
 
 # Bound startup only; a healthy resident root has no runtime deadline.
 START_TIMEOUT_S = 900
+
+# The window in which `BOOT_MAX_ATTEMPTS` starts exhaust systemd's start limit: long
+# enough that attempts which each use their whole start timeout still count together.
+START_LIMIT_INTERVAL_S = BOOT_MAX_ATTEMPTS * (START_TIMEOUT_S + BOOT_RETRY_INTERVAL_S)
 
 
 @dataclass(frozen=True)
@@ -131,7 +135,7 @@ def _path_value(value: str, what: str) -> str:
 def render_unit(ctx: BootUnitContext) -> str:
     """Start normally, then let systemd own the verified application root."""
     # The ordinary source checkout invocation of the root boot owner.
-    argv = (str(ctx.repo / ".venv/bin/python"), "-m", "cli.main", "start")
+    argv = (str(ctx.repo / ".venv/bin/python"), "-m", "cli.main", "start", "--boot")
     environment = (
         ("HOME", str(ctx.home_dir)),
         ("AVA_HOME", str(ctx.home)),
@@ -144,13 +148,15 @@ def render_unit(ctx: BootUnitContext) -> str:
     command = " ".join(_quote(value, "start argument") for value in argv)
     # Only the generic network target: the host's private-network or proxy
     # services are the operator's (order after them with a drop-in), and a boot
-    # start that beats them fails and retries under Restart=on-failure.
+    # start that beats them fails and retries under Restart=on-failure, at most
+    # BOOT_MAX_ATTEMPTS times: then the unit stays in systemd's `failed` state.
     return (
         "[Unit]\n"
         "Description=Ava application root\n"
         "After=network-online.target\n"
         "Wants=network-online.target\n"
-        "StartLimitIntervalSec=0\n\n"
+        f"StartLimitIntervalSec={START_LIMIT_INTERVAL_S}\n"
+        f"StartLimitBurst={BOOT_MAX_ATTEMPTS}\n\n"
         "[Service]\n"
         "Type=forking\n"
         "GuessMainPID=no\n"

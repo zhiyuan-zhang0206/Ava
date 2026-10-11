@@ -718,3 +718,80 @@ def test_plugin_birth_config_is_part_of_the_existing_unit_generation(
     assert SERVICE_PLUGIN_CONFIG_ENV in dict(units[0].env)
     assert units[0].digest() == units[1].digest()
     assert units[0].digest() != units[2].digest()
+
+
+class _UnitClient:
+    """Records which units an operator-style reconcile asked root to bring up."""
+
+    def __init__(self) -> None:
+        self.up_calls: list[str] = []
+
+    def up(self, unit_id: str) -> dict[str, Any]:
+        self.up_calls.append(unit_id)
+        return {"ok": True}
+
+
+def _no_refresh(_client: object) -> None:
+    return None
+
+
+def _spent_budget_status() -> dict[str, Any]:
+    exhausted = status(state="exited")
+    exhausted["health"] = {"gateway": {"restart_limit_reached": True}}
+    return exhausted
+
+
+def test_an_operator_start_brings_up_a_unit_whose_restart_budget_is_spent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit `ava start` is the operator's way to revive an exhausted unit."""
+    monkeypatch.setattr(driver, "_root_status", _no_refresh)
+    client = _UnitClient()
+    driver._reconcile_units((spec(),), client, _spent_budget_status())
+    assert client.up_calls == ["gateway"]
+
+
+def test_a_boot_attempt_leaves_a_unit_down_whose_restart_budget_is_spent(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The boot job's retried start must not spend root's budget again."""
+    monkeypatch.setattr(driver, "_root_status", _no_refresh)
+    client = _UnitClient()
+    driver._reconcile_units((spec(),), client, _spent_budget_status(), honor_restart_budget=True)
+    assert client.up_calls == []
+    assert "spent its restart budget" in capsys.readouterr().out
+
+
+def test_a_boot_attempt_still_brings_up_a_unit_with_budget_left(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(driver, "_root_status", _no_refresh)
+    client = _UnitClient()
+    down = status(state="exited")
+    down["health"] = {"gateway": {"restart_limit_reached": False}}
+    driver._reconcile_units((spec(),), client, down, honor_restart_budget=True)
+    assert client.up_calls == ["gateway"]
+
+
+def test_seed_wait_reports_a_keeper_that_stopped_restarting_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from services.desktop.permissions_helper import client
+
+    monkeypatch.setattr(driver, "root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
+    exited = {
+        "state": "exited",
+        "seeded": True,
+        "restarts": 2,
+        "stop_requested": False,
+        "last_exit": {"kind": "crash", "code": 1, "at": 0.0},
+    }
+
+    def seed_root(_config: object) -> dict[str, Any]:
+        return exited
+
+    monkeypatch.setattr(client, "seed_root", seed_root)
+    with pytest.raises(driver._RootDriverError, match="stopped restarting"):
+        driver._seed_via_helper(
+            tmp_path, tmp_path, tmp_path / "manifests.json", {"AVA_HOME": str(tmp_path)}
+        )

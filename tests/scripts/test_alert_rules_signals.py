@@ -41,6 +41,7 @@ SIGNALS: dict[str, Signal] = {
     "ava-ops-health-probe-error": Signal("health_probe_failing", "ava-ops", "10m", "error"),
     "ava-ops-health-probe-silent": Signal("health_probe_ran", "ava-ops", "0m", "error"),
     "ava-ops-service-start-unready": Signal("service_start_unready", "ava-ops", "0m", "warning"),
+    "ava-ops-boot-retries-exhausted": Signal("boot_retries_exhausted", "ava-ops", "0m", "error"),
     "ava-ops-schedule-verify-failed": Signal("schedule_verify_failed", "ava-ops", "0m", "error"),
     "ava-ops-schedule-stalled": Signal("schedule_stalled", "ava-ops-slow", "0m", "warning"),
     "ava-ops-agent-continuation-lost": Signal("agent_continuation_lost", "ava-ops", "0m", "error"),

@@ -55,3 +55,15 @@ def test_helper_native_reaping_cannot_race_owned_signal_delivery(tmp_path: Path)
             check=False,
         )
         assert crash.returncode == expected, crash.stdout + crash.stderr
+    # A root that keeps exiting is restarted a bounded number of times.
+    bounded_home = tmp_path / "bounded-home"
+    bounded_home.mkdir()
+    bounded = subprocess.run(  # noqa: S603 — same private native fixture
+        ["swift", str(program), str(bounded_home), "bounded-restart"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert bounded.returncode == 0, bounded.stdout + bounded.stderr
+    assert "bounded root restart passed" in bounded.stdout

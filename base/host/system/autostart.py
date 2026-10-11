@@ -10,10 +10,11 @@ service), so this one boot job covers the whole cluster — data plane included.
 - Linux: the enabled distro-level systemd unit (`base.host.system.boot_unit`);
   automatic startup requires systemd
 
-The job **retries** — one boot-time `ava start` is not enough, because at boot
-its dependencies are not all up yet. See `base/host/system/boot_policy.py` for the policy
-and for how each mechanism states it: launchd keys on macOS, systemd restart
-keys on Linux.
+The job **retries, boundedly** — one boot-time `ava start` is not enough, because
+at boot its dependencies are not all up yet, but an endless loop would hide a
+permanent error. See `base/host/system/boot_policy.py` for the policy and for how
+each mechanism states it: launchd keys plus the cap inside `ava start --boot` on
+macOS, systemd restart and start-limit keys on Linux.
 
 Mirrors base/host/system/cron.py (the health-probe registrar) -- same launchd / crontab
 mechanics -- but fires at boot (RunAtLoad / systemd)
@@ -67,17 +68,18 @@ def _autostart_plist_path() -> Path:
 
 
 def _autostart_plist_content() -> str:
-    """The LaunchAgent plist: run `ava start` at load, and keep re-running it
-    for as long as it fails.
+    """The LaunchAgent plist: run `ava start --boot` at load, and keep re-running
+    it while it fails, up to the boot attempt budget.
 
     `KeepAlive` → `SuccessfulExit: false` is launchd's "restart in the inverse
     condition" of a zero exit (launchd.plist(5)) — i.e. respawn only while the
     job exits non-zero, and fall back to demand-based invocation the moment it
     exits 0. `ThrottleInterval` overrides launchd's default 10-second respawn
     floor, so a start that keeps failing is retried once a minute rather than
-    six times a minute. Together that is the retry policy in
-    `base/host/system/boot_policy.py`, with launchd rather than a loop of ours doing the
-    retrying — which is why this job runs plain `ava start`.
+    six times a minute. launchd has no attempt limit; `--boot` counts the
+    attempts and the one that spends the budget exits 0 to end the retries.
+    Together that is the retry policy in `base/host/system/boot_policy.py`, with
+    launchd rather than a loop of ours doing the retrying.
 
     Start remains unsuccessful until readiness passes. Its idempotent root
     reconciliation preserves healthy units on subsequent boot attempts.
@@ -96,6 +98,7 @@ def _autostart_plist_content() -> str:
     <array>
         <string>{ava}</string>
         <string>start</string>
+        <string>--boot</string>
     </array>
 {launchd_env_block()}
     <key>RunAtLoad</key>
