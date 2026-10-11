@@ -10,14 +10,14 @@ import time
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
+from base.cluster import session_name
 from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineRoles
 from base.config import settings
 from base.log import logger
-from cli.commands._repo import ServiceSpec, session_name
 from cli.commands.probe import ReadinessWait
 from cli.start_runtime import StartRuntime
-from ops.roster.service_spec import api_access, db_access, profile_marker
+from ops.roster.service_spec import ServiceSpec, api_access, db_access, profile_marker
 
 _ROOT_SOCKET_NAME = "ava-root.sock"
 _ROOT_STDOUT_LOG = "root.stdout.log"
@@ -88,11 +88,11 @@ def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
 
 def _root_tree_roster(roles: MachineRoles, launch_skip: set[str]) -> tuple[ServiceSpec, ...]:
     """The capability/config-selected units for this root."""
-    from cli.commands._repo import _services_for_roles_annotated
+    from ops.spec import services_for_capabilities_annotated
 
     return tuple(
         spec
-        for spec, reason in _services_for_roles_annotated(roles)
+        for spec, reason in services_for_capabilities_annotated(roles)
         if reason is None and spec.session not in launch_skip
     )
 

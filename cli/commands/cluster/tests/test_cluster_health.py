@@ -499,8 +499,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
-        _repo_commands,
-        "_services_for_roles_annotated",
+        "ops.spec.services_for_capabilities_annotated",
         lambda _roles: (  # pyright: ignore[reportUnknownArgumentType]
             (dead, None),
             (alive, None),
@@ -605,8 +604,7 @@ def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) 
     spec = ServiceSpec(session="ops", cmd="x", capabilities=_GATEWAY, requires_db=True)
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
-        _repo_commands,
-        "_services_for_roles_annotated",
+        "ops.spec.services_for_capabilities_annotated",
         lambda _roles: ((spec, None),),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
@@ -648,7 +646,7 @@ def test_service_probes_respect_durable_service_intent(
         return _probe_commands.ServiceProbe(True, "owned", "ready")
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(_repo_commands, "_services_for_roles_annotated", roster)
+    monkeypatch.setattr("ops.spec.services_for_capabilities_annotated", roster)
     monkeypatch.setattr(_probe_commands, "probe_service", probe)
     monkeypatch.setattr(
         service_selection,

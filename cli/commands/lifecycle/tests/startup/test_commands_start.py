@@ -11,12 +11,12 @@ import cli.commands._setup as _setup_commands
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 from base.config import settings
-from cli.commands._repo import ServiceSpec
 from cli.commands._setup import _collect_setup_values as _real_collect_setup_values
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     _hermetic_start as _hermetic_start,
 )
 from cli.tests._commands_helpers import _FakeResult, _git_aware
+from ops.roster.service_spec import ServiceSpec
 
 
 def test_cmd_start_needs_no_tty(monkeypatch: pytest.MonkeyPatch) -> None:

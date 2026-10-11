@@ -13,6 +13,7 @@ from datetime import datetime
 import psutil
 
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.cluster import session_name
 from base.cluster.machine import MachineRoles, machine_role
 from base.db import Database
 from base.deploy.lifecycle import start_serving
@@ -22,7 +23,7 @@ from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.native_process.ownership import retain_processes
 from base.sessions.pty.paths import SERVICE_UNIT
-from cli.commands._repo import _repo_root, build_services, session_name
+from cli.commands._repo import _repo_root
 from cli.commands.lifecycle.service_stop import (
     OwnedProcess,
     capture_tree,
@@ -34,6 +35,7 @@ from cli.commands.lifecycle.service_stop import (
 )
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause.probe import ops_quiescent
+from ops.roster import build_services
 
 
 def _stop_browser(deadline: float) -> None:
