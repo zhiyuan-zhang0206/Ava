@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _STEWARD = (
     _REPO_ROOT / "ava_builtins" / "plugins" / "ava_memory" / "skills" / "scripts" / "steward.py"
