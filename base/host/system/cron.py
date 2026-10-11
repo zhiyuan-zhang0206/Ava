@@ -44,9 +44,7 @@ DEFAULT_INTERVAL_SECONDS = 300  # 5 minutes
 # not a home. Only the default home registers or removes them (`owns_os_jobs`).
 LAUNCHD_LABEL_PREFIX = "com.ava"
 
-# Crontab marker of the health-probe line. Lines are matched by substring, and
-# older versions wrote `# ava-health-probe.<slug>`, which contains this marker:
-# the first register replaces such a line in place instead of adding a second.
+# Crontab marker of the health-probe line. Lines are matched by substring.
 _CRON_MARKER = "# ava-health-probe"
 
 
@@ -67,8 +65,7 @@ def os_jobs_enabled(*, enabled_reader: Callable[[], bool]) -> bool:
     a session that is SIGKILLed before its teardown.
 
     Deregistration is deliberately NOT gated — a cleanup path has to work
-    wherever registration is forbidden, including on the leftovers of a run that
-    predates this switch.
+    wherever registration is forbidden.
     """
     # The composition root supplies the live switch; this gate owns read timing.
     return enabled_reader()

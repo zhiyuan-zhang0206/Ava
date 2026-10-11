@@ -15,8 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 GenerationClass = Literal["gateway", "runner"]
 CLASSES: tuple[GenerationClass, ...] = ("gateway", "runner")
 
-# Stable NOLOGIN capability groups. `ava_runner` is the historical runner login,
-# demoted in place so its existing grants keep working.
+# Stable NOLOGIN capability groups.
 GATEWAY_GROUP = "ava_gateway"
 RUNNER_GROUP = "ava_runner"
 

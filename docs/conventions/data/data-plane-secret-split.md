@@ -38,8 +38,7 @@ Delivery:
   credential-free endpoint and its first dial fails with
   `NoDatabaseAuthorityError`.
 - Bootstrap serves no database credential: its `AVA_DB_URL` is the
-  credential-free endpoint (a remote-managed provider URL loses its password),
-  and a runner strips any password an older gateway still serves. A remote
+  credential-free endpoint (a remote-managed provider URL loses its password). A remote
   agent-runner's root launcher delivers its installed unit capability to every
   runner-class service, and an admitted operator process on that home consumes
   it; anything else refuses by name. The capability arrives only as an
