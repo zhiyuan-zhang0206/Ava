@@ -53,6 +53,6 @@ The full-screen supervision surface (`components/fleet/`, `app/fleet/page.tsx`) 
 ## Settings / Auth
 
 - Control page routing see [[ui/web/src/docs/frontend-data-flow/frontend-data-flow.ava.okf.md|Data Flow]] hooks (`useUserSettings`, etc.); `/control/display` goes through the server-side `user_settings` table.
-- **AuthGuard** (`components/auth/`) wraps all pages, showing a login page when unauthenticated; `auth-context` shared via React Context.
+- **AuthGuard** (`components/auth/`) wraps all pages, showing a login page when unauthenticated; `auth-context` shared via React Context; on mount, only when the URL fragment carries a one-time `#ticket=` login link, it lazily loads `lib/auth/login-ticket.ts` (kept out of the first-load bundle), which clears the fragment before posting the ticket; `/api/auth/check` then decides, and a refused link leaves the login form (the cluster password still works).
 
 The run timeline page (`/insights/run/{id}`) is its own node: [[ui/web/src/docs/frontend-components/run-timeline/run-timeline.ava.okf.md|Run Timeline]].
