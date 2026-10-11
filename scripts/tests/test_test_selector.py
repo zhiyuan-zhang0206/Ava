@@ -20,6 +20,7 @@ import pytest
 from scripts.ci import test_selector
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_ESTIMATE_CHILD = Path(__file__).with_name("child_estimate_seconds.py")
 
 
 def test_queue_branch_always_keeps_the_full_suite(tmp_path: Path) -> None:
@@ -331,23 +332,11 @@ def test_selector_mode_is_audit_metadata_from_the_workflow_env(
 
 def test_duration_estimates_are_identical_across_python_hash_seeds() -> None:
     """Hash-randomized set iteration must not change the audit JSON."""
-    snippet = """\
-from scripts.ci.test_selector import estimate_seconds
-
-print(repr(estimate_seconds(
-    {\"tests/a.py\", \"tests/b.py\", \"tests/c.py\"},
-    {
-        \"tests/a.py::test_a\": 1e16,
-        \"tests/b.py::test_b\": 1.0,
-        \"tests/c.py::test_c\": 1.0,
-    },
-)))
-"""
     outputs: list[str] = []
     for seed in ("1", "2", "3"):
         environment = os.environ | {"PYTHONHASHSEED": seed}
-        completed = subprocess.run(  # noqa: S603 -- fixed local Python snippet
-            [sys.executable, "-c", snippet],
+        completed = subprocess.run(  # noqa: S603 -- fixed interpreter and in-repo helper
+            [sys.executable, str(_ESTIMATE_CHILD)],
             cwd=_REPO_ROOT,
             capture_output=True,
             check=True,

@@ -9,14 +9,13 @@ exception on, and the explicit reasoned marker.
 
 from __future__ import annotations
 
-import importlib
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.diagnostics.no_silent_failures")
+from scripts.lint.diagnostics import no_silent_failures as _lint
 
 
 def _lines(src: str) -> list[int]:

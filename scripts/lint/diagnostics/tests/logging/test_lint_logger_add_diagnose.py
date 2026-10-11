@@ -12,12 +12,11 @@ and calls on an object that is not a logger.
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.diagnostics.logger_add_diagnose")
+from scripts.lint.diagnostics import logger_add_diagnose as _lint
 
 
 def _violations(src: str) -> list[tuple[int, str]]:

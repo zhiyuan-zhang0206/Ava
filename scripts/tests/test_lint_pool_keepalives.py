@@ -15,12 +15,11 @@ module attribute.
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.pool_keepalives")
+from scripts.lint import pool_keepalives as _lint
 
 
 def _violations(src: str) -> list[tuple[int, str]]:
