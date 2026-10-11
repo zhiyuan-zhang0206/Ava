@@ -1,17 +1,4 @@
-"""Stream-layer failure taxonomy + the llm node's failure ledger.
-
-Owns every fail-fast exception the llm node raises (the ``LLMStreamError``
-hierarchy, ``FatalLLMStreamError``, ``FatalProviderError``), the provider-error
-classification helpers (``base.lm.errors.classify_error`` → structured log →
-optional ``FatalProviderError``), and ``LlmLedger``: the consecutive-error record
-that bounds deterministic retry loops, the stall-pair streak that bounds the
-delayed retry schedule for two-adjacent-stall terminations, and the silent-idle
-output-token budget.
-
-Split out of ``llm/node.py`` (Task #1004 >800-line outlier) — a leaf dependency
-of ``llm/_stream.py`` / ``llm/_cancel.py`` / ``llm/_chunk.py``; nothing here
-imports back into ``llm/node.py``.
-"""
+"""Model failure classification and the successful silent-idle token budget."""
 
 from __future__ import annotations
 
@@ -39,9 +26,8 @@ class LLMStreamStallTimeoutError(LLMStreamError):
 
     ``stage`` names WHAT bound expired — ``"ttft"`` (no first chunk),
     ``"mid-stream"`` (gap after at least one chunk) or ``"total"`` (the
-    per-attempt duration ceiling). It rides the exception so the
-    ``stream_stalled_retry`` event can count stalls by shape without parsing
-    the message.
+    per-attempt duration ceiling). It rides the exception for diagnostics
+    without requiring the message to be parsed.
     """
 
     def __init__(self, message: str, *, stage: str = "unknown") -> None:
@@ -49,39 +35,8 @@ class LLMStreamStallTimeoutError(LLMStreamError):
         self.stage = stage
 
 
-class LLMStreamStallPairError(LLMStreamStallTimeoutError):
-    """Two adjacent stalls in one call — the streaming segment stalled and the
-    non-streaming fallback then timed out under the same bound.
-
-    Raised by ``_consume_llm`` in place of the fallback's bare ``TimeoutError``
-    so the pair is a first-class ``LLMStreamError``: it is retried on the
-    delayed stall schedule (``_retry.retry_wait`` — initial
-    ``llm_stall_retry_initial_interval_seconds``, doubling, capped at
-    ``llm_stall_retry_max_interval_seconds``, up to
-    ``llm_stall_retry_max_consecutive`` consecutive pairs, jittered ±
-    ``llm_stall_retry_jitter_fraction``) instead of continuing to burn the
-    provider's stalled segments; the whole pair is bounded to ~2x the
-    stream-segment bound (one key, one value for both segments).
-
-    Deliberately excluded from the ledger's consecutive-error record: this
-    error's own streak is its bound, and the record's cap (default 3) would
-    pre-empt the delayed schedule's 4th grant. When the streak exhausts, the
-    next attempt raises ``LLMStreamStallPairExhaustedError`` (fatal) at entry.
-    """
-
-
 class FatalLLMStreamError(LLMStreamError):
-    """LLM stream retry cap exhausted — same error type N times consecutively;
-    fail fast with ERROR event instead of exhausting all retries. A deterministic
-    error (e.g. Gemini always timing out at TTFT) can't be fixed by retry.
-
-    Raised by `LlmLedger.check_consecutive_error_cap` when the consecutive-same-error
-    count reaches `settings.lm.llm_retry_max_consecutive_same_error`. LangGraph's
-    retry policy must NOT retry this — it propagates out of the graph, where
-    the agent host emits one ERROR event and re-enters the graph with a fresh
-    run: the turn is aborted, the agent stays alive idling for the next
-    inbound so the user can see the error and decide the next action.
-    """
+    """An LLM failure that must leave the node without retrying."""
 
 
 class LLMRetryBudgetExceededError(FatalLLMStreamError):
@@ -92,29 +47,15 @@ class LLMRetryBudgetExceededError(FatalLLMStreamError):
     """
 
 
-class LLMStreamStallPairExhaustedError(FatalLLMStreamError):
-    """The delayed stall-retry schedule is spent — the stall pair recurred
-    ``llm_stall_retry_max_consecutive`` times consecutively.
-
-    Raised at llm-node entry by ``_check_stall_pair_cap`` instead of burning
-    another stalled segment. As a ``FatalLLMStreamError`` it takes the
-    established fatal-turn settlement: one ERROR event, the turn aborts, the
-    agent stays alive and idles — the regular wake path retries once the
-    provider recovers (the wake latency itself is the recovery-wake
-    workstream, not this error's).
-    """
-
-
 class FatalProviderError(Exception):
     """Provider permanently rejected the request — a `base.lm.errors.classify_error`
     `PERMANENT` class (HTTP 400 bad request / context length / schema, 401 auth,
     402 billing, 403 forbidden, 404 unknown model, 422 schema) or a configured
     fatal error type (e.g. `engine_overloaded_error`). Retrying within the turn
     cannot succeed, so — like `FatalLLMStreamError` — it is excluded from the
-    retry policy and routed to the agent host's idle path: the turn is aborted but
-    the process stays alive idling, so when the underlying cause clears (balance
-    topped up, key fixed, context compacted) the next wake-up retries on its own
-    rather than needing a manual revive.
+    retry policy and routed to the agent host's idle path. Background wakes
+    stop; after correcting the cause, fresh chat or an explicit control can
+    request another attempt.
 
     Carries the structured `(error_class, provider, status)` from the classifier
     so the abort log + Error event are queryable without re-parsing the message.
@@ -140,8 +81,8 @@ class FatalProviderError(Exception):
         self.status = status
         # True when the rejection was the context window being exceeded (the
         # classifier's `context_overflow` predicate). The one permanent
-        # failure the agent can self-rescue from (compaction) — the runloop
-        # keys the heartbeat circuit breaker's forced-compact arm on it.
+        # failure requiring an explicit compaction; preserve the classification
+        # for diagnostics and the suggested operator action.
         self.context_overflow = context_overflow
 
 
@@ -295,129 +236,14 @@ class LLMStreamTruncatedError(LLMStreamUnexpectedStopReasonError):
 
 
 class LlmLedger:
-    """What the llm node remembers about each agent between its tries and its turns.
+    """Output-token budget of consecutive successful silent-idle turns.
 
-    The graph build constructs one per compiled graph and hands it to the llm node; nothing is
-    module state, so a process that builds two graphs (a test, the eval driver) has two ledgers.
-    Entries are keyed by thread id (the agent id as a string) because one graph serves every agent
-    the host runs. A restart forgets all of it.
-
-    Three records:
-
-    - **Consecutive stalls.** The last owned ``LLMStreamStallTimeoutError`` type per thread. If
-      the same type is raised N times in a row (N = ``llm_retry_max_consecutive_same_error``), the
-      next attempt raises ``FatalLLMStreamError`` instead -- a deterministic error cannot be fixed
-      by retry; fail fast with an ERROR event rather than silently exhausting every retry. Reset on
-      a successful stream, and cleared when the cap fires: ``FatalLLMStreamError`` aborts only the
-      current turn (the agent host catches it, emits one ERROR event, and idles for the next
-      inbound), so the next inbound-triggered turn must start with a fresh retry budget rather than
-      instantly re-tripping the cap.
-    - **Stall-pair streak.** Consecutive two-adjacent-stall terminations. Incremented when
-      ``_retry.retry_wait`` grants a delayed retry, reset on a successful stream, and popped when
-      the streak exhausts (the next inbound-triggered turn must start with a fresh budget -- the
-      same convention as the consecutive-error record).
-    - **Silent-idle output tokens.** Output-token budget units across consecutive silent-idle
-      turns. Separate from the error record because a silent idle is a successful stream. Every
-      silent idle consumes at least one unit, so a provider that reports reasoning content with
-      zero output tokens cannot bypass the bound. It resets on the first turn that produces text
-      or a tool call.
+    One ledger belongs to one graph; records are keyed by agent thread id.
+    Provider failures have no cross-turn retry state.
     """
 
     def __init__(self) -> None:
-        self._consecutive_errors: dict[str, tuple[str, int]] = {}
-        self._stall_pair_streaks: dict[str, int] = {}
         self._silent_idle_output_tokens: dict[str, int] = {}
-
-    def consecutive_error(self, thread_id: str) -> tuple[str, int] | None:
-        """The (exception type name, count) the thread has recorded, if any."""
-        return self._consecutive_errors.get(thread_id)
-
-    def check_consecutive_error_cap(self, thread_id: str, *, max_cap: int) -> None:
-        """Raise FatalLLMStreamError if the same error has hit the retry cap.
-
-        Called at the top of _llm_node_impl before the stream starts -- if we
-        already know this error is deterministic, skip another 30-480s retry cycle.
-        """
-        if max_cap <= 0:
-            return  # Disabled: always exhaust retries
-        entry = self._consecutive_errors.get(thread_id)
-        if entry and entry[1] >= max_cap:
-            # Pop before raising: the agent host aborts this turn and keeps the
-            # agent alive idling, so the next inbound-triggered turn gets a fresh
-            # retry budget instead of instantly re-tripping the cap.
-            self._consecutive_errors.pop(thread_id)
-            raise FatalLLMStreamError(
-                f"LLM stream error '{entry[0]}' occurred {entry[1]} times consecutively -- "
-                f"retry cap ({max_cap}) exhausted. Deterministic error cannot be fixed by retry; "
-                f"failing fast with ERROR event."
-            )
-
-    def record_consecutive_error(self, thread_id: str, exc: BaseException, *, max_cap: int) -> None:
-        """Update the consecutive-error record after a stream error.
-
-        Only tracks retryable stream stalls. Protocol errors fail once and
-        must not pre-empt a later user turn. Stall pairs are excluded:
-        their retry bound is the delayed-schedule streak, and
-        letting this record's cap (default 3) count them would fail the turn
-        before the schedule's 4th grant.
-        """
-        if max_cap <= 0:
-            return
-        if not isinstance(exc, LLMStreamStallTimeoutError) or isinstance(
-            exc, LLMStreamStallPairError
-        ):
-            return
-        exc_name = type(exc).__name__
-        entry = self._consecutive_errors.get(thread_id)
-        if entry and entry[0] == exc_name:
-            self._consecutive_errors[thread_id] = (exc_name, entry[1] + 1)
-        else:
-            self._consecutive_errors[thread_id] = (exc_name, 1)
-
-    def clear_consecutive_errors(self, thread_id: str) -> None:
-        """Reset the consecutive-error record on successful stream completion."""
-        self._consecutive_errors.pop(thread_id, None)
-
-    def stall_pair_streak(self, thread_id: str) -> int:
-        """Current streak (0 when the thread has none)."""
-        return self._stall_pair_streaks.get(thread_id, 0)
-
-    def stall_pair_streak_active(self, thread_id: str) -> bool:
-        """True while a delayed stall-retry sequence is in progress.
-
-        The llm node uses this to keep the transient-retry wall-clock budget
-        (`llm_retry_max_total_seconds`, sized for seconds-scale backoffs) from
-        ending the delayed schedule's minutes-scale sequence at entry.
-        """
-        return self._stall_pair_streaks.get(thread_id, 0) > 0
-
-    def record_stall_pair_streak(self, thread_id: str, streak: int) -> None:
-        """Store the streak a delayed retry was granted at."""
-        self._stall_pair_streaks[thread_id] = streak
-
-    def reset_stall_pair_streak(self, thread_id: str) -> None:
-        """Clear the streak (successful stream, or an exhausted sequence)."""
-        self._stall_pair_streaks.pop(thread_id, None)
-
-    def check_stall_pair_cap(self, thread_id: str, *, max_pairs: int) -> None:
-        """Raise the fatal pair error once the delayed schedule is spent.
-
-        Called at the top of `_llm_node_impl` beside `check_consecutive_error_cap`:
-        a streak at the cap means the next attempt would be the (cap+1)-th
-        consecutive pair -- fail fast into the fatal-turn settlement (one ERROR
-        event, agent alive and idling; the regular wake path retries once the
-        provider recovers) instead of burning another stalled segment. Pops the
-        streak before raising so the next turn starts with a fresh budget.
-        """
-        streak = self._stall_pair_streaks.get(thread_id)
-        if max_pairs <= 0 or streak is None or streak < max_pairs:
-            return
-        self._stall_pair_streaks.pop(thread_id, None)
-        raise LLMStreamStallPairExhaustedError(
-            f"LLM stream stall pair recurred {streak} times consecutively — the delayed "
-            f"retry budget ({max_pairs} pairs) is exhausted. Aborting the turn; the agent "
-            f"stays alive and idles, and the next wake retries once the provider recovers."
-        )
 
     def silent_idle_output_tokens(self, thread_id: str) -> int:
         """Budget units the thread's consecutive silent-idle turns have used so far."""

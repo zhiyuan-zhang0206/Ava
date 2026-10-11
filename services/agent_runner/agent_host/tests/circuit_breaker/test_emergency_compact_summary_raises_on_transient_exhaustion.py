@@ -4,23 +4,16 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import psycopg
-import pytest
-from langchain_core.exceptions import ModelAPIError
-from langchain_core.messages import AIMessageChunk, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessageChunk
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import llm_node
 from agent.graph.llm_errors import FatalProviderError, LlmLedger
 from agent.graph.tests.test_llm_helpers import _CONFIG as _LLM_CONFIG
 from agent.graph.tests.test_llm_helpers import _make_runtime as _llm_make_runtime
-from agent.hooks.compact import (
-    COMPACT_MAX_ATTEMPTS,
-    CompactionFailedError,
-    emergency_compact_summary,
-)
 from base.agents.context import AvaContext
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -40,24 +33,6 @@ from services.agent_runner.agent_host.tests.test_circuit_breaker import (
 )
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from tests.fixtures.units import spawn_agent
-
-
-async def test_emergency_compact_summary_raises_on_transient_exhaustion() -> None:
-    """A transient failure (provider 502) is retried and, exhausted, raises
-    CompactionFailedError — a provider blip must not silently destroy the
-    conversation with the wipe fallback."""
-    msgs: list[AnyMessage] = [SystemMessage(content="<sys>"), HumanMessage(content="hi")]
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=ModelAPIError("provider 502"))
-
-    with pytest.raises(CompactionFailedError, match="no usable summary"):
-        await emergency_compact_summary(
-            msgs,
-            llm,
-            AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            catalog=build_model_catalog(),
-        )
-    assert llm.bind_tools.return_value.ainvoke.await_count == COMPACT_MAX_ATTEMPTS
 
 
 async def test_llm_node_closes_circuit_on_success(

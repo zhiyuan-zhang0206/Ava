@@ -547,9 +547,9 @@ def test_editable_import_gate_requires_the_checkout_editable_import(
 _GUARD_PROBE = """
 import sys
 from pathlib import Path
-from base.deploy.release.editable_install import guard_editable_install
+from base.deploy.release.editable_install import editable_install_violations
 raise SystemExit(
-    bool(guard_editable_install(Path(sys.argv[1]), allowed_roots=(Path(sys.argv[2]),)))
+    bool(editable_install_violations(Path(sys.argv[1]), allowed_roots=(Path(sys.argv[2]),)))
 )
 """
 
@@ -595,7 +595,7 @@ def test_uv_native_editable_records_are_legal_and_exec_guard_accepts_them(tmp_pa
         == ()
     )
     assert (
-        editable_install.guard_editable_install(
+        editable_install.editable_install_violations(
             uv_built_venv_root,
             allowed_roots=(checkout,),
         )
@@ -647,42 +647,3 @@ def test_current_interpreter_source_root_keeps_symlinked_venv_identity(
     monkeypatch.setattr(editable_install.sys, "executable", str(interpreter))
 
     assert editable_install.current_interpreter_source_root() == source_root
-
-
-def test_guard_editable_install_repairs_all_records_and_emits_exec_event(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """One exec-boundary guard reports then repairs the complete poisoned install."""
-    source_root = tmp_path / "prod" / "source"
-    deleted_worktree = tmp_path / "deleted-worktree"
-    pth = _write_pth(source_root, deleted_worktree)
-    direct_url = _write_direct_url(source_root, deleted_worktree.as_uri())
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def record_emit(*args: object, **kwargs: object) -> None:
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr("base.telemetry.emit", record_emit)
-
-    violations = editable_install.guard_editable_install(source_root)
-
-    assert len(violations) == 2
-    assert pth.read_text() == str(source_root)
-    assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
-    assert [entry[0][1] for entry in emitted] == [
-        "editable_pth_repaired",
-        "editable_direct_url_repaired",
-        "exec_editable_install_poisoned",
-    ]
-    assert emitted[-1] == (
-        ("telemetry", "exec_editable_install_poisoned"),
-        {
-            "level": "warning",
-            "source": "exec_guard",
-            "attributes": {
-                "violations": list(violations),
-                "source_root": str(source_root),
-                "python": str(editable_install.sys.executable),
-            },
-        },
-    )

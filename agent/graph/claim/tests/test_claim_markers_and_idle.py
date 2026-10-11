@@ -3,8 +3,6 @@
 from unittest.mock import MagicMock
 
 import psycopg
-import pytest
-from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
@@ -86,7 +84,6 @@ def test_render_restart_completed_marker_external_source_unchanged():
 async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -99,16 +96,9 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
 
     from langchain_core.messages import SystemMessage
 
-    from agent.graph.claim import node as claim_node_mod
     from agent.graph.claim.node import claim_node
 
     tid = spawn_agent(catalog=model_catalog, authority=config_authority)
-
-    # stub the body: we only exercise the wrapper + node_lifecycle enter path
-    async def _stub_impl(_state, _runtime, _config):
-        return Command(goto="end")
-
-    monkeypatch.setattr(claim_node_mod, "_claim_node_impl", _stub_impl)  # pyright: ignore[reportUnknownArgumentType]
 
     pub = MagicMock()
     state = AgentState()

@@ -1,33 +1,25 @@
 ---
 type: doc
-title: Delivery Watchdog — wake dispatcher + stale-pending alerter
-description: "Gateway wake dispatch, stale-pending alerts and stale-inbound dead-letter sweeps. No automatic resurrection or stalled-turn recovery."
+title: Delivery watchdog
+description: Observe stalled pending delivery and retire stale inputs without dispatching work.
 tags: []
 ---
 
-# Delivery Watchdog — wake dispatcher + stale-pending alerter
+# Delivery watchdog
 
-## What it is
-A gateway daemon with one resident scan loop. It re-publishes missed pending
-wakes, reports delivery stalls, and performs the retained stale-inbound sweeps.
-It does not force-terminate or resurrect agents, recover crash-marked owners, or
-replay graph work. Config-gated by `AVA_DELIVERY_WATCHDOG_ENABLED`. The jobs
-are specified in [[services/docs/gateway_side/delivery_watchdog/jobs/jobs.ava.okf.md]].
+One gateway scan loop observes stalled pending messages and retires stale
+inputs without re-publishing wakes or restarting agents. The agent host owns
+ordinary pending-input polling; Redis wakes are latency hints and can be lost.
+Queue claims still serialize input acceptance.
 
-**Role affiliation**: gateway side — `ServiceSpec.capabilities=_GATEWAY` in `ops/spec.py`, `requires_db=True` (polls `inbound_messages`). Kept alive by the root supervisor's health monitor through the roster's `/healthz` identity probe.
+`AVA_DELIVERY_WATCHDOG_ENABLED` controls the daemon; its thirty-second default
+scan interval is an observation cadence, not a recovery deadline. `/healthz`
+reports loop progress. A process-local alerted set avoids repeat alerts while
+a row stays pending, but does not survive a restart. Alert-layer rules own
+cross-restart debounce. Old dispatch/poison and dedup table rows are left in
+place; the runtime no longer reads or writes them.
 
-## Key Dependencies
-- [[agent/db/docs/db.ava.okf.md]] — polls `inbound_messages` + reads `agents_meta` owner status
-- [[agent/graph/docs/graph.ava.okf.md]] — the claim loop whose lost-wake window this closes
-- [[process-lifecycle.ava.okf.md]] — ordinary lifecycle semantics
-
-## Entry Points
-- `services/wake/delivery_watchdog/daemon.py` — `.venv/bin/python -m services.wake.delivery_watchdog.daemon`
-- `services/wake/delivery_watchdog/dead_letter.py` — stale-inbound dead-letter sweeps (split out at the line budget; re-exported by `daemon.py`)
-- Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`ops/roster/healthz.py`)
-
-## Notes
-- One instance per cluster (runs on the gateway, owns the data plane)
-- Its degraded-WARNING doubles as a dispatcher-health signal: the per-agent 30s recheck warns when it fires, which only happens if the dispatcher is dead AND a wake was lost
-- After correcting the underlying delivery failure, manually resume watchdog dispatch with `UPDATE inbound_messages SET dispatch_count = 0, last_dispatch_at = NULL, poisoned_at = NULL WHERE id = <inbound_id>;`.
-- Manually clear an agent-level automatic-wake suppression with `UPDATE agents_meta SET wake_suppressed_until = NULL, wake_suppress_reason = NULL WHERE id = <agent_id>;`.
+Entry points are `services/wake/delivery_watchdog/daemon.py` and
+`services/wake/delivery_watchdog/dead_letter.py`. See
+[[services/docs/gateway_side/delivery_watchdog/jobs/jobs.ava.okf.md]] and
+[[agent/db/docs/db.ava.okf.md]].

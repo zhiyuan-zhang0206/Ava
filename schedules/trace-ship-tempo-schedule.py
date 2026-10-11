@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 import ava
 from base.db import Database
-from schedules.catchup import catch_up, fire_slot_once
+from schedules.catchup import fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
 CRON = "*/5 * * * *"
@@ -27,7 +27,6 @@ def ship_traces(_slot: datetime, _trigger: None) -> None:
 
 def main() -> None:
     db = Database.from_settings()
-    catch_up(db, [(CRON, None)], timezone=TIMEZONE, fire=ship_traces)
     while True:
         nxt = next_fire(CRON, after=datetime.now(UTC), timezone=TIMEZONE)
         while datetime.now(UTC) < nxt:

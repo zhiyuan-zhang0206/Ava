@@ -27,7 +27,7 @@ claimed and merged into the next LLM round.
 
 Automatic compaction runs in the LLM node via `agent/hooks/compact.py:auto_compact_for_llm`
 after the before_llm hooks commit. Claim still dispatches explicit compaction
-requests and circuit-breaker rescue.
+requests.
 
 Deps injected via `runtime.context: AvaContext` (see agent/graph/_context.py).
 agent_id read from RunnableConfig (LangGraph checkpointer standard).
@@ -133,14 +133,8 @@ async def _claim_node_impl(
     except RuntimeOwnershipLostError:
         return Command[ClaimGoto](update={"exit_requested": True}, goto=END)
     if not batch:
-        # The breaker parks the agent too: an open non-overflow breaker means
-        # the last LLM call was permanently rejected (billing / auth / ...) —
-        # a self-initiated continue-loop (this else-less branch's normal
-        # caller) would only re-fire the doomed call. Only real inbound
-        # (dispatch) may attempt a call, and the breaker closes on the first
-        # success (llm_node). The overflow reason is deliberately NOT parked:
-        # it must keep flowing to decide()'s forced-compact arm, which runs on
-        # dispatched wakes only.
+        # Every permanent rejection parks without fresh input. A healthy new
+        # chat can try again after the cause is corrected.
         if claim_will_idle(state):
             drain = build_attach_drain(state, ctx)
             if drain is not None:
