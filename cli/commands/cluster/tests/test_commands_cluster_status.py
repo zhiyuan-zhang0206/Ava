@@ -99,7 +99,7 @@ def test_cmd_cluster_status_renders_role_column_without_a_pin_verdict(
             running_sha="abc1234def",
         ),
         _machine_row(
-            name="wsl",
+            name="runner-a",
             serve_gateway=False,
             serve_agent_runner=True,
             head_sha="999888777",
@@ -114,9 +114,9 @@ def test_cmd_cluster_status_renders_role_column_without_a_pin_verdict(
     assert "pin" not in header and "code" in header
     assert "✓" not in out and "✗" not in out
     cloud_line = next(line for line in out.splitlines() if line.startswith("cloud"))
-    wsl_line = next(line for line in out.splitlines() if line.startswith("wsl"))
+    runner_line = next(line for line in out.splitlines() if line.startswith("runner-a"))
     assert "gateway + agent-runner" in cloud_line
-    assert "agent-runner" in wsl_line and "gateway +" not in wsl_line
+    assert "agent-runner" in runner_line and "gateway +" not in runner_line
 
 
 def test_cmd_cluster_status_role_column_shows_observability_station(
@@ -342,7 +342,7 @@ def test_cmd_cluster_status_renders_online_stopped_offline(
     roster = [
         _machine_row(name="test-host", online=True, stopped_at=None),
         _machine_row(
-            name="wsl",
+            name="runner-a",
             online=False,
             paused=None,
             stopped_at=datetime(2026, 6, 1, 6, 0, tzinfo=UTC),
@@ -354,7 +354,7 @@ def test_cmd_cluster_status_renders_online_stopped_offline(
     assert rc == 0
     out = capsys.readouterr().out
     assert "test-host" in out and "online" in out
-    assert "wsl" in out and "stopped" in out
+    assert "runner-a" in out and "stopped" in out
     assert "corp" in out and "offline" in out
 
 
@@ -374,7 +374,7 @@ def test_cmd_cluster_status_fails_fast_on_http_error(
 def test_cmd_cluster_status_without_held_hosts_has_no_banner(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _patch_roster_get(monkeypatch, [_machine_row(name="wsl")])
+    _patch_roster_get(monkeypatch, [_machine_row(name="runner-a")])
     rc = cluster_control.cmd_cluster_status()
     assert rc == 0
     assert "host left held" not in capsys.readouterr().out
@@ -410,7 +410,7 @@ def test_pause_names_what_a_paused_machine_is_hidden_from(
             "reassigned_tasks": 0,
         },
     )
-    assert cluster_control.cmd_cluster_pause("wsl") == 0
+    assert cluster_control.cmd_cluster_pause("runner-a") == 0
     out = capsys.readouterr().out
     assert "hidden from roster/probe/fan-out/spawn until resumed" in out
     assert "rollout" not in out
@@ -419,10 +419,10 @@ def test_pause_names_what_a_paused_machine_is_hidden_from(
 def test_resume_names_what_is_restored(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _post_returns(monkeypatch, {"name": "wsl", "resumed": True})
-    assert cluster_control.cmd_cluster_resume("wsl") == 0
+    _post_returns(monkeypatch, {"name": "runner-a", "resumed": True})
+    assert cluster_control.cmd_cluster_resume("runner-a") == 0
     out = capsys.readouterr().out
-    assert "wsl: resumed — probing / roster / fan-out / spawn restored" in out
+    assert "runner-a: resumed — probing / roster / fan-out / spawn restored" in out
     assert "rollout" not in out
 
 
@@ -430,5 +430,5 @@ def test_unmark_staging_names_the_fan_out_target_set(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _post_returns(monkeypatch, {"deleted": True})
-    assert cluster_control.cmd_cluster_mark_staging("wsl", is_staging=False) == 0
-    assert capsys.readouterr().out == "wsl: unmarked staging (now a fan-out target)\n"
+    assert cluster_control.cmd_cluster_mark_staging("runner-a", is_staging=False) == 0
+    assert capsys.readouterr().out == "runner-a: unmarked staging (now a fan-out target)\n"

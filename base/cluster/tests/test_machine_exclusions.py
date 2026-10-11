@@ -47,10 +47,10 @@ def test_the_pause_latch_outranks_a_stop_on_the_same_row(db_conn: psycopg.Connec
     operator exit (`ava cluster resume`), so it is the one reported."""
     db_conn.execute(
         "INSERT INTO machines (name, paused_at, stopped_at) "
-        "VALUES ('win', now() - interval '2 hours', now())"
+        "VALUES ('runner-a', now() - interval '2 hours', now())"
     )
     db_conn.commit()
 
     assert [
         (name, reason) for name, reason, _s in machine_exclusions.list_excluded_machines(_db())
-    ] == [("win", "paused")]
+    ] == [("runner-a", "paused")]

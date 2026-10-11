@@ -23,7 +23,7 @@ from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import StatusCache
 from ops.cluster import rpc as cluster_rpc
 
-_OPS_URL = "http://wsl:18121"
+_OPS_URL = "http://runner-a:18121"
 
 
 class _RemoteProbeResults(dict[str, tuple[bool, bool | None]]):
@@ -129,10 +129,10 @@ def _assert_remote_machine_rows(by_name: dict[str, dict[str, Any]]) -> None:
     assert by_name["test-host"]["paused"] is False
     assert by_name["test-host"]["serve_gateway"] is False
     assert by_name["test-host"]["serve_agent_runner"] is True
-    assert by_name["wsl-test"]["online"] is False
-    assert by_name["wsl-test"]["paused"] is None
-    assert by_name["wsl-test"]["serve_gateway"] is False
-    assert by_name["wsl-test"]["serve_agent_runner"] is True
+    assert by_name["runner-test"]["online"] is False
+    assert by_name["runner-test"]["paused"] is None
+    assert by_name["runner-test"]["serve_gateway"] is False
+    assert by_name["runner-test"]["serve_agent_runner"] is True
 
 
 class TestClusterPanel:
@@ -189,9 +189,9 @@ class TestClusterPanel:
         _ = fake_flag, stub_machine_identity
         _insert_machine(db_conn, "cloud-test", "https://ava.example.com", "gateway", "central node")
         _insert_machine(db_conn, "test-host", "http://test-host:18121", "agent-runner")
-        _insert_machine(db_conn, "wsl-test", _OPS_URL, "agent-runner")
+        _insert_machine(db_conn, "runner-test", _OPS_URL, "agent-runner")
         stub_remote_probe["test-host"] = (True, False)
-        stub_remote_probe["wsl-test"] = (False, None)  # probe failed
+        stub_remote_probe["runner-test"] = (False, None)  # probe failed
 
         with TestClient(app) as client:
             r = client.get("/api/status")
@@ -243,15 +243,15 @@ class TestClusterPanel:
         pre-fix `_probe_machine(url.rstrip(...))` crashed with AttributeError
         and the outer try/except masked it as cluster.machines=[]."""
         _ = fake_flag, stub_machine_identity
-        _insert_machine(db_conn, "wsl-test", None, "agent-runner")
-        stub_remote_probe["wsl-test"] = (True, False)
+        _insert_machine(db_conn, "runner-test", None, "agent-runner")
+        stub_remote_probe["runner-test"] = (True, False)
 
         with TestClient(app) as client:
             r = client.get("/api/status")
         assert r.status_code == 200
         machines = r.json()["cluster"]["machines"]
         assert len(machines) == 1
-        assert machines[0]["name"] == "wsl-test"
+        assert machines[0]["name"] == "runner-test"
         assert machines[0]["online"] is False
         assert machines[0]["paused"] is None
         assert stub_remote_probe.calls == []
@@ -279,8 +279,8 @@ class TestClusterPanel:
         stub_remote_probe: _RemoteProbeResults,
     ) -> None:
         _ = fake_flag, stub_machine_identity
-        _insert_machine(db_conn, "wsl-test", _OPS_URL, "agent-runner")
-        stub_remote_probe["wsl-test"] = (True, False)
+        _insert_machine(db_conn, "runner-test", _OPS_URL, "agent-runner")
+        stub_remote_probe["runner-test"] = (True, False)
 
         with TestClient(app) as client:
             first = client.get("/api/status")
@@ -288,7 +288,7 @@ class TestClusterPanel:
 
         assert first.status_code == 200
         assert second.status_code == 200
-        assert stub_remote_probe.calls == ["wsl-test"]
+        assert stub_remote_probe.calls == ["runner-test"]
 
     def test_response_cache_ttl_zero_reprobes(
         self,
@@ -300,8 +300,8 @@ class TestClusterPanel:
     ) -> None:
         _ = fake_flag, stub_machine_identity
         monkeypatch.setattr("gateway.app.StatusCache", lambda: StatusCache(ttl_s=0.0))
-        _insert_machine(db_conn, "wsl-test", _OPS_URL, "agent-runner")
-        stub_remote_probe["wsl-test"] = (True, False)
+        _insert_machine(db_conn, "runner-test", _OPS_URL, "agent-runner")
+        stub_remote_probe["runner-test"] = (True, False)
 
         with TestClient(app) as client:
             first = client.get("/api/status")
@@ -309,7 +309,7 @@ class TestClusterPanel:
 
         assert first.status_code == 200
         assert second.status_code == 200
-        assert stub_remote_probe.calls == ["wsl-test", "wsl-test"]
+        assert stub_remote_probe.calls == ["runner-test", "runner-test"]
 
     def test_response_cache_keeps_retry_recovered_result(
         self,
@@ -321,7 +321,7 @@ class TestClusterPanel:
         """A transport reset recovered by the roster's retry is cached as the
         successful final verdict, not as a transient offline row."""
         _ = fake_flag, stub_machine_identity
-        _insert_machine(db_conn, "wsl-test", _OPS_URL, "agent-runner")
+        _insert_machine(db_conn, "runner-test", _OPS_URL, "agent-runner")
         calls: list[dict[str, object]] = []
 
         async def retry_aware_dispatch(**kw: object) -> dict[str, object]:
@@ -330,7 +330,7 @@ class TestClusterPanel:
             if kw["retries"] != 1:
                 raise cluster_rpc.ClusterOpUnreachable("connection reset was not retried")
             return {
-                "machine_name": "wsl-test",
+                "machine_name": "runner-test",
                 "serve_gateway": False,
                 "serve_agent_runner": True,
                 "paused": False,
@@ -372,7 +372,7 @@ class TestProbeAgentRunner:
             seen["ops_url"] = _kw.get("ops_url")
             seen["retries"] = _kw.get("retries")
             return {
-                "machine_name": "wsl",
+                "machine_name": "runner-a",
                 "serve_gateway": False,
                 "serve_agent_runner": True,
                 "paused": False,
@@ -381,7 +381,7 @@ class TestProbeAgentRunner:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
             IdentityMismatchLog(),
-            "wsl",
+            "runner-a",
             ["agent-runner"],
             _OPS_URL,
             datetime(2026, 5, 24, tzinfo=UTC),
@@ -409,7 +409,7 @@ class TestProbeAgentRunner:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", must_not_dispatch)
         row = await status_router._probe_agent_runner(
             IdentityMismatchLog(),
-            "wsl",
+            "runner-a",
             ["agent-runner"],
             None,
             datetime(2026, 5, 24, tzinfo=UTC),
@@ -446,7 +446,7 @@ class TestProbeAgentRunner:
         row = await asyncio.wait_for(
             status_router._probe_agent_runner(
                 IdentityMismatchLog(),
-                "wsl",
+                "runner-a",
                 ["agent-runner"],
                 _OPS_URL,
                 datetime(2026, 5, 24, tzinfo=UTC),
@@ -470,7 +470,7 @@ class TestProbeAgentRunner:
         stopped = datetime(2026, 5, 25, tzinfo=UTC)
         r = await status_router._probe_agent_runner(
             IdentityMismatchLog(),
-            "wsl",
+            "runner-a",
             ["agent-runner"],
             _OPS_URL,
             datetime(2026, 5, 24, tzinfo=UTC),
@@ -490,7 +490,7 @@ class TestProbeAgentRunner:
         async def fake_enqueue(*_a: object, **_kw: object) -> dict[str, object]:
             # A full status_probe response (the shape ClusterStatus.model_dump emits).
             return {
-                "machine_name": "wsl",
+                "machine_name": "runner-a",
                 "serve_gateway": False,
                 "serve_agent_runner": True,
                 "paused": True,
@@ -499,7 +499,7 @@ class TestProbeAgentRunner:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
             IdentityMismatchLog(),
-            "wsl",
+            "runner-a",
             ["agent-runner"],
             _OPS_URL,
             datetime(2026, 5, 24, tzinfo=UTC),
@@ -518,7 +518,7 @@ class TestProbeAgentRunner:
 
         async def fake_enqueue(*_a: object, **_kw: object) -> dict[str, object]:
             return {
-                "machine_name": "wsl",
+                "machine_name": "runner-a",
                 "serve_gateway": False,
                 "serve_agent_runner": True,
                 "paused": False,
@@ -528,7 +528,7 @@ class TestProbeAgentRunner:
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
             IdentityMismatchLog(),
-            "wsl",
+            "runner-a",
             ["agent-runner"],
             _OPS_URL,
             datetime(2026, 5, 24, tzinfo=UTC),
@@ -549,12 +549,12 @@ class TestProbeAgentRunner:
 
         async def fake_enqueue(*_a: object, **_kw: object) -> dict[str, object]:
             # Missing the required serve_gateway / serve_agent_runner / serve_observability_station fields.
-            return {"machine_name": "wsl", "paused": True}
+            return {"machine_name": "runner-a", "paused": True}
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         r = await status_router._probe_agent_runner(
             IdentityMismatchLog(),
-            "wsl",
+            "runner-a",
             ["agent-runner"],
             _OPS_URL,
             datetime(2026, 5, 24, tzinfo=UTC),

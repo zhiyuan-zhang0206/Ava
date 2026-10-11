@@ -346,12 +346,12 @@ class TestStatusSnapshot:
         from base.deploy.state import host_deploy_state
 
         monkeypatch.setattr(start_serving, "run_dir", lambda: fake_flag.parent)
-        set_machine_identity(role="agent-runner", name="wsl")
+        set_machine_identity(role="agent-runner", name="runner-a")
         host_deploy_state.set_posture(database, "idle")
         start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
         # unpaused
         snap = cluster_status.status_snapshot(database)
-        assert snap.machine_name == "wsl"
+        assert snap.machine_name == "runner-a"
         assert snap.serve_gateway is False
         assert snap.serve_agent_runner is True
         assert snap.paused is False
@@ -368,7 +368,7 @@ class TestStatusSnapshot:
     ) -> None:
         """status_snapshot threads the prod-source HEAD so the roster can compare
         it against the cluster pin."""
-        set_machine_identity(role="agent-runner", name="wsl")
+        set_machine_identity(role="agent-runner", name="runner-a")
         monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "abc1234")
         assert cluster_status.status_snapshot(database).head_sha == "abc1234"
 
@@ -382,7 +382,7 @@ class TestStatusSnapshot:
         own boot — distinct from head_sha (the checkout the pin verdict compares)
         so the roster can expose a node running stale code even when its checkout
         reads on-pin."""
-        set_machine_identity(role="agent-runner", name="wsl")
+        set_machine_identity(role="agent-runner", name="runner-a")
         monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: "def5678")
         assert cluster_status.status_snapshot(database).running_sha == "def5678"
 
@@ -403,7 +403,7 @@ class TestStatusSnapshot:
         saw running_sha == head_sha for a node on days-old code. The snapshot
         answers from the process, so the stale commit survives the bookmark's
         advance and the divergence every drift renderer keys on is there."""
-        set_machine_identity(role="agent-runner", name="wsl")
+        set_machine_identity(role="agent-runner", name="runner-a")
         monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: "0ld0ld0aaaa")
         monkeypatch.setattr("base.deploy.git.running_sha.get", lambda: "n3wn3w0bbbb")
         monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "n3wn3w0bbbb")
@@ -460,10 +460,12 @@ class TestClusterEndpoints:
             lambda _db, name, home: marked.append((name, home)),  # pyright: ignore[reportUnknownArgumentType]
         )
         with TestClient(app) as client:
-            r = client.post("/api/cluster/stopping", params={"machine": "wsl", "home": "~/.ava"})
+            r = client.post(
+                "/api/cluster/stopping", params={"machine": "runner-a", "home": "~/.ava"}
+            )
         assert r.status_code == 200
-        assert r.json() == {"machine": "wsl"}
-        assert marked == [("wsl", "~/.ava")]
+        assert r.json() == {"machine": "runner-a"}
+        assert marked == [("runner-a", "~/.ava")]
 
 
 # ─── admin events query ──────────────────────────────────────────────────────
