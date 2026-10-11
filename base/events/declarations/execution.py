@@ -148,7 +148,6 @@ EVENTS: dict[str, EventSpec] = {
     "code": telemetry_event(
         "code", "LLM generated code block", payload=ExecPayload, tier="noise", persist=True
     ),
-    # label-fallback events kept in the registry
     "text": telemetry_event("text", "LLM text output", tier="noise"),
     "syntax_fix": telemetry_event(
         "syntax_fix",

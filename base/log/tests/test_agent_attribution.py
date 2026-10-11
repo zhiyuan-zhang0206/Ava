@@ -72,7 +72,7 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
     with (
         mock.patch.object(slog.logger, "add"),
         mock.patch.object(slog, "_add_file_sink"),
-        mock.patch.object(slog, "add_postgres_sink") as init_pipeline,
+        mock.patch.object(slog, "add_event_sink") as init_pipeline,
         mock.patch.object(slog, "_install_stdlib_intercept"),
         mock.patch.object(slog.loaded_commit, "freeze") as freeze,
         mock.patch.object(slog.loaded_commit, "get", return_value="loaded-generation"),
@@ -107,7 +107,7 @@ def test_owned_gateway_boot_uses_loaded_image_and_original_producer(
     with (
         mock.patch.object(slog.logger, "add"),
         mock.patch.object(slog, "_add_file_sink"),
-        mock.patch.object(slog, "add_postgres_sink") as init_pipeline,
+        mock.patch.object(slog, "add_event_sink") as init_pipeline,
         mock.patch.object(slog, "_install_stdlib_intercept"),
         mock.patch.object(slog.loaded_commit, "freeze") as freeze,
         mock.patch.object(slog.loaded_commit, "get") as read_late_version,

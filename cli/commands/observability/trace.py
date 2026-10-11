@@ -28,9 +28,6 @@ Two modes:
   stamp (name stamp, or mtime for the unstamped active file) falls in the
   range, ignoring the watermark. Span ingestion is idempotent by span id, so
   re-shipping an already-shipped window is safe.
-
-Legacy `spans-YYYYMMDD-<pid>.jsonl` files (the pre-#1266 agent-side mirror)
-are still read — a host upgraded mid-window replays its old files too.
 """
 
 from __future__ import annotations
@@ -108,9 +105,9 @@ def _require_ship_config() -> _ShipTarget:
 
 
 def _file_day(path: Path) -> date:
-    """Day stamp of a mirror file: legacy `spans-YYYYMMDD-<pid>.jsonl` names,
-    the collector's rotated `spans-<ISO-timestamp>(-size|-time)?.jsonl` names
-    (`.gz` suffix tolerated), else the file's mtime (the active `spans.jsonl`
+    """Day stamp of a mirror file: the collector's rotated
+    `spans-<ISO-timestamp>-(size|time).jsonl` names (`.gz` suffix tolerated),
+    else the file's mtime (the active `spans.jsonl`
     carries no stamp — its content is today's)."""
     from base.telemetry.trace_mirror import mirror_day
 
@@ -118,7 +115,7 @@ def _file_day(path: Path) -> date:
     if day is not None:
         return day
     # The active file carries no stamp; its day is the mtime in UTC — the same
-    # clock the legacy day stamps and --since/--until use.
+    # clock the name day stamps and --since/--until use.
     return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).date()
 
 
@@ -288,10 +285,9 @@ def cmd_trace_ship(*, since: str | None, until: str | None, dry_run: bool) -> in
 
     from base.telemetry.trace_mirror import mirror_sort_key
 
-    # Active `spans.jsonl` + rotated `spans-<ts>(-size|-time)?.jsonl` + legacy
-    # `spans-YYYYMMDD-<pid>.jsonl` + gzipped old segments (`*.jsonl.gz` — the
-    # agent-side compression pass; read transparently in `_ship_files`);
-    # oldest first, the active file last.
+    # Active `spans.jsonl` + rotated `spans-<ts>-(size|time).jsonl` + gzipped
+    # old segments (`*.jsonl.gz` — the agent-side compression pass; read
+    # transparently in `_ship_files`); oldest first, the active file last.
     files = sorted(traces_dir().glob("spans*.jsonl*"), key=mirror_sort_key)
     if windowed:
         files = [p for p in files if lo <= _file_day(p) <= hi]

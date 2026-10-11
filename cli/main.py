@@ -256,7 +256,7 @@ def main(
         telemetry = sys.modules.get("base.telemetry")
         if telemetry is not None:
             with telemetry.failure_isolated("CLI telemetry drain"):
-                telemetry.sync(timeout=5.0, bounded=True)
+                telemetry.sync(timeout=5.0)
 
 
 if __name__ == "__main__":

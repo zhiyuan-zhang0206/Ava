@@ -157,7 +157,7 @@ def test_metrics_filters_inspector_output(
         _metric(name="insp_metric"),
         _metric(
             name="grafana_only",
-            query="SELECT count(*) FROM events WHERE event_name = {event_name} AND category = {category}",
+            query="SELECT count(*) FROM agents_meta WHERE event_name = {event_name} AND category = {category}",
             output=["grafana"],
         ),
     )
@@ -197,7 +197,7 @@ def test_metrics_macro_translation_unit() -> None:
     output."""
     sql = _translate_macros(
         "SELECT $__timeGroup(ts, $__interval) AS time, count(*) "
-        "FROM events WHERE event_name = 'k' AND $__timeFilter(ts) "
+        "FROM agents_meta WHERE event_name = 'k' AND $__timeFilter(ts) "
         "AND $__timeFilter(ts, 'extra')"
     )
     # the double AT TIME ZONE round-trip truncates in UTC while keeping the
@@ -207,7 +207,7 @@ def test_metrics_macro_translation_unit() -> None:
     assert "$__" not in sql
     # a weird argument inside the macro parens is discarded, not echoed
     sql2 = _translate_macros(
-        "SELECT count(*) FROM events WHERE $__timeFilter(attributes->>'model')"
+        "SELECT count(*) FROM agents_meta WHERE $__timeFilter(attributes->>'model')"
     )
     assert "attributes" not in sql2
     assert sql2.count("$__timeFilter") == 0
@@ -220,13 +220,13 @@ def test_metrics_macro_translation_unit() -> None:
     "tampered",
     [
         # DML sneaked past the generator
-        "SELECT count(*) FROM events; DELETE FROM events",
+        "SELECT count(*) FROM agents_meta; DELETE FROM agents_meta",
         # different FROM target
         "SELECT count(*) FROM agents WHERE id = 1",
         # denied function call
-        "SELECT pg_sleep(1) FROM events",
+        "SELECT pg_sleep(1) FROM agents_meta",
         # comment-injected
-        "SELECT count(*) FROM events -- WHERE event_name = 'x'",
+        "SELECT count(*) FROM agents_meta -- WHERE event_name = 'x'",
     ],
 )
 def test_metrics_tampered_query_500(

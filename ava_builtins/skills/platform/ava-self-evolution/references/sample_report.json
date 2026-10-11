@@ -57,7 +57,7 @@
       "count": 12,
       "failed": 5,
       "fumbled": 7,
-      "top_signals": ["ended-on-exec-fail", "reprompts=3", "breached"],
+      "top_signals": ["ended-on-exec-fail", "reprompts=3"],
       "runs": [
         {"agent_id": 1205, "label": "failed", "task_snippet": "Check today's emails and summarize..."},
         {"agent_id": 1208, "label": "failed", "task_snippet": "Send reply to recent thread about..."},
@@ -85,7 +85,7 @@
       "count": 4,
       "failed": 1,
       "fumbled": 3,
-      "top_signals": ["ended-on-exec-fail", "breached"],
+      "top_signals": ["ended-on-exec-fail", "exec_failed=2"],
       "runs": [
         {"agent_id": 1401, "label": "failed", "task_snippet": "Analyze recent logs for error patterns..."},
         {"agent_id": 1404, "label": "fumbled", "task_snippet": "Generate weekly activity summary..."}

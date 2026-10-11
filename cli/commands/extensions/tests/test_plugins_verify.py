@@ -30,7 +30,6 @@ def _isolate_plugins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setattr(paths, "plugins_config_path", lambda: tmp_path / "plugins.json")
     before = {k: v for k, v in sys.modules.items() if k.startswith(_PLUGIN_MODULE_PREFIXES)}
     yield
     for key in [

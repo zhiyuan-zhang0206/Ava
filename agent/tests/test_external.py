@@ -367,15 +367,15 @@ def test_close_delivers_telemetry_when_plugin_flush_fails(
 ) -> None:
     """The close finally path must run delivery as well as detachment."""
     attachment = external.attach("lease")
-    delivered: list[tuple[bool, int | None]] = []
+    delivered: list[int | None] = []
 
     def fail_flush() -> None:
         raise RuntimeError("plugin journal unavailable")
 
     monkeypatch.setattr(attachment, "flush", fail_flush)
 
-    def sync_delivery(*, bounded: bool) -> telemetry.DrainResult:
-        delivered.append((bounded, _borrowed_agent_id()))
+    def sync_delivery() -> telemetry.DrainResult:
+        delivered.append(_borrowed_agent_id())
         return telemetry.DrainResult(telemetry.DrainStatus.COMPLETED, telemetry.DrainPhase.DRAIN)
 
     monkeypatch.setattr(telemetry, "sync", sync_delivery)
@@ -383,7 +383,7 @@ def test_close_delivers_telemetry_when_plugin_flush_fails(
     with pytest.raises(RuntimeError, match="plugin journal unavailable"):
         attachment.close()
 
-    assert delivered == [(True, 405)]
+    assert delivered == [405]
     assert _borrowed_agent_id() is None
 
 
@@ -613,8 +613,7 @@ def test_close_reports_unfinished_ordinary_telemetry(
 ) -> None:
     from base.log import logger
 
-    def unfinished(*, bounded: bool) -> telemetry.DrainResult:
-        assert bounded
+    def unfinished() -> telemetry.DrainResult:
         return telemetry.DrainResult(telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.DRAIN)
 
     monkeypatch.setattr(telemetry, "sync", unfinished)

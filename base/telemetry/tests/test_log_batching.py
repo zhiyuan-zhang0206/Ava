@@ -4,7 +4,7 @@ Hermetic — no Postgres. The point is the *shape* of the write path, which is
 what went missing before: `314708af` added batching to the loguru Postgres
 sink, `e92f6e82` removed it three hours later while replaying a stale branch,
 and the whole suite stayed green for three weeks because
-`base/agents/tests/test_log_sink.py` registered `_postgres_sink` directly with
+`base/agents/tests/test_log_sink.py` registered `_event_sink` directly with
 `enqueue=False` and never touched `_ThreadedPostgresSink` at all.
 
 The batching now lives in the unified emitter (`base.telemetry`), which the
@@ -213,17 +213,17 @@ def test_nothing_is_dropped_when_the_drain_keeps_up() -> None:
 
 
 def test_production_loguru_sink_routes_through_the_emitter() -> None:
-    """`_postgres_sink` must enqueue into the emitter (which batches), not write
+    """`_event_sink` must enqueue into the emitter (which batches), not write
     straight to the DB per record — the regression that deleted batching before.
     """
 
     import inspect
 
-    src = inspect.getsource(slog._postgres_sink)
+    src = inspect.getsource(slog._event_sink)
     assert "telemetry.emit" in src
-    wiring = inspect.getsource(slog.add_postgres_sink)
+    wiring = inspect.getsource(slog.add_event_sink)
     assert "telemetry.init_telemetry" in wiring
-    assert "_postgres_sink" in wiring  # the adapter is the loguru handler
+    assert "_event_sink" in wiring  # the adapter is the loguru handler
 
 
 def _rec(extra: dict[str, Any]) -> Any:
@@ -231,8 +231,8 @@ def _rec(extra: dict[str, Any]) -> Any:
     return {"extra": extra}
 
 
-def test_add_postgres_sink_registers_at_most_once() -> None:
-    """Two `add_postgres_sink` calls (exec_child's env + request init paths)
+def test_add_event_sink_registers_at_most_once() -> None:
+    """Two `add_event_sink` calls (exec_child's env + request init paths)
     must not double-register the adapter: one loguru record lands exactly one
     mirror row. The 2026-08-24 double registration wrote every post-init
     record twice — byte-identical rows, same surrogate id — into the JSONL
@@ -241,8 +241,8 @@ def test_add_postgres_sink_registers_at_most_once() -> None:
 
     from base.log import logger as _g
 
-    first = slog.add_postgres_sink(process="test-dup-guard")
-    second = slog.add_postgres_sink(process="test-dup-guard")
+    first = slog.add_event_sink(process="test-dup-guard")
+    second = slog.add_event_sink(process="test-dup-guard")
     assert second == first, "repeat registration must return the live sink id"
 
     marker = f"dup-guard-{time.time_ns()}"
@@ -317,10 +317,9 @@ def test_event_pipeline_filter_keeps_warning_and_named_events() -> None:
     assert f(_rec_level({"event": "log"}, "WARNING"))
     assert f(_rec_level({"event": "log"}, "ERROR"))
     assert f(_rec_level({"event": "log"}, "CRITICAL"))
-    # named events (node_exit, llm_usage) and label-alias events are not bare logs
+    # named events (node_exit, llm_usage) are not bare logs
     assert f(_rec_level({"event": "node_exit"}))
     assert f(_rec_level({"event": "llm_usage"}))
-    assert f(_rec_level({"label": "exec"}))
     # a record without a level passes unsampled (test-records / tolerant path)
     assert f(_rec({}))
 
