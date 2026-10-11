@@ -9,7 +9,7 @@ tags:
 
 # Spawn Boundary: Presets and the Fork Config Rule
 
-`POST /api/agents` resolves a preset named inside the config overlay
+`POST /api/keyed/v1/agents` resolves a preset named inside the config overlay
 (`config["preset"]`) at the spawn boundary: the preset's stored config is the
 base and the explicit fields win per key; the row stores the RESOLVED overlay
 plus `agents_meta.preset_name` for display (diff semantics in the inspector).
@@ -50,15 +50,15 @@ immutable receipt and reconciles only that attempt's wake; replay cannot rotate
 another attempt or insert another inbound. The old unversioned retry route is
 removed. See [[gateway/agents/docs/launch-retry.ava.okf.md]]. Admission racing a failed
 forward wins and produces an accepted receipt. A failure-state DB read/write
-outage still returns the committed ID with an unknown state. A caller may supply `Idempotency-Key` to `POST /api/agents`. The immutable
-request hash and key commit on the agent row with the fork marker and first
-prompt. Concurrent retries serialize the same birth, return its existing ID,
-and recover a still-unadmitted launch using its committed attempt and config.
-Receipt lookup precedes mutable model/preset/fork validation. Reusing the key
-with changed request data returns 409; a keyless create still creates a new
-identity. `Idempotency-Scope: principal-v1` uses the existing authenticated
-principal namespace; legacy raw keys remain global. Creation identities remain
-with the agent row and are never pruned. A replay never
+outage still returns the committed ID with an unknown state. Every creation
+carries an `Idempotency-Key` and `Idempotency-Scope: principal-v1`, which binds
+the key to the authenticated principal namespace. The immutable request hash and
+key commit as an `agent_creation_snapshots` record with the agent row, the fork
+marker and first prompt. Concurrent retries serialize the same birth, return its
+existing ID, and recover a still-unadmitted launch using its committed attempt
+and config. Receipt lookup precedes mutable model/preset/fork validation.
+Reusing the key with changed request data returns 409. Creation snapshots are
+never pruned. A replay never
 launches an agent that has since been admitted or terminated. The SDK supplies
 one key per creation call and reuses it for connect-family retries. Automatic
 retry of an ambiguous outcome requires proven gateway capability and remains

@@ -17,7 +17,6 @@ from base.agents.tasks.priority import Priority
 from gateway.agents.schemas import (
     AgentRow,
     MessageEnqueued,
-    NewThread,
     NoticeItem,
     ResolveNoticeIn,
     UserMessageIn,
@@ -136,10 +135,6 @@ def test_resolve_notice_in_strips_and_rejects_empty_reply() -> None:
     assert ResolveNoticeIn(action="answer", reply="  hi  ").reply == "hi"
     with pytest.raises(ValidationError):
         ResolveNoticeIn(action="answer", reply="   ")
-
-
-def test_new_thread_wire_shape() -> None:
-    assert json.loads(NewThread(id=42).model_dump_json()) == {"id": 42}
 
 
 def test_message_enqueued_wire_shape() -> None:

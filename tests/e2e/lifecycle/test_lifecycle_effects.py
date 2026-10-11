@@ -26,6 +26,7 @@ from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record, scratch_root
 from tests.e2e.fakes.scenarios import lifecycle_effects as world
+from tests.fixtures.gateway_config import post_spawn
 
 Call = list[dict[str, Any]]
 
@@ -64,7 +65,7 @@ def _terminate(agent_id: int) -> None:
 
 
 def _spawn_idle_agent() -> int:
-    resp = httpx.post(f"{GATEWAY_URL}/api/agents", json={"spawner": "user"}, timeout=60.0)
+    resp = post_spawn(GATEWAY_URL, {"spawner": "user"}, timeout=60.0)
     resp.raise_for_status()
     return int(resp.json()["id"])
 

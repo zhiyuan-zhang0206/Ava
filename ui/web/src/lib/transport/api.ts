@@ -536,13 +536,8 @@ export const api = {
   getAgent: (agentId: number, signal?: AbortSignal): Promise<AgentRow> =>
     f(`/api/agents/${agentId}`, { signal }).then(ok<WireAgentRow>).then(projectAgentStatus),
 
-  spawnAgent: (req: SpawnAgentRequest = {}, operationKey: string = newOperationKey()): Promise<SpawnedAgent> => {
-    if (!operationKey || operationKey.length > 128) throw new Error("idempotency key must contain 1 to 128 characters");
-    const init = POST_JSON(req);
-    const headers = new Headers(init.headers);
-    headers.set("Idempotency-Key", operationKey);
-    return f("/api/agents", { ...init, headers }).then(ok<SpawnedAgent>);
-  },
+  spawnAgent: (req: SpawnAgentRequest = {}, operationKey: string = newOperationKey()): Promise<SpawnedAgent> =>
+    f("/api/keyed/v1/agents", keyedJson(req, operationKey)).then(ok<SpawnedAgent>),
   retryAgentLaunch: (agentId: number, priorAttempt: string, operationKey: string): Promise<RetryLaunchAccepted> =>
     f(`/api/keyed/v1/agents/${agentId}/retry-launch`, keyedJson({ expected_prior_attempt_id: priorAttempt }, operationKey))
       .then(ok<RetryLaunchAccepted>),

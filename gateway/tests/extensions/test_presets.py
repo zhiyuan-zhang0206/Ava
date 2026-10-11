@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from tests.fixtures.gateway_config import spawn_via_http
 
 
 def _create(client: TestClient, **kw: object):
@@ -174,14 +175,14 @@ class TestSpawnWithPreset:
     ) -> None:
         with TestClient(app) as client:
             before = db_conn.execute("SELECT count(*) FROM agents").fetchone()
-            result = client.post("/api/agents", json={"spawner": "user", "preset": preset})
+            result = spawn_via_http(client, {"spawner": "user", "preset": preset})
         assert result.status_code == 422
         assert result.json()["errors"][0]["type"] == "extra_forbidden"
         assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == before
 
     def test_unknown_preset_in_config_400(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            r = client.post("/api/agents", json={"spawner": "user", "config": {"preset": "ghost"}})
+            r = spawn_via_http(client, {"spawner": "user", "config": {"preset": "ghost"}})
         assert r.status_code == 400
         assert "ghost" in r.json()["detail"]
 
@@ -204,9 +205,9 @@ class TestSpawnWithPreset:
             # An available id on purpose — a withdrawn override would settle to
             # its registered fallback at the write side (task #4306, its own
             # coverage); this test pins the preset merge.
-            r = client.post(
-                "/api/agents",
-                json={
+            r = spawn_via_http(
+                client,
+                {
                     "spawner": "user",
                     "config": {"preset": "coder", "llm_model": "deepseek-flash"},
                 },
@@ -225,7 +226,7 @@ class TestSpawnWithPreset:
     ) -> None:
         with TestClient(app) as client:
             _create(client, name="coder", label="Coder", config={"llm_model": "claude-sonnet-5"})
-            r = client.post("/api/agents", json={"spawner": "user", "config": {"preset": "coder"}})
+            r = spawn_via_http(client, {"spawner": "user", "config": {"preset": "coder"}})
             assert r.status_code == 201, r.text
             agent_id = r.json()["id"]
         overlay, preset_name = self._row(db_conn, agent_id)
@@ -234,6 +235,6 @@ class TestSpawnWithPreset:
 
     def test_preset_key_must_be_nonempty_string(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            r = client.post("/api/agents", json={"spawner": "user", "config": {"preset": ""}})
+            r = spawn_via_http(client, {"spawner": "user", "config": {"preset": ""}})
         assert r.status_code == 400
         assert "non-empty string" in r.json()["detail"]

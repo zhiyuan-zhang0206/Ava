@@ -155,26 +155,6 @@ def test_identity_arguments_cannot_override_verified_client(
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (0,)
 
 
-def test_missing_snapshot_fails_closed_without_repeating_preflight(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with TestClient(app) as client:
-        token = _create_token(client)
-        original = _tool_result(_tool_call(client, token, TOOL, ARGS))
-        db_conn.execute("DELETE FROM agent_creation_snapshots")
-        db_conn.commit()
-
-        def no_preflight(*args: object, **kwargs: object) -> None:
-            raise AssertionError("missing snapshot must not authorize another birth")
-
-        monkeypatch.setattr(router, "spawn_prechecks_blocking", no_preflight)
-        response = _tool_call(client, token, TOOL, ARGS)
-    assert response["result"].get("isError") is True
-    assert "snapshot is unavailable" in _tool_result(response)
-    assert db_conn.execute("SELECT id FROM agents").fetchall() == [(original["id"],)]
-    assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
-
-
 def test_revoked_credential_cannot_recover_original_birth(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
         credential = client.post(

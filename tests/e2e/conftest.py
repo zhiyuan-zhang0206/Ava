@@ -72,6 +72,7 @@ from tests.e2e.process_support import (
     wait_for_port,
 )
 from tests.e2e.process_support import pty_sessions_proc as pty_sessions_proc
+from tests.fixtures.gateway_config import post_spawn
 
 # ---- module-level overrides (run after top-level conftest) ---------------------
 
@@ -650,7 +651,7 @@ def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None
 def ops_proc(gateway_proc: str) -> Iterator[None]:
     """services/agent_runner/agent_ops/daemon.py — the agent-runner ops server.
 
-    Spawn is HTTP-uniform: `POST /api/agents` creates the row on the gateway and
+    Spawn is HTTP-uniform: `POST /api/keyed/v1/agents` creates the row on the gateway and
     forwards the launch to this host's ops server over localhost (no in-process
     shortcut), which dispatches launch_agent_op. So the e2e single box must run
     the ops daemon (like a real `ava start`) AND have its machine registered
@@ -689,7 +690,7 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
 @pytest.fixture
 def spawned_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> Iterator[int]:
     """Allocate an idle agent via the gateway; the host runs it when work arrives."""
-    resp = httpx.post(f"{GATEWAY_URL}/api/agents", json={"spawner": "user"}, timeout=30.0)
+    resp = post_spawn(GATEWAY_URL, {"spawner": "user"}, timeout=30.0)
     resp.raise_for_status()
     agent_id = int(resp.json()["id"])
 

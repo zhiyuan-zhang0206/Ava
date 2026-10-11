@@ -53,7 +53,7 @@ def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:
     stack and skip that many checkpoints so the fork starts from the last
     meaningful turn — the timeline's last message, not a heartbeat response.
 
-    Used by gateway `POST /api/agents` fork path — resolves "latest" and
+    Used by the gateway keyed creation fork path — resolves "latest" and
     passes an explicit ckpt id into `create_agent_row(fork_checkpoint=...)` for the
     actual copy. The SDK no longer calls this function (SDK uses HTTP and lets
     the gateway resolve).
@@ -122,7 +122,6 @@ def create_agent_row(
     fork_tail_skills: list[str] | None = None,
     creation_key: str | None = None,
     creation_request_hash: str | None = None,
-    immutable_creation_snapshot: bool = False,
 ) -> tuple[int, dict[str, object] | None, int | None, UUID]:
     """Create the agent row: agents + agents_meta + fork copy, NO launch.
 
@@ -182,11 +181,11 @@ def create_agent_row(
         prompt: optional chat message committed with the row;
             paired with prompt_source (both None or both given).
         prompt_source: provenance tag for `prompt` ('agent:N' / 'user').
-        creation_key: optional scoped identity for one creation intent.
+        creation_key: optional scoped identity for one creation intent; a keyed
+            birth retains its immutable creation snapshot. No key = no creation
+            identity.
         creation_request_hash: immutable caller request digest paired with the key;
             same-key races return the previously committed agent identity.
-
-        immutable_creation_snapshot: retain the original guarded draft birth and prompt.
 
     Returns:
         (new agent_id, birth_config dict, chat inbound id, launch attempt id).
@@ -214,10 +213,9 @@ def create_agent_row(
             fork_tail_skills=fork_tail_skills,
             creation_key=creation_key,
             creation_request_hash=creation_request_hash,
-            immutable_creation_snapshot=immutable_creation_snapshot,
         )
         if birth.birth_event is None:
-            return birth.legacy_result()
+            return birth.row_result()
         conn.commit()
         _announce_created_agent(
             db,
@@ -235,4 +233,4 @@ def create_agent_row(
         forked_from=fork_from,
         machine=machine,
     )
-    return birth.legacy_result()
+    return birth.row_result()

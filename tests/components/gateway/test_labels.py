@@ -28,6 +28,7 @@ from gateway.app import app
 from services.derived.labeler.labeler import _normalize as _normalize_to
 from services.derived.labeler.labeler import generate_label_async
 from services.derived.labeler.tests.slices import labeler_config, labeler_db
+from tests.fixtures.gateway_config import spawn_via_http
 
 
 def _normalize(raw: str) -> str:
@@ -683,9 +684,8 @@ class TestSpawnAgentSchedulesLabelGeneration:
         monkeypatch.setattr(aredis.Redis, "publish", _noop_publish, raising=False)
 
         with TestClient(app) as client:
-            resp = client.post(
-                "/api/agents",
-                json={"prompt": "\u8fc1\u79fb\u6570\u636e\u5e93 schema", "prompt_source": "user"},
+            resp = spawn_via_http(
+                client, {"prompt": "\u8fc1\u79fb\u6570\u636e\u5e93 schema", "prompt_source": "user"}
             )
         assert resp.status_code == 201
         new_id = resp.json()["id"]
@@ -703,7 +703,7 @@ class TestSpawnAgentSchedulesLabelGeneration:
         monkeypatch.setattr(labels_module, "build_chat_model", _no_llm)
 
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={})
+            resp = spawn_via_http(client, {})
         assert resp.status_code == 201
         new_id = resp.json()["id"]
         assert _label_of(db_conn, new_id) is None
