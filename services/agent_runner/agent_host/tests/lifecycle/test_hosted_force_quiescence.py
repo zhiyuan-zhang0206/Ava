@@ -98,6 +98,24 @@ def _observed_host(
     return host, errors
 
 
+def _hold_pump_settlement(patch: pytest.MonkeyPatch) -> asyncio.Event:
+    """Park the host pump's quiescent observation until the returned event is set.
+
+    The host resolves `original_host_force` at call time, so wrapping the module
+    attribute holds only the pump's settlement; the cancel route's validation call
+    (not quiescent) passes straight through.
+    """
+    gate = asyncio.Event()
+
+    async def held(*args: Any, **kwargs: Any) -> bool:
+        if kwargs.get("quiescent"):
+            await gate.wait()
+        return await original_host_force(*args, **kwargs)
+
+    patch.setattr("base.agents.incarnation.hosted_force.original_host_force", held)
+    return gate
+
+
 async def _assert_pending_force(
     conn: psycopg.Connection, pool: AsyncConnectionPool, agent_id: int, command: int, chat: int
 ) -> None:
@@ -228,6 +246,10 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
     graph.ainvoke = AsyncMock(side_effect=graph_return)
     host, errors = _observed_host(aops_pool, graph, monkeypatch, model_catalog=model_catalog)
     monkeypatch.setattr("services.agent_runner.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S", 0.05)
+    # Cancellation really ends exec work (it kills the child), so how long the
+    # pump stays unsettled after the cancel races the unwind bound. Hold the
+    # pump's settlement open instead, so the pending window is deterministic.
+    settlement_gate = _hold_pump_settlement(monkeypatch)
     scheduler = TurnScheduler(host.run_turn)
     scheduler.wake(agent_id)
     try:
@@ -242,10 +264,13 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
         chat = _insert(db_conn, agent_id)
         payload = json.dumps({"agent_id": agent_id, "command_id": command}).encode()
         status, response, _ = await cancel_turn_route(scheduler, host)(payload)
-        assert status == 200
-        if not json.loads(response)["cancelled"]:
-            assert agent_id in scheduler.active_agents
-            await _assert_pending_force(db_conn, aops_pool, agent_id, command, chat)
+        assert (status, json.loads(response), agent_id in scheduler.active_agents) == (
+            200,
+            {"cancelled": False},
+            True,
+        )
+        await _assert_pending_force(db_conn, aops_pool, agent_id, command, chat)
+        settlement_gate.set()
         release.set()
         release_file.touch()
         async with asyncio.timeout(10):
@@ -267,6 +292,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
         )
         assert calls == 2
     finally:
+        settlement_gate.set()
         release.set()
         release_file.touch()
         successor_release.set()
