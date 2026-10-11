@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from agent.extensions._discovery import enabled_plugin_dirs, pkg_of
 from base.packages.plugins import enable_config
 from base.packages.plugins.contributions import Contribution
 from base.packages.plugins.manifest import CONTRIBUTION_KEYS, PluginManifest, load_manifest
@@ -399,18 +400,17 @@ def _data_records() -> dict[str, tuple[Contribution, ...]]:
     Loaded here only to be described — the processes that serve these surfaces (the gateway, the
     Grafana supply) load them on their own, into their own registries.
     """
-    from agent.extensions import _enabled_plugin_dirs, _pkg_of
     from ava.sdk_surface.plugin_loader import safe_load_plugin_module
     from base.packages.plugins import data_registry
 
     records: dict[str, tuple[Contribution, ...]] = {}
-    for name, directory in _enabled_plugin_dirs():
+    for name, directory in enabled_plugin_dirs():
         found: list[Contribution] = []
         for face in ("metrics", "inspector", "provider"):
             path = directory / f"{face}.py"
             if not path.is_file():
                 continue
-            module = safe_load_plugin_module(path, name=name, pkg=_pkg_of(directory), module=face)
+            module = safe_load_plugin_module(path, name=name, pkg=pkg_of(directory), module=face)
             if module is None:
                 continue
             declared = data_registry.load_declaration(name, lambda module=module: module)

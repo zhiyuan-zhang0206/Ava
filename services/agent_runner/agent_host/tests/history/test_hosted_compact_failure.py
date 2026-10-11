@@ -19,7 +19,7 @@ from redis.asyncio.client import PubSub
 from agent import state as states
 from agent.graph.claim.node import claim_node
 from agent.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
-from agent.impersonation import flush_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.tests.claim.test_inbound_ownership import agent_row
 from base.agents.context import AvaContext

@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import empty_checkpoint
 from psycopg_pool import AsyncConnectionPool, PoolClosed
 
-from agent.impersonation import flush_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from base.config import settings
 from base.log import logger
 from services.agent_runner.agent_host.daemon import _build_checkpointer

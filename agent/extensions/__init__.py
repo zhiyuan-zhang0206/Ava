@@ -38,7 +38,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from base import paths
+from agent.extensions._discovery import (
+    FACE_MODULE,
+    SURFACE_MODULE,
+    discovered_and_config,
+    enabled_plugin_dirs,
+    pkg_of,
+)
+from agent.extensions.registry import ALL_FACES, SURFACE_FACES, build_registry
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
@@ -46,48 +53,6 @@ from base.packages.plugins import enable_config as plugins_cfg
 from base.packages.plugins import load_report
 from base.packages.plugins.config_face import CONFIG_FACE
 from base.packages.plugins.extensions import ExtensionRegistry
-
-SURFACE_MODULE = "plugin"
-FACE_MODULE = "agent_runtime"
-
-
-def _pkg_of(plugin_dir: Path) -> str:
-    """The dotted package a plugin's modules load under (builtin vs external)."""
-    repo_dir = str(paths.repo_plugins_dir())
-    return "ava_builtins.plugins" if repo_dir in str(plugin_dir.resolve()) else "plugins"
-
-
-def _discovered_and_config(
-    report: load_report.Reporter | None = None,
-) -> tuple[dict[str, Path], plugins_cfg.PluginsConfig]:
-    """Discover plugins + read the enable config, fail-soft on dangling entries.
-
-    A config entry whose plugin directory is gone (interrupted upgrade, manual
-    rm) must not block the load: each dangling name is reported through the one
-    canonical reporter on each failed read via `plugins_cfg.report_dangling`
-    and treated as disabled (the same contract the loader always had —
-    2026-08-28 ava_ledger incident).
-    """
-    discovered = plugins_cfg.discover_plugins()
-    known = set(discovered)
-    try:
-        config = plugins_cfg.load(known)
-    except plugins_cfg.DanglingPlugin as exc:
-        plugins_cfg.report_dangling(exc, report)
-        config = plugins_cfg.load(known, allow_dangling=True)
-    return discovered, config
-
-
-def _enabled_plugin_dirs(
-    report: load_report.Reporter | None = None,
-) -> list[tuple[str, Path]]:
-    """(name, plugin_dir) for every enabled discovered plugin, name-sorted."""
-    discovered, config = _discovered_and_config(report)
-    return [
-        (name, discovered[name])
-        for name in sorted(config.plugins)
-        if config.plugins[name].enabled and name in discovered
-    ]
 
 
 def _load_face(
@@ -154,7 +119,6 @@ def load_extensions(
     ``catalog`` and ``authority``. Inventory-only loads supply neither; accessing
     those SDK capabilities still requires a bound owner.
     """
-    from agent.extensions.registry import ALL_FACES, SURFACE_FACES, build_registry
     from ava.sdk_surface import install as sdk_install
     from ava.sdk_surface.plugin_loader import safe_load_plugin_module
 
@@ -167,7 +131,7 @@ def load_extensions(
         if clock_factory is None:
             clock_factory = previous.clock_factory
 
-    discovered, config = _discovered_and_config(report)
+    discovered, config = discovered_and_config(report)
 
     for name in sorted(config.plugins):
         if not config.plugins[name].enabled:
@@ -177,7 +141,7 @@ def load_extensions(
         # hardest bug to chase. Assert rather than silent continue.
         assert name in discovered, f"load() invariant broken: {name} not in discovered"  # noqa: S101
         plugin_dir = discovered[name]
-        pkg = _pkg_of(plugin_dir)
+        pkg = pkg_of(plugin_dir)
         if (
             safe_load_plugin_module(plugin_dir / "plugin.py", name=name, pkg=pkg, report=report)
             is None
@@ -211,8 +175,8 @@ def load_agent_faces() -> None:
     surface has not loaded are skipped too: the surface owns the module
     identity the face imports against.
     """
-    for name, plugin_dir in _enabled_plugin_dirs():
-        pkg = _pkg_of(plugin_dir)
+    for name, plugin_dir in enabled_plugin_dirs():
+        pkg = pkg_of(plugin_dir)
         if f"{pkg}.{name}.{FACE_MODULE}" in sys.modules:
             continue
         if f"{pkg}.{name}.{SURFACE_MODULE}" not in sys.modules:

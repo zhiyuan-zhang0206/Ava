@@ -1,15 +1,13 @@
 """Cancel race for the llm node — streaming task vs durable-interrupt event.
 
-``_race_stream_vs_cancel`` races the streaming coroutine against the
+``race_stream_vs_cancel`` races the streaming coroutine against the
 ``subscribe_interrupt`` cancel event and decides which won: a cancel that
 fires first discards the partial generation and returns the halted Command
 (goto=after_exec, so claim dispatches the inbound); a completed stream
 propagates classified provider errors and returns None.
 
-Split out of ``node.py`` (Task #1004 >800-line outlier). Imports ``LlmGoto``
-from ``node.py`` (the node module owns the goto type); ``node.py`` therefore
-imports this module lazily inside ``_llm_node_impl`` to keep the import graph
-acyclic.
+Split out of ``node.py`` (Task #1004 >800-line outlier); the goto type both
+share lives in ``goto.py``.
 """
 
 from __future__ import annotations
@@ -30,10 +28,10 @@ from base.agents.context import AvaContext
 from base.events.live.projection import Cancelled
 from base.log import logger
 
-from .node import LlmGoto
+from .goto import LlmGoto
 
 
-async def _race_stream_vs_cancel(
+async def race_stream_vs_cancel(
     ctx: AvaContext,
     agent_id: int,
     stream_coro: Coroutine[Any, Any, None],
@@ -53,7 +51,7 @@ async def _race_stream_vs_cancel(
     pending row the claim node dispatches next pass.
     """
     assert ctx.event_publisher is not None, (  # noqa: S101
-        "_race_stream_vs_cancel requires ctx.event_publisher"
+        "race_stream_vs_cancel requires ctx.event_publisher"
     )
     async with subscribe_interrupt(
         ctx.ops_pool,
