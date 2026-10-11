@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from services.derived.memory_indexer import memory_search_reconcile as reconcile
+from services.derived.memory_indexer.backends.base import ChunkHit
 
 
 @pytest.fixture(autouse=True)
@@ -55,7 +56,7 @@ class _FakeBackend:
     def all_meta(self) -> dict[str, tuple[float, str, str]]:
         return {}
 
-    def search_topk(self, vector: object, k: int) -> list[str]:
+    def search_topk(self, vector: object, k: int) -> list[ChunkHit]:
         del vector, k
         return []
 

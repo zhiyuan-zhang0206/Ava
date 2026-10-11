@@ -186,7 +186,7 @@ def memory_discipline_section(slices: AgentSlices, *, catalog: ModelCatalog) -> 
 
 class _PassiveMemoryRecallHook(Hook):
     """Before an LLM turn, search the memory pool on the recent conversation and
-    inject fresh top matches as a note.
+    inject the notes that clear the score threshold as a note.
 
     No-op (returns None) when the feature is disabled, when the tail has no
     recallable inbound (only a watcher or shell wake-up), when auto-compact
@@ -232,7 +232,6 @@ class _PassiveMemoryRecallHook(Hook):
                     injected_paths=state.memory.injected_paths,
                     agent=agent,
                     context=runtime.context,
-                    log_key=runtime.context.recall_log_key,
                 ),
                 timeout=deadline,
             )

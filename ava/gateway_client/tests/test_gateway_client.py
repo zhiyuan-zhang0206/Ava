@@ -424,11 +424,18 @@ class TestTransientHttpRetry:
         """An unhandled server failure must not be retried as backend congestion."""
         from ava.gateway_client import memory_search
 
-        ok = _transient_resp(200, {"results": [{"path": "a.md", "description": "d", "tags": []}]})
+        ok = _transient_resp(
+            200,
+            {
+                "results": [
+                    {"path": "a.md", "description": "d", "tags": [], "score": 0.5, "chunk": "c"}
+                ]
+            },
+        )
         mock_client.post.side_effect = [_transient_resp(500), ok]
 
         with pytest.raises(httpx.HTTPStatusError):
-            memory_search("query", 5)
+            memory_search("query", 5, purpose="search")
         assert mock_client.post.call_count == 1
 
     @pytest.mark.usefixtures("retry_waits")
@@ -447,20 +454,58 @@ class TestTransientHttpRetry:
         mock_client.post.return_value = fail
 
         with pytest.raises(IndexerUnavailable, match="busy"):
-            gc.memory_search("query", 5)
+            gc.memory_search("query", 5, purpose="search")
         assert mock_client.post.call_count == 2
 
         # Per-attempt timeout derives from the gateway deadline + 3s margin.
         mock_client.post.side_effect = None
         mock_client.post.return_value = _transient_resp(
-            200, {"results": [{"path": "a.md", "description": "", "tags": []}]}
+            200,
+            {
+                "results": [
+                    {"path": "a.md", "description": "", "tags": [], "score": 0.5, "chunk": "c"}
+                ]
+            },
         )
-        gc.memory_search("query", 5)
+        gc.memory_search("query", 5, purpose="search")
         passed = mock_client.post.call_args.kwargs["timeout"]
         assert (
             passed.read
             == settings.services.memory_search_deadline_seconds + gc._MEMORY_SEARCH_TIMEOUT_MARGIN_S
         )
+
+    def test_memory_search_sends_the_purpose(self, mock_client: MagicMock):
+        from ava.gateway_client import memory_search
+
+        mock_client.post.return_value = _transient_resp(200, {"results": []})
+        memory_search("query", 5, purpose="recall")
+        assert mock_client.post.call_args.kwargs["json"] == {
+            "query": "query",
+            "k": 5,
+            "purpose": "recall",
+        }
+
+    def test_memory_search_maps_the_wire_result(self, mock_client: MagicMock):
+        """Every wire field lands on `MemorySearchResult`, tags as a tuple."""
+        from ava.gateway_client import MemorySearchResult, memory_search
+
+        mock_client.post.return_value = _transient_resp(
+            200,
+            {
+                "results": [
+                    {
+                        "path": "n/a.md",
+                        "description": "d",
+                        "tags": ["type/user", "x"],
+                        "score": 0.75,
+                        "chunk": "the passage",
+                    }
+                ]
+            },
+        )
+        assert memory_search("query", 5, purpose="search") == [
+            MemorySearchResult("n/a.md", "d", ("type/user", "x"), 0.75, "the passage")
+        ]
 
     @pytest.mark.usefixtures("retry_waits")
     def test_memory_search_caller_timeout_overrides_default(self, mock_client: MagicMock):
@@ -468,9 +513,14 @@ class TestTransientHttpRetry:
         from ava.gateway_client import memory_search
 
         mock_client.post.return_value = _transient_resp(
-            200, {"results": [{"path": "a.md", "description": "", "tags": []}]}
+            200,
+            {
+                "results": [
+                    {"path": "a.md", "description": "", "tags": [], "score": 0.5, "chunk": "c"}
+                ]
+            },
         )
-        memory_search("query", 5, timeout=9.0)
+        memory_search("query", 5, purpose="search", timeout=9.0)
         passed = mock_client.post.call_args.kwargs["timeout"]
         assert passed.read == 9.0
 

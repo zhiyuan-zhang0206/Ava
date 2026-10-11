@@ -44,7 +44,7 @@ def test_shipped_plugin_metrics_are_logql() -> None:
     names = {spec.name for spec in specs}
     assert {
         "ava_memory_recall_search_latency_ms",
-        "ava_memory_recall_filter_latency_ms",
+        "ava_memory_recall_injected_notes",
     } <= names
     for spec in specs:
         assert spec.query_type == "logql", f"{spec.name} must read the Loki event stream"

@@ -30,7 +30,7 @@ and standing context notes) and `recall/` (passive memory recall):
   - `node_log.py`      — node enter/exit lifecycle log + publish timeline snapshot
   - `prompt/system_prompt.py` — system prompt dynamic assembly (base + plugin contributions)
   - `prompt/capabilities.py`, `prompt/context_notes.py` — the `# Capabilities` index, standing context notes
-  - `recall/memory_recall.py` — passive memory recall (filter in `recall/_memory_filter.py`)
+  - `recall/memory_recall.py` — passive memory recall
 
 Public API is lazily re-exported via this __init__.py (PEP 562) — external
 `from agent.graph import X` callers don't need to know the submodule layout,

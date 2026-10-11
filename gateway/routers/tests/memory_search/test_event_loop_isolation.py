@@ -23,6 +23,10 @@ from gateway.routers.tests.test_memory_search import (
 from gateway.routers.tests.test_memory_search import (
     _app_db as _app_db,
 )
+from gateway.routers.tests.test_memory_search import (
+    judge as judge,
+)
+from services.derived.memory_indexer.backends.base import ChunkHit
 
 
 class TestEventLoopIsolation:
@@ -62,9 +66,11 @@ class TestEventLoopIsolation:
             def __init__(self, *args: object, **kwargs: object) -> None:
                 pass
 
-            async def search_topk_async(self, _v: object, _k: int, *, timeout: float) -> list[str]:
+            async def search_topk_async(
+                self, _v: object, _k: int, *, timeout: float
+            ) -> list[ChunkHit]:
                 assert timeout > 0  # the handler must hand the backend a real deadline
-                return [str(tmp_path / "a.md")]
+                return [ChunkHit(str(tmp_path / "a.md"), "body", 0, 0.5)]
 
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
@@ -72,7 +78,9 @@ class TestEventLoopIsolation:
             outcome: dict[str, object] = {}
 
             def _search() -> None:
-                outcome["resp"] = client.post("/api/memory/search", json={"query": "x", "k": 1})
+                outcome["resp"] = client.post(
+                    "/api/memory/search", json={"query": "x", "k": 1, "purpose": "search"}
+                )
 
             t = threading.Thread(target=_search)
             t.start()
@@ -195,8 +203,8 @@ class TestWedgedBackendReleasesPermits:
 
                 async def search_topk_async(
                     self, _v: object, _k: int, *, timeout: float
-                ) -> list[str]:
-                    return [str(tmp_path / "a.md")]
+                ) -> list[ChunkHit]:
+                    return [ChunkHit(str(tmp_path / "a.md"), "body", 0, 0.5)]
 
             monkeypatch.setattr(_factory, "get_backend", _Healthy)
             recovered = await asyncio.wait_for(_search(client), timeout=10)
@@ -225,8 +233,8 @@ class TestWedgedBackendReleasesPermits:
 
                 async def search_topk_async(
                     self, _v: object, _k: int, *, timeout: float
-                ) -> list[str]:
-                    return [str(tmp_path / "a.md")]
+                ) -> list[ChunkHit]:
+                    return [ChunkHit(str(tmp_path / "a.md"), "body", 0, 0.5)]
 
             monkeypatch.setattr(_factory, "get_backend", _Healthy)
             recovered = await asyncio.wait_for(_search(client), timeout=10)

@@ -4115,9 +4115,9 @@
      "sort": "desc"
     }
    },
-   "title": "Memory recall filter runs (per minute)",
+   "title": "Memory recall runs (per minute)",
    "type": "timeseries",
-   "description": "Recall_filter INFO events per minute (5-minute buckets / 5) \u2014 how often passive memory recall filters retrieval results for relevance (event_name='recall_filter', level='info', category='telemetry', 90d retention).",
+   "description": "Completed passive-recall passes per minute (5-minute buckets / 5) \u2014 how often recall searches the memory pool and scores the results (event_name='passive_recall', level='info', category='telemetry', 90d retention).",
    "targets": [
     {
      "datasource": {
@@ -4125,7 +4125,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" | level=\"info\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "runs"
@@ -4187,7 +4187,7 @@
    },
    "title": "Empty recall ratio",
    "type": "timeseries",
-   "description": "Share of INFO runs where filtering kept 0 notes (body 'N candidate(s) -> 0 kept') \u2014 recall-quality signal: a high share means retrieval/filtering usually judges nothing relevant (event_name='recall_filter', category='telemetry').",
+   "description": "Share of completed recall passes that injected 0 notes \u2014 recall-quality signal: a high share means no searched note clears the score threshold (or the threshold is set too high) (event_name='passive_recall', category='telemetry').",
    "targets": [
     {
      "datasource": {
@@ -4195,7 +4195,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_body =~ \".*-> 0 kept.*\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" | level=\"info\" [5m]))",
+     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" | attributes_injected=\"0\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" [5m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "empty %"
@@ -4263,9 +4263,9 @@
      "sort": "desc"
     }
    },
-   "title": "Recall filter error ratio",
+   "title": "Recall deadline skip ratio",
    "type": "timeseries",
-   "description": "Share of recall_filter WARNINGs across all runs \u2014 when the filter call fails (model error / timeout / unparseable reply) the round's recall injection is empty; a spiking rate points at the filter model or provider (event_name='recall_filter', category='telemetry').",
+   "description": "Share of recall passes that ran out of memory_recall_deadline_seconds and skipped injection for that turn \u2014 a spiking rate points at a slow search endpoint or ranking model (event_name='passive_recall', category='telemetry').",
    "targets": [
     {
      "datasource": {
@@ -4273,10 +4273,10 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" | level=\"warning\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" [5m]))",
+     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_body =~ \"skip: recall exceeded.*\" [5m])) / (sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" [5m])) + sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_body =~ \"skip: recall exceeded.*\" [5m])))",
      "refId": "A",
      "queryType": "range",
-     "legendFormat": "anomaly %"
+     "legendFormat": "skipped %"
     }
    ]
   },
@@ -4324,9 +4324,9 @@
     },
     "textMode": "auto"
    },
-   "title": "Recall filter failures (window)",
+   "title": "Recall deadline skips (window)",
    "type": "stat",
-   "description": "Total recall_filter WARNINGs in the current window \u2014 filter unavailable, an unparseable reply, or an unknown model path all leave the round without injection (event_name='recall_filter', category='telemetry').",
+   "description": "Total recall passes that ran out of their deadline in the current window \u2014 each left that turn without recall (event_name='passive_recall', category='telemetry').",
    "targets": [
     {
      "datasource": {
@@ -4334,10 +4334,10 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" | level=\"warning\" [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_body =~ \"skip: recall exceeded.*\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
-     "legendFormat": "failures"
+     "legendFormat": "skips"
     }
    ]
   },
@@ -4396,7 +4396,7 @@
    },
    "title": "Memory recall search latency",
    "type": "timeseries",
-   "description": "Average successful passive-recall semantic-search duration in milliseconds (5-minute buckets; event_name='passive_recall', category='telemetry').",
+   "description": "Average successful passive-recall search duration in milliseconds \u2014 the search request including the gateway's ranking of the retrieved chunks (5-minute buckets; event_name='passive_recall', category='telemetry').",
    "targets": [
     {
      "datasource": {
@@ -4430,7 +4430,7 @@
        }
       ]
      },
-     "unit": "ms",
+     "unit": "short",
      "custom": {
       "lineInterpolation": "smooth",
       "showPoints": "never",
@@ -4464,9 +4464,9 @@
      "sort": "desc"
     }
    },
-   "title": "Memory recall filter latency",
+   "title": "Memory recall injected notes",
    "type": "timeseries",
-   "description": "Average successful passive-recall relevance-filter duration in milliseconds (5-minute buckets; event_name='passive_recall', category='telemetry').",
+   "description": "Average notes injected per completed passive-recall pass (5-minute buckets; event_name='passive_recall', category='telemetry') \u2014 how many of the searched notes clear the score threshold.",
    "targets": [
     {
      "datasource": {
@@ -4474,10 +4474,10 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_filter_ms!=\"\" | unwrap attributes_filter_ms [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_filter_ms!=\"\" [5m]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_injected!=\"\" | unwrap attributes_injected [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_injected!=\"\" [5m]))",
      "refId": "A",
      "queryType": "range",
-     "legendFormat": "avg filter ms"
+     "legendFormat": "avg injected"
     }
    ]
   },

@@ -62,7 +62,7 @@ def test_copied_context_keeps_original_admission_and_cleanup_scope() -> None:
         original_incarnation=incarnation,
         hosted_resources=resources,
     )
-    copied = replace(context, recall_log_key=b"copied-run")
+    copied = replace(context)
     assert copied.require_original_incarnation(17) is incarnation
     assert copied.hosted_resources is resources
     with pytest.raises(RuntimeError, match="different agent"):

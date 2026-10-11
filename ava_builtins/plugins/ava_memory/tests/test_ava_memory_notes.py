@@ -128,7 +128,7 @@ def test_only_the_shared_index_is_grafted_onto_a_fork(memory_plugin: Any) -> Non
 
 
 def test_discipline_names_every_type_in_the_vocabulary(memory_plugin: Any) -> None:
-    """The type tags the linter enforces and the recall filter reads are the ones
+    """The type tags the linter enforces and search results expose are the ones
     the agent is told to write — one list, stated here."""
     section = memory_plugin.memory_discipline_section(
         AgentSlices.resolve(default_reader=_default_reader), catalog=build_model_catalog()

@@ -9,7 +9,6 @@ Unknown failures propagate; expected failures settle their checkpoint.
 from __future__ import annotations
 
 import asyncio
-import secrets
 import time
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -176,7 +175,6 @@ class AgentHost:
         # What the graph and this host share across turns: handed to every turn's context.
         self.turn_progress = TurnProgress()
         self.relays = RelaySupervision()
-        self._recall_log_key = secrets.token_bytes(32)
         self.admission = TurnAdmission(policy.max_concurrent_turns)
         self.database_waits = DatabaseWaits()
         self.stats = HostStats()
@@ -585,7 +583,6 @@ class AgentHost:
             extensions=self._extensions,
             turn_progress=self.turn_progress,
             relays=self.relays,
-            recall_log_key=self._recall_log_key,
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             original_incarnation=incarnation,
             hosted_resources=resources,

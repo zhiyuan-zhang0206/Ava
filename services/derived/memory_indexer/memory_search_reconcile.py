@@ -170,8 +170,8 @@ def main() -> int:
             except EmbeddingAPIError as exc:
                 print(f"[{i}] embed failed, skipping: {exc}", file=sys.stderr)
                 continue
-            paths_a = backend_a.search_topk(vector, args.k)
-            paths_b = backend_b.search_topk(vector, args.k)
+            paths_a = [hit.path for hit in backend_a.search_topk(vector, args.k)]
+            paths_b = [hit.path for hit in backend_b.search_topk(vector, args.k)]
             if paths_a == paths_b:
                 exact += 1
                 continue

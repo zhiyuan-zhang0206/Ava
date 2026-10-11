@@ -12,11 +12,11 @@ task #3585).
 
 import os
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import ava
 from ava.sdk_surface import sdk_disable
+from ava_builtins.plugins.ava_memory.sdk import MemoryMatch
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.log import logger
@@ -67,7 +67,7 @@ def _apply_per_agent_eval_isolation(*, default_reader: Callable[[str, str], Any]
         memory.search_detailed = _isolated_memory_search
 
 
-def _isolated_memory_search(_query: str, _k: int = 5) -> list[tuple[Path, str, list[str]]]:
+def _isolated_memory_search(_query: str, _k: int = 5) -> list[MemoryMatch]:
     """Return no shared-memory results for an isolated evaluation agent."""
     return []
 

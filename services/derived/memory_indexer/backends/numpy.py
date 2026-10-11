@@ -19,7 +19,20 @@ from collections.abc import Callable, Sequence
 import httpx
 import numpy as np
 
-from services.derived.memory_indexer.backends.base import KIND_BODY
+from services.derived.memory_indexer.backends.base import KIND_BODY, ChunkHit
+
+
+def _hits_of(body: dict[str, list[dict[str, object]]]) -> list[ChunkHit]:
+    """The `/search` response body as `ChunkHit`s (the service's wire shape)."""
+    return [
+        ChunkHit(
+            path=str(hit["path"]),
+            kind=str(hit["kind"]),
+            chunk_idx=int(str(hit["chunk_idx"])),
+            score=float(str(hit["score"])),
+        )
+        for hit in body["hits"]
+    ]
 
 
 class NumPyBackend:
@@ -145,18 +158,18 @@ class NumPyBackend:
             for path, (mtime, hash_, fingerprint) in resp.json().items()
         }
 
-    def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:
-        """Exact cosine top-k paths — see `backends.base`."""
+    def search_topk(self, query_vector: np.ndarray, k: int) -> list[ChunkHit]:
+        """Exact cosine top-k files, each with its best chunk row — see `backends.base`."""
         resp = self._require_client().post(
             "/search",
             json={"vector": query_vector.astype(np.float32).tolist(), "k": k},
         )
         resp.raise_for_status()
-        return [str(p) for p in resp.json()["paths"]]
+        return _hits_of(resp.json())
 
     async def search_topk_async(
         self, query_vector: np.ndarray, k: int, *, timeout: float
-    ) -> list[str]:
+    ) -> list[ChunkHit]:
         """Async twin of `search_topk` — a per-call async client bounded by
         the caller's deadline, closed in `finally`."""
         async with httpx.AsyncClient(base_url=self._uri, timeout=timeout) as client:
@@ -165,4 +178,4 @@ class NumPyBackend:
                 json={"vector": query_vector.astype(np.float32).tolist(), "k": k},
             )
             resp.raise_for_status()
-            return [str(p) for p in resp.json()["paths"]]
+            return _hits_of(resp.json())
