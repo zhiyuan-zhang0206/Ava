@@ -58,21 +58,10 @@ def _insert(conn: psycopg.Connection, agent_id: int, source: str, *, claimed: bo
 async def _close(
     pool: AsyncConnectionPool,
     bus: EventBus,
-    saver: AsyncPostgresSaver,
     incarnation: RuntimeIncarnation,
     outcome: TurnOutcome,
 ) -> None:
-    await settlement.close_hosted_turn(
-        pool,
-        pool,
-        bus,
-        saver,
-        incarnation,
-        outcome,
-        resources=None,
-        prompt_reap_enabled=lambda: False,
-        reconcile_inputs=configured_policy().reconcile_inputs,
-    )
+    await settlement.close_hosted_turn(pool, pool, bus, incarnation, outcome, resources=None)
 
 
 async def _admit(
@@ -170,15 +159,19 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
                                 (agent_id,),
                             ).fetchone()
                             assert row is not None and row[0] == "idling" and row[1] is not None
-                            _insert(db_conn, agent_id, "system:heartbeat")
+                            # Off the event loop: the settlement's consume pass may hold the
+                            # agent's inbound-owner lock while this insert waits for it.
+                            await asyncio.to_thread(_insert, db_conn, agent_id, "system:heartbeat")
                             assert not await admit_pending_wake(aops_pool, agent_id)
-                            new_chats.append(_insert(db_conn, agent_id, "user"))
+                            new_chats.append(
+                                await asyncio.to_thread(_insert, db_conn, agent_id, "user")
+                            )
                             assert await admit_pending_wake(aops_pool, agent_id)
 
             async with asyncio.TaskGroup() as reactions:
                 reactions.create_task(react_to_error())
-                await _close(aops_pool, event_bus, saver, incarnation, outcome)
-            await _close(aops_pool, event_bus, saver, incarnation, outcome)
+                await _close(aops_pool, event_bus, incarnation, outcome)
+            await _close(aops_pool, event_bus, incarnation, outcome)
     assert len(received) == 2 and all(error.blocked and error.status == 402 for error in received)
     assert pending.errors == [] and outcome.failure_report is None
     assert db_conn.execute(
@@ -203,11 +196,11 @@ async def test_unproven_settlement_never_publishes_retry_instructions(
     monkeypatch.setattr(
         settlement,
         "settle_and_stamp_turn",
-        AsyncMock(return_value=TurnSettlement(TurnFatalStamp(applied, False), settled)),
+        AsyncMock(return_value=TurnSettlement(TurnFatalStamp(applied), settled)),
     )
     report = AsyncMock()
     outcome = TurnOutcome(exited=False, crashed=True, failure_report=report)
-    await _close(Mock(), Mock(), Mock(), RuntimeIncarnation(42, uuid4(), uuid4()), outcome)
+    await _close(Mock(), Mock(), RuntimeIncarnation(42, uuid4(), uuid4()), outcome)
     report.assert_not_awaited()
     assert outcome.failure_report is report
     assert any("turn Error withheld" in str(row["message"]) for row in loguru_records)
@@ -232,15 +225,15 @@ async def test_publication_failure_is_observable_and_never_repeated(
     monkeypatch.setattr(
         settlement,
         "settle_and_stamp_turn",
-        AsyncMock(return_value=TurnSettlement(TurnFatalStamp(True, False), True)),
+        AsyncMock(return_value=TurnSettlement(TurnFatalStamp(True), True)),
     )
     if fault == "cancel":
         with pytest.raises(asyncio.CancelledError) as caught:
-            await _close(Mock(), bus, Mock(), RuntimeIncarnation(42, uuid4(), uuid4()), outcome)
+            await _close(Mock(), bus, RuntimeIncarnation(42, uuid4(), uuid4()), outcome)
         assert caught.value is original
     else:
-        await _close(Mock(), bus, Mock(), RuntimeIncarnation(42, uuid4(), uuid4()), outcome)
-    await _close(Mock(), bus, Mock(), RuntimeIncarnation(42, uuid4(), uuid4()), outcome)
+        await _close(Mock(), bus, RuntimeIncarnation(42, uuid4(), uuid4()), outcome)
+    await _close(Mock(), bus, RuntimeIncarnation(42, uuid4(), uuid4()), outcome)
     if fault != "cancel":
         assert any("Error for agent 42" in str(row["message"]) for row in loguru_records)
     assert bus.publish_best_effort.await_count == 1
@@ -253,7 +246,6 @@ async def test_changed_incarnation_withholds_original_failure_report(
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
     database: Database,
-    db_url: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
@@ -276,8 +268,7 @@ async def test_changed_incarnation_withholds_original_failure_report(
     db_conn.commit()
     report = AsyncMock()
     outcome = TurnOutcome(exited=False, crashed=True, failure_report=report)
-    async with AsyncPostgresSaver.from_conn_string(db_url) as saver:
-        await _close(aops_pool, event_bus, saver, incarnation, outcome)
+    await _close(aops_pool, event_bus, incarnation, outcome)
     report.assert_not_awaited()
     assert outcome.failure_report is report
     assert db_conn.execute(

@@ -39,7 +39,7 @@ from agent.ownership.hosted import (
     release_hosted_owner,
     settle_hosted_runtime,
 )
-from agent.startup import reconcile_claimed_inbounds_at_startup, repair_dangling_tool_use_at_startup
+from agent.startup import consume_claimed_inbounds, repair_dangling_tool_use_at_startup
 from agent.state import BaseAgentState
 from agent.turn.runloop import (
     PendingTurnFailure,
@@ -416,12 +416,9 @@ class AgentHost:
                     self._pool,
                     self._control_pool,
                     self._bus,
-                    self._checkpointer,
                     incarnation,
                     outcome,
                     resources=resources,
-                    prompt_reap_enabled=self._policy.recrash_reap_enabled,
-                    reconcile_inputs=self._policy.reconcile_inputs,
                 )
 
     async def _run_held_controls(
@@ -524,13 +521,7 @@ class AgentHost:
     ) -> _AgentRuntime:
         """Repair checkpoint/inbound state, then prepare the model."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
-        await reconcile_claimed_inbounds_at_startup(
-            self._pool,
-            checkpoints.saver,
-            agent_id,
-            incarnation=incarnation,
-            inputs=self._policy.reconcile_inputs,
-        )
+        await consume_claimed_inbounds(self._pool, agent_id, incarnation=incarnation)
         await repair_dangling_tool_use_at_startup(checkpoints.graph, agent_id)
         return await build_runtime(
             agent_id,

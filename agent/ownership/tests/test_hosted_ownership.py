@@ -268,10 +268,8 @@ async def test_stamp_turn_fatal_is_monotonic_and_cas_guarded(
     )
     assert incarnation is not None
 
-    # First crash stamps, and the outcome names it a first death (no mark
-    # existed), not a re-crash.
-    first_stamp = await stamp_turn_fatal(aops_pool, incarnation)
-    assert first_stamp.applied and not first_stamp.recrash
+    # First crash stamps.
+    assert (await stamp_turn_fatal(aops_pool, incarnation)).applied
     first = _marker(db_conn, agent_id)
     assert first is not None
 
@@ -279,12 +277,10 @@ async def test_stamp_turn_fatal_is_monotonic_and_cas_guarded(
     # restart the reap grace forever). Capture the old value first: a
     # COALESCE -> now() regression would silently pass a `!= first` check
     # (both stamps read ~now), so the assertion must demand equality with the
-    # pre-existing stamp. The outcome must also flag the re-crash — the
-    # settle boundary's prompt-reap decision reads it (task #3616).
+    # pre-existing stamp.
     _set_marker(db_conn, agent_id, minutes_ago=100)
     old_stamp = _marker(db_conn, agent_id)
-    recrash = await stamp_turn_fatal(aops_pool, incarnation)
-    assert recrash.applied and recrash.recrash
+    assert (await stamp_turn_fatal(aops_pool, incarnation)).applied
     assert _marker(db_conn, agent_id) == old_stamp
 
     # A settled (non-running) row is not stamped — the mark names the live

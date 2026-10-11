@@ -231,16 +231,6 @@ EVENTS: dict[str, EventSpec] = {
         "durable terminated flip already committed",
         tier="noise",
     ),
-    # Crash-recovery wake (task #4039): reap commits it; service consumes it.
-    "host_recrash_reap_skipped": telemetry_event(
-        "host_recrash_reap_skipped",
-        "the recrash prompt reap skipped terminating a re-crashed corpse "
-        "(fail-closed) — the grace-window reap stays the backstop. Carries the "
-        "reason: the gray switch is off (disabled), the turn never settled to "
-        "idling (settle_incomplete), or the row moved on since the crash "
-        "(row_moved_on)",
-        tier="noise",
-    ),
     "host_turn_stall_aborted": telemetry_event(
         "host_turn_stall_aborted",
         "a hosted turn task ended after its no-progress abort: the invocation "
@@ -254,10 +244,9 @@ EVENTS: dict[str, EventSpec] = {
         "host_abort_reconcile_skipped",
         "the settled hosted turn abort skipped the immediate inbound reconcile "
         "(fail-closed) — the claimed rows are left to the next cold admission. "
-        "Carries the reason: the soft switch is off (disabled), the turn's "
-        "resources never fully settled (resources_unsettled), or the runtime "
-        "ownership was already replaced (ownership_lost — the replacement "
-        "disposes the rows)",
+        "Carries the reason: the turn's resources never fully settled "
+        "(resources_unsettled), or the runtime ownership was already replaced "
+        "(ownership_lost — the replacement disposes the rows)",
         tier="noise",
     ),
     "host_abort_reconcile_failed": telemetry_event(
@@ -272,10 +261,9 @@ EVENTS: dict[str, EventSpec] = {
         "host_turn_reconcile_skipped",
         "the finished hosted turn skipped the immediate inbound reconcile "
         "(fail-closed) — the claimed rows are left to the next cold admission. "
-        "Carries the reason: the soft switch is off (disabled), the turn's "
-        "resources never fully settled (resources_unsettled), or the runtime "
-        "ownership was already replaced (ownership_lost — the replacement "
-        "disposes the rows)",
+        "Carries the reason: the turn's resources never fully settled "
+        "(resources_unsettled), or the runtime ownership was already replaced "
+        "(ownership_lost — the replacement disposes the rows)",
         tier="noise",
     ),
     "host_turn_reconcile_failed": telemetry_event(
@@ -329,11 +317,7 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
     ),
     "inbound_reconcile": telemetry_event(
-        "inbound_reconcile", "inbound reconciliation", tier="noise"
-    ),
-    "inbound_reconcile_sideload_fallback": telemetry_event(
-        "inbound_reconcile_sideload_fallback",
-        "inbound reconcile switched from the claim window to settled history",
+        "inbound_reconcile", "claimed inbounds consumed after interruption", tier="noise"
     ),
     # pause / rollout lifecycle
     "pause_lifecycle_wait": telemetry_event(
