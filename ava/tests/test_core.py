@@ -22,7 +22,6 @@ pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 @pytest.fixture(autouse=True)
 def _authenticated_sdk(monkeypatch: pytest.MonkeyPatch, gateway_client: httpx.Client) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "sdk-core-secret")
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     gateway_client.headers["Authorization"] = "Bearer sdk-core-secret"
 
 

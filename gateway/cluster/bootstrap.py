@@ -4,11 +4,8 @@ Returns cluster-common config for an agent-runner to load into its environment
 at start. The endpoint serves cluster configuration (including the Redis
 runtime URL and provider keys), so it requires a bearer — reachability is not
 trust: the active write generation's machine API token a unit's capability
-carries (or the human cluster secret, for an operator). A no-secret cluster
-has no credential to present and no remote runner to protect (its gateway
-binds loopback), so the endpoint serves unauthenticated then. A single box
-never dials it (the gateway and its agents share the host); only a remote unit
-does.
+carries (or the human cluster secret, for an operator). A single box never
+dials it (the gateway and its agents share the host); only a remote unit does.
 
 It never serves a database login (`AVA_DB_URL` is the credential-free
 endpoint) nor the human cluster secret (`AVA_CLUSTER_SECRET` is not a
@@ -48,17 +45,13 @@ def get_bootstrap(
 
     Raises:
         HTTPException: 401 when the request carries neither the active write
-            generation's machine API token nor the cluster secret as its bearer
-            (a no-secret cluster serves without auth — there is no credential
-            to require); 400 when the gateway configuration has no database
+            generation's machine API token nor the cluster secret as its bearer;
+            400 when the gateway configuration has no database
             endpoint.
     """
     secret = config.settings.data_plane.cluster_secret
     if (
-        secret
-        and cluster_credential(
-            authorization, secret, cache=request.app.state.machine_token_acceptance
-        )
+        cluster_credential(authorization, secret, cache=request.app.state.machine_token_acceptance)
         is None
     ):
         raise HTTPException(status_code=401, detail="machine API token required")

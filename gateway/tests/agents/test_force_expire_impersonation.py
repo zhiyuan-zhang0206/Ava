@@ -64,4 +64,4 @@ def test_force_expire_endpoint_requires_observed_session_and_returns_distinct_st
         "WHERE lease_id=%s AND kind='lifecycle' ORDER BY seq DESC LIMIT 1",
         (lease["id"],),
     ).fetchone()
-    assert entry == ("local_operator",)
+    assert entry == ("cluster_bearer:administrator",)

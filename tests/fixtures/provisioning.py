@@ -46,6 +46,7 @@ from tests.fixtures.env_bootstrap import (
     UNPROVISIONED_REDIS_URL,
 )
 from tests.fixtures.static_environment import static_mode
+from tests.fixtures.unit.gateway_auth import install_default_gateway_credentials
 
 # Host job inventory as it stood BEFORE this session — `pytest_sessionfinish`
 # diffs against it and fails the run on anything new (see tests/_os_jobs.py).
@@ -309,17 +310,15 @@ def _clean_state(
     so every test starts against an empty DB + Redis on the session's native pg/redis.
     Table schema is set up once per session by _provisioned_db.
 
-    Also disables the cluster-secret auth middleware (the sanctioned
-    auth_middleware_enabled=false bypass) so tests don't need to carry auth
-    credentials (individual auth tests re-enable it via monkeypatch). An empty
-    cluster_secret is no longer a bypass — auth is fail-closed and the gateway
-    refuses to start without a secret — so the explicit flag is what disables it.
+    The cluster API always authenticates, so the suite keeps its cluster secret
+    (`env_bootstrap`) and every `TestClient` over the Gateway app carries it as its
+    bearer by default (`tests.fixtures.unit.gateway_auth`); authentication tests patch
+    the secret or drop the header (`without_credentials`).
     """
     if static_mode(pytestconfig):
         yield
         return
-    monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", "")
-    monkeypatch.setattr("base.config.settings.gateway.auth_middleware_enabled", False)
+    install_default_gateway_credentials(monkeypatch)
     # Barrier before the TRUNCATE: the telemetry drain thread may hold a batch
     # dequeued during the previous test (events are written by that single
     # thread up to one flush_interval after enqueue). sync() drains the queue

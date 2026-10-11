@@ -76,13 +76,14 @@ guard correct.
 | Loki/Prometheus backend APIs | none — loopback-only (`AVA_LGTM_LISTEN_HOST`) | n/a |
 | Grafana UI | gateway session auth through `/grafana/*` proxy | gateway middleware; Grafana runs anonymous read-only |
 
-An **empty `AVA_CLUSTER_SECRET`** is the zero-config single-box posture:
-every surface serves unauthenticated on loopback, no machine token is
-delivered, and any unit that would have to expose a remote ingress **fails
-closed** (converge raises) rather than exposing an unauthenticated receiver. A
-telemetry token (a non-empty secret on the gateway, an API-bearing capability
-on a remote unit) on a unit with a non-loopback reachable host is what turns
-remote ingress on.
+Every gateway home has an `AVA_CLUSTER_SECRET`; the cluster API and `/ops`
+always authenticate. Reach is a separate fact: the zero-config single box
+declares no reachable address (`AVA_MACHINE_HOST` unset, `localhost`), so every
+listener, the data plane included, binds loopback only, and a unit that would
+have to expose a remote ingress without a telemetry token **fails closed**
+(converge raises). The telemetry token (derived from the secret on the gateway,
+carried by the capability on a remote unit) on a unit with a non-loopback
+reachable host is what turns remote ingress on.
 
 The telemetry token is derived from the human secret, so there is
 deliberately no second station secret to distribute, yet a unit holding it

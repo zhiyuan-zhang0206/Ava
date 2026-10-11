@@ -202,25 +202,30 @@ def _lsof_listener_name_addrs(port: int) -> set[str]:
 LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
 
 
-def bind_addrs(cluster_secret: str) -> list[str]:
+def serves_off_box() -> bool:
+    """Whether this host declares a reachable address other machines can dial.
+
+    The single predicate behind every off-box listener decision (data plane,
+    gateway, ops): the operator's declared `AVA_MACHINE_HOST` (`ava init
+    --machine-host`) is not a loopback alias. The default `localhost` is the
+    single box, which listens on loopback alone.
+    """
+    from base.cluster import machine
+
+    return machine.reachable_host() not in LOOPBACK_ALIASES
+
+
+def bind_addrs() -> list[str]:
     """Loopback plus this host's reachable address, de-duplicated (loopback alone
     when reachable resolves to localhost — the single-box default).
 
-    A no-secret cluster binds LOOPBACK ONLY, whatever the reachable address says:
-    an empty secret is the single-box posture (its API and `/ops` serve
-    unauthenticated and no other machine dials its data plane), so Postgres and
-    its pooler, though they always authenticate (SCRAM), have no reason to face
-    the LAN. The bearer decides the network posture — an operator who wants a
-    LAN-reachable Postgres data plane sets the cluster secret.
-
-    `cluster_secret` is the CALLER-PASSED cluster secret (the same value the hba
-    is written from and the pooler is configured with), never read from
-    `settings` — a process that inherited a sibling cluster's
-    AVA_CLUSTER_SECRET (a shell carrying a different home's environment) must not widen
-    a no-secret cluster's bind posture to the LAN. The caller resolves the
-    cluster's own secret from its authority-passed `.env` value."""
-    if not cluster_secret:
-        return ["127.0.0.1"]
+    The network posture is the operator's declared reachable address
+    (`AVA_MACHINE_HOST`, `ava init --machine-host`), nothing else: the default
+    `localhost` keeps every data-plane listener on loopback, and declaring a
+    private-network address adds that one address. Postgres and its pooler
+    authenticate (SCRAM) whatever they bind. The reachable address is an identity
+    field read from the home's own `.env`, never from a parent process's
+    environment."""
     from base.cluster import machine
 
     host = machine.reachable_host()

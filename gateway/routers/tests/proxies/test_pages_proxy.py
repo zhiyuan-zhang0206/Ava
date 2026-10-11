@@ -36,6 +36,7 @@ from base.packages.docs.pages_copy import (
 )
 from gateway.app import app
 from gateway.routers import pages as pages_router
+from tests.fixtures.unit.gateway_auth import without_credentials
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -530,11 +531,10 @@ def test_proxy_requires_auth(monkeypatch: pytest.MonkeyPatch, db_conn) -> None:
     """The reverse proxy is auth-gated like every other API route: no
     credentials -> 401; a valid bearer passes the middleware (404 here
     because the page was never registered, proving it reached the route)."""
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
-        no_auth = client.get(f"/pages/{aid}-p/")
+        no_auth = without_credentials(client).get(f"/pages/{aid}-p/")
         assert no_auth.status_code == 401
 
         with_auth = client.get(

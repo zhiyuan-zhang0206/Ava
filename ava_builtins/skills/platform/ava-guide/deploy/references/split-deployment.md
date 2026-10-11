@@ -41,11 +41,11 @@ runner's login is its issued unit capability. The gateway itself dials its local
 storage. Off-box reachability requires both the configured private network and
 the credential for the caller's role.
 
-Postgres and PgBouncer expose the configured reachable address only with
-control-plane authentication enabled. Redis uses the platform's native network
+Postgres and PgBouncer expose the configured reachable address
+(`AVA_MACHINE_HOST`) and nothing else. Redis uses the platform's native network
 contract: macOS has its host relay, while Linux binds the authenticated native
 instance to the configured address. See the `docs/conventions/runbook.md` in the Ava source checkout
-for binding and firewall ownership. No-secret single-box storage remains local.
+for binding and firewall ownership. A box with no declared reachable address keeps its storage on loopback.
 
 ## Join each runner
 

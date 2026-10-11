@@ -102,19 +102,6 @@ def test_bootstrap_admission_preserves_auth(
     assert response.status_code == 401
 
 
-@pytest.mark.parametrize("role", [None, "runner"])
-def test_no_secret_bootstrap_serves_zero_verbatim(
-    gateway_snapshot: dict[str, str],
-    gateway_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-    role: str | None,
-) -> None:
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
-    response = gateway_client.get("/api/bootstrap", params={"role": role} if role else {})
-    assert response.status_code == 200
-    assert response.json()[_TURN_LIMIT] == "0"
-
-
 def test_runner_fetch_replaces_stale_admission(
     gateway_snapshot: dict[str, str],
     gateway_client: TestClient,

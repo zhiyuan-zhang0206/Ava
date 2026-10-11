@@ -118,7 +118,7 @@ def _teardown(born: Born) -> None:
 
 
 def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
-    """A configured-but-unprovisioned single-box home (empty cluster secret)."""
+    """A configured-but-unprovisioned single-box home (minted cluster secret)."""
     from cli.start_identity import IdentityInput, _gateway_values
 
     home = (tmp_path / "home").resolve()
@@ -141,14 +141,14 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
             {},
         ),
     )
-    assert values["AVA_CLUSTER_SECRET"] == ""
+    assert values["AVA_CLUSTER_SECRET"]
     assert "AVA_DB_ADMIN_PASSWORD" not in values
     assert "AVA_RUNNER_DB_PASSWORD" not in values
     (home / ".env").write_text("".join(f"{key}={value}\n" for key, value in values.items()))
     _intent(home, record, values)
     passphrase.ensure_minted(home)  # as the birth's claim publication pins it
     dp = settings.data_plane
-    monkeypatch.setattr(dp, "cluster_secret", "")
+    monkeypatch.setattr(dp, "cluster_secret", values["AVA_CLUSTER_SECRET"])
     monkeypatch.setattr(dp, "db_url", values["AVA_DB_URL"])
     monkeypatch.setattr(dp, "redis_url", values["AVA_REDIS_URL"])
     monkeypatch.setattr(dp, "redis_admin_password", values["AVA_REDIS_ADMIN_PASSWORD"])
@@ -338,7 +338,6 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(born: Born) -
         pg_port=born.pg_port,
         listen_port=born.pooler_port,
         db_name="ava",
-        cluster_secret="",
         userlist=without_gateway,
         admin_password=admin.password,
     )
@@ -433,11 +432,8 @@ def test_launched_services_receive_their_class_login_only(
     assert _service_extra_env(runner)["AVA_DB_URL"] == born.dsn("runner")
     assert _service_extra_env(runner)[authority.GENERATION_ENV] == "0"
     assert "AVA_DB_URL" not in _service_extra_env(frontend)
-    # The born single box serves an open API: no machine token is delivered.
-    assert API_TOKEN_ENV not in _service_extra_env(gateway)
-    # An authenticated API delivers each service its class token, the
-    # database-free frontend included, and never the root itself.
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "human-" + "h" * 40)
+    # The born single box authenticates its API: each service is delivered its class
+    # token, the database-free frontend included, and never the root itself.
     tokens = authority.read_secret(born.home, authority.active_generation(born.home)).api
     assert _service_extra_env(gateway)[API_TOKEN_ENV] == tokens.gateway
     assert _service_extra_env(runner)[API_TOKEN_ENV] == tokens.runner

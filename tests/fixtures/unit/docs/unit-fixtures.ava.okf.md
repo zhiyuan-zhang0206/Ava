@@ -37,6 +37,15 @@ Those capabilities use local conftests at shared consumer test directories.
 When a directory is full, its existing scope declaration names exact consumer
 files, including child files when the full child has no declaration of its own.
 
+`unit.gateway_auth` is the one place a Gateway client's credentials are decided. The cluster
+API always authenticates, so the suite keeps its cluster secret and the autouse `_clean_state`
+installs `install_default_gateway_credentials`: every `TestClient` over the Gateway app (not
+local FastAPI stand-ins) carries `Authorization: Bearer <cluster secret>`, the secret current when
+the client is built, unless the test passes its own `Authorization`. It never imports the app
+(unrelated tests must not depend on every router). Tests of rejection or admission use
+`without_credentials(client)`; a module whose subject is authentication itself calls
+`disable_default_gateway_credentials(monkeypatch)`; raw `httpx` clients take `gateway_credentials()`.
+
 `gateway_unit` and `sdk_via_gateway` live in `tests/fixtures/unit/gateway.py`.
 Their four consumer directories use file-level declarations in
 `path_scopes.toml`; putting the assembled app in a shared conftest there would

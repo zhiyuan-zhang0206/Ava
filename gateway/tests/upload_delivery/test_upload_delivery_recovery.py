@@ -35,7 +35,6 @@ def uploaded_agent(
 ) -> Iterator[tuple[TestClient, int]]:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
 
     # Deterministic fault tests call a real round explicitly; no background race.
     def no_background(_self: UploadRecovery, _group: asyncio.TaskGroup) -> None:

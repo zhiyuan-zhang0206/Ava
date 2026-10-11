@@ -24,7 +24,7 @@ AVA_MCP_ENDPOINT_ENABLED=true
 The flag decides whether MCP client tokens authenticate at all, and those
 tokens outlive every write generation, so no config write sets it: `ava config
 set` (API or `--local`) refuses it and the settings panel shows it read-only,
-as for `AVA_AUTH_MIDDLEWARE_ENABLED`. Edit the gateway `.env` on its host, after
+as for `AVA_ALERTS_WEBHOOK_TOKEN`. Edit the gateway `.env` on its host, after
 the rollout that ships the endpoint code.
 
 ## Connect a client
@@ -51,8 +51,7 @@ claude mcp add --transport http ava http://<gateway-host>/mcp \
 ```
 
 Codex takes the same shape (`codex mcp add`). `<gateway-host>` is the address
-the cluster advertises (`AVA_GATEWAY_URL`). `/mcp` requires a client token even
-on a no-secret cluster; a session cookie or cluster-secret Bearer is rejected.
+the cluster advertises (`AVA_GATEWAY_URL`). `/mcp` requires a client token; a session cookie or cluster-secret Bearer is rejected.
 
 List client metadata with `GET /api/mcp/clients`. Revoke one immediately with
 `POST /api/mcp/clients/<id>/revoke`; a revoked token receives 401 thereafter.

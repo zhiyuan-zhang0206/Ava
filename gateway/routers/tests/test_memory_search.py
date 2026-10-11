@@ -18,6 +18,7 @@ from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.routers.memory import MemorySearchInputs
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
+from tests.fixtures.unit.gateway_auth import gateway_credentials
 
 
 def _memory_inputs() -> MemorySearchInputs:
@@ -367,7 +368,11 @@ def _asgi_client() -> httpx.AsyncClient:
     """Drive the app on the *test's* own event loop, so concurrent requests
     contend for the handler's semaphore the way they do in the gateway.
     `TestClient` would run them on its own portal loop instead."""
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=gateway_credentials(),
+    )
 
 
 async def _search(client: httpx.AsyncClient) -> httpx.Response:

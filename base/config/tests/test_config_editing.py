@@ -285,14 +285,12 @@ def test_coerce_scalar_forms() -> None:
 # ── real-field provisioning surface pins ──
 
 
-# Keys that decide who authenticates to this cluster, or whether it
-# authenticates at all. An authenticated caller (any machine token included)
+# Keys that decide who authenticates to this cluster. An authenticated caller (any machine token included)
 # must never choose them through a config write: the human bearer rotates only
 # through scripts/data_plane_ops/rotate_cluster_secret.py, the others by editing the gateway
 # `.env` on its host.
 _AUTHORITY_KEYS = {
     "cluster_secret": "AVA_CLUSTER_SECRET",
-    "auth_middleware_enabled": "AVA_AUTH_MIDDLEWARE_ENABLED",
     "webhook_token": "AVA_ALERTS_WEBHOOK_TOKEN",
     # Opens the /mcp authentication surface, where MCP client tokens (bound to
     # no write generation) authenticate.

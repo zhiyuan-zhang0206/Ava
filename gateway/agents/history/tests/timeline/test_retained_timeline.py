@@ -18,17 +18,17 @@ from base.db import create_agent
 from gateway.agents.history import timeline
 from gateway.agents.history.tests.test_timeline import test_client as test_client
 from gateway.app import app
+from tests.fixtures.unit.gateway_auth import without_credentials
 
 
 def test_retained_read_requires_auth_and_serializes_for_authenticated_caller(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     secret = secrets.token_urlsafe(24)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     tid = create_agent(db_conn)
     with patch.dict(os.environ), TestClient(app) as client:
-        rejected = client.get(f"/api/agents/{tid}/timeline/retained")
+        rejected = without_credentials(client).get(f"/api/agents/{tid}/timeline/retained")
         assert rejected.status_code == 401
         accepted = client.get(f"/api/agents/{tid}/timeline/retained", headers=bearer_header(secret))
     assert accepted.status_code == 200

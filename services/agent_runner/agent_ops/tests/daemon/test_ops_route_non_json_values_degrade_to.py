@@ -333,14 +333,17 @@ def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> Non
     assert "crashed" in combined and "db pool exploded" in combined
 
 
-def test_ops_binds_all_interfaces_only_when_authenticated() -> None:
-    """An authenticated /ops (any acceptance set, even an empty fail-closed one)
-    binds 0.0.0.0; the open posture binds loopback only — an unauthenticated
-    control surface is never LAN-reachable. Which tokens /ops accepts is the
-    write-generation matrix in tests/components/lifecycle/db_authority/test_api_tokens.py."""
-    assert daemon._ops_bind_host(frozenset({"d" * 64})) == "0.0.0.0"  # noqa: S104
-    assert daemon._ops_bind_host(frozenset()) == "0.0.0.0"  # noqa: S104
-    assert daemon._ops_bind_host(None) == "127.0.0.1"
+def test_ops_binds_all_interfaces_only_for_a_declared_reachable_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """/ops always authenticates; only a host that declares a reachable address
+    (`AVA_MACHINE_HOST`) binds 0.0.0.0, a single box binds loopback. Which tokens /ops
+    accepts is the write-generation matrix in
+    tests/components/lifecycle/db_authority/test_api_tokens.py."""
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
+    assert daemon._ops_bind_host() == "0.0.0.0"  # noqa: S104
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "localhost")
+    assert daemon._ops_bind_host() == "127.0.0.1"
 
 
 def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -> None:

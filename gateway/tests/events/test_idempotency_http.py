@@ -23,7 +23,6 @@ def test_authenticated_admin_legacy_retry_and_scoped_reconcile(
 
     secret = "principal-scope-test-secret"  # noqa: S105 — isolated test credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     url = f"/api/agents/{agent_id}/messages"
     body = {"content": "admin principal retry", "source": "user"}
     legacy_headers = {"Authorization": f"Bearer {secret}", "Idempotency-Key": "legacy-flight"}
@@ -56,7 +55,6 @@ def test_browser_rotation_and_bearer_share_admin_retry_namespace(
 
     secret = "principal-rotation-test-secret"  # noqa: S105 — isolated test credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(settings.gateway, "session_cookie_secure", False)
     url = f"/api/agents/{agent_id}/messages"
     body = {"content": "same administrator across sessions", "source": "user"}
@@ -84,24 +82,6 @@ def test_browser_rotation_and_bearer_share_admin_retry_namespace(
         first.json()["inbound_id"] == repeated.json()["inbound_id"] == bearer.json()["inbound_id"]
     )
     assert _count_inbounds(db_conn, agent_id, body["content"]) == 1
-
-
-def test_no_auth_mode_cannot_claim_verified_principal_namespace(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    agent_id: int,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
-    response = client.post(
-        f"/api/agents/{agent_id}/messages",
-        json={"content": "must not insert scoped", "source": "user"},
-        headers={"Idempotency-Key": "no-auth-key", "Idempotency-Scope": "principal-v1"},
-    )
-    assert response.status_code == 422
-    assert _count_inbounds(db_conn, agent_id, "must not insert scoped") == 0
 
 
 def test_same_key_retry_lands_once(
