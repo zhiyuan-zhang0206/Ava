@@ -65,7 +65,7 @@ from base.events.live.bus import EventBus
 from base.log import init_gateway_process
 from base.packages.plugins.config_registration import (
     disk_image_path,
-    read_authority_config,
+    read_config_image,
     read_service_config,
 )
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -337,7 +337,7 @@ def main() -> None:
     try:
         config = read_service_config("ava_fleet", FleetConfig)
         if config is None:
-            config = read_authority_config("ava_fleet", FleetConfig, disk_image_path("ava_fleet"))
+            config = read_config_image(FleetConfig, disk_image_path("ava_fleet"))
         asyncio.run(run(config))
     except KeyboardInterrupt:
         _log.info("[task-maintenance] interrupted, shutting down")

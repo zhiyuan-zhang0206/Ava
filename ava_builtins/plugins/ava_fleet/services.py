@@ -24,7 +24,7 @@ from functools import partial
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.cluster.machine import MachineRole
-from base.packages.plugins.config_registration import disk_image_path, read_authority_config
+from base.packages.plugins.config_registration import disk_image_path, read_config_image
 from ops.roster import healthz_daemon
 from ops.roster.service_spec import ServiceSpec
 
@@ -58,7 +58,7 @@ def services() -> tuple[ServiceSpec, ...]:
     source checkout the service starts in) — no `uv run` wrapper.
     """
     config_path = disk_image_path("ava_fleet")
-    config = read_authority_config("ava_fleet", FleetConfig, config_path)
+    config = read_config_image(FleetConfig, config_path)
     return (
         healthz_daemon(
             "task-maintenance",
