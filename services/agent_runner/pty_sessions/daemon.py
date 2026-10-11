@@ -14,6 +14,9 @@ import resource
 import sys
 from pathlib import Path
 
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 from base.log import logger
 from base.log.sinks import add_sink
 from base.native_process.os_platform import LockTimeoutError, file_lock
@@ -56,13 +59,16 @@ def main() -> int:
         # One service per home, for as long as this process lives: a second start must
         # neither sweep the live service's sessions nor take over its socket.
         with file_lock(lock_path(), timeout_s=0):
-            return _run()
+            config = ConfigBoot()
+            machine = machine_from_boot(config)
+            config.read_process_environment()
+            return _run(machine=machine)
     except LockTimeoutError:
         logger.error("another pty-sessions service holds {lock}", lock=lock_path())
         return 1
 
 
-def _run() -> int:
+def _run(*, machine: MachineIdentity) -> int:
     service = PtyService()
     service.swept = ledger.sweep(ledger_path())
     path = service_socket_path()
@@ -73,6 +79,7 @@ def _run() -> int:
             path,
             hangup_wait_s=shutdown_budget.SHUTDOWN_HANGUP_WAIT_S,
             kill_s=shutdown_budget.SHUTDOWN_KILL_S,
+            machine=machine,
         )
     )
     return 0

@@ -141,7 +141,7 @@ def test_refresh_gateway_checkout_fast_forwards(
         assert roles == machine_identity.role()
         return tmp_path
 
-    monkeypatch.setattr(memory_repo, "gateway_memory_dir", memory_root_for_roles)
+    monkeypatch.setattr("base.paths.gateway_memory_dir", memory_root_for_roles)
 
     def pulled(*, machine: MachineIdentity) -> str:
         assert machine is machine_identity
@@ -170,7 +170,7 @@ def test_refresh_gateway_checkout_failure_logs_and_does_not_raise(
         assert roles == machine_identity.role()
         return tmp_path
 
-    monkeypatch.setattr(memory_repo, "gateway_memory_dir", memory_root_for_roles)
+    monkeypatch.setattr("base.paths.gateway_memory_dir", memory_root_for_roles)
 
     def _boom(*, machine: MachineIdentity) -> str:
         assert machine is machine_identity

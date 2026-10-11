@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from cli.commands.observability import grafana_render
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 

@@ -74,6 +74,7 @@ async def finish_pending_failure(
                 incarnation=ctx.original_incarnation,
                 resources=ctx.hosted_resources,
                 notes=notes,
+                read_local_machine=lambda: ctx.require_machine().name(),
             )
         await settle_turn_failure(graph, checkpointer, config, ctx, agent_id, pending)
         if native_work is not None:
@@ -221,6 +222,7 @@ async def finish_completed_invocation(
                 incarnation=ctx.original_incarnation,
                 resources=ctx.hosted_resources,
                 notes=notes,
+                read_local_machine=lambda: ctx.require_machine().name(),
             )
         return TurnOutcome(exited=False, crashed=False)
     return None

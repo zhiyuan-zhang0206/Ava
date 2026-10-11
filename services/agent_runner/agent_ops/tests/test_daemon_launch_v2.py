@@ -39,8 +39,10 @@ async def test_versioned_launch_dispatch(
         body: LaunchAgentRequest,
         received_pool: object,
         *,
+        local_machine: str,
         catalog: ModelCatalog,
     ) -> SpawnedAgent:
+        assert local_machine == machine_identity.name()
         seen.append((body.agent_id, received_pool))
         return SpawnedAgent(id=body.agent_id)
 

@@ -2,13 +2,17 @@
 
 import subprocess
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from cli.commands.cluster import health as cluster_health
-from cli.commands.cluster.tests.health_probe_inputs import Probe, unhealthy
+from cli.commands.cluster.tests.health_probe_inputs import Probe, service_probe_verdict, unhealthy
+from cli.commands.cluster.tests.health_probe_inputs import (
+    all_checks_pass as all_checks_pass,
+)
 from cli.commands.cluster.tests.health_probe_inputs import probe as probe
 from cli.commands.cluster.tests.health_probe_inputs import (
     provider_guard_healthy as provider_guard_healthy,
@@ -20,18 +24,16 @@ from cli.commands.cluster.tests.health_probe_inputs import (
     signals as signals,
 )
 from cli.commands.cluster.tests.test_cluster_health import (
-    _all_checks_pass as _all_checks_pass,
-)
-from cli.commands.cluster.tests.test_cluster_health import (
     _home as _home,
 )
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 
 
 @pytest.mark.parametrize(
     "health", ["healthy", "gateway", "population", "service", "disk", "provider"]
 )
 def test_repeated_observations_never_mutate_release_state(
-    probe: Probe, _all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch, health: str
+    probe: Probe, all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch, health: str
 ) -> None:
     """Repeated good/bad rounds ignore prior rollback and promotion counters."""
     legacy_state = {
@@ -64,7 +66,11 @@ def test_repeated_observations_never_mutate_release_state(
         monkeypatch.setattr(cluster_health, "_agent_population", no_agents)
         monkeypatch.setattr(cluster_health, "_agent_population_failure_class", population_failure)
     elif health == "service":
-        monkeypatch.setattr(cluster_health, "_service_probes", lambda: ["frontend (unknown)"])
+        monkeypatch.setattr(
+            cluster_health,
+            "_service_probes",
+            partial(service_probe_verdict, failures=["frontend (unknown)"]),
+        )
     elif health == "disk":
         monkeypatch.setattr(cluster_health, "_disk_usage_failure", lambda: "disk full")
     elif health == "provider":
@@ -77,7 +83,7 @@ def test_repeated_observations_never_mutate_release_state(
 
 def test_full_disk_is_reported_when_gateway_is_down(
     probe: Probe,
-    _all_checks_pass: None,
+    all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],

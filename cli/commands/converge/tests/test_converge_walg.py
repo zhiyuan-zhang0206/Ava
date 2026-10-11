@@ -14,6 +14,7 @@ from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
 from cli.commands.converge import walg as converge_walg_module
 from cli.commands.converge.spec import ConvergeCtx
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.backup.walg import config as walg_config
 from services.backup.walg.tests.support import Sandbox, make_sandbox, valid_config
 from tests.path_scoped.cli_tests import operator_database as operator_database

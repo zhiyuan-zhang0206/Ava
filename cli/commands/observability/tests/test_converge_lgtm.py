@@ -664,7 +664,9 @@ def test_native_step_runs_only_for_the_marker_home(
         services: frozenset[str],
         database_factory: Callable[[], Any],
         producer: Callable[[], EventPipeline],
+        machine: MachineIdentity,
     ) -> None:
+        assert machine is ctx.machine
         assert database_factory is ctx.database_factory
         assert producer is ctx.producer
         calls.append((repo, home))

@@ -394,7 +394,6 @@ ignore_imports = [
     # the host's beat runs the grace reap, and the settlement boundary runs
     # the prompt reap of a corpse that re-crashed under its own mark.
     "services.agent_runner.agent_host.recovery.crash -> agent.ownership.corpse_reap",
-    "services.agent_runner.agent_host.host -> agent.ownership.corpse_reap",
     "services.agent_runner.agent_host.settlement -> agent.ownership.corpse_reap",
     # The hosted invocation driver shares the native takeover boundary: it
     # gates active leases and settles external state only after graph flush.

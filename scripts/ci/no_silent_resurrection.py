@@ -1,53 +1,15 @@
 #!/usr/bin/env python3
-"""Fail a PR that silently resurrects lines main deleted recently.
+"""Reject recent main deletions restored without an explicit declaration.
 
-Decision record: docs/decisions/agents/lifecycle/2026-10-04-no-silent-resurrection.md.
-Working convention: docs/conventions/agents/no-silent-resurrection.md.
-
-The incident: #4245 (6ecfe14c3) deleted the delivery-watchdog field code; #4207
-(151bc92fe) then landed after replaying a stale branch through a conflict
-resolution and carried the old content of four of those files back. The
-resurrected code compiled and its tests passed, so every existing gate stayed
-green. This check compares the lines a PR adds with the lines main deleted in
-the last N days (default 30) and fails on a match unless a commit in the PR
-carries a ``Resurrects: <reason>`` line (optionally naming the deleting sha or
-a path) or reverts the deleting commit (``This reverts commit <sha>``).
-
-Pipeline (one function per stage):
-
-1. ``added_runs`` -- ``git diff -U0 -M <merge-base> <head>``, split into runs of
-   consecutive added lines (any non-added line ends a run).
-2. ``candidate_texts`` -- normalized (leading/trailing whitespace stripped)
-   added lines that are "strong": not blank, not a comment/import/pure
-   punctuation, MIN_STRONG_LENGTH..MAX_STRONG_LENGTH chars (a longer line is
-   a data blob: it never becomes a candidate), >= 2 identifiers of >= 3 chars.
-   Weak lines never fail the check; they only bridge runs.
-3. ``alive_candidates`` -- candidate texts still present in the base tree
-   (skipped paths excluded) are not dead: a move cannot hide a resurrection,
-   and a line that still exists is not resurrected.
-4. ``deleted_candidates`` -- one streaming ``git log --since=<N>days
-   --no-merges -p -U0 <base>`` pass. A commit "deletes" a candidate line when
-   its diff removes it from a non-skipped path and the commit does not re-add
-   the text somewhere in the same commit (a move is not a deletion).
-5. ``find_hits`` -- inside a run, a stretch where every strong line is dead
-   (weak, blank and still-present lines bridge; a strong line that is neither
-   breaks the stretch) is a hit when it holds >= MIN_DEAD_LINES dead strong lines or one
-   distinctive dead line (an identifier of >= DISTINCTIVE_IDENTIFIER_LENGTH
-   chars with an underscore or camelCase). Each hit is attributed to the commit
-   covering the most of its dead lines (ties: the most recent).
-6. ``collect_allowances`` / ``apply_allowances`` -- commit messages in
-   merge-base..head; ``Resurrects:`` lines allow every hit, or only the hits
-   they name by deleting sha or path; ``This reverts commit <sha>`` allows the
-   hits that sha deleted. A declaration matching nothing is warned about.
-
-Exit codes: 0 no blocking hit (clean, or every hit allowed), 1 blocking hits,
-2 usage or infrastructure (git) failure. Output is English, on stdout;
-warnings go to stderr; the failing message carries the allowance recipe.
+Pipeline and limits: docs/conventions/agents/no-silent-resurrection.md.
+Proven retained keyword continuations are syntax provenance, not behavioral
+approval. Stdlib/Git only. Exit codes: 0 clean/allowed, 1 blocked, 2 Git/input error.
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 import io
 import re
 import subprocess
@@ -61,13 +23,8 @@ DEFAULT_BASE = "origin/main"
 DEFAULT_HEAD = "HEAD"
 DEFAULT_DAYS = 30
 
-# A "strong" line is meaningful enough that a resurrected run of them (or one
-# carrying a distinctive identifier) should have been noticed by the author.
-# The thresholds are the tuning knobs, set from the 30-day false-positive
-# sweep described in docs/conventions/agents/no-silent-resurrection.md: the minimum unit
-# is three lines (the incident's blocks were 3+ lines; two-line idiom matches
-# dominated the noise) and a solo line needs a >=20-char identifier (short
-# framework names like OperationalError matched everything).
+# Strong lines carry identifier evidence; three-line blocks or a distinctive
+# operation are decisive. See the convention for the historical noise sweep.
 MIN_STRONG_LENGTH = 14
 MAX_STRONG_LENGTH = 1000
 MIN_IDENTIFIERS = 2
@@ -76,9 +33,6 @@ DISTINCTIVE_IDENTIFIER_LENGTH = 20
 MIN_DEAD_LINES = 3
 SAMPLE_LINES = 3
 
-# Lock and generated files carry line churn that no reader reviews: they are
-# regenerated from their source, which the check does see. Mirrors the codegen
-# freshness hooks in .pre-commit-config.yaml.
 SKIPPED_FILES = frozenset(
     {
         "uv.lock",
@@ -211,8 +165,6 @@ def _has_distinctive_identifier(text: str) -> bool:
         name = token.string
         if token.type != tokenize.NAME:
             continue
-        # A qualified type reference is not an operation on that type. Keep
-        # actual constructor calls and domain attributes as distinctive proof.
         if (
             not _qualified_type_reference(tokens, index)
             and len(name) >= DISTINCTIVE_IDENTIFIER_LENGTH
@@ -220,6 +172,24 @@ def _has_distinctive_identifier(text: str) -> bool:
         ):
             return True
     return False
+
+
+def _exception_handler_header(text: str) -> bool:
+    """A header naming exception types does not contain the handler's operation."""
+    if not text.startswith(("except ", "except* ")) or not text.endswith(":"):
+        return False
+    try:
+        tree = ast.parse(f"try:\n    pass\n{text}\n    pass\n")
+    except SyntaxError:
+        return False
+    statement = tree.body[0]
+    if not isinstance(statement, (ast.Try, ast.TryStar)):
+        return False
+    exception_type = statement.handlers[0].type
+    return exception_type is not None and all(
+        isinstance(node, (ast.Name, ast.Attribute, ast.Tuple, ast.Load))
+        for node in ast.walk(exception_type)
+    )
 
 
 def _classify(text: str) -> tuple[bool, bool]:
@@ -237,7 +207,11 @@ def _classify(text: str) -> tuple[bool, bool]:
     declaration = text.startswith(("def ", "async def ", "class ")) and text.endswith(":")
     return (
         strong,
-        strong and not text.endswith("(") and not declaration and _has_distinctive_identifier(text),
+        strong
+        and not text.endswith("(")
+        and not declaration
+        and not _exception_handler_header(text)
+        and _has_distinctive_identifier(text),
     )
 
 
@@ -300,9 +274,7 @@ def _alive_candidates(candidates: set[str], base: str, cwd: Path) -> set[str]:
     """Candidate texts still present anywhere in the base tree (skipped paths excluded)."""
     if not candidates:
         return set()
-    # Git owns binary detection and path exclusions. An empty fixed pattern
-    # streams all text lines without thousands of substring searches per blob;
-    # the final comparison has always been normalized whole-line membership.
+    # Git owns binary detection and exclusions; membership remains whole-line.
     stream = subprocess.Popen(  # noqa: S603
         [
             "git",
@@ -336,9 +308,7 @@ def _alive_candidates(candidates: set[str], base: str, cwd: Path) -> set[str]:
             text = line.strip()
             if text not in candidates:
                 continue
-            # The former pattern query matched bytes before replacement decoding.
-            # A malformed UTF-8 line only reached that decoder if some candidate
-            # matched its physical Git line; preserve that rare-path condition.
+            # Preserve byte-pattern eligibility for replacement-decoded UTF-8.
             if "\ufffd" in text and not any(pattern in raw for pattern in encoded_candidates):
                 continue
             alive.add(text)
@@ -347,6 +317,106 @@ def _alive_candidates(candidates: set[str], base: str, cwd: Path) -> set[str]:
         detail = stderr.decode("utf-8", errors="replace").strip().splitlines()
         raise GitError(f"`git grep` over {base} failed: {detail[0] if detail else 'exit'}")
     return alive
+
+
+def _syntax(node: ast.AST) -> str:
+    return ast.dump(node)
+
+
+def _tokens(text: str | None) -> tuple[tuple[int, str], ...]:
+    if text is None:
+        raise ValueError("AST source span is missing")
+    ignored = {tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER}
+    return tuple(
+        (token.type, token.string)
+        for token in tokenize.generate_tokens(io.StringIO(text).readline)
+        if token.type not in ignored
+    )
+
+
+def _named_parts(call: ast.Call, source: str) -> list[tuple[tuple[int, str], ...]] | None:
+    names = [keyword.arg for keyword in call.keywords]
+    if None in names or len(set(names)) != len(names):
+        return None
+    if any(isinstance(arg, ast.Starred) for arg in call.args):
+        return None
+    parts = [_tokens(ast.get_source_segment(source, k)) for k in call.keywords]
+    return parts if all(parts) else None
+
+
+def _retained_call(old: ast.Call, new: ast.Call, before: str, after: str) -> bool:
+    """Only additive named inputs; no inference about the callee's behavior."""
+    old_parts, new_parts = _named_parts(old, before), _named_parts(new, after)
+    if not old_parts or new_parts is None or _syntax(old.func) != _syntax(new.func):
+        return False
+    if _syntax(ast.Tuple(elts=old.args)) != _syntax(ast.Tuple(elts=new.args)):
+        return False
+    names = {part[0][1] for part in old_parts}
+    return old_parts == [part for part in new_parts if part[0][1] in names]
+
+
+def _direct_calls(tree: ast.Module) -> dict[tuple[str, int], tuple[ast.Assign, str]]:
+    """No nested scopes or control-flow correspondence heuristics."""
+    owners = [
+        node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    names = Counter(node.name for node in owners)
+    calls: dict[tuple[str, int], tuple[ast.Assign, str]] = {}
+    for owner in owners:
+        counts = Counter(_syntax(n.func) for n in ast.walk(owner) if isinstance(n, ast.Call))
+        for index, statement in enumerate(owner.body):
+            if names[owner.name] != 1 or not isinstance(statement, ast.Assign):
+                continue
+            if isinstance(statement.value, ast.Call) and counts[_syntax(statement.value.func)] == 1:
+                calls[(owner.name, index)] = (
+                    statement,
+                    str([_syntax(n) for n in [*owner.decorator_list, *owner.body[:index]]]),
+                )
+    return calls
+
+
+def _retained_keywords(before: str, after: str) -> set[int]:
+    """Locations of whole keyword lines retained at a proven direct assignment site."""
+    old_tree, new_tree = ast.parse(before), ast.parse(after)
+    old_calls, new_calls = _direct_calls(old_tree), _direct_calls(new_tree)
+    retained: set[int] = set()
+    lines = after.splitlines()
+    for site in old_calls.keys() & new_calls.keys():
+        (old, old_prefix), (new, new_prefix) = old_calls[site], new_calls[site]
+        if _syntax(ast.Tuple(elts=old.targets)) != _syntax(ast.Tuple(elts=new.targets)):
+            continue
+        if old_prefix != new_prefix:
+            continue
+        if not isinstance(old.value, ast.Call) or not isinstance(new.value, ast.Call):
+            continue
+        if not _retained_call(old.value, new.value, before, after):
+            continue
+        originals = {k.arg for k in old.value.keywords}
+        for keyword in new.value.keywords:
+            if keyword.arg not in originals or keyword.lineno != keyword.end_lineno:
+                continue
+            part = _tokens(ast.get_source_segment(after, keyword))
+            line = _tokens(lines[keyword.lineno - 1].strip())
+            if part and line in (part, (*part, (tokenize.OP, ","))):
+                retained.add(keyword.lineno)
+    return retained
+
+
+def _retained_candidates(hits: list[Hit], base: str, head: str, cwd: Path) -> set[tuple[str, int]]:
+    """Keep unsupported/ambiguous syntax on the original detection path."""
+    retained: set[tuple[str, int]] = set()
+    for path in sorted({hit.path for hit in hits if hit.path.endswith(".py")}):
+        if not _git("ls-tree", base, "--", path, cwd=cwd).strip():
+            continue  # A genuinely new file has no retained site.
+        before = _git("show", f"{base}:{path}", cwd=cwd)
+        after = _git("show", f"{head}:{path}", cwd=cwd)
+        try:
+            retained.update((path, line) for line in _retained_keywords(before, after))
+        except (SyntaxError, tokenize.TokenError, IndentationError, ValueError) as error:
+            print(
+                f"no-silent-resurrection: unresolved syntax in {path}: {error}; raw detection retained"
+            )
+    return retained
 
 
 class _LogScan:
@@ -425,13 +495,7 @@ class _LogScan:
 def _deleted_candidates(
     base: str, days: int, candidates: set[str], cwd: Path
 ) -> tuple[dict[str, list[Commit]], int]:
-    """Return (dead candidate text -> deleting commits, commits scanned).
-
-    One streaming `git log --since=<days>days --no-merges -p -U0 <base>` pass:
-    a commit "deletes" a candidate line when its diff removes it from a
-    non-skipped path and the commit does not re-add the text in the same
-    commit (a move is not a deletion).
-    """
+    """Stream recent main deletions; content re-added in the same commit stays live."""
     if not candidates:
         return {}, 0
     stream = subprocess.Popen(  # noqa: S603
@@ -469,25 +533,39 @@ def _deleted_candidates(
     return scan.dead, scan.scanned
 
 
-def _find_hits(runs: list[Run], alive: set[str], dead: dict[str, list[Commit]]) -> list[Hit]:
+def _find_hits(
+    runs: list[Run],
+    alive: set[str],
+    dead: dict[str, list[Commit]],
+    retained: set[tuple[str, int]] | None = None,
+) -> list[Hit]:
     hits: list[Hit] = []
     for run in runs:
         segment: list[Line] = []
         for line in run.lines:
             if line.strong and line.text not in alive and line.text not in dead:
-                hits.extend(_segment_hits(run.path, segment, alive, dead))
+                hits.extend(_segment_hits(run.path, segment, alive, dead, retained or set()))
                 segment = []
                 continue
             segment.append(line)
-        hits.extend(_segment_hits(run.path, segment, alive, dead))
+        hits.extend(_segment_hits(run.path, segment, alive, dead, retained or set()))
     return hits
 
 
 def _segment_hits(
-    path: str, segment: list[Line], alive: set[str], dead: dict[str, list[Commit]]
+    path: str,
+    segment: list[Line],
+    alive: set[str],
+    dead: dict[str, list[Commit]],
+    retained: set[tuple[str, int]],
 ) -> list[Hit]:
     dead_lines = [
-        line for line in segment if line.strong and line.text in dead and line.text not in alive
+        line
+        for line in segment
+        if line.strong
+        and line.text in dead
+        and line.text not in alive
+        and (path, line.number) not in retained
     ]
     if not dead_lines:
         return []
@@ -566,9 +644,11 @@ def _path_matches(declared: str, path: str) -> bool:
 def _covers(allowance: Allowance, hit: Hit) -> bool:
     if allowance.allow_all:
         return True
-    if any(hit.commit.sha.startswith(sha) for sha in allowance.shas):
-        return True
-    return any(_path_matches(declared, hit.path) for declared in allowance.paths)
+    if allowance.shas and not any(hit.commit.sha.startswith(sha) for sha in allowance.shas):
+        return False
+    if allowance.paths:
+        return any(_path_matches(declared, hit.path) for declared in allowance.paths)
+    return bool(allowance.shas)
 
 
 def _apply_allowances(
@@ -607,17 +687,10 @@ def _warn_unused(unused: list[Allowance]) -> None:
 
 
 def _line_recipe(hit: Hit) -> None:
-    print()
-    print(
-        "no-silent-resurrection: an intentional resurrection is allowed by a "
-        "`Resurrects: <reason>` line"
-    )
-    print("in any commit message of this PR; name the deleting sha or a path to allow only")
-    print("matching hits:")
-    print(f"    Resurrects: {hit.commit.sha[:9]}    # this hit's deleting commit")
-    print(f"    Resurrects: {hit.path}    # this hit's file (or a directory)")
-    print("A `Resurrects:` line with neither a sha nor a path allows every hit. A commit that")
-    print("reverts the deleting commit (`This reverts commit <sha>`) is allowed automatically.")
+    print("\nno-silent-resurrection: intentional restoration requires a commit declaration:")
+    print(f"    Resurrects: {hit.commit.sha[:9]} {hit.path}")
+    print("Both targets must match. See docs/conventions/agents/no-silent-resurrection.md")
+    print("for SHA-only, path-only, broad declarations and explicit revert semantics.")
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -655,6 +728,8 @@ def main(argv: list[str] | None = None) -> int:
         alive = _alive_candidates(candidates, args.base, cwd)
         dead, scanned = _deleted_candidates(args.base, args.days, candidates, cwd)
         hits = _find_hits(runs, alive, dead)
+        retained = _retained_candidates(hits, merge_base, args.head, cwd)
+        hits = _find_hits(runs, alive, dead, retained)
         allowances = _collect_allowances(merge_base, args.head, cwd)
     except (GitError, OSError) as error:
         print(f"no-silent-resurrection: error: {error}", file=sys.stderr)
@@ -670,6 +745,9 @@ def main(argv: list[str] | None = None) -> int:
         f"no-silent-resurrection: {len(candidates)} candidate line(s); {len(alive)} still in "
         f"the base tree; {len(dead)} match lines deleted in {scanned} commit(s) over the "
         f"last {args.days} day(s)"
+    )
+    print(
+        f"no-silent-resurrection: {len(retained)} retained keyword line(s); other syntax keeps raw detection"
     )
     if not hits:
         print("no-silent-resurrection: no resurrection detected.")

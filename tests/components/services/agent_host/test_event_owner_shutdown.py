@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -136,6 +137,7 @@ async def test_boot_before_host_closes_writer_even_if_it_failed_and_still_closes
 async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    unit_home: Path,
 ) -> None:
     from ava.sdk_surface.install import Installation
     from base.cluster.machine import MachineIdentity
@@ -174,6 +176,9 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     def no_op(*_args: object) -> None:
         pass
 
+    def initialize_process_scope(*, machine: MachineIdentity, home: Path) -> None:
+        assert home == unit_home
+
     def acquire(*_args: object) -> bool:
         return True
 
@@ -189,7 +194,7 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     monkeypatch.setattr(daemon, "load_installation", load_plugins)
     monkeypatch.setattr(daemon, "process_clients", process_clients)
     monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
-    monkeypatch.setattr("agent.process_boot.init_process_scope", no_op)
+    monkeypatch.setattr("agent.process_boot.init_process_scope", initialize_process_scope)
     monkeypatch.setattr("agent.process_boot.land_cluster_extensions", no_op)
     machine = MachineIdentity(
         name=lambda: "test-box",
@@ -199,7 +204,9 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     )
     try:
         with pytest.raises(ValueError) as observed:
-            await daemon.run(config=ConfigBoot(), database=lambda: database, machine=machine)
+            await daemon.run(
+                config=ConfigBoot(), database=lambda: database, machine=machine, home=unit_home
+            )
         assert observed.value is boot_error
         assert any(str(writer_error) in note for note in boot_error.__notes__)
         assert events == ["pools", "pidfile"]

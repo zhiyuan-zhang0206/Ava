@@ -388,7 +388,9 @@ def test_building_the_prompt_records_no_skill_attribution(
     `prompt_injected` depth is no longer written at all — it was ~55K rows of
     "installed on this machine" noise that drowned the `loaded` signal
     ava_self_evolution actually scores. Exposure must not look like use."""
-    set_machine_identity("agent-runner", "test-machine")  # the built prompt names its machine
+    set_machine_identity(
+        role="agent-runner", name="test-machine"
+    )  # the built prompt names its machine
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc", body="# A\n")
     _write_skill(fake_skills_dir / "grp", "beta", "beta", "Beta desc", body="# B\n")

@@ -188,6 +188,7 @@ async def test_original_invocation_settles_once_after_database_fault(
             wake_enabled=configured_policy().recovery_wake_enabled,
             prompt_reap_enabled=configured_policy().recrash_reap_enabled,
             reconcile_inputs=configured_policy().reconcile_inputs,
+            machine=machine_identity,
         )
         assert faults.injected
         assert faults.invocations == 1

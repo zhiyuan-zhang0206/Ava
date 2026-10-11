@@ -1,16 +1,19 @@
 """Converge browser step: preflight when enabled."""
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 import cli.commands.converge.host as cv
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from tests.fixtures.configuration import snapshot_process_config
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -178,11 +181,12 @@ def test_steps_read_their_context_owner_and_later_overlay(
         producer=operator_pipeline,
         command_runtime=command_runtime,
     )
-    second = _ctx(
-        tmp_path / "second",
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
+    second_config = snapshot_process_config()
+    second = replace(
+        first,
+        ava_home=tmp_path / "second",
+        config=second_config,
+        machine=machine_from_boot(second_config),
     )
     first.config.set_field("browser_enabled", False)
     second.config.set_field("browser_enabled", True)

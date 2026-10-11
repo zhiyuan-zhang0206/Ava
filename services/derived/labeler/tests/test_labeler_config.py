@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 
-from base.config import Settings, get_field, settings
+from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot, Settings, get_field, settings
 from base.config.domains.lm import LmSettings
 from base.daemon.endpoints import ServiceEndpoint
 from base.db import Database
@@ -122,13 +126,20 @@ def _assert_gate_matches_image(
         assert reads == [(image.source_root, image.sha)]
 
 
-def _run_main(monkeypatch: pytest.MonkeyPatch) -> None:
+def _run_main(monkeypatch: pytest.MonkeyPatch, *, machine_name: str) -> None:
+    boot = ConfigBoot()
+    boot.set_field("machine_name", machine_name)
+    monkeypatch.setattr(daemon, "ConfigBoot", lambda: boot)
     runner = asyncio.Runner()
     monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
     try:
-        daemon.main()
+        with patch.dict(os.environ):
+            daemon.main()
     finally:
         runner.close()
+        tzset = getattr(time, "tzset", None)
+        if tzset is not None:
+            tzset()
 
 
 @pytest.mark.parametrize("sha", ["captured-labeler", None])
@@ -142,11 +153,13 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
     gates: list[ProcessDbGate] = []
     reads: list[tuple[Path, str]] = []
     factories: list[Callable[[], Database]] = []
+    machines: list[MachineIdentity] = []
     pipeline = object()
 
     class Store:
         @classmethod
-        def from_settings(cls, *, gate: ProcessDbGate) -> Store:
+        def from_settings(cls, *, gate: ProcessDbGate, local_host: Callable[[], str]) -> Store:
+            assert local_host == machines[0].host
             gates.append(gate)
             return cls()
 
@@ -158,7 +171,8 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
         reads.append((root, commit))
         return 42
 
-    def build(*, database: Callable[[], Database]) -> object:
+    def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
+        machines.append(machine)
         stages.append("producer")
         factories.append(database)
         return pipeline
@@ -167,6 +181,7 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
         stages.append("logging")
         assert inputs["image"] is image
         assert inputs["producer"]() is pipeline
+        assert inputs["machine_reader"] == machines[0].name
         assert inputs["machine_reader"]() == "labeler-entry"
         factories[0]()
 
@@ -187,7 +202,6 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
     def exit_process(code: int) -> None:
         stages.append(f"exit:{code}")
 
-    monkeypatch.setattr(settings.general, "machine_name", "labeler-entry")
     monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
     monkeypatch.setattr(code_version, "first_parent_count", count)
     monkeypatch.setattr(daemon, "Database", Store)
@@ -198,7 +212,7 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
     monkeypatch.setattr(daemon, "run", work)
     monkeypatch.setattr(daemon, "_remove_pidfile", lambda: None)
     monkeypatch.setattr(daemon, "_hard_exit", exit_process)
-    _run_main(monkeypatch)
+    _run_main(monkeypatch, machine_name="labeler-entry")
     assert stages == ["capture", "schema", "producer", "logging", "run", "exit:0"]
     _assert_gate_matches_image(gates, reads, image)
 
@@ -253,11 +267,14 @@ def test_main_reports_uncaught_failure_and_exits_nonzero(
     runner = asyncio.Runner()
     monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
     try:
-        with pytest.raises(_Exit) as caught:
+        with pytest.raises(_Exit) as caught, patch.dict(os.environ):
             daemon.main()
         assert caught.value.code == 1
     finally:
         runner.close()
+        tzset = getattr(time, "tzset", None)
+        if tzset is not None:
+            tzset()
     assert removed == [True]
     [record] = [item for item in caplog.records if "daemon crashed" in item.message]
     assert record.exc_info is not None

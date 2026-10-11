@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
     record_hourly_notice,
@@ -16,6 +17,7 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from services.wake.heartbeat import completion_digest
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _agent(db_conn: psycopg.Connection) -> int:
@@ -30,7 +32,7 @@ def _agent(db_conn: psycopg.Connection) -> int:
 
 
 def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
-    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate, machine_identity: MachineIdentity
 ) -> None:
     import base.db
 
@@ -67,6 +69,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
                     Database.from_settings(gate=database_gate),
                     EventBus.from_settings(),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
+                    machine=machine_identity,
                 )
             )
             == 1
@@ -105,6 +108,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
                     Database.from_settings(gate=database_gate),
                     EventBus.from_settings(),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
+                    machine=machine_identity,
                 )
             )
             == 0
@@ -119,7 +123,11 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
 
 
 def test_unknown_digest_failure_propagates_to_service(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """An unknown failure ends this round rather than deferring poison work."""
     import base.db
@@ -161,6 +169,7 @@ def test_unknown_digest_failure_propagates_to_service(
                     Database.from_settings(gate=database_gate),
                     EventBus.from_settings(),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
+                    machine=machine_identity,
                 )
             )
     finally:
@@ -175,7 +184,11 @@ def test_unknown_digest_failure_propagates_to_service(
 
 
 def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbound(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     import base.db
     from base.agents.messages.chat_delivery import ChatInboundCommittedError
@@ -207,6 +220,7 @@ def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbou
                         Database.from_settings(gate=database_gate),
                         EventBus.from_settings(),
                         now=datetime(2026, 9, 22, 12, tzinfo=UTC),
+                        machine=machine_identity,
                     )
                 )
             assert failed.value.__cause__ is bug
@@ -221,6 +235,7 @@ def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbou
                     Database.from_settings(gate=database_gate),
                     EventBus.from_settings(),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
+                    machine=machine_identity,
                 )
             )
             == 1

@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import CopyProof, ReceiveRequest
+from base.cluster.authority.unit import UnitIdentity
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -183,7 +184,12 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
         app.state.db_pool, first["batch_id"], local_machine=machine_identity.name()
     )
     remote_dir = tmp_path / "remote-disk" / f"AvaAgent-{agent}"
-    monkeypatch.setattr(receiver, "current_unit", lambda: target)
+
+    def current_target(*, local_machine: str) -> UnitIdentity:
+        assert local_machine == machine_identity.name()
+        return target
+
+    monkeypatch.setattr(receiver, "current_unit", current_target)
 
     def directory(_id: int, **_kwargs: Any) -> Path:
         return remote_dir
@@ -518,7 +524,12 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
         app.state.db_pool, response.json()["batch_id"], local_machine=machine_identity.name()
     )
     assert request.source != request.target and request.target == target
-    monkeypatch.setattr(receiver, "current_unit", lambda: target)
+
+    def current_target(*, local_machine: str) -> UnitIdentity:
+        assert local_machine == machine_identity.name()
+        return target
+
+    monkeypatch.setattr(receiver, "current_unit", current_target)
     monkeypatch.setattr(receiver, "MAX_AGENT_UPLOAD_BYTES", 5)
     calls: list[tuple[str, str, dict[str, Any]]] = []
 

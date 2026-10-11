@@ -14,14 +14,20 @@ from typing import Any
 import pytest
 
 from agent.ownership.corpse_reap import ReapedCorpse
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_attempts_the_guarded_resurrect_per_wake(
-    monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
+    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     calls: list[tuple[int, int, str]] = []
 
@@ -32,7 +38,9 @@ async def test_attempts_the_guarded_resurrect_per_wake(
         *,
         trigger_inbound_id: int,
         trigger_inbound_kind: str,
+        local_machine: str,
     ) -> str:
+        assert local_machine == machine_identity.name()
         calls.append((agent_id, trigger_inbound_id, trigger_inbound_kind))
         return "spawned"
 
@@ -44,13 +52,18 @@ async def test_attempts_the_guarded_resurrect_per_wake(
         Database.from_settings(gate=database_gate),
         event_bus,
         [ReapedCorpse(7, 101), ReapedCorpse(8, 102)],
+        machine=machine_identity,
     )
 
     assert calls == [(7, 101, "chat"), (8, 102, "chat")]
 
 
 async def test_wake_less_entries_are_skipped(
-    monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
+    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     async def _attempt(*args: object, **kwargs: object) -> str:
         raise AssertionError("a wake-less entry must not reach the resurrect")
@@ -59,9 +72,14 @@ async def test_wake_less_entries_are_skipped(
 
     monkeypatch.setattr(ops.lifecycle, "resurrect_if_terminated", _attempt)
 
-    await recover_reaped_corpses(Database.from_settings(gate=database_gate), event_bus, [])
     await recover_reaped_corpses(
-        Database.from_settings(gate=database_gate), event_bus, [ReapedCorpse(7, None)]
+        Database.from_settings(gate=database_gate), event_bus, [], machine=machine_identity
+    )
+    await recover_reaped_corpses(
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        [ReapedCorpse(7, None)],
+        machine=machine_identity,
     )
 
 
@@ -71,6 +89,7 @@ async def test_an_attempt_failure_defers_without_stopping_the_next(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     attempted: list[int] = []
 
@@ -81,7 +100,9 @@ async def test_an_attempt_failure_defers_without_stopping_the_next(
         *,
         trigger_inbound_id: int,
         trigger_inbound_kind: str,
+        local_machine: str,
     ) -> str:
+        assert local_machine == machine_identity.name()
         if trigger_inbound_id == 101:
             raise RuntimeError("resurrect dispatch exploded")
         attempted.append(agent_id)
@@ -95,6 +116,7 @@ async def test_an_attempt_failure_defers_without_stopping_the_next(
         Database.from_settings(gate=database_gate),
         event_bus,
         [ReapedCorpse(7, 101), ReapedCorpse(8, 102)],
+        machine=machine_identity,
     )
 
     assert attempted == [8]

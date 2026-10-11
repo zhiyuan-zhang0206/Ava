@@ -14,11 +14,14 @@ import sys
 from pathlib import Path
 import tests.fixtures.env_bootstrap
 import psycopg
+from base.cluster.machine.boot import machine_from_boot
 from base.config import refresh_data_plane_settings, settings
 from tests._containers import postgres
+from tests.fixtures.configuration import snapshot_process_config
 
 scratch = Path(sys.argv[1])
 assert settings.data_plane.pg_throwaway_base == str(scratch)
+machine = machine_from_boot(snapshot_process_config())
 refresh_data_plane_settings()
 assert settings.data_plane.pg_throwaway_base == str(scratch)
 
@@ -27,7 +30,7 @@ def data_directory(url):
         assert conn.execute('SELECT 1').fetchone() == (1,)
         return Path(conn.execute('SHOW data_directory').fetchone()[0])
 
-with postgres() as first_url, postgres() as second_url:
+with postgres(machine_name=machine.name) as first_url, postgres(machine_name=machine.name) as second_url:
     first, second = data_directory(first_url), data_directory(second_url)
     assert first.parents[1] == scratch and second.parents[1] == scratch
     assert first != second

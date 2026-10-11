@@ -392,10 +392,11 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     start and normal stop need the real cluster configuration."""
     import os as _os
 
-    # Blanking os.environ drops AVA_HOME, which would make the home `~/.ava` —
-    # and on a host that runs a cluster its own checkout gate would refuse `stop`
-    # from this checkout. Name a home with no `source` of its own: this test
-    # asserts env pinning, not gate behaviour.
+    # The no-op parser admits its own home; initialization is exercised by start-gate tests.
+    def admitted(home: Path) -> None:
+        assert home == tmp_path.resolve()
+
+    monkeypatch.setattr("cli.start_identity.require_initialized", admitted)
     for verb in ("status", "cluster", "agents", "config", "logs"):
         env = {"PATH": "/usr/bin", "AVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)

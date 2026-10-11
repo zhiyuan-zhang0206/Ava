@@ -187,6 +187,7 @@ async def test_activation_waits_for_resource_closure(
     )
     activate = Mock(return_value=_session())
     monkeypatch.setattr("base.agents.impersonation.activate", activate)
+    read_local_machine = Mock(side_effect=AssertionError("identity read before resource closure"))
     resources = HostedTurnResources(unresolved={Path("request"): object()})
     with pytest.raises(RuntimeError, match="unresolved native exec"):
         await impersonation.settle_checkpoint(
@@ -198,6 +199,7 @@ async def test_activation_waits_for_resource_closure(
             incarnation=incarnation,
             resources=resources,
             notes=_notes(),
+            read_local_machine=read_local_machine,
         )
     activate.assert_not_called()
     assert not await impersonation.settle_checkpoint(
@@ -210,5 +212,7 @@ async def test_activation_waits_for_resource_closure(
         incarnation=incarnation,
         resources=resources,
         notes=_notes(),
+        read_local_machine=read_local_machine,
     )
     activate.assert_not_called()
+    read_local_machine.assert_not_called()

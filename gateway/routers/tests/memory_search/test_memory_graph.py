@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineRoles
 from gateway.app import app
 from gateway.routers.tests.test_memory_search import _app_db as _app_db
 from gateway.routers.tests.test_memory_search import _legacy_extract_meta
@@ -19,7 +21,7 @@ class TestMemoryGraph:
 
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -68,7 +70,7 @@ tags: [tech-ops]
         """The folder pseudo node carries only structure — display fields stay empty."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -105,7 +107,7 @@ tags: [ava-internal]
         """Recursive rglob picks up notes in subdirectories."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
 
         # Root-level file
         (tmp_path / "root-note.md").write_text(
@@ -161,7 +163,7 @@ See [Root Note](../root-note.md).
         folder → parent-folder containment edges forming a rooted tree."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "root.md").write_text(
             """---
 type: Memory
@@ -229,7 +231,7 @@ tags: [ava-internal]
         connected tree even when every note lives in a subdirectory."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "sub").mkdir()
         (tmp_path / "sub" / "only.md").write_text(
             """---
@@ -260,7 +262,7 @@ tags: [ava-internal]
         """An existing but empty pool yields an empty graph — no lone root folder."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
 
         with TestClient(app) as client:
             resp = client.get("/api/memory/graph")
@@ -281,7 +283,7 @@ tags: [ava-internal]
         graph page)."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -310,7 +312,7 @@ See [Outside](../outside.md) and [Absolute](/etc/passwd).
         string list, nothing else."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -348,7 +350,7 @@ tags: {a: 1}
         """OKF-reserved files (index.md / log.md / MEMORY.md) never become nodes."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         for name in ("index.md", "log.md", "MEMORY.md"):
             (tmp_path / name).write_text(
                 """---
@@ -382,7 +384,7 @@ title: Real
         """A file without `---` frontmatter is not a note and never becomes a node."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "plain.md").write_text("# Just a heading\n\nNo YAML.\n", encoding="utf-8")
         (tmp_path / "note.md").write_text(
             """---
@@ -406,7 +408,9 @@ title: Note
         """memory_root missing → 200 + a warning, not a 500."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path / "nope")
+        monkeypatch.setattr(
+            _gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path / "nope")
+        )
 
         with TestClient(app) as client:
             resp = client.get("/api/memory/graph")
@@ -423,7 +427,7 @@ title: Note
         warning and is skipped instead of 500-ing."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "x.md").mkdir()
         (tmp_path / "good.md").write_text(
             """---
@@ -449,7 +453,7 @@ title: Good
         """http(s):// and # links are not concept edges."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -475,7 +479,7 @@ See [Web](https://example.com) and [Anchor](#section).
         is dropped; containment edges are unaffected."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -500,7 +504,7 @@ See [Ghost](ghost.md).
         """timestamp / ava_agent: truthy → str(), falsy/missing → None."""
         import gateway.routers.memory as _gw_memory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -591,3 +595,9 @@ def test_extract_meta_coerces_non_string_description(tmp_path: Path) -> None:
     p = tmp_path / "scalar.md"
     p.write_text("---\ndescription: 123\ntags: 5\n---\nb\n", encoding="utf-8")
     assert _extract_meta(p) == ("123", [])
+
+
+def _memory_root(root: Path, *, roles: MachineRoles) -> Path:
+    """Keep the original test filesystem while accepting the explicit role input."""
+    del roles
+    return root

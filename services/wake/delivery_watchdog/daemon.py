@@ -95,6 +95,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base import paths, telemetry
+from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, Settings, settings
 from base.config.service_read import ConfigAuthority
@@ -519,6 +520,7 @@ async def _run_loops(
     liveness: LivenessGroup,
     *,
     authority: ConfigAuthority,
+    machine: MachineIdentity,
 ) -> None:
     """Own the four resident loops: the scan loop and the three recovery loops
     (resurrect retry, stalled crash-marked harvest, hosted-turn recovery).
@@ -543,6 +545,7 @@ async def _run_loops(
                 interval,
                 settings.daemon.delivery_watchdog_max_resurrect_per_tick,
                 settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds,
+                machine=machine,
             )
         )
         loops.create_task(
@@ -553,6 +556,7 @@ async def _run_loops(
                 harvest,
                 interval,
                 settings.daemon.delivery_watchdog_threshold_seconds,
+                machine=machine,
             )
         )
         loops.create_task(
@@ -563,11 +567,14 @@ async def _run_loops(
                 hosted_turn,
                 interval,
                 turn_liveness.hosted_turn_threshold_seconds(authority),
+                machine=machine,
             )
         )
 
 
-async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
+async def run(
+    *, database: Callable[[], Database], image: LoadedCommit, machine: MachineIdentity
+) -> None:
     """Start the daemon: pidfile -> healthz server -> connect DB -> loops."""
     if _is_running():
         _log.info("[delivery] daemon already running (pidfile=%s), exiting", _pidfile())
@@ -593,7 +600,9 @@ async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
             all_domains=settings if settings.profile is None else Settings(profile=None),
             env_path=paths.ava_home() / ".env",
         )
-        await _run_loops(pool, db, EventBus.from_settings(), liveness, authority=authority)
+        await _run_loops(
+            pool, db, EventBus.from_settings(), liveness, authority=authority, machine=machine
+        )
     finally:
         pool.close()
         await stop_health_server(health)
@@ -634,7 +643,7 @@ def main() -> None:
     # teardown is skipped by the hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run(database=database, image=image))
+        runner.run(run(database=database, image=image, machine=machine))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[delivery] interrupted, shutting down")

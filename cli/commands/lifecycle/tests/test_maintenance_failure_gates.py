@@ -27,6 +27,7 @@ from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from cli.commands.lifecycle.tests.stop_support import drained
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from ops import agent_pause
 from ops.cluster import pause as cluster_pause
 from tests.factories.maintenance import WHEN as STOP_WHEN

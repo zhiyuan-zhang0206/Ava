@@ -34,6 +34,7 @@ import pytest
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.probe as _probe_commands
+from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import start as start_mod
@@ -204,15 +205,23 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequ
 
 def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> list[str]:
     launched: list[str] = []
-    monkeypatch.setattr(
-        "cli.commands._repo._services_for_roles_annotated",
-        lambda _r: tuple((s, None) for s in specs),  # pyright: ignore[reportUnknownArgumentType] — roster test double
-    )
-    monkeypatch.setattr(
-        _root_driver_commands,
-        "start_roster",
-        lambda _roles, skip: tuple(s for s in specs if s.session not in skip),  # pyright: ignore[reportUnknownArgumentType] — roster test double
-    )
+
+    def annotated_roster(
+        roles: frozenset[str], *, machine: MachineIdentity
+    ) -> tuple[tuple[ServiceSpec, None], ...]:
+        assert isinstance(machine, MachineIdentity)
+        del roles
+        return tuple((spec, None) for spec in specs)
+
+    def start_roster(
+        roles: frozenset[str], skip: set[str], *, machine: MachineIdentity
+    ) -> tuple[ServiceSpec, ...]:
+        assert isinstance(machine, MachineIdentity)
+        del roles
+        return tuple(spec for spec in specs if spec.session not in skip)
+
+    monkeypatch.setattr("cli.commands._repo._services_for_roles_annotated", annotated_roster)
+    monkeypatch.setattr(_root_driver_commands, "start_roster", start_roster)
 
     def launch(roster: tuple[ServiceSpec, ...], *_a: object, **_kw: object) -> LaunchOutcome:
         launched.extend(s.session for s in roster)

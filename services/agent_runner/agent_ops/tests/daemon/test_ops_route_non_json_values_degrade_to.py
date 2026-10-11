@@ -376,7 +376,7 @@ def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> Non
         sys.path.insert(0, {str(_REPO)!r})
         from services.agent_runner.agent_ops import daemon
 
-        async def _boom(*, database, image):
+        async def _boom(*, database, image, local_machine, config):
             raise RuntimeError("db pool exploded mid-loop")
 
         daemon.init_gateway_process = lambda **kw: None

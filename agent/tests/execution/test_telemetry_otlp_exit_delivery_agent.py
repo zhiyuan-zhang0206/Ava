@@ -78,7 +78,11 @@ LEASE = {{
     "event_delivery_protocol_version": None,
 }}
 
-external.control.require_active = lambda _db, _lease_id, _caller: dict(LEASE)
+def require_active(_db, _lease_id, _caller, *, local_machine):
+    assert local_machine == "external-cli-probe"
+    return dict(LEASE)
+
+external.control.require_active = require_active
 os.environ["AVA_MACHINE_NAME"] = "external-cli-probe"
 external.process_metadata = lambda: {{"pid": 1}}
 def load_snapshot(_agent_id, **_kwargs):

@@ -36,6 +36,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -653,7 +654,9 @@ async def _liveness_loop(
         await _sleep_with_liveness(liveness, _PASS_INTERVAL_S)
 
 
-async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
+async def run(
+    *, database: Callable[[], Database], image: LoadedCommit, machine: MachineIdentity
+) -> None:
     """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
     if _is_running():
         _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _pidfile())
@@ -687,7 +690,9 @@ async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
             loops.create_task(_dispatch_loop(pool, db, bus, dispatch_progress))
             loops.create_task(_liveness_loop(db, pool, bus, liveness_progress))
             loops.create_task(
-                completion_digest.completion_digest_loop(pool, db, bus, digest_progress)
+                completion_digest.completion_digest_loop(
+                    pool, db, bus, digest_progress, machine=machine
+                )
             )
     finally:
         pool.close()
@@ -735,7 +740,7 @@ def main() -> None:
     # hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run(database=database, image=image))
+        runner.run(run(database=database, image=image, machine=machine))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[heartbeat] interrupted, shutting down")

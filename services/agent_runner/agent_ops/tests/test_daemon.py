@@ -98,8 +98,10 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
         body: LaunchAgentRequest,
         pool: ConnectionPool | None,
         *,
+        local_machine: str,
         catalog: ModelCatalog,
     ):
+        assert local_machine == machine_identity.name()
         captured["agent_id"] = body.agent_id
         captured["pool"] = pool
         return SpawnedAgent(id=777)

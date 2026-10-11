@@ -322,6 +322,7 @@ async def test_recovery_commits_the_marked_wake_with_the_termination(
         Database.from_settings(gate=database_gate),
         event_bus,
         watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True),
+        machine=machine_identity,
     )
 
     wakes = _recovery_wakes(db_conn, agent_id)
@@ -350,6 +351,7 @@ async def test_recovery_emits_evidence_then_terminates_with_its_wake_and_resurre
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from ops import lifecycle
 
@@ -391,7 +393,7 @@ async def test_recovery_emits_evidence_then_terminates_with_its_wake_and_resurre
         trigger_inbound_kind: str,
         local_machine: str,
     ) -> str:
-        del local_machine
+        assert local_machine == machine_identity.name()
         calls.append("resurrect")
         assert (agent_id, trigger_inbound_id) == (42, 9001)
         assert trigger_inbound_kind == "chat"
@@ -404,7 +406,7 @@ async def test_recovery_emits_evidence_then_terminates_with_its_wake_and_resurre
     wedge = watchdog._HostedTurnWedge(42, "runner-a", 2500.0, (1.0, 2.0, 3.0), False)
 
     await watchdog._recover_hosted_turn(
-        pool, Database.from_settings(gate=database_gate), event_bus, wedge
+        pool, Database.from_settings(gate=database_gate), event_bus, wedge, machine=machine_identity
     )
 
     assert calls == ["event", "terminate", "trigger", "resurrect"]
@@ -449,7 +451,7 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
 
     wedge = watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), False)
     await watchdog._recover_hosted_turn(
-        pool, Database.from_settings(gate=database_gate), event_bus, wedge
+        pool, Database.from_settings(gate=database_gate), event_bus, wedge, machine=machine_identity
     )
 
     row = db_conn.execute(
@@ -526,6 +528,7 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
             Database.from_settings(gate=database_gate),
             event_bus,
             watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True),
+            machine=machine_identity,
         )
 
     assert _row(db_conn, "SELECT status FROM agents_meta WHERE id=%s", agent_id) == ("terminated",)
@@ -541,6 +544,7 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
         LoopProgress("resurrect", rounds.loop_liveness_timeout_s()),
         5,
         86400.0,
+        machine=machine_identity,
     )
     assert set(triggers) == {wakes[0][0]}
 
@@ -573,6 +577,7 @@ async def test_a_committed_recovery_is_never_recovered_twice(
         Database.from_settings(gate=database_gate),
         event_bus,
         watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), True),
+        machine=machine_identity,
     )
 
     rescan = await watchdog._detect_hosted_turn_wedges(
@@ -637,6 +642,7 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
         EventBus.from_settings(),
         progress,
         _THRESHOLD_S,
+        machine=machine_identity,
     )
     await watchdog.hosted_turn_recovery_round(
         pool,
@@ -644,6 +650,7 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
         EventBus.from_settings(),
         progress,
         _THRESHOLD_S,
+        machine=machine_identity,
     )
     assert recovered == [agent_id]
     assert watchdog.HOSTED_TURN_RECOVERY_COOLDOWN_S == 600.0
@@ -655,6 +662,7 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
         EventBus.from_settings(),
         progress,
         _THRESHOLD_S,
+        machine=machine_identity,
     )
     assert recovered == [agent_id, agent_id]
 
@@ -690,6 +698,7 @@ async def test_a_hung_recovery_is_cut_at_the_deadline_and_still_enters_the_coold
         EventBus.from_settings(),
         LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s()),
         _THRESHOLD_S,
+        machine=machine_identity,
     )
 
     claimed, _ = attempts.claim_attempts(pool, attempts.HOSTED_TURN, [agent_id], 600.0)
@@ -734,6 +743,7 @@ async def test_a_slow_recovery_is_never_started_twice(
             LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s()),
             0.01,
             _THRESHOLD_S,
+            machine=machine_identity,
         )
     )
     try:

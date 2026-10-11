@@ -103,7 +103,8 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     def fake_dependency_gate() -> None:
         calls.append("dependency")
 
-    def fake_ava_migrations(got: object) -> list[str]:
+    def fake_ava_migrations(got: object, *, machine_name: Callable[[], str]) -> list[str]:
+        assert callable(machine_name)
         assert got in (conn, admin_conn)
         calls.append("ava")
         return ["20260823T000000_example"]

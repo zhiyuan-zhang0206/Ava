@@ -10,6 +10,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.deploy.schema.migrations import (
     MigrationFailed,
@@ -26,7 +27,7 @@ from base.deploy.tests.migration_support import (
 )
 
 
-def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
+def test_fresh_schema_sql_bootstrap_is_baselined(machine_identity: MachineIdentity) -> None:
     """The real fresh-DB bootstrap: apply db/schema.sql to an empty database and
     assert it lands in the baselined applied-set state (new shape + baseline row,
     presets seeded), and apply_pending is then a no-op. Isolated throwaway DB, so
@@ -61,11 +62,11 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
         # ALTER skip a fresh schema that already carries the column; all other
         # post-baseline migrations replay cleanly, then a second apply is a no-op.
         with psycopg.connect(url) as conn:
-            assert set(apply_pending_migrations(conn)) == required_migration_set() - set(
-                _schema_sql_stamped_migration_names()
-            )
+            assert set(
+                apply_pending_migrations(conn, machine_name=machine_identity.name)
+            ) == required_migration_set() - set(_schema_sql_stamped_migration_names())
         with psycopg.connect(url) as conn:
-            assert apply_pending_migrations(conn) == []
+            assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
             settled = conn.execute("SELECT llm_model FROM cluster_defaults WHERE id = 1").fetchone()
             assert settled == ("deepseek-flash",)
     finally:
@@ -177,12 +178,14 @@ def _widen_retired_checks(conn: psycopg.Connection) -> None:
     )
 
 
-def test_the_version_gate_and_posture_paths_survive_the_contraction() -> None:
+def test_the_version_gate_and_posture_paths_survive_the_contraction(
+    machine_identity: MachineIdentity,
+) -> None:
     """Everything a live process still does against the two surviving tables."""
     with _throwaway_database("retire_paths") as url, psycopg.connect(url) as conn:
         conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
         conn.commit()
-        apply_pending_migrations(conn)
+        apply_pending_migrations(conn, machine_name=machine_identity.name)
         conn.execute(
             "UPDATE deployment_state SET min_code_version = GREATEST(min_code_version, %s) "
             "WHERE id = 1",
@@ -216,7 +219,9 @@ def test_the_version_gate_and_posture_paths_survive_the_contraction() -> None:
             )
 
 
-def test_restarting_row_refuses_the_retirement_and_leaves_the_schema_alone() -> None:
+def test_restarting_row_refuses_the_retirement_and_leaves_the_schema_alone(
+    machine_identity: MachineIdentity,
+) -> None:
     with _throwaway_database("retire_guard") as url:
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
@@ -228,7 +233,7 @@ def test_restarting_row_refuses_the_retirement_and_leaves_the_schema_alone() -> 
             )
 
         with psycopg.connect(url) as conn, pytest.raises(MigrationFailed) as refusal:
-            apply_pending_migrations(conn)
+            apply_pending_migrations(conn, machine_name=machine_identity.name)
         assert isinstance(refusal.value.__cause__, psycopg.errors.RaiseException)
         assert "rows 7 are still in it" in str(refusal.value.__cause__)
 
@@ -254,7 +259,7 @@ def test_restarting_row_refuses_the_retirement_and_leaves_the_schema_alone() -> 
         with psycopg.connect(url) as conn:
             # Migrations newer than the retirement apply after it; only the
             # retirement was held back by the refusal.
-            applied = apply_pending_migrations(conn)
+            applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
             assert [name for name in applied if name <= _RETIRE] == [_RETIRE]
         with (
             psycopg.connect(url, autocommit=True) as conn,
