@@ -4,7 +4,7 @@ Validates:
 - GET /healthz → 200 + JSON includes name / pid / home / started_at
 - Other paths → 404
 - start server + stop pair is idempotent (stop called twice does not raise)
-- _health_port: env override takes priority, defaults to DEFAULT_PORTS, unregistered raises KeyError
+- health_port: env override takes priority, defaults to DEFAULT_PORTS, unregistered raises KeyError
 - probe_daemon: 200 only counts as alive when the name/home/pid triple matches
 - probe_home: the pid-less sibling for `/api/health`, where the reload fork makes
   a pid comparison meaningless — 200 plus this unit's `$AVA_HOME`
@@ -19,6 +19,7 @@ from typing import cast
 
 import pytest
 
+from base.config import get_field
 from base.daemon import health
 from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.tests._health_helpers import _find_free_port, _http_get
@@ -340,25 +341,28 @@ async def test_stop_idempotent() -> None:
 
 
 def test_health_port_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With nothing overriding it, _health_port falls back to DEFAULT_PORTS.
+    """With nothing overriding it, health_port falls back to DEFAULT_PORTS.
 
     The overrides have to be cleared to see that: the suite pins a free port per
     daemon for the whole session (tests/fixtures/env_bootstrap.py) precisely so no test can bind
     or probe a prod default. Stubbing the settings lookup is what "unconfigured"
-    means to `_health_port`."""
-    monkeypatch.setattr(health, "get_field", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    assert health._health_port("agent_host") == 8114
-    assert health._health_port("labeler") == 8103
-    assert health._health_port("memory_indexer") == 8105
-    assert health._health_port("heartbeat") == 8107
-    assert health._health_port("task_maintenance") == 8108
-    assert health._health_port("events_maintenance") == 8109
+    means to `health_port`."""
+
+    def unconfigured(_name: str) -> None:
+        return None
+
+    assert health.health_port("agent_host", read_field=unconfigured) == 8114
+    assert health.health_port("labeler", read_field=unconfigured) == 8103
+    assert health.health_port("memory_indexer", read_field=unconfigured) == 8105
+    assert health.health_port("heartbeat", read_field=unconfigured) == 8107
+    assert health.health_port("task_maintenance", read_field=unconfigured) == 8108
+    assert health.health_port("events_maintenance", read_field=unconfigured) == 8109
 
 
 def test_health_ports_are_isolated_from_prod_defaults() -> None:
     """The session's own pinned ports are in force — the property that keeps a
     daemon leaked out of a test run off prod's ports."""
     for name in health.DEFAULT_PORTS:
-        assert health._health_port(name) != health.DEFAULT_PORTS[name], (
+        assert health.health_port(name, read_field=get_field) != health.DEFAULT_PORTS[name], (
             f"{name} health port is not isolated from its prod default"
         )

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from base.config import get_field
 from base.daemon import health
 from base.daemon.health_schema import DEGRADED, component
 from base.daemon.tests._health_helpers import _find_free_port, _http_get, _probe_url
@@ -344,13 +345,13 @@ def test_health_port_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "agent_host_health_port", 9999)
-    assert health._health_port("agent_host") == 9999
+    assert health.health_port("agent_host", read_field=get_field) == 9999
 
 
 def test_health_port_unknown_raises_key_error() -> None:
     """Unregistered daemon name — fail fast (no silent fallback)."""
     with pytest.raises(KeyError):
-        health._health_port("never_registered_daemon")
+        health.health_port("never_registered_daemon", read_field=get_field)
 
 
 # ─── probe_daemon always returns a verdict ───────────────────────────────

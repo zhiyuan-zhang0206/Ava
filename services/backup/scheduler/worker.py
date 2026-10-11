@@ -18,7 +18,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.db.config import db_config_from_settings
+from base.db.config import db_config_from_boot
 from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -245,11 +245,11 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="pg-backup-worker")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, local_host=machine.host)
+        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
 
     def database_for_url(url: str) -> Database:
         return Database(
-            dataclasses.replace(db_config_from_settings(), db_url=url),
+            dataclasses.replace(db_config_from_boot(config), db_url=url),
             gate=gate,
             local_host=machine.host,
         )
