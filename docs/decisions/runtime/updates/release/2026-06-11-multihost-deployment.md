@@ -440,7 +440,7 @@ Detail + the failure matrix: `cli/commands/update.py` + `cli/commands/_update_re
   is half-partitioned" state. The recovery layers above handle a *paused* node,
   not a *split* one. Lower priority — a tailnet rarely half-partitions — but
   noted.
-- **Fail-fast on SHA-drift** ([`commit-pinned-cluster.md`](../../../../../future/infra/lifecycle/commit-pinned-cluster.md)):
+- **Fail-fast on SHA-drift** (`commit-pinned-cluster.md`, since removed):
   the `cluster_pin` is persisted + visualized, but a drifted node does **not**
   yet refuse work. That enforcement is the deferred load-bearing half — it makes
   "are these two nodes compatible?" disappear instead of being judged.
@@ -496,7 +496,7 @@ move. This reversibility is what makes the opt-in cheap to try.
 > still unbuilt — TLS is tracked in
 > [`../future/infra/security/auth-tls-design.md`](../../../../../future/infra/security/auth-tls-design.md).
 > Item E (fail-fast on commit-pin drift) is also still open, in
-> [`../future/infra/lifecycle/commit-pinned-cluster.md`](../../../../../future/infra/lifecycle/commit-pinned-cluster.md).
+> `future/infra/lifecycle/commit-pinned-cluster.md` (since removed).
 
 The restart (2026-06-14) climbs a ladder, each rung building on the last. Target
 for this pass: **Rung 2 — multi-host safe to opt into, behind the flag.** Rung 3
@@ -628,5 +628,5 @@ because it is the §2 principle made true in code.
 - [`okf/index.ava.okf.md`](../../../../index.ava.okf.md) — built process shape, the gateway/ops dial, keep-alive
 - `shared/config/` — the per-field `scope` model this builds on
 - [`runbook.md`](../../../../conventions/runbook.md) · [`dev-setup.md`](../../../../conventions/dev-setup.md) — concrete bring-up + roster
-- [`commit-pinned-cluster.md`](../../../../../future/infra/lifecycle/commit-pinned-cluster.md) — version-consistency foundation
+- `commit-pinned-cluster.md` (since removed) — version-consistency foundation
 - `cli/commands/update.py` · `cli/commands/_update_recover.py` — the recovery foundation
