@@ -14,7 +14,6 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.schema import migrations
 from base.native_process import code_version
@@ -80,19 +79,7 @@ def test_entry_retains_one_gate_for_work_and_lazy_log_database(
         database()
         database()
 
-    async def machine_work(
-        *, database: Callable[[], Database], image: LoadedCommit, machine: MachineIdentity
-    ) -> None:
-        assert machine is pipeline.call_args.kwargs["machine"]
-        await work(database=database, image=image)
-
-    supplied_work = (
-        machine_work
-        if entry.__name__
-        in {"services.wake.heartbeat.daemon", "services.wake.delivery_watchdog.daemon"}
-        else work
-    )
-    monkeypatch.setattr(entry, "run", supplied_work)
+    monkeypatch.setattr(entry, "run", work)
     monkeypatch.setattr(code_version, "first_parent_count", count)
     entry.main()
 
@@ -116,7 +103,7 @@ def test_entry_retains_one_gate_for_work_and_lazy_log_database(
 def test_work_failure_keeps_the_original_exception_and_exit_status(
     entry: ModuleType, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _capture, _create, pipeline, _logging, exit_process = _prepare_entry(
+    _capture, _create, _pipeline, _logging, exit_process = _prepare_entry(
         entry, monkeypatch, LoadedCommit(Path(), None)
     )
     failure = RuntimeError("original service failure")
@@ -124,19 +111,7 @@ def test_work_failure_keeps_the_original_exception_and_exit_status(
     async def work(*, database: Callable[[], Database], image: LoadedCommit) -> None:
         raise failure
 
-    async def machine_work(
-        *, database: Callable[[], Database], image: LoadedCommit, machine: MachineIdentity
-    ) -> None:
-        assert machine is pipeline.call_args.kwargs["machine"]
-        await work(database=database, image=image)
-
-    supplied_work = (
-        machine_work
-        if entry.__name__
-        in {"services.wake.heartbeat.daemon", "services.wake.delivery_watchdog.daemon"}
-        else work
-    )
-    monkeypatch.setattr(entry, "run", supplied_work)
+    monkeypatch.setattr(entry, "run", work)
     entry.main()
 
     exit_process.assert_called_once_with(1)
