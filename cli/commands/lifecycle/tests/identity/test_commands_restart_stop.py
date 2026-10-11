@@ -109,9 +109,11 @@ def test_cmd_restart_calls_stop_then_start(
         retained_children: object = None,
         database_factory: Callable[[], Any],
         producer: Callable[[], EventPipeline],
+        machine: MachineIdentity,
     ) -> int:
         assert database_factory is operator_database
         assert producer is operator_pipeline
+        assert machine is command_runtime.machine
         assert require_confirmation is False, "cmd_restart must skip stdin confirmation"
         assert force is False
         assert keep_browser is True and teardown_extras is False, (

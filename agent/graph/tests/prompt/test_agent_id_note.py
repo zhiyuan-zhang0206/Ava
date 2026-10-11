@@ -49,7 +49,7 @@ def _no_label(_ctx: AvaContext, _agent_id: int) -> str | None:
     return None
 
 
-def _no_machine() -> str | None:
+def _no_machine(_ctx: AvaContext) -> str | None:
     return None
 
 
@@ -67,7 +67,7 @@ def _steward_label(_ctx: AvaContext, _agent_id: int) -> str | None:
     return "memory steward"
 
 
-def _wsl_machine() -> str | None:
+def _wsl_machine(_ctx: AvaContext) -> str | None:
     return "wsl"
 
 
