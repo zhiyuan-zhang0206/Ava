@@ -10,12 +10,13 @@ from typing import Any
 import pytest
 
 from base.cluster.machine import MachineIdentity
-from base.config import settings
+from base.config import ConfigBoot, field_domain, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import DbConfig
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
-from services.agent_runner.page_server import daemon
+from services.agent_runner.page_server import daemon, resources
 from tests.fixtures.configuration import snapshot_process_config
 
 
@@ -61,11 +62,11 @@ def test_entry_shares_the_captured_gate_with_logging_health_and_work(
     pipeline = object()
 
     class Store:
-        @classmethod
-        def from_settings(cls, *, gate: ProcessDbGate, local_host: Callable[[], str]) -> Store:
+        def __init__(
+            self, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+        ) -> None:
             gates.append(gate)
             readers.append(local_host)
-            return cls()
 
     def capture() -> LoadedCommit:
         stages.append("capture")
@@ -90,7 +91,12 @@ def test_entry_shares_the_captured_gate_with_logging_health_and_work(
         factories[0][0]()
 
     async def work(
-        *, database: Callable[[], Database], image: LoadedCommit, local_machine: MachineIdentity
+        *,
+        process_config: ConfigBoot,
+        runtime: Path,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+        local_machine: MachineIdentity,
     ) -> None:
         stages.append("run")
         assert image is captured and database is factories[0][0]
@@ -121,3 +127,23 @@ def test_entry_shares_the_captured_gate_with_logging_health_and_work(
     _run_main(monkeypatch)
     assert stages == ["capture", "schema", "producer", "logging", "run", "exit:0"]
     _assert_gate_matches_image(gates, reads, image, readers, factories[0][1])
+
+
+def test_resources_follow_the_entry_owner_at_each_original_lookup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = snapshot_process_config()
+    runtime = tmp_path / "owned-entry" / "run"
+    domain = field_domain("page_server_health_port")
+    fields = getattr(config.view, domain)
+    monkeypatch.setattr(fields, "page_server_health_port", 26101)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path / "a-later-home"))
+
+    first = resources.endpoint(config, runtime=runtime)
+    monkeypatch.setattr(fields, "page_server_health_port", 26102)
+    second = resources.endpoint(config, runtime=runtime)
+
+    assert (first.health_port, second.health_port) == (26101, 26102)
+    assert first.pidfile == second.pidfile == runtime / "page_server.pid"
+    assert runtime.is_dir()
+    assert not (tmp_path / "a-later-home" / "run").exists()

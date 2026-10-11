@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from base.config import get_field, settings
+from base.config import ConfigBoot, get_field, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import health_port
 from base.host.env.registry import health_port_env_aliases
 from base.paths import run_dir
 
@@ -54,3 +55,39 @@ def test_a_healthz_url_names_the_host_the_caller_reaches_it_from() -> None:
 def test_an_unregistered_daemon_is_a_key_error() -> None:
     with pytest.raises(KeyError):
         ServiceEndpoints.from_settings().of("no_such_daemon")
+
+
+def test_boot_tables_use_only_their_owner_and_follow_live_fields_on_rebuild(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first, second = ConfigBoot(), ConfigBoot()
+    first.read_process_environment()
+    second.read_process_environment()
+    first.view.services.labeler_health_port = 18761
+    second.view.services.labeler_health_port = 18762
+    monkeypatch.setattr(settings.services, "labeler_health_port", 18763)
+    before = ServiceEndpoints.from_boot(first, runtime=tmp_path / "first")
+    other = ServiceEndpoints.from_boot(second, runtime=tmp_path / "second")
+    assert before.of("labeler").health_port == 18761
+    assert other.of("labeler").health_port == 18762
+    assert before.of("labeler").pidfile == tmp_path / "first" / "labeler.pid"
+    assert other.of("labeler").pidfile == tmp_path / "second" / "labeler.pid"
+    first.view.services.labeler_health_port = 18764
+    after = ServiceEndpoints.from_boot(first, runtime=tmp_path / "first")
+    assert before.of("labeler").health_port == 18761
+    assert after.of("labeler").health_port == 18764
+    assert ServiceEndpoints.from_boot(second, runtime=tmp_path / "second") == other
+    with pytest.raises(KeyError):
+        after.of("no_such_daemon")
+
+
+def test_a_registered_port_propagates_its_owner_failure() -> None:
+    failure = ValueError("invalid owner port")
+
+    def rejected_field(name: str) -> int | None:
+        assert name == "labeler_health_port"
+        raise failure
+
+    with pytest.raises(ValueError) as raised:
+        health_port("labeler", read_field=rejected_field)
+    assert raised.value is failure

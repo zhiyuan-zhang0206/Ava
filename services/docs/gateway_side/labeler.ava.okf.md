@@ -37,3 +37,11 @@ An independent agent label auto-generation process — polls per second for rows
 - Label generation logic lives in `base/agents/labels.py` (labels on agent rows) + `services/derived/labeler/labeler.py` (the generation service) — extracted out of the gateway to eliminate a services → gateway reverse dependency
 - System prompt restricts label to `services.labeler_max_chars` (default 64) characters, outputting only the label itself
 - The prompt being summarized is frequently machine-authored — a long English second-person imperative brief written by one agent to spawn another. That shape steers a summarizer into *executing* the brief; the validity check above is what keeps the result out of the user-facing `agents.label` (issue #178)
+
+The service entry retains its prepared `ConfigBoot` and resolved unit runtime
+path. Endpoint and pidfile operations borrow those inputs through
+`ServiceEndpoints.from_boot`; each original lookup reads the same live view.
+The work and logging database factory calls `db_config_from_boot` at each
+handle creation and retains the entry's gate and lazy machine host reader.
+Schema checks, health-before-pool ordering and shutdown stay at their original
+boundaries. Business-specific configuration slices keep their existing readers.

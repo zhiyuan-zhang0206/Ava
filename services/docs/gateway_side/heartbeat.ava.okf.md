@@ -61,3 +61,11 @@ and keeps the configured-target no-op and fail-open lookup/probe boundaries.
 The heartbeat root also retains one lazy `MachineIdentity` and supplies it to
 its work loops and telemetry; its database factory borrows the same owner's
 `host` reader without resolving it before a direct-host operation needs it.
+
+The service entry retains its prepared `ConfigBoot` and resolved unit runtime
+path. Endpoint and pidfile operations borrow those inputs through
+`ServiceEndpoints.from_boot`; each original lookup reads the same live view.
+The work and logging database factory calls `db_config_from_boot` at each
+handle creation and retains the entry's gate and lazy machine host reader.
+Schema checks, health-before-pool ordering and shutdown stay at their original
+boundaries. Business-specific configuration slices keep their existing readers.

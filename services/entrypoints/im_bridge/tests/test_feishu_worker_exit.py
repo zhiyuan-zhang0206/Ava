@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from base.config import ConfigBoot
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
 from services.entrypoints.im_bridge import daemon
@@ -55,8 +56,14 @@ def run_blocked_ws_child(markers_path: Path, *, responsive: bool = True) -> None
             mark("disconnect-requested")
             disconnect_seen.set_result(None)
 
-    async def run_ws(*, database: Callable[[], Database], image: LoadedCommit) -> None:
-        del database, image
+    async def run_ws(
+        *,
+        process_config: ConfigBoot,
+        runtime: Path,
+        database: Callable[[], Database],
+        image: LoadedCommit,
+    ) -> None:
+        del process_config, runtime, database, image
         adapter = PatchingAdapter(
             FakeCore(),
             feishu_config(

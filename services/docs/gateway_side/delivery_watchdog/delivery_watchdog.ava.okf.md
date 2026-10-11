@@ -27,3 +27,11 @@ Entry points are `services/wake/delivery_watchdog/daemon.py` and
 The executable entry captures one loaded image and supplies one ProcessDbGate-backed
 database factory to both its event pipeline and scan pool. The health server uses
 the same image; importing the module does not initialize process logging.
+
+The service entry retains its prepared `ConfigBoot` and resolved unit runtime
+path. Endpoint and pidfile operations borrow those inputs through
+`ServiceEndpoints.from_boot`; each original lookup reads the same live view.
+The work and logging database factory calls `db_config_from_boot` at each
+handle creation and retains the entry gate and lazy machine host reader.
+Schema checks, health-before-pool ordering and shutdown stay at their original
+boundaries. Business-specific configuration slices keep their existing readers.

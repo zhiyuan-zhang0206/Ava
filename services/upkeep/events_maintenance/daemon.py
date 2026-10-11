@@ -78,6 +78,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.log.process import init_gateway_process
@@ -124,12 +125,13 @@ def events_maintenance_db(*, gate: ProcessDbGate, local_host: Callable[[], str])
     return Database.from_settings(gate=gate, local_host=local_host)
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("events_maintenance")
+def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    runtime.mkdir(parents=True, exist_ok=True)
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("events_maintenance")
 
 
-def _pidfile() -> Path:
-    return _endpoint().pidfile
+def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
+    return _endpoint(config, runtime=runtime).pidfile
 
 
 _LIVENESS_BEAT_STEP_S = 30.0
@@ -244,22 +246,29 @@ def _run_resolution(
     progress.mark_success()
 
 
-def _write_pidfile() -> None:
-    if not acquire_pidfile(_pidfile(), "services.upkeep.events_maintenance.daemon"):
-        _log.info("[events_maintenance] daemon already running (pidfile=%s), exiting", _pidfile())
+def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    if not acquire_pidfile(
+        _pidfile(config, runtime=runtime), "services.upkeep.events_maintenance.daemon"
+    ):
+        _log.info(
+            "[events_maintenance] daemon already running (pidfile=%s), exiting",
+            _pidfile(config, runtime=runtime),
+        )
         sys.exit(1)
 
 
-def _remove_pidfile() -> None:
-    remove_pidfile(_pidfile())
+def _remove_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    remove_pidfile(_pidfile(config, runtime=runtime))
 
 
-def _is_running() -> bool:
+def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_pidfile(), "services.upkeep.events_maintenance.daemon")
+    return pidfile_holds_daemon(
+        _pidfile(config, runtime=runtime), "services.upkeep.events_maintenance.daemon"
+    )
 
 
 def _loop_components(liveness: LivenessGroup) -> list[dict[str, object]]:
@@ -436,18 +445,24 @@ async def _resolution_loop(
         await _sleep_with_liveness(progress, interval)
 
 
-async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
+async def run(
+    *,
+    process_config: ConfigBoot,
+    runtime: Path,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+) -> None:
     """Start healthz, register per-loop progress, then enter all resident loops."""
-    if _is_running():
+    if _is_running(process_config, runtime=runtime):
         _log.info(
             "[events-maintenance] daemon already running (pidfile=%s), exiting",
-            _pidfile(),
+            _pidfile(process_config, runtime=runtime),
         )
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
-    _write_pidfile()
-    _log.info("[events-maintenance] pidfile written: %s", _pidfile())
+    _write_pidfile(process_config, runtime=runtime)
+    _log.info("[events-maintenance] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
     config = events_maintenance_config()
     liveness = LivenessGroup()
@@ -456,7 +471,7 @@ async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
         "resolution", config.events_maintenance_resolution_deadline_s
     )
     gauge_progress = liveness.register("registry_gauge", _REGISTRY_GAUGE_LIVENESS_TIMEOUT_S)
-    endpoint = _endpoint()
+    endpoint = _endpoint(process_config, runtime=runtime)
     # Only a unit holding the Grafana credential reconciles alerts; one without it
     # carries no such loop (and no tracker to read as idle).
     reconcile_alerts = alert_reconciler.grafana_reconciliation_configured(config)
@@ -493,7 +508,7 @@ async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
     finally:
         pool.close()
         await stop_health_server(health)
-        _remove_pidfile()
+        _remove_pidfile(process_config, runtime=runtime)
         _log.info("[events-maintenance] daemon stopped")
 
 
@@ -512,12 +527,12 @@ def main() -> None:
     machine = machine_from_boot(machine_config)
     process_home = ava_home().resolve()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
-    assert_schema_current(settings.data_plane.db_url)
+    assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="events_maintenance")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, local_host=machine.host)
+        return Database(db_config_from_boot(machine_config), gate=gate, local_host=machine.host)
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
@@ -536,7 +551,14 @@ def main() -> None:
     # hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run(database=database, image=image))
+        runner.run(
+            run(
+                process_config=machine_config,
+                runtime=process_home / "run",
+                database=database,
+                image=image,
+            )
+        )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[events-maintenance] interrupted, shutting down")
@@ -552,7 +574,7 @@ def main() -> None:
         _log.exception("[events-maintenance] daemon crashed — uncaught exception escaped run()")
         code = 1
     finally:
-        _remove_pidfile()
+        _remove_pidfile(machine_config, runtime=process_home / "run")
     _hard_exit(code)
 
 

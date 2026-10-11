@@ -45,6 +45,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -64,17 +65,20 @@ _REQUESTS_INTERVAL_S = 1.0
 _POOL_MAX_SIZE = 4
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("schedule_manager")
+def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    runtime.mkdir(parents=True, exist_ok=True)
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("schedule_manager")
 
 
-def _pidfile() -> Path:
-    return _endpoint().pidfile
+def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
+    return _endpoint(config, runtime=runtime).pidfile
 
 
-def _is_running() -> bool:
+def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     """Whether a daemon is already running (via its pidfile); pid-reuse-safe."""
-    return pidfile_holds_daemon(_pidfile(), "services.wake.schedule_manager.daemon")
+    return pidfile_holds_daemon(
+        _pidfile(config, runtime=runtime), "services.wake.schedule_manager.daemon"
+    )
 
 
 async def provision_builtins(pool: ConnectionPool[Any]) -> None:
@@ -129,18 +133,29 @@ async def _run_loops(pool: ConnectionPool, liveness: LivenessGroup) -> None:
         )
 
 
-async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
+async def run(
+    *,
+    process_config: ConfigBoot,
+    runtime: Path,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+) -> None:
     """Start the daemon: checkout guard -> pidfile -> healthz -> DB -> loops."""
     refusal = prod_service_checkout_error(REPO_ROOT)
     if refusal is not None:
         raise RuntimeError(f"schedule supervision refused: {refusal}")
-    if _is_running() or not acquire_pidfile(_pidfile(), "services.wake.schedule_manager.daemon"):
-        _log.info("[schedule-manager] daemon already running (pidfile=%s), exiting", _pidfile())
+    if _is_running(process_config, runtime=runtime) or not acquire_pidfile(
+        _pidfile(process_config, runtime=runtime), "services.wake.schedule_manager.daemon"
+    ):
+        _log.info(
+            "[schedule-manager] daemon already running (pidfile=%s), exiting",
+            _pidfile(process_config, runtime=runtime),
+        )
         sys.exit(1)
-    _log.info("[schedule-manager] pidfile written: %s", _pidfile())
+    _log.info("[schedule-manager] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
     liveness = LivenessGroup()
-    endpoint = _endpoint()
+    endpoint = _endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "schedule_manager", endpoint.health_port, liveness=liveness, image=image
     )
@@ -155,7 +170,7 @@ async def run(*, database: Callable[[], Database], image: LoadedCommit) -> None:
     finally:
         pool.close()
         await stop_health_server(health)
-        remove_pidfile(_pidfile())
+        remove_pidfile(_pidfile(process_config, runtime=runtime))
         _log.info("[schedule-manager] daemon stopped")
 
 
@@ -169,12 +184,12 @@ def main() -> None:
     machine = machine_from_boot(machine_config)
     process_home = ava_home().resolve()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
-    assert_schema_current(settings.data_plane.db_url)
+    assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="schedule_manager")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, local_host=machine.host)
+        return Database(db_config_from_boot(machine_config), gate=gate, local_host=machine.host)
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
@@ -190,7 +205,14 @@ def main() -> None:
     # workers — and a stop signal must never wait on those (see `_hard_exit`).
     runner = asyncio.Runner()
     try:
-        runner.run(run(database=database, image=image))
+        runner.run(
+            run(
+                process_config=machine_config,
+                runtime=process_home / "run",
+                database=database,
+                image=image,
+            )
+        )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[schedule-manager] interrupted, shutting down")

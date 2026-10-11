@@ -46,6 +46,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database, publish_inbound_wake
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
@@ -61,12 +62,13 @@ from services.wake.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
 _log = logging.getLogger("services.wake.heartbeat.daemon")
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("heartbeat")
+def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    runtime.mkdir(parents=True, exist_ok=True)
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("heartbeat")
 
 
-def _pidfile() -> Path:
-    return _endpoint().pidfile
+def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
+    return _endpoint(config, runtime=runtime).pidfile
 
 
 # Liveness staleness ceiling. The loop sleeps a long inter-poll interval (default
@@ -526,22 +528,25 @@ def _backoff_deadlines(
     return {agent_id: deadline for agent_id, (_, deadline) in deadline_state.items()}
 
 
-def _write_pidfile() -> None:
-    if not acquire_pidfile(_pidfile(), "services.wake.heartbeat.daemon"):
-        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _pidfile())
+def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    if not acquire_pidfile(_pidfile(config, runtime=runtime), "services.wake.heartbeat.daemon"):
+        _log.info(
+            "[heartbeat] daemon already running (pidfile=%s), exiting",
+            _pidfile(config, runtime=runtime),
+        )
         sys.exit(1)
 
 
-def _remove_pidfile() -> None:
-    remove_pidfile(_pidfile())
+def _remove_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    remove_pidfile(_pidfile(config, runtime=runtime))
 
 
-def _is_running() -> bool:
+def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_pidfile(), "services.wake.heartbeat.daemon")
+    return pidfile_holds_daemon(_pidfile(config, runtime=runtime), "services.wake.heartbeat.daemon")
 
 
 async def _sleep_with_liveness(liveness: LoopProgress, total_s: float) -> None:
@@ -656,22 +661,30 @@ async def _liveness_loop(
 
 
 async def run(
-    *, database: Callable[[], Database], image: LoadedCommit, machine: MachineIdentity
+    *,
+    process_config: ConfigBoot,
+    runtime: Path,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    machine: MachineIdentity,
 ) -> None:
     """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
-    if _is_running():
-        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _pidfile())
+    if _is_running(process_config, runtime=runtime):
+        _log.info(
+            "[heartbeat] daemon already running (pidfile=%s), exiting",
+            _pidfile(process_config, runtime=runtime),
+        )
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
-    _write_pidfile()
-    _log.info("[heartbeat] pidfile written: %s", _pidfile())
+    _write_pidfile(process_config, runtime=runtime)
+    _log.info("[heartbeat] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
     liveness = LivenessGroup()
     dispatch_progress = liveness.register("dispatch", _LIVENESS_TIMEOUT_S)
     liveness_progress = liveness.register("liveness", _LIVENESS_TIMEOUT_S)
     digest_progress = liveness.register("completion_digest", _DIGEST_LIVENESS_TIMEOUT_S)
-    endpoint = _endpoint()
+    endpoint = _endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "heartbeat", endpoint.health_port, liveness=liveness, image=image
     )
@@ -698,7 +711,7 @@ async def run(
     finally:
         pool.close()
         await stop_health_server(health)
-        _remove_pidfile()
+        _remove_pidfile(process_config, runtime=runtime)
         _log.info("[heartbeat] daemon stopped")
 
 
@@ -717,12 +730,12 @@ def main() -> None:
     machine = machine_from_boot(machine_config)
     process_home = ava_home().resolve()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
-    assert_schema_current(settings.data_plane.db_url)
+    assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="heartbeat")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, local_host=machine.host)
+        return Database(db_config_from_boot(machine_config), gate=gate, local_host=machine.host)
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
@@ -741,7 +754,15 @@ def main() -> None:
     # hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run(database=database, image=image, machine=machine))
+        runner.run(
+            run(
+                process_config=machine_config,
+                runtime=process_home / "run",
+                database=database,
+                image=image,
+                machine=machine,
+            )
+        )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[heartbeat] interrupted, shutting down")
@@ -757,7 +778,7 @@ def main() -> None:
         _log.exception("[heartbeat] daemon crashed — uncaught exception escaped run()")
         code = 1
     finally:
-        _remove_pidfile()
+        _remove_pidfile(machine_config, runtime=process_home / "run")
     _hard_exit(code)
 
 

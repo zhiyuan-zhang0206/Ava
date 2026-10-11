@@ -69,12 +69,13 @@ def _memory_root(*, roles: MachineRoles) -> Path:
     return gateway_memory_dir(roles=roles)
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("memory_indexer")
+def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+    runtime.mkdir(parents=True, exist_ok=True)
+    return ServiceEndpoints.from_boot(config, runtime=runtime).of("memory_indexer")
 
 
-def _pidfile() -> Path:
-    return _endpoint().pidfile
+def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
+    return _endpoint(config, runtime=runtime).pidfile
 
 
 _LOOP_INTERVAL_S = 1.0
@@ -128,22 +129,29 @@ class _MarkdownEventHandler(FileSystemEventHandler):
                 self._push(str(dest))
 
 
-def _write_pidfile() -> None:
-    if not acquire_pidfile(_pidfile(), "services.derived.memory_indexer.daemon"):
-        _log.info("[memory_indexer] daemon already running (pidfile=%s), exiting", _pidfile())
+def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    if not acquire_pidfile(
+        _pidfile(config, runtime=runtime), "services.derived.memory_indexer.daemon"
+    ):
+        _log.info(
+            "[memory_indexer] daemon already running (pidfile=%s), exiting",
+            _pidfile(config, runtime=runtime),
+        )
         sys.exit(1)
 
 
-def _remove_pidfile() -> None:
-    remove_pidfile(_pidfile())
+def _remove_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+    remove_pidfile(_pidfile(config, runtime=runtime))
 
 
-def _is_running() -> bool:
+def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_pidfile(), "services.derived.memory_indexer.daemon")
+    return pidfile_holds_daemon(
+        _pidfile(config, runtime=runtime), "services.derived.memory_indexer.daemon"
+    )
 
 
 def _scan_disk(root: Path) -> dict[Path, float]:
@@ -605,6 +613,7 @@ def _close_backend(backend: MemorySearchBackend) -> None:
 async def run(
     *,
     config: ConfigBoot,
+    runtime: Path,
     database: Callable[[], Database],
     image: LoadedCommit,
     machine: MachineIdentity,
@@ -617,12 +626,15 @@ async def run(
     Publish the pidfile before binding healthz so identity-aware probes can verify it.
     """
     inputs = MemoryIndexerInputs.from_boot(config)
-    if _is_running():
-        _log.info("[indexer] daemon already running (pidfile=%s), exiting", _pidfile())
+    if _is_running(config, runtime=runtime):
+        _log.info(
+            "[indexer] daemon already running (pidfile=%s), exiting",
+            _pidfile(config, runtime=runtime),
+        )
         sys.exit(1)
 
-    _write_pidfile()
-    _log.info("[indexer] pidfile written: %s", _pidfile())
+    _write_pidfile(config, runtime=runtime)
+    _log.info("[indexer] pidfile written: %s", _pidfile(config, runtime=runtime))
 
     # Fail fast before deriving liveness or binding healthz: an unknown
     # AVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.
@@ -648,7 +660,7 @@ async def run(
         base_s=inputs.retry_base(),
         cap_s=inputs.retry_cap(),
     )
-    endpoint = _endpoint()
+    endpoint = _endpoint(config, runtime=runtime)
     health = await start_health_server(
         "memory_indexer",
         endpoint.health_port,
@@ -705,7 +717,7 @@ async def run(
         observer.join(timeout=5.0)
         _close_backend(backend)
         await stop_health_server(health)
-        _remove_pidfile()
+        _remove_pidfile(config, runtime=runtime)
         _log.info("[indexer] daemon stopped")
 
 
@@ -741,7 +753,15 @@ def main() -> None:
         # then hard-exit without closing Runner and its default executor.
         runner = asyncio.Runner()
         try:
-            runner.run(run(config=config, database=database, image=image, machine=machine))
+            runner.run(
+                run(
+                    config=config,
+                    runtime=process_home / "run",
+                    database=database,
+                    image=image,
+                    machine=machine,
+                )
+            )
         except KeyboardInterrupt:
             signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
             _log.info("[indexer] received interrupt, shutting down")
@@ -757,7 +777,7 @@ def main() -> None:
             _log.exception("[indexer] daemon crashed — uncaught exception escaped run()")
             code = 1
         finally:
-            _remove_pidfile()
+            _remove_pidfile(config, runtime=process_home / "run")
     finally:
         try:
             drain = pipeline.stop(timeout=2)

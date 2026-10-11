@@ -35,13 +35,13 @@ from psycopg_pool import ConnectionPool
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
-from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
@@ -54,8 +54,8 @@ from base.sessions.page_session import page_session_name
 from base.sessions.pty import client as pty_client
 from base.sessions.record import SessionRecord
 from base.telemetry import build_pipeline
+from services.agent_runner.page_server import resources
 from services.agent_runner.page_server.config import PageServerConfig
-from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 from . import dead_pages
 from .degradation import (
@@ -81,14 +81,6 @@ def page_server_config() -> PageServerConfig:
     )
 
 
-def _endpoint() -> ServiceEndpoint:
-    return ServiceEndpoints.from_settings().of("page_server")
-
-
-def _pidfile() -> Path:
-    return _endpoint().pidfile
-
-
 # A new pty session needs a short window to finish its interactive-shell startup
 # and receive its initial command before a health probe can make a decision.
 _SPAWN_VERIFY_TIMEOUT_S = 5.0
@@ -108,21 +100,6 @@ class _ServerHandle:
     token: str = field(repr=False)
     session_name: str
     last_launch_monotonic: float
-
-
-def _write_pidfile() -> None:
-    if not acquire_pidfile(_pidfile(), "services.agent_runner.page_server.daemon"):
-        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
-        sys.exit(1)
-
-
-def _remove_pidfile() -> None:
-    remove_pidfile(_pidfile())
-
-
-def _is_running() -> bool:
-    """Whether a daemon is already running (via its pidfile)."""
-    return pidfile_holds_daemon(_pidfile(), "services.agent_runner.page_server.daemon")
 
 
 def _open_rows(pool: ConnectionPool, host: str) -> list[_PageRow]:
@@ -663,18 +640,29 @@ async def _reconcile_loop(
 
 
 async def run(
-    *, database: Callable[[], Database], image: LoadedCommit, local_machine: MachineIdentity
+    *,
+    process_config: ConfigBoot,
+    runtime: Path,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> None:
     """Start the daemon and keep its health endpoint alive while it reconciles."""
-    if _is_running():
-        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
+    if resources.is_running(process_config, runtime=runtime):
+        _log.info(
+            "[page-server] daemon already running (pidfile=%s), exiting",
+            resources.pidfile(process_config, runtime=runtime),
+        )
         sys.exit(1)
-    _write_pidfile()
+    resources.write_pidfile(process_config, runtime=runtime)
     liveness = LivenessGroup()
     reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
     dead_pages_progress = liveness.register("dead_show_pages", _DEAD_PAGES_LIVENESS_TIMEOUT_S)
     health = await start_health_server(
-        "page_server", _endpoint().health_port, liveness=liveness, image=image
+        "page_server",
+        resources.endpoint(process_config, runtime=runtime).health_port,
+        liveness=liveness,
+        image=image,
     )
     db = database()
     pool = db.pool()
@@ -695,7 +683,7 @@ async def run(
     finally:
         await stop_health_server(health)
         pool.close()
-        _remove_pidfile()
+        resources.remove_pidfile(process_config, runtime=runtime)
 
 
 def main() -> None:
@@ -707,12 +695,12 @@ def main() -> None:
     machine_config.boot()
     machine = machine_from_boot(machine_config)
     process_home = ava_home().resolve()
-    assert_schema_current(settings.data_plane.db_url)
+    assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="page_server", exempt=False)
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, local_host=machine.host)
+        return Database(db_config_from_boot(machine_config), gate=gate, local_host=machine.host)
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
@@ -731,7 +719,15 @@ def main() -> None:
     # hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run(database=database, image=image, local_machine=machine))
+        runner.run(
+            run(
+                process_config=machine_config,
+                runtime=process_home / "run",
+                database=database,
+                image=image,
+                local_machine=machine,
+            )
+        )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[page-server] interrupted, shutting down")

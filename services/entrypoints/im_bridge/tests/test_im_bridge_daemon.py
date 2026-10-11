@@ -18,7 +18,7 @@ from typing import Any, cast
 
 import pytest
 
-from base.config import get_field, settings
+from base.config import ConfigBoot, get_field, settings
 from base.daemon.health import Liveness
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
@@ -66,7 +66,13 @@ def test_liveness_loop_beats_periodically(monkeypatch: pytest.MonkeyPatch) -> No
     asyncio.run(scenario())
 
 
-def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch, database: Database) -> None:
+def test_run_wires_the_liveness_task(
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
+) -> None:
     """run() hands the health server a Liveness that keeps getting beaten: the
     beat task is actually created and running, not merely defined."""
     captured: list[Liveness] = []
@@ -92,9 +98,20 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch, database: 
     # /send accepts the machine API tokens of the write generation, never the human secret.
     monkeypatch.setattr(daemon, "daemon_acceptance", lambda: frozenset({"digest-of-a-token"}))
 
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: None)
+    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
+        return False
+
+    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
+
+    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start_health_server)
 
     # run() imports IMBridgeCore inside the function; patch the module it
@@ -146,7 +163,12 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch, database: 
 
     async def scenario() -> None:
         task = asyncio.create_task(
-            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None))
+            daemon.run(
+                process_config=process_config,
+                runtime=tmp_path / "run",
+                database=lambda: database,
+                image=LoadedCommit(Path(), None),
+            )
         )
         try:
             await asyncio.sleep(0.5)
@@ -288,6 +310,9 @@ async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
     database: Database,
     fault: Exception,
     cleanup_owner: str | None,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
@@ -301,9 +326,21 @@ async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
         return pool
 
     monkeypatch.setattr(daemon.Database, "pool", make_pool)
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: events.append("pid_removed"))
+
+    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
+        return False
+
+    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
+
+    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        return events.append("pid_removed")
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
 
     class Core:
         def __init__(self, config: Any, gateway: Any, db_pool: Any, *, tasks: asyncio.TaskGroup):
@@ -360,7 +397,13 @@ async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
     with pytest.raises(ExceptionGroup) as caught:
         await asyncio.wait_for(
-            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None)), timeout=3
+            daemon.run(
+                process_config=process_config,
+                runtime=tmp_path / "run",
+                database=lambda: database,
+                image=LoadedCommit(Path(), None),
+            ),
+            timeout=3,
         )
     if cleanup_owner is None:
         assert caught.value.exceptions == (fault,)
@@ -394,6 +437,9 @@ def test_invalid_adapter_configuration_is_not_skipped(monkeypatch: pytest.Monkey
 
 async def test_cleanup_attempts_every_resource_and_reports_unknown_adapter_fault(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
@@ -408,7 +454,9 @@ async def test_cleanup_attempts_every_resource_and_reports_unknown_adapter_fault
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
     monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile)
     errors = await asyncio.wait_for(
-        daemon._stop_resources(core, [broken, healthy], health, pool),
+        daemon._stop_resources(
+            core, [broken, healthy], health, pool, config=process_config, runtime=tmp_path / "run"
+        ),
         timeout=2,
     )
     assert errors == [fault]
@@ -417,7 +465,7 @@ async def test_cleanup_attempts_every_resource_and_reports_unknown_adapter_fault
     healthy.stop.assert_awaited_once()
     stop_health.assert_awaited_once_with(health)
     pool.close.assert_called_once()
-    remove_pidfile.assert_called_once()
+    remove_pidfile.assert_called_once_with(process_config, runtime=tmp_path / "run")
 
 
 def test_cleanup_group_with_cancellation_uses_the_bounded_failure_exit(

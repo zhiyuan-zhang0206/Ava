@@ -14,6 +14,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -46,9 +47,20 @@ def _patch_run(
     async def fake_stop(_server: object) -> None:
         events.append("health")
 
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: events.append("pidfile"))
+    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
+        return False
+
+    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
+
+    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        pass
+
+    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+
+    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
+        return events.append("pidfile")
+
+    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
     patch_database(monkeypatch, pool=_Pool)
@@ -70,7 +82,12 @@ def _patch_run(
 
 
 def test_every_loop_gets_its_own_progress_tracker(
-    monkeypatch: pytest.MonkeyPatch, database: Database, *, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
+    machine_identity: MachineIdentity,
 ) -> None:
     received: dict[str, LoopProgress] = {}
 
@@ -92,6 +109,8 @@ def test_every_loop_gets_its_own_progress_tracker(
     asyncio.run(
         asyncio.wait_for(
             daemon.run(
+                process_config=process_config,
+                runtime=tmp_path / "run",
                 database=lambda: database,
                 image=LoadedCommit(Path(), None),
                 machine=machine_identity,
@@ -111,6 +130,8 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     database: Database,
     crashing: str,
     *,
+    process_config: ConfigBoot,
+    tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
     cancelled: list[str] = []
@@ -141,6 +162,8 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
         asyncio.run(
             asyncio.wait_for(
                 daemon.run(
+                    process_config=process_config,
+                    runtime=tmp_path / "run",
                     database=lambda: database,
                     image=LoadedCommit(Path(), None),
                     machine=machine_identity,
