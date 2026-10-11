@@ -36,8 +36,7 @@ def chat_message_key(key: str) -> str:
 
     A chat message id is cluster-wide: reusing it for another agent, body or
     source conflicts instead of delivering a second message. Only the cluster
-    administrator reaches the chat routes, and the delivery outbox flush commits
-    the same message without an HTTP request, so the identity is fixed to that
+    administrator reaches the chat routes, so the identity is fixed to that
     principal rather than read from a request.
     """
     return stored_key("cluster", "administrator", "POST", "chat-message", key)

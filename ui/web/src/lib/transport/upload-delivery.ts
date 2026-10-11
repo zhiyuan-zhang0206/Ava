@@ -1,5 +1,6 @@
 import type { DeliveredUploadAcceptance } from "../contracts/types";
 import { API_BASE } from "./api-base";
+import { keyedHeaders } from "./operation-key";
 
 /** Submit one immutable batch. A 202 proves source acceptance, not delivery. */
 export function submitUploadedFiles(
@@ -9,9 +10,7 @@ export function submitUploadedFiles(
   onProgress?: (pct: number) => void,
 ): Promise<DeliveredUploadAcceptance> {
   if (!Number.isSafeInteger(agentId) || agentId <= 0) throw new Error("invalid upload agent ID");
-  if (typeof operationKey !== "string" || !operationKey || operationKey.length > 128) {
-    throw new Error("idempotency key must contain 1 to 128 characters");
-  }
+  const keyed = keyedHeaders(operationKey);
   if (files.length === 0) throw new Error("upload batch must contain files");
   const submitted = files.map((file) => ({
     file, name: file.name, size: file.size, contentType: file.type || "application/octet-stream",
@@ -23,8 +22,7 @@ export function submitUploadedFiles(
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API_BASE}${path}`);
     xhr.withCredentials = true;
-    xhr.setRequestHeader("Idempotency-Key", operationKey);
-    xhr.setRequestHeader("Idempotency-Scope", "principal-v1");
+    for (const [name, value] of Object.entries(keyed)) xhr.setRequestHeader(name, value);
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress?.(Math.round(event.loaded / event.total * 100));
     };

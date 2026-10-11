@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { newOperationKey } from "./operation-key";
+import { keyedHeaders, newOperationKey } from "./operation-key";
 import type { NativeWorkTarget, CompactTarget } from "../contracts/types";
 
 import { ApiError, api, MessageDeliveryUnknownError } from "./api";
@@ -325,6 +325,7 @@ describe("agent label / messages / cancel", () => {
     expect(calls[0].init?.headers).toEqual({
       "content-type": "application/json",
       "Idempotency-Key": "client-message-123",
+      "Idempotency-Scope": "principal-v1",
     });
     expect(JSON.parse(calls[0].init?.body as string)).toEqual({
       content: "hello",
@@ -364,6 +365,7 @@ describe("agent label / messages / cancel", () => {
     expect(new Headers(calls[1].init?.headers).get("Idempotency-Key")).toBe(
       "client-timeout-123",
     );
+    expect(new Headers(calls[1].init?.headers).get("Idempotency-Scope")).toBe("principal-v1");
   });
 
   it("times out when headers arrive but the response body never completes", async () => {
@@ -846,13 +848,13 @@ describe("uploadFiles", () => {
 });
 
 describe("schedule operation identities", () => {
-  it("reuses an explicit restart identity without silently selecting principal scope", async () => {
+  it("reuses an explicit restart identity under the principal scope", async () => {
     await api.restartSchedule(17, "same-restart");
     await api.restartSchedule(17, "same-restart");
     for (const call of calls) {
       const headers = new Headers(call.init?.headers);
       expect(headers.get("Idempotency-Key")).toBe("same-restart");
-      expect(headers.has("Idempotency-Scope")).toBe(false);
+      expect(headers.get("Idempotency-Scope")).toBe("principal-v1");
     }
   });
 
@@ -876,7 +878,7 @@ describe("schedule creation identity", () => {
       const headers = new Headers(call.init?.headers);
       expect(headers.get("Idempotency-Key")).toBe("create-once");
       expect(headers.get("content-type")).toBe("application/json");
-      expect(headers.has("Idempotency-Scope")).toBe(false);
+      expect(headers.get("Idempotency-Scope")).toBe("principal-v1");
     }
   });
 });
@@ -966,5 +968,18 @@ describe("run timeline read ownership", () => {
     caller.abort();
     expect(await result).toBe(original);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("keyedHeaders", () => {
+  it("pairs the operation key with the principal scope", () => {
+    expect(keyedHeaders("op-1")).toEqual({
+      "Idempotency-Key": "op-1",
+      "Idempotency-Scope": "principal-v1",
+    });
+  });
+
+  it.each(["", "x".repeat(129)])("rejects an unusable key before any request", (key) => {
+    expect(() => keyedHeaders(key)).toThrow("idempotency key must contain 1 to 128 characters");
   });
 });
