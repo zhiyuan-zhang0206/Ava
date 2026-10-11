@@ -33,14 +33,9 @@ class WeixinIngress:
         self.adapter = adapter
         self.command_states: dict[tuple[str, str, str], ChatState] = {}
 
-    async def initialize(
-        self, namespace: str, account_id: str, legacy_cursor: str | None
-    ) -> PollBinding:
-        binding = await asyncio.to_thread(
-            self.store.initialize, namespace, account_id, legacy_cursor
-        )
-        if not binding.held:
-            await asyncio.to_thread(self.store.recover_claims, binding)
+    async def initialize(self, namespace: str, account_id: str) -> PollBinding:
+        binding = await asyncio.to_thread(self.store.initialize, namespace, account_id)
+        await asyncio.to_thread(self.store.recover_claims, binding)
         return binding
 
     async def recover_retained(self, binding: PollBinding) -> None:
@@ -139,18 +134,10 @@ class WeixinIngress:
             ):
                 return await self.dispatch(binding, previous)
             return previous
-        adopted = await asyncio.to_thread(
-            self.store.quarantine_or_adopt,
-            binding,
-            source,
-            request,
-            message,
-            text.strip(),
-            source_chat_key(source),
-            quarantine_unknown=binding.state == IngressBindingState.DRAINING,
-        )
-        if adopted is not None:
-            return adopted
+        if binding.state == IngressBindingState.DRAINING:
+            return await asyncio.to_thread(
+                self.store.quarantine, binding, source, request, message, text.strip()
+            )
         if (
             sender_id == binding.account_id
             or message.get("message_type") == 2

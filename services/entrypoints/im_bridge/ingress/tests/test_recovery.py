@@ -26,12 +26,11 @@ async def replace_account(native: NativeWeixin, account_id: str) -> WeixinAdapte
     adapter = WeixinAdapter(native.core, client=native.adapter._http)
     native.core.register(adapter)
     store = WeixinIngressStore(native.pool)
-    held = store.initialize("https://provider.example", account_id, None)
-    store.begin_cutover(held, expected_cursor="")
+    store.initialize("https://provider.example", account_id)
     return adapter
 
 
-async def test_entire_legacy_backlog_drains_without_execution_until_real_empty_commit(
+async def test_entire_unproven_backlog_drains_without_execution_until_real_empty_commit(
     native_weixin: NativeWeixin, db_conn: psycopg.Connection
 ) -> None:
     adapter = await replace_account(native_weixin, "new-bot")
@@ -192,85 +191,6 @@ async def test_incomplete_or_unknown_provider_snapshots_hold_cursor(
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (0,)
 
 
-async def test_legacy_weixin_journal_stays_held_and_other_channels_continue(
-    native_weixin: NativeWeixin, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from services.entrypoints.im_bridge.state import _load_outbox, _outbox_path
-
-    path = _outbox_path()
-    weixin = {
-        "id": "legacy-weixin",
-        "channel": "weixin",
-        "chat_id": "peer-1",
-        "agent_id": native_weixin.agent_id,
-        "text": "retained original payload",
-        "idempotency_key": "legacy-key",
-        "enqueued_at": 1.0,
-    }
-    telegram = dict(weixin, id="legacy-telegram", channel="telegram", text="other channel")
-    import json
-
-    path.write_text(json.dumps(weixin) + "\n" + json.dumps(telegram) + "\n")
-    delivered: list[tuple[int, str, str | None]] = []
-
-    async def send(agent_id: int, text: str, *, idempotency_key: str | None = None) -> None:
-        delivered.append((agent_id, text, idempotency_key))
-
-    monkeypatch.setattr(native_weixin.core.gateway, "send_message", send)
-    await native_weixin.core._replay_outbox_once()
-    assert delivered == [(native_weixin.agent_id, "other channel", "legacy-key")]
-    retained = _load_outbox()
-    assert len(retained) == 1 and retained[0].__dict__ == weixin
-    assert json.loads(path.read_text()) == weixin
-    await native_weixin.core._replay_outbox_once()
-    assert len(delivered) == 1
-    assert json.loads(path.read_text()) == weixin
-
-
-async def test_active_legacy_receipt_adoption_precedes_new_selection(
-    native_weixin: NativeWeixin, db_conn: psycopg.Connection
-) -> None:
-    from base.agents.messages.chat_delivery import insert_chat_inbound_once
-    from base.db import create_agent
-    from services.entrypoints.im_bridge.ingress.identity import source_chat_key
-    from services.entrypoints.im_bridge.ingress.types import ProviderSource
-
-    original = insert_chat_inbound_once(
-        db_conn,
-        agent_id=native_weixin.agent_id,
-        content="legacy accepted",
-        source="user",
-        payload=None,
-        publish_wake=lambda _agent, _iid: True,
-        client_message_id=source_chat_key(
-            ProviderSource(
-                namespace="https://provider.example",
-                account_id="bot-id",
-                sender_id="peer-1",
-                message_id="9",
-            )
-        ),
-    )
-    later = create_agent(db_conn)
-    # Current selection can change without rewriting history's original recipient.
-    db_conn.execute(
-        "UPDATE im_bridge_cursors SET push_agent_id=%s WHERE channel='weixin' AND chat_id='peer-1'",
-        (later,),
-    )
-    db_conn.commit()
-    receipt = await native_weixin.adapter._handle_message(message("legacy accepted", "9"))
-    assert receipt.status == IngressStatus.ACCEPTED
-    assert receipt.route.agent_id == native_weixin.agent_id
-    assert receipt.inbound_id == original.inbound_id
-    assert db_conn.execute(
-        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (later,)
-    ).fetchone() == (0,)
-    db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (original.inbound_id,))
-    db_conn.commit()
-    assert await native_weixin.adapter._handle_message(message("legacy accepted", "9")) == receipt
-    assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (0,)
-
-
 async def test_superseded_poll_waiting_for_provider_cannot_admit_or_checkpoint(
     native_weixin: NativeWeixin, db_conn: psycopg.Connection
 ) -> None:
@@ -290,7 +210,7 @@ async def test_superseded_poll_waiting_for_provider_cannot_admit_or_checkpoint(
         old = asyncio.create_task(native_weixin.adapter._poll_once("", 35000))
         await entered.wait()
         store = WeixinIngressStore(native_weixin.pool)
-        store.initialize("https://provider.example", "replacement-account", None)
+        store.initialize("https://provider.example", "replacement-account")
         release.set()
         with pytest.raises(StalePollBindingError):
             await old
