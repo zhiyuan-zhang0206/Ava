@@ -14,7 +14,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
-from ava.sdk_surface.injection_check import check_page
+from ava.sdk_surface.injection_check import begin_check
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
@@ -447,16 +447,20 @@ def _fetch_one(url: str, prompt: str, max_chars: int, effort: str | ReasoningEff
 
     Wraps `_read_page` + the injection check + `_answer` + `scan_content` so the
     asyncio layer can schedule multiple copies via `asyncio.to_thread`. The check
-    judges the page text itself, which `scan_content` on the summary never sees.
+    judges the page text itself, which `scan_content` on the summary never sees; it
+    needs only the page, so it runs beside `_answer`.
     """
     title, page_url, content, truncated = _read_page(url, max_chars)
-    check_page(url, title, content)
-    answer = _answer(
-        prompt,
-        title=title,
-        url=page_url,
-        content=content,
-        truncated=truncated,
-        effort=effort,
-    )
+    finish_check = begin_check(url, title, content)
+    try:
+        answer = _answer(
+            prompt,
+            title=title,
+            url=page_url,
+            content=content,
+            truncated=truncated,
+            effort=effort,
+        )
+    finally:
+        finish_check()
     return scan_content(answer, source="web.fetch")

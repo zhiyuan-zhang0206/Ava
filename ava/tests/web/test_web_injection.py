@@ -7,7 +7,9 @@ its failure never fails the fetch.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from collections.abc import Callable, Coroutine, Iterator, Mapping
 from typing import Any
 from unittest.mock import patch
@@ -89,15 +91,57 @@ def test_a_suspicious_page_adds_a_finding_and_leaves_the_answer_alone(
     assert finding.triggers == ["instructions aimed at an AI reader (model score 0.97)"]
 
 
-def test_the_raw_page_is_judged_before_it_is_summarized(
+def test_the_raw_page_is_judged_while_it_is_summarized(
+    monkeypatch: pytest.MonkeyPatch, exec_update: dict[str, Any]
+) -> None:
+    """The judgement needs only the page, so it must not wait for the summary or hold it up:
+    each side blocks until the other has started, which a serial order cannot satisfy."""
+    summary_started = threading.Event()
+    judgement_started = threading.Event()
+    seen: dict[str, Any] = {}
+
+    def answer(prompt: str, **kwargs: Any) -> str:
+        summary_started.set()
+        seen["judgement_started_during_summary"] = judgement_started.wait(timeout=5)
+        return "SUMMARY"
+
+    async def decide(
+        model: str, state: str, questions: Mapping[str, Question], **kwargs: Any
+    ) -> Mapping[str, Decision]:
+        judgement_started.set()
+        seen["state"] = state
+        seen["summary_started_during_judgement"] = await asyncio.to_thread(summary_started.wait, 5)
+        decision = Decision(top="false", probabilities={"true": 0.01, "false": 0.99})
+        return dict.fromkeys(questions, decision)
+
+    monkeypatch.setattr("ava.web._answer", answer)
+    monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
+    monkeypatch.setattr(settings.web, "jina_api_key", None)
+    monkeypatch.setattr(injection_check, "decide", decide)
+
+    assert _fetch() == ["SUMMARY"]
+
+    assert seen == {
+        "judgement_started_during_summary": True,
+        "summary_started_during_judgement": True,
+        "state": _PAGE,
+    }
+    assert exec_update.get("security_findings", []) == []
+
+
+def test_a_finding_is_kept_when_the_summary_fails(
     monkeypatch: pytest.MonkeyPatch, events: list[str], exec_update: dict[str, Any]
 ) -> None:
-    monkeypatch.setattr(injection_check, "decide", _fake_decide(events, probability=0.01))
+    def failing_answer(prompt: str, **kwargs: Any) -> str:
+        raise ava.web.FetchError("summary model down")
 
-    _fetch()
+    monkeypatch.setattr("ava.web._answer", failing_answer)
+    monkeypatch.setattr(injection_check, "decide", _fake_decide(events, probability=0.97))
 
-    assert events == [f"decide:{_PAGE}", "summary"]
-    assert exec_update.get("security_findings", []) == []
+    with pytest.raises(ava.web.FetchError):
+        _fetch()
+
+    assert len(exec_update["security_findings"]) == 1
 
 
 def test_a_failing_decision_model_does_not_fail_the_fetch(

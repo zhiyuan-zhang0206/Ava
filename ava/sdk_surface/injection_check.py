@@ -1,7 +1,7 @@
 """Model-based prompt-injection check of fetched page text.
 
 `ava.security.scan_content` matches fixed patterns and `ava.web.fetch` only scans the
-summary it returns, so the page itself was never examined. `check_page` asks a decision
+summary it returns, so the page itself was never examined. `begin_check` asks a decision
 model one yes/no question about the raw page text and, when the answer is likely "yes",
 records a finding that reaches the agent as a SECURITY note. It never alters the page or
 the summary and never blocks the fetch: a decision model that is unreachable, keyless or
@@ -14,6 +14,8 @@ highest probability decides.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.call import decide
@@ -135,28 +137,34 @@ async def page_probability(
     return max(answers) if answers else None
 
 
-def check_page(url: str, title: str, content: str) -> None:
-    """Judge a fetched page and record a finding when it likely addresses an AI reader.
+def begin_check(url: str, title: str, content: str) -> Callable[[], None]:
+    """Start judging a fetched page; the returned `finish` waits and records the finding.
 
-    Does nothing unless the check is enabled, security scanning is on and an agent turn is
-    running (outside one a finding has nowhere to go). Runs from a worker thread, so it owns
-    its event loop.
+    The judgement runs in a worker thread beside the caller's own work, so it adds no
+    round trip to the fetch. `finish` joins it and, when the page likely addresses an AI
+    reader, records the finding from the caller's thread. It does nothing unless the check
+    is enabled, security scanning is on and an agent turn is running (outside one a finding
+    has nowhere to go); then no model call is made and `finish` is a no-op.
 
     Raises:
-        ValueError: the configured model is not a decision model of the catalog.
+        ValueError: the configured model is not a decision model of the catalog. Raised here,
+            before any work starts.
     """
     from ava.sdk_surface import agent_identity
     from ava.sdk_surface.settings import config_authority, model_catalog
     from ava.security import finding_delivery_active, record_model_finding
 
+    def nothing() -> None:
+        return None
+
     authority = config_authority()
     if not authority.service_field_value("web_fetch_injection_check_enabled"):
-        return
+        return nothing
     if not finding_delivery_active():
-        return
+        return nothing
     text = f"{title}\n\n{content}" if title else content
     if not text.strip():
-        return
+        return nothing
 
     model = authority.service_field_value("web_fetch_injection_model")
     catalog = model_catalog()
@@ -165,13 +173,25 @@ def check_page(url: str, title: str, content: str) -> None:
             f"web_fetch_injection_model {model!r} is not a decision model; available: "
             + ", ".join(sorted(catalog.decision_models))
         )
-    probability = asyncio.run(
-        page_probability(
-            model, text, catalog=catalog, url=url, for_agent_id=agent_identity.agent_id()
-        )
+    threshold = authority.service_field_value("web_fetch_injection_threshold")
+    agent_id = agent_identity.agent_id()
+    # Everything the worker needs is resolved above, in the caller's thread.
+    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="injection-check")
+    judged = worker.submit(
+        asyncio.run,
+        page_probability(model, text, catalog=catalog, url=url, for_agent_id=agent_id),
     )
-    if probability is not None and probability >= authority.service_field_value(
-        "web_fetch_injection_threshold"
-    ):
-        # The finding's source names the page; whitespace is collapsed so a URL cannot add lines.
-        record_model_finding(f"web.fetch ({' '.join(url.split())[:_MAX_URL_CHARS]})", probability)
+
+    def finish() -> None:
+        try:
+            probability = judged.result()
+        finally:
+            worker.shutdown(wait=True)
+        if probability is not None and probability >= threshold:
+            # The finding's source names the page; whitespace is collapsed so a URL cannot
+            # add lines.
+            record_model_finding(
+                f"web.fetch ({' '.join(url.split())[:_MAX_URL_CHARS]})", probability
+            )
+
+    return finish
