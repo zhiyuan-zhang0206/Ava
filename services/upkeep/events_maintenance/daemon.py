@@ -65,7 +65,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine.boot import machine_from_boot
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
     LivenessGroup,
@@ -80,7 +80,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.deploy.maintenance import admission
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, EventBusConfig
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -102,27 +102,29 @@ from services.upkeep.events_maintenance.token_totals import fold_totals
 _log = logging.getLogger("services.upkeep.events_maintenance.daemon")
 
 
-def events_maintenance_config() -> EventsMaintenanceConfig:
-    """The composition root: the one place this package reads `settings`."""
+def events_maintenance_config(config: ConfigBoot) -> EventsMaintenanceConfig:
+    """Read the service slice from its entry owner at the original call point."""
     return EventsMaintenanceConfig(
-        events_maintenance_interval_seconds=settings.daemon.events_maintenance_interval_seconds,
-        events_maintenance_pass_deadline_s=settings.daemon.events_maintenance_pass_deadline_s,
-        events_maintenance_resolution_deadline_s=settings.daemon.events_maintenance_resolution_deadline_s,
-        events_resolution_burst_threshold=settings.daemon.events_resolution_burst_threshold,
-        events_resolution_interval_seconds=settings.daemon.events_resolution_interval_seconds,
-        events_auto_dismiss_enabled=settings.daemon.events_auto_dismiss_enabled,
-        events_auto_dismiss_days=settings.daemon.events_auto_dismiss_days,
-        timezone=settings.general.timezone,
-        grafana_host=settings.gateway.grafana_host,
-        grafana_port=settings.gateway.grafana_port,
-        grafana_admin_password=settings.alerts.grafana_admin_password,
+        events_maintenance_interval_seconds=config.view.daemon.events_maintenance_interval_seconds,
+        events_maintenance_pass_deadline_s=config.view.daemon.events_maintenance_pass_deadline_s,
+        events_maintenance_resolution_deadline_s=config.view.daemon.events_maintenance_resolution_deadline_s,
+        events_resolution_burst_threshold=config.view.daemon.events_resolution_burst_threshold,
+        events_resolution_interval_seconds=config.view.daemon.events_resolution_interval_seconds,
+        events_auto_dismiss_enabled=config.view.daemon.events_auto_dismiss_enabled,
+        events_auto_dismiss_days=config.view.daemon.events_auto_dismiss_days,
+        timezone=config.view.general.timezone,
+        grafana_host=config.view.gateway.grafana_host,
+        grafana_port=config.view.gateway.grafana_port,
+        grafana_admin_password=config.view.alerts.grafana_admin_password,
     )
 
 
-def events_maintenance_db(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> Database:
+def events_maintenance_db(
+    config: ConfigBoot, *, gate: ProcessDbGate, local_host: Callable[[], str]
+) -> Database:
     """The handle on the cluster database, built where the daemon (or one of its operator
     commands) starts."""
-    return Database.from_settings(gate=gate, local_host=local_host)
+    return Database(db_config_from_boot(config), gate=gate, local_host=local_host)
 
 
 def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
@@ -464,7 +466,7 @@ async def run(
     _write_pidfile(process_config, runtime=runtime)
     _log.info("[events-maintenance] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
-    config = events_maintenance_config()
+    config = events_maintenance_config(process_config)
     liveness = LivenessGroup()
     dispatch_progress = liveness.register("dispatch", config.events_maintenance_pass_deadline_s)
     resolution_progress = liveness.register(
@@ -501,7 +503,12 @@ async def run(
             loops.create_task(_resolution_loop(pool, resolution_progress, config, tasks=loops))
             loops.create_task(registry_gauge.registry_gauge_loop(pool, gauge_progress))
             if alert_progress is not None:
-                bus = EventBus.from_settings()
+                bus = EventBus(
+                    EventBusConfig(
+                        redis_url=process_config.view.data_plane.redis_url,
+                        events_channel=process_config.view.data_plane.events_channel,
+                    )
+                )
                 loops.create_task(
                     alert_reconciler.reconciliation_loop(pool, bus, alert_progress, config)
                 )

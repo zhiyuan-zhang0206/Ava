@@ -31,6 +31,7 @@ from base.config.domains.daemon.settings import DaemonSettings
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import LivenessGroup, LoopProgress
 from base.db import Database
+from base.events.live.bus import EventBus, EventBusConfig
 from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.events_maintenance import daemon
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
@@ -123,7 +124,10 @@ async def test_completed_pass_beats_once_after_worker_finishes(
 
 
 async def test_failed_rollup_still_waits_before_retry(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    process_config: ConfigBoot,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A maintenance pass that raises a transient (non-ProgrammingError) exception
     beats on completion, records the error, then waits before re-running."""
@@ -152,14 +156,14 @@ async def test_failed_rollup_still_waits_before_retry(
         original_beat()
 
     monkeypatch.setattr(progress, "beat", counting_beat)
-    config = events_maintenance_config()
+    config = events_maintenance_config(process_config)
     async with asyncio.TaskGroup() as tasks:
         with pytest.raises(asyncio.CancelledError):
             await daemon._dispatch_loop(
                 _FAKE_POOL,
                 progress,
                 config,
-                events_maintenance_db(local_machine=machine_identity),
+                events_maintenance_db(process_config, local_machine=machine_identity),
                 tasks=tasks,
             )  # pool unused
 
@@ -170,7 +174,10 @@ async def test_failed_rollup_still_waits_before_retry(
 
 
 async def test_wedged_dispatch_parks_without_entering_retry_sleep(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    process_config: ConfigBoot,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A timed-out worker parks by ending its loop without entering either sleep path."""
 
@@ -195,8 +202,8 @@ async def test_wedged_dispatch_parks_without_entering_retry_sleep(
         await daemon._dispatch_loop(
             _FAKE_POOL,
             progress,
-            events_maintenance_config(),
-            events_maintenance_db(local_machine=machine_identity),
+            events_maintenance_config(process_config),
+            events_maintenance_db(process_config, local_machine=machine_identity),
             tasks=tasks,
         )
 
@@ -250,7 +257,10 @@ def _instrument_maintenance_slices(
 
 
 def test_maintenance_pass_runs_unconditional_slices(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    process_config: ConfigBoot,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The hourly pass always runs the metric and telemetry-event recoveries, the cost-ledger
     rollup, the size telemetry sample, and blob vacuum. Checkpoint pruning belongs only
@@ -270,8 +280,8 @@ def test_maintenance_pass_runs_unconditional_slices(
     daemon._run_maintenance(
         cast(ConnectionPool, _FakePool()),
         progress,
-        events_maintenance_config(),
-        events_maintenance_db(local_machine=machine_identity),
+        events_maintenance_config(process_config),
+        events_maintenance_db(process_config, local_machine=machine_identity),
     )  # every slice faked
 
     for name in (
@@ -480,7 +490,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(
     assert len({id(progress) for progress in received.values()}) == 3
     # The root builds the slice once and both loops share it.
     assert len(configs) == 2 and configs[0] is configs[1]
-    assert configs[0] == events_maintenance_config()
+    assert configs[0] == events_maintenance_config(process_config)
     assert received["dispatch"].timeout_s == 1500.0
     assert received["resolution"].timeout_s == 600.0
     assert received["registry_gauge"].timeout_s == 180.0
@@ -572,7 +582,7 @@ def _run_with_alert_loop(
     process_config: ConfigBoot,
     tmp_path: Path,
 ) -> dict[str, object]:
-    seen: dict[str, object] = {"alert_loop": False, "trackers": []}
+    seen: dict[str, object] = {"alert_loop": False, "trackers": [], "owned_bus": False}
 
     class _RunPool:
         def close(self) -> None:
@@ -627,10 +637,19 @@ def _run_with_alert_loop(
     monkeypatch.setattr(daemon, "_resolution_loop", parked)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", parked)
     monkeypatch.setattr(daemon.alert_reconciler, "reconciliation_loop", alert_loop)
-    password = SecretStr("grafana-test-password") if configured else None
-    config = events_maintenance_config(grafana_admin_password=password)
 
-    def build_config() -> EventsMaintenanceConfig:
+    def owned_bus(inputs: EventBusConfig) -> EventBus:
+        assert inputs.redis_url == process_config.view.data_plane.redis_url
+        assert inputs.events_channel == process_config.view.data_plane.events_channel
+        seen["owned_bus"] = True
+        return EventBus(inputs)
+
+    monkeypatch.setattr(daemon, "EventBus", owned_bus)
+    password = SecretStr("grafana-test-password") if configured else None
+    config = events_maintenance_config(process_config, grafana_admin_password=password)
+
+    def build_config(entry_config: ConfigBoot) -> EventsMaintenanceConfig:
+        assert entry_config is process_config
         return config
 
     monkeypatch.setattr(daemon, "events_maintenance_config", build_config)

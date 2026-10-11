@@ -196,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())
-    with events_maintenance_db(gate=gate, local_host=machine.host).connect() as conn:
+    with events_maintenance_db(config, gate=gate, local_host=machine.host).connect() as conn:
         result = roll_days(conn, args.first, args.last)
         # A day at or before the watermark is already inside the folded totals.
         if args.first <= folded_through(conn):

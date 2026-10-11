@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
 from services.upkeep.events_maintenance import daemon
@@ -30,13 +31,14 @@ def _rollup(
     config: EventsMaintenanceConfig,
     *,
     tasks: asyncio.TaskGroup,
+    process_config: ConfigBoot,
     local_machine: MachineIdentity,
 ) -> Any:
     return daemon._dispatch_loop(
         pool,
         progress,
         config,
-        events_maintenance_db(local_machine=local_machine),
+        events_maintenance_db(process_config, local_machine=local_machine),
         tasks=tasks,
     )
 
@@ -50,11 +52,15 @@ _LOOPS: dict[str, tuple[_Loop, str]] = {
 @pytest.mark.parametrize("quiesced", [True, False])
 @pytest.mark.parametrize("name", list(_LOOPS))
 async def test_a_quiesced_unit_runs_no_pass(
-    monkeypatch: pytest.MonkeyPatch, name: str, quiesced: bool, machine_identity: MachineIdentity
+    process_config: ConfigBoot,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    quiesced: bool,
+    machine_identity: MachineIdentity,
 ) -> None:
     loop, pass_name = _LOOPS[name]
     if name == "rollup":
-        loop = partial(loop, local_machine=machine_identity)
+        loop = partial(loop, process_config=process_config, local_machine=machine_identity)
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
     passes: list[object] = []
 
@@ -84,7 +90,10 @@ async def test_a_quiesced_unit_runs_no_pass(
     async with asyncio.TaskGroup() as tasks:
         task = tasks.create_task(
             loop(
-                object(), LoopProgress("t", timeout_s=5.0), events_maintenance_config(), tasks=tasks
+                object(),
+                LoopProgress("t", timeout_s=5.0),
+                events_maintenance_config(process_config),
+                tasks=tasks,
             )
         )
         try:
