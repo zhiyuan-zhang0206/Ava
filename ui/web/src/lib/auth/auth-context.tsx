@@ -2,7 +2,8 @@
 
 // Auth context — tracks session authentication state.
 //
-// On mount, checks /api/auth/check. While checking, `status === "loading"`.
+// On mount, redeems a one-time login ticket from the URL fragment (if any),
+// then checks /api/auth/check. While checking, `status === "loading"`.
 // Once resolved, `status` is "authenticated" or "unauthenticated".
 // Call `login(password)` to authenticate; `logout()` to clear.
 
@@ -52,11 +53,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setSessionInvalidHandler(null);
   }, []);
 
-  // Check auth on mount
+  // Check auth on mount. A one-time login link is redeemed first; the session
+  // check then decides, so a ticket the gateway refuses (or a cookie that does
+  // not reach it) still lands on the login page and the password still works.
   useEffect(() => {
     let cancelled = false;
-    api
-      .checkAuth()
+    // The redemption code loads only for a URL that carries a ticket, keeping it
+    // out of the first-load bundle of every ordinary visit.
+    const redeemed = window.location.hash.includes("ticket=")
+      ? import("./login-ticket").then((m) => m.redeemTicketFromLocation())
+      : Promise.resolve();
+    redeemed
+      .then(() => api.checkAuth())
       .then((res) => {
         if (!cancelled) setStatus(res.authenticated ? "authenticated" : "unauthenticated");
       })
