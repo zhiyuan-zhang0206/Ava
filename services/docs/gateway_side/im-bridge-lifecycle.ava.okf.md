@@ -42,7 +42,7 @@ retry budgets. Authentication, configuration, JSON/schema and programming
 errors propagate; Feishu never advances its cursor or marks a failed message
 seen after a fixed number of errors. Restart retains its durable replay cursor.
 A chat message whose keyed gateway send exhausts its bounded retries is not
-persisted or replayed: the sender is told it was not delivered. Current
+persisted or replayed: the gateway may or may not have accepted it, and the sender is told delivery is unconfirmed. Current
 switch/filter files are strict. The retired notice cursor alone permits the designed one-time
 `LEGACY_HISTORY_UNKNOWN` cutover, retaining possibly sent old notifications.
 

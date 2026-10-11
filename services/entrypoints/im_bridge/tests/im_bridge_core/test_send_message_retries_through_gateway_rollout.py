@@ -667,11 +667,12 @@ async def test_sse_reconnect_log_does_not_kill_subscription_loop() -> None:
         await scenario()
 
 
-async def test_handle_inbound_reports_not_delivered_when_gateway_stays_down(
+async def test_handle_inbound_reports_unconfirmed_delivery_when_gateway_stays_down(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
-    """When the keyed gateway send exhausts its retries the user is told the message was
-    not delivered. Nothing is persisted for a later replay and no acceptance is claimed."""
+    """When the keyed gateway send exhausts its retries the outcome is UNKNOWN (a lost response may
+    still have been accepted). The user is told delivery is unconfirmed, nothing is persisted
+    for a later replay and no acceptance is claimed."""
     async with owned_tasks() as _owned_tasks:
         monkeypatch.setenv("AVA_HOME", str(tmp_path))
         gateway = FakeGateway(send_failures=10)
@@ -685,8 +686,10 @@ async def test_handle_inbound_reports_not_delivered_when_gateway_stays_down(
         async def scenario() -> None:
             await core.handle_inbound(msg)
             assert gateway.sent == []  # gateway is down - nothing delivered
-            assert adapter.sent == [("12345", copy.NOT_DELIVERED_NOTICE)]
-            assert not any(word in copy.NOT_DELIVERED_NOTICE.lower() for word in ("queue", "retry"))
+            assert adapter.sent == [("12345", copy.DELIVERY_UNCONFIRMED_NOTICE)]
+            assert not any(
+                word in copy.DELIVERY_UNCONFIRMED_NOTICE.lower() for word in ("queue", "retry")
+            )
             assert list(tmp_path.rglob("outbox*")) == []
             # No replay loop exists: a recovered gateway never receives the message later.
             await asyncio.sleep(0)

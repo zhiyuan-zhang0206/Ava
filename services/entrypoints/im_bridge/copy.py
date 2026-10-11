@@ -33,7 +33,7 @@ from base.telemetry.alerts.copy import (
 
 # -- generic ---------------------------------------------------------------
 
-NOT_DELIVERED_NOTICE = "Your message was not delivered: the gateway is temporarily unavailable. Please resend it later."
+DELIVERY_UNCONFIRMED_NOTICE = "Your message may not have been delivered: the gateway is temporarily unavailable. If the agent does not respond, please resend it later."
 
 # -- /list /switch /status /commands /help ---------------------------------
 
