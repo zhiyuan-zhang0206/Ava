@@ -14,6 +14,7 @@ import pytest
 
 from base.agents import IndexerUnavailable
 from base.api_contracts.memory_search import MemorySearchPurpose
+from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import (
     FALSE,
@@ -301,6 +302,13 @@ async def test_requests_run_concurrently_up_to_the_cap(
     assert len(judge.calls) == count
     assert len(ranked) == count
     assert 1 < judge.max_in_flight <= rerank._MAX_CONCURRENT_DECISIONS
+
+
+def test_default_candidates_all_go_out_together() -> None:
+    """The default depth (30, from the calibration benchmark) fits under the concurrency cap, so a
+    default search sends every request at once."""
+    assert settings.services.memory_rerank_candidates == 30
+    assert settings.services.memory_rerank_candidates <= rerank._MAX_CONCURRENT_DECISIONS
 
 
 # ── failure ──
