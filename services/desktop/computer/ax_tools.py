@@ -24,6 +24,7 @@ from .ax_gap import Frame
 from .ax_ids import AxSession
 from .errors import ComputerUseError
 from .screen import _current_scale
+from .targets import AppTarget, app_selector
 
 Mode = Literal["interactive", "text", "full"]
 _MODES: tuple[str, ...] = ("interactive", "text", "full")
@@ -406,26 +407,40 @@ def ax_tree_tool(
 ) -> dict[str, Any]:
     """`ax_tree`: read a window's accessibility tree as filtered text."""
     wanted = _args(args)
-    app = str(args.get("app") or helper.frontmost_app()["app"])
-    if not app:
-        raise ComputerUseError("ax_tree needs an app and no app is frontmost")
+    app, target = _app_request(args)
+    table_app = app
     require_helper_support("ax_tree_v1", "ax_tree")
+    require_helper_support("ax_target_v1", "ax_tree")
     raw_scope: int | None = None
     scope_fp: str | None = None
     if wanted.scope is not None:
         table = session.current(app)
+        table_app = table.app
         sid = int(wanted.scope[1:])
         raw_scope, scope_fp = table.raw_of(sid), table.entry(sid).fp
+        if target is not None and "pid" in target and target["pid"] != table.pid:
+            raise ComputerUseError("scope belongs to a different process: call ax_tree first")
+        # Name-only scoped reads retain the observed process, even if an app
+        # with the same name started after the original tree was read.
+        if target is None:
+            target = dict[str, object](pid=table.pid)
+            app = None
     result = helper.ax_tree(
         app,
+        target=target,
         scope=raw_scope,
         scope_fp=scope_fp,
         max_nodes=min(2000, max(600, wanted.max_nodes * 4)),
         enable_ax=wanted.enable_ax,
     )
     quality = assess_quality(result, scoped=wanted.scope is not None)
-    out: dict[str, Any] = {"app": app, "quality": quality, "tree": ""}
-    nodes = session.table_for(app, result["pid"]).align(
+    out: dict[str, Any] = {
+        "app": result["app"],
+        "pid": result["pid"],
+        "quality": quality,
+        "tree": "",
+    }
+    nodes = session.table_for(table_app or result["app"], result["pid"]).align(
         result["nodes"], scoped=wanted.scope is not None
     )
     session.visual = {}  # px: entries belong to the latest call only
@@ -446,6 +461,23 @@ def ax_tree_tool(
     return out
 
 
+def _app_request(args: dict[str, Any]) -> tuple[str | None, dict[str, object] | None]:
+    if "target" in args:
+        if "app" in args:
+            raise ComputerUseError("ax_tree takes exactly one of app or target")
+        target = AppTarget.parse(args["target"])
+        return None, {"pid": target.pid} if target.pid is not None else {
+            "bundle_id": target.bundle_id
+        }
+    app = app_selector(args.get("app"))
+    if "app" in args and app is None:
+        raise ComputerUseError("app must be a nonempty display name or bundle identifier")
+    app = app if app is not None else helper.frontmost_app()["app"]
+    if not app:
+        raise ComputerUseError("ax_tree needs an app and no app is frontmost")
+    return app, None
+
+
 TOOL_DECLARATIONS: list[dict[str, Any]] = [
     {
         "name": "ax_tree",
@@ -454,7 +486,9 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
             "usually cheaper and more exact than snapshot + OCR. One line per element: "
             '[eN] role "label" @cx,cy WxH {flags} val="..."; cx,cy is the element '
             "center in physical pixels (pass it to click), so an element found here is "
-            "clickable without a screenshot. Defaults to the frontmost app. "
+            "clickable without a screenshot. Defaults to the frontmost app. An explicit "
+            "target selects pid or unique bundle_id without activating it; app and target "
+            "are mutually exclusive. App names and bundle IDs must be unambiguous. "
             "mode=interactive (default: controls plus the labels around them), text "
             "(readable text only) or full (everything, with actions). max_nodes caps "
             "the lines (default 150); '... +N more under eK' marks a cut and "
@@ -474,6 +508,7 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "app": {"type": "string"},
+                "target": AppTarget.schema(),
                 "mode": {"type": "string", "enum": list(_MODES), "default": "interactive"},
                 "max_nodes": {"type": "integer", "default": DEFAULT_MAX_NODES},
                 "include_ocr_gap": {"type": "boolean", "default": False},

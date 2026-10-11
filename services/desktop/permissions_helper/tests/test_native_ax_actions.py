@@ -31,12 +31,16 @@ def test_native_ax_actions_window_identity_selection_and_reported_actions(tmp_pa
     actual = "\n".join(
         [
             section(source, "func numericDouble(", "// Accessibility grant gate."),
+            section(source, "func inputNumber(", "func inputBool("),
+            section(source, "private func selectedRunningApp(", "func listApps("),
             section(source, "private let axTreeAttributes:", "private let axVisibleChildrenRoles:"),
+            section(source, "private let axVisibleChildrenRoles:", "private let axMaxStringLength"),
             section(
                 source, "private let axMaxStringLength =", "private let axTreeFrameworkMarkers:"
             ),
             section(source, "private struct AXEntry {", "/// Raw ids"),
             section(source, "private func fnv1a(", "private func axFrameworkHint("),
+            section(source, "private func axPickWindow(", "// NSString ranges"),
             section(source, "private func axSelectionRange(", "// MARK: - Root keeper"),
         ]
     )
@@ -62,14 +66,16 @@ import CoreFoundation
 import CoreGraphics
 import ApplicationServices
 enum OpError: Error { case bad(String) }
-struct RunningApplication {
-    let localizedName: String? = "Editor"
-    let bundleIdentifier: String? = "test.editor"
-    let processIdentifier: pid_t = 9001
+struct NSRunningApplication {
+    let localizedName: String?
+    let bundleIdentifier: String?
+    let processIdentifier: pid_t
+    let isTerminated = false
 }
 class NSWorkspace {
     static let shared = NSWorkspace()
-    let runningApplications = [RunningApplication()]
+    var runningApplications = [NSRunningApplication(localizedName: "Editor",
+        bundleIdentifier: "test.editor", processIdentifier: 9001)]
 }
 func refreshAppKit() { }
 // Creating these refs performs no accessibility reads or writes.
@@ -77,6 +83,7 @@ let appRef = AXUIElementCreateApplication(9001)
 let windowRef = AXUIElementCreateApplication(9002)
 let elementRef = AXUIElementCreateApplication(9003)
 let otherWindow = AXUIElementCreateApplication(9004)
+let otherAppRef = AXUIElementCreateApplication(8001)
 var windows = [windowRef]
 var elementWindow: AXUIElement? = windowRef
 var freshValues: [AnyObject] = []
@@ -89,9 +96,14 @@ var selectedRange: CFRange?
 var batchReads = 0
 var elementWindowReads = 0
 private var axElementTable: [Int: AXEntry] = [:]
+private var axNextElementID = 100
+func axFrameworkHint(_ app: NSRunningApplication) -> String { "" }
+func axEnableChromiumAccessibility(_ app: AXUIElement, pid: pid_t) -> String {
+    preconditionFailure("the native test does not enable Chromium")
+}
 func inertApplication(_ pid: pid_t) -> AXUIElement {
-    precondition(pid == 9001)
-    return appRef
+    precondition(pid == 9001 || pid == 8001)
+    return pid == 9001 ? appRef : otherAppRef
 }
 func inertGetPid(_ element: AXUIElement, _ pid: inout pid_t) -> AXError {
     pid = pidValue
@@ -100,7 +112,7 @@ func inertGetPid(_ element: AXUIElement, _ pid: inout pid_t) -> AXError {
 func inertTimeout(_ element: AXUIElement, _ timeout: Float) -> AXError { .success }
 func inertAttribute(_ element: AXUIElement, _ attribute: CFString,
                     _ result: inout CFTypeRef?) -> AXError {
-    if CFEqual(element, appRef) && attribute as String == kAXWindowsAttribute {
+    if (CFEqual(element, appRef) || CFEqual(element, otherAppRef)) && attribute as String == kAXWindowsAttribute {
         result = windows as CFArray
         return .success
     }
@@ -109,6 +121,9 @@ func inertAttribute(_ element: AXUIElement, _ attribute: CFString,
         guard let window = elementWindow else { return .noValue }
         result = window
         return .success
+    }
+    if attribute as String == kAXFocusedWindowAttribute || attribute as String == kAXMainWindowAttribute {
+        return .noValue
     }
     preconditionFailure("unexpected attribute query")
 }
@@ -159,7 +174,7 @@ func install(_ element: AXUIElement = elementRef) {
         values: values), window: windowRef)]
 }
 func request(_ action: String, _ extra: [String: Any] = [:]) -> [String: Any] {
-    var result: [String: Any] = ["app": "Editor", "id": 7, "action": action]
+    var result: [String: Any] = ["app": "Editor", "pid": 9001, "id": 7, "action": action]
     result.merge(extra) { $1 }
     return result
 }
@@ -179,6 +194,42 @@ func refused(_ action: String, _ extra: [String: Any] = [:], containing: String)
 """
     checks = r"""
 precondition(CFEqual(windowRef, windowRef) && !CFEqual(windowRef, otherWindow))
+let originalApp = NSWorkspace.shared.runningApplications[0]
+let sameNameApp = NSRunningApplication(localizedName: "Editor",
+    bundleIdentifier: "test.editor", processIdentifier: 8001)
+NSWorkspace.shared.runningApplications = [sameNameApp, originalApp]
+for selector: [String: Any] in [["app": "Editor"], ["app": "test.editor"], ["bundle_id": "test.editor"]] {
+    do { _ = try axSelectedRunningApp(selector); preconditionFailure("ambiguous selection accepted") }
+    catch OpError.bad(let message) { precondition(message.contains("ambiguous")) }
+}
+let selectedByPID = try axSelectedRunningApp(["pid": 9001])
+precondition(selectedByPID.processIdentifier == 9001)
+reset(); offered = ["AXPress"]
+let pinned = try axAct(request("press"))
+precondition(pinned["completed"] as? Bool == true && mutations == ["action:AXPress"])
+NSWorkspace.shared.runningApplications = [originalApp, sameNameApp]
+reset(); offered = ["AXPress"]
+_ = try axAct(request("press"))
+precondition(mutations == ["action:AXPress"])
+NSWorkspace.shared.runningApplications = [originalApp]
+let selectedByBundle = try axSelectedRunningApp(["bundle_id": "test.editor"])
+precondition(selectedByBundle.processIdentifier == 9001)
+reset()
+NSWorkspace.shared.runningApplications = [sameNameApp, originalApp]
+do {
+    _ = try axTree(["pid": 8001, "scope": 7, "scope_fp": "known"])
+    preconditionFailure("scope accepted another PID")
+} catch OpError.bad(let message) { precondition(message.contains("does not belong")) }
+precondition(batchReads == 0 && mutations.isEmpty)
+NSWorkspace.shared.runningApplications = [sameNameApp]
+do {
+    _ = try axTree(["bundle_id": "test.editor", "scope": 7, "scope_fp": "known"])
+    preconditionFailure("scope accepted another bundle instance")
+} catch OpError.bad(let message) { precondition(message.contains("does not belong")) }
+precondition(batchReads == 0 && mutations.isEmpty)
+NSWorkspace.shared.runningApplications = [originalApp]
+let scoped = try axTree(["pid": 9001, "scope": 7, "scope_fp": "known"])
+precondition(scoped["pid"] as? Int == 9001 && scoped["visited"] as? Int == 1)
 reset(); windows = []; offered = ["AXIncrement"]
 try stale("perform_action", ["native_action": "AXIncrement"])
 precondition(batchReads == 0)

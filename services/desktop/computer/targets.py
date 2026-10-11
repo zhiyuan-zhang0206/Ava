@@ -67,10 +67,30 @@ class WindowTarget:
 
 @dataclass(frozen=True)
 class AppTarget:
-    """One running app selected for an explicit foreground activation."""
+    """One running app selected by PID or an unambiguous bundle identifier."""
 
     pid: int | None = None
     bundle_id: str | None = None
+
+    @staticmethod
+    def schema() -> dict[str, Any]:
+        """The same explicit process selector for observation and activation."""
+        return {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {"pid": {"type": "integer", "minimum": 1, "maximum": 2**31 - 1}},
+                    "required": ["pid"],
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "properties": {"bundle_id": {"type": "string", "minLength": 1}},
+                    "required": ["bundle_id"],
+                    "additionalProperties": False,
+                },
+            ]
+        }
 
     @classmethod
     def parse(cls, value: Any) -> AppTarget:

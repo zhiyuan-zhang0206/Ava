@@ -235,11 +235,16 @@ class FakeAxHelper:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.supported = True
+        self.target_supported = True
         self.tree = result(compose_window())
 
     def ping(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(("ping", {}))
-        return {"pong": True, "ax_tree_v1": True} if self.supported else {"pong": True}
+        return (
+            {"pong": True, "ax_tree_v1": True, "ax_target_v1": self.target_supported}
+            if self.supported
+            else {"pong": True}
+        )
 
     def frontmost_app(self, **kw: Any) -> dict[str, Any]:
         return {"app": "Mail"}
@@ -247,7 +252,7 @@ class FakeAxHelper:
     def screen_size(self, **kw: Any) -> dict[str, Any]:
         return {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
 
-    def ax_tree(self, app: str, **kw: Any) -> AxTreeResult:
+    def ax_tree(self, app: str | None, **kw: Any) -> AxTreeResult:
         self.calls.append(("ax_tree", {"app": app, **kw}))
         return self.tree
 
@@ -283,6 +288,41 @@ async def test_ax_tree_defaults_to_the_frontmost_app_and_renders(fake_ax: FakeAx
     assert fake_ax.calls[-1][1]["scope"] is None
 
 
+@pytest.mark.parametrize("target", [{"pid": 4242}, {"bundle_id": "org.test.editor"}])
+async def test_explicit_app_target_is_forwarded_without_frontmost_lookup(
+    fake_ax: FakeAxHelper, monkeypatch: pytest.MonkeyPatch, target: dict[str, Any]
+) -> None:
+    def unexpected_frontmost() -> dict[str, str]:
+        pytest.fail("explicit AX targets must not select the foreground app")
+
+    monkeypatch.setattr(helper, "frontmost_app", unexpected_frontmost)
+    out = await call_ax({"target": target})
+    assert fake_ax.calls[-1][1]["target"] == target
+    assert fake_ax.calls[-1][1]["app"] is None
+    assert out["pid"] == fake_ax.tree["pid"]
+    assert out["app"] == fake_ax.tree["app"]
+
+
+@pytest.mark.parametrize(
+    "args", [{"target": {"pid": True}}, {"target": {}}, {"app": "Mail", "target": {"pid": 1}}]
+)
+async def test_ax_target_invalid_or_conflicting_selectors_fail_before_walk(
+    fake_ax: FakeAxHelper, args: dict[str, Any]
+) -> None:
+    with pytest.raises(ComputerUseError):
+        await call_ax(args)
+    assert not any(name == "ax_tree" for name, _ in fake_ax.calls)
+
+
+async def test_tree_target_guarantee_requires_new_capability_before_any_walk(
+    fake_ax: FakeAxHelper,
+) -> None:
+    fake_ax.target_supported = False
+    with pytest.raises(ComputerUseError, match="predates ax_tree"):
+        await call_ax({"target": {"pid": 4242}})
+    assert not any(name == "ax_tree" for name, _ in fake_ax.calls)
+
+
 async def test_ax_tree_scope_goes_through_the_raw_id_and_widens_the_walk(
     fake_ax: FakeAxHelper,
     database: Database,
@@ -291,8 +331,9 @@ async def test_ax_tree_scope_goes_through_the_raw_id_and_widens_the_walk(
     await call_ax({"app": "Mail"}, daemon)
     await call_ax({"app": "Mail", "scope": "e2", "max_nodes": 300}, daemon)
     call = fake_ax.calls[-1][1]
+    assert call["target"] == {"pid": fake_ax.tree["pid"]}
     assert (call["app"], call["scope"], call["scope_fp"], call["max_nodes"]) == (
-        "Mail",
+        None,
         2,
         "fp2",
         1200,

@@ -423,8 +423,9 @@ def ax_window_info(app: str, *, sock_path: str | Path | None = None) -> AxWindow
 
 
 def ax_tree(
-    app: str,
+    app: str | None = None,
     *,
+    target: dict[str, object] | None = None,
     scope: int | None = None,
     scope_fp: str | None = None,
     max_nodes: int = 600,
@@ -434,9 +435,10 @@ def ax_tree(
     enable_ax: bool = True,
     sock_path: str | Path | None = None,
 ) -> AxTreeResult:
-    """Read `app`'s focused-window accessibility tree (or the subtree under the
+    """Read the selected process's focused-window accessibility tree (or the subtree under the
     raw id `scope`, whose fingerprint is `scope_fp`), bounded by node, depth and
-    time limits."""
+    time limits. `target` selects PID or unique bundle ID without activation;
+    legacy `app` names must resolve unambiguously."""
     req: dict[str, object] = {
         "max_nodes": max_nodes,
         "max_depth": max_depth,
@@ -447,7 +449,13 @@ def ax_tree(
     if scope is not None:
         req["scope"] = scope
         req["scope_fp"] = scope_fp
-    return _call("ax_tree", app=app, sock_path=sock_path, **req)
+    if target is not None:
+        if app is not None:
+            raise ValueError("ax_tree takes exactly one of app or target")
+        req.update(target)
+    elif app is not None:
+        req["app"] = app
+    return _call("ax_tree", sock_path=sock_path, **req)
 
 
 def ax_act(
@@ -455,6 +463,7 @@ def ax_act(
     raw_id: int,
     action: str,
     *,
+    pid: int | None = None,
     value: str | None = None,
     native_action: str | None = None,
     text: str | None = None,
@@ -465,8 +474,11 @@ def ax_act(
     sock_path: str | Path | None = None,
 ) -> AxActResult:
     """Perform `action` (press / show_menu / focus / set_value) on the element
-    the latest walk numbered `raw_id`. `value` is written, never echoed."""
+    the latest walk numbered `raw_id`. `pid` pins the observed process, while
+    `app` remains display metadata. `value` is written, never echoed."""
     req: dict[str, object] = {"timeout_ms": timeout_ms}
+    if pid is not None:
+        req["pid"] = pid
     if value is not None:
         req["value"] = value
     for name, supplied in (
