@@ -21,15 +21,8 @@ it disposable:
   reused PID means the recorded boot ended, never that a replacement is the old
   host (the same identity check exec-owner recovery uses).
 
-An envelope whose own bytes cannot be read at all — the zero-byte or partial
-write a killed parent leaves — carries no attribution to judge, so it is
-bounded by the protocol instead: past twice the exec node timeout (the inner
-exec timeout is validated strictly below it, and the child hard-exits within
-that chain), with no live process reference and no live host process, no
-in-flight request can still own it and it is quarantined too
-(``Verdict.DISPOSABLE``; task #3619 D-2). Every other refusal — over the size
-ceiling, version drift, a wrong agent, a missing or malformed incarnation —
-describes a *readable* envelope whose retention contract is unchanged.
+Unreadable envelopes retain unknown execution evidence regardless of age.
+A timeout alone cannot prove arbitrary user code or its resources ended.
 
 Everything else is retained with diagnostics naming the file, its attribution
 and the disposition commands. Stale evidence is quarantined, never deleted: the
