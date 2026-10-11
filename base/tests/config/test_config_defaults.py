@@ -16,26 +16,6 @@ def authority(tmp_path: Path) -> ConfigAuthority:
     return ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
 
 
-@pytest.mark.parametrize("raw", ["[1, 2.5]", "1,2.5"])
-def test_delivery_watchdog_backoff_accepts_json_or_comma_list(raw: str) -> None:
-    from base.config.domains.daemon.settings import DaemonSettings
-
-    configured = DaemonSettings.model_validate(
-        {"AVA_DELIVERY_WATCHDOG_DISPATCH_BACKOFF_STEPS_S": raw}
-    )
-    assert configured.delivery_watchdog_dispatch_backoff_steps_s == [1.0, 2.5]
-
-
-@pytest.mark.parametrize("raw", ["", "[0]", "[-1, 2]"])
-def test_delivery_watchdog_backoff_rejects_empty_or_nonpositive_steps(raw: str) -> None:
-    import pydantic
-
-    from base.config.domains.daemon.settings import DaemonSettings
-
-    with pytest.raises(pydantic.ValidationError):
-        DaemonSettings.model_validate({"AVA_DELIVERY_WATCHDOG_DISPATCH_BACKOFF_STEPS_S": raw})
-
-
 def test_sdk_code_reminder_cadence_config_contract(authority: ConfigAuthority) -> None:
     """The code-category reminder cadence is a live per-agent enum whose
     default preserves the existing once-per-context-window behavior."""

@@ -30,7 +30,6 @@ from agent.hooks.compact import (
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.messages import NoteTag, security_note_message, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END
-from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from ava.security import SecurityFindingEntry, scan_inbound_content
 from base.agents.context import AvaContext
 from base.agents.messages.envelope import EnvelopeReadInputs
@@ -368,14 +367,8 @@ async def _handle_heartbeat(
     heartbeats never arrive; this pass keeps the idle-agent cadence.
     Best-effort; reconcile never raises.
 
-    With the heartbeat circuit breaker open (a permanent provider rejection
-    aborted the last turn) the check-in is consumed WITHOUT its note and
-    without routing to the LLM — the note would only re-fire the doomed call
-    and grow the context (the 3962 incident: 80 heartbeat cycles against a
-    permanent context-overflow 400). Page liveness still reconciles. The
-    overflow reason routes to BEFORE_LLM anyway so decide()'s forced-compact
-    arm runs; every other reason parks at CLAIM (the agent stays idling until
-    a real wake — the breaker closes on the first successful LLM call).
+    An open provider circuit consumes heartbeat without another model call;
+    fresh chat and explicit controls keep their normal routing.
     """
     assert ctx.ops_pool is not None, "_handle_heartbeat requires ctx.ops_pool"  # noqa: S101
     from agent.startup import reconcile_open_pages
@@ -397,8 +390,7 @@ async def _handle_heartbeat(
             agent_id=agent_id,
             reason=circuit.reason,
         )
-        if circuit.reason != CIRCUIT_REASON_CONTEXT_OVERFLOW:
-            st.next_goto = CLAIM
+        st.next_goto = CLAIM
         return
     st.new_msgs.append(
         system_note_message(

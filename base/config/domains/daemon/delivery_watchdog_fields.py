@@ -1,26 +1,8 @@
-"""The delivery-watchdog and inbound-reconcile field blocks of `DaemonSettings`.
-
-Moved out of `base/config/domains/daemon/settings.py` when two in-flight field additions and
-this block together pushed that module past its 800-line hard ceiling (task
-#3616 x #3621 line-budget split, 2026-09-16). Mixed into `DaemonSettings` — NOT
-a config domain: `settings.daemon.delivery_watchdog_*`, every alias/scope/
-capability face, and the `.env` contract stay exactly as they were. The two
-`delivery_watchdog_dispatch_backoff_steps_s` validators stay on the model in
-`daemon.py`.
-
-The inbound-reconcile window bounds joined the module 2026-09-27 (task #4788)
-under the same ceiling. Both blocks bound the same `'claimed'` chat-row
-lifecycle: the watchdog sweeps stale claims, the reconcile finalizes them from
-the claim window at boot/settle, and the reconcile's fresh-claim scope reads
-`delivery_watchdog_stale_claimed_threshold_seconds` from the block above.
-"""
+"""Delivery observation and stale-input retirement settings."""
 
 from __future__ import annotations
 
-from typing import Annotated
-
 from pydantic import Field
-from pydantic_settings import NoDecode
 
 
 class DeliveryWatchdogFields:
@@ -40,59 +22,9 @@ class DeliveryWatchdogFields:
     )
 
     delivery_watchdog_interval_seconds: float = Field(
-        default=0.5,
+        default=30.0,
         alias="AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS",
-        description="Delivery watchdog tick (seconds): how often it re-dispatches lost wakes and scans for stalled inbounds. Constant load (~2 qps), independent of fleet size. Lower = faster wake recovery after a lost publish.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    delivery_watchdog_dispatch_threshold_seconds: float = Field(
-        default=1.0,
-        alias="AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS",
-        description="Wake re-dispatch threshold (seconds): a pending inbound of an idling owner older than this gets its Redis wake re-published (plus the wake-key breadcrumb). Must stay below the claim loop's 30s SELECT recheck — it is the fast fallback for lost pub/sub wakes.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    delivery_watchdog_max_dispatch_count: int = Field(
-        default=5,
-        ge=1,
-        alias="AVA_DELIVERY_WATCHDOG_MAX_DISPATCH_COUNT",
-        description="Maximum successful delivery-watchdog wake re-dispatches for one pending inbound before the watchdog poisons the row and stops re-publishing. Poison does not prevent the agent from claiming the inbound after recovery.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    delivery_watchdog_dispatch_backoff_steps_s: Annotated[list[float], NoDecode] = Field(
-        default=[5.0, 30.0, 120.0, 300.0],
-        alias="AVA_DELIVERY_WATCHDOG_DISPATCH_BACKOFF_STEPS_S",
-        description="Minimum seconds between successive delivery-watchdog wake re-dispatches, indexed by the row's current dispatch count (the first re-dispatch waits steps[0]). The last step repeats when the dispatch cap is longer than this list.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    delivery_watchdog_host_staleness_seconds: float = Field(
-        default=120.0,
-        gt=0,
-        alias="AVA_DELIVERY_WATCHDOG_HOST_STALENESS_SECONDS",
-        description="Host-verdict freshness window (seconds) for wake re-dispatch and poisoning: a row is dispatched or poisoned only while its owner's machine_probe row is fresh, the machine not graded offline (fewer than two consecutive probe failures), and the agent host alive — the host check is excused inside the one-failure grace window, because a failed probe necessarily nulls the host verdict. A stale, missing, offline-graded or (outside that window) host-less verdict freezes the row — no re-dispatch, no dispatch-count advance, no poison — and redelivery resumes on the next round once the verdict is fresh again (task #4872 route D: an outage must not burn a row's dispatch budget). The default covers the 60s liveness-pass cadence with its two-consecutive-failure grading, the same freshness contract the roster's availability read uses.",
+        description="Interval in seconds for observing stalled inbounds and retiring stale rows. Pending input pickup is owned by the agent host.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,

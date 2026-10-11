@@ -103,17 +103,12 @@ template into a running cluster without a restart of the manager, run
   at process start, so a changed value needs `ava schedules restart <id>`.
   A one-off schedule you write yourself should do the same rather than
   hard-coding an IANA name; `next_fire(expr, timezone=None)` computes in UTC.
-- **Built-in cron slots are durably claimed.** Each template calls
-  `schedules.catchup.fire_slot_once()` for normal online fires and runs
-  `schedules.catchup.catch_up()` once at startup. The claim key is
-  `(schedule_id, slot_fire_at)`, so concurrent runners and later restarts cannot
-  execute the same slot twice. On first use, the schedule's `created_at` is the
-  lower bound; later starts use its newest claim. Startup executes at most the
-  two most recent missed slots and warns when older slots were truncated.
-  Callbacks receive `(slot_fire_at, payload)`, with the claimed slot normalized
-  to UTC, so window-based reports use their own slot even during catch-up.
-  Claims commit before the fire callback: a crash after claiming can lose that
-  slot, which is the intentional at-most-once trade-off.
+- **Built-in cron slots are durably claimed.** Templates use
+  `schedules.catchup.fire_slot_once()` for online fires. Startup skips missed
+  slots; there is no catch-up helper. The `(schedule_id, slot_fire_at)` claim
+  commits before the callback, so concurrent runners cannot execute a slot
+  twice. A crash after claiming may lose that slot. Callbacks receive the
+  claimed UTC slot and payload for report windows.
 - **A template change reaches a running cluster at the next `schedule-manager`
   start** (see "How built-ins get created"), or at once through
   `ava schedules provision`. A resynced **enabled** schedule is relaunched onto the
@@ -129,7 +124,7 @@ template into a running cluster without a restart of the manager, run
   rename leftover the imports alone cannot see; conservative: any binding
   counts, annotations are not read, `from x import *` disables it), and an
   `inspect.signature().bind` of every call the script makes into repo code
-  (`catch_up(...)`, `schedules.catchup.fire_slot_once(...)`, `Database.from_settings()`;
+  (`schedules.catchup.fire_slot_once(...)`, `Database.from_settings()`;
   the argument shape only, so a call it cannot bind statically — `*args`, an
   instance method, a rebound name, the plugin-wrapped `ava.*` SDK — is skipped,
   never guessed). Nothing is started, stopped, or written. The drift classes that

@@ -7,9 +7,9 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from langchain_core.exceptions import ModelConnectionError
 
 from agent.graph.llm import _retry
-from agent.graph.llm_errors import LlmLedger
 from base.config import ConfigBoot
 from base.lm.catalog import ModelCatalog
 
@@ -27,7 +27,6 @@ def test_two_owner_retry_inputs_are_live_and_unknown_failures_do_not_read_them(
         for owner, initial in ((first, 2.0), (second, 7.0)):
             owner.set_field("llm_retry_initial_interval_seconds", initial)
             owner.set_field("llm_retry_max_interval_seconds", 100.0)
-            owner.set_field("llm_stall_retry_max_consecutive", 0)
         reads: list[tuple[str, str]] = []
 
         def wait(owner: ConfigBoot, name: str, exc: Exception) -> float | None:
@@ -40,7 +39,6 @@ def test_two_owner_retry_inputs_are_live_and_unknown_failures_do_not_read_them(
                 1,
                 model="deepseek-flash",
                 agent_id=0,
-                ledger=LlmLedger(),
                 catalog=model_catalog,
                 max_attempts_pin=3,
                 read_lm=read,
@@ -48,7 +46,7 @@ def test_two_owner_retry_inputs_are_live_and_unknown_failures_do_not_read_them(
 
         assert wait(first, "first", RuntimeError("unknown")) is None
         assert reads == []
-        failure = _retry.LLMStreamStallTimeoutError("stall")
+        failure = ModelConnectionError("provider transport unavailable")
         assert wait(first, "first", failure) == 2.0
         assert wait(second, "second", failure) == 7.0
         first.set_field("llm_retry_initial_interval_seconds", 5.0)
@@ -57,7 +55,6 @@ def test_two_owner_retry_inputs_are_live_and_unknown_failures_do_not_read_them(
             (owner, field)
             for owner in ("first", "second", "first")
             for field in (
-                "llm_stall_retry_max_consecutive",
                 "llm_retry_max_interval_seconds",
                 "llm_retry_initial_interval_seconds",
             )

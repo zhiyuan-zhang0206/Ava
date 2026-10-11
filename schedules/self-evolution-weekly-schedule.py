@@ -17,7 +17,7 @@ import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from base.db import Database
-from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
+from schedules.catchup import cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
 
@@ -174,16 +174,7 @@ def _main_loop() -> None:
             return
         raise ValueError(f"unknown self-evolution weekly trigger: {trigger}")
 
-    catch_up(
-        db,
-        [
-            (MONDAY_CRON, MONDAY_TRIGGER),
-            (THURSDAY_CRON, THURSDAY_TRIGGER),
-        ],
-        timezone=cluster_timezone(),
-        fire=fire_weekly_trigger,
-    )
-
+    started_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)
 
@@ -192,12 +183,16 @@ def _main_loop() -> None:
         # would then jump to the next day (deterministic miss, observed 2026-08-06).
         # Tolerance window = [-120s, +90s].
         nxt_monday = next_fire(
-            MONDAY_CRON, after=now - timedelta(minutes=2), timezone=cluster_timezone()
+            MONDAY_CRON,
+            after=max(started_at, now - timedelta(minutes=2)),
+            timezone=cluster_timezone(),
         )
         wait_monday = (nxt_monday - now).total_seconds()
 
         nxt_thursday = next_fire(
-            THURSDAY_CRON, after=now - timedelta(minutes=2), timezone=cluster_timezone()
+            THURSDAY_CRON,
+            after=max(started_at, now - timedelta(minutes=2)),
+            timezone=cluster_timezone(),
         )
         wait_thursday = (nxt_thursday - now).total_seconds() if thursday_enabled else float("inf")
 

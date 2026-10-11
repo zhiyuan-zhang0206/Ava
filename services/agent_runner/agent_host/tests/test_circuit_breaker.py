@@ -1,43 +1,18 @@
-"""Heartbeat circuit breaker + overflow self-rescue tests (Task #1928).
-
-Locks the two framework-side fixes for the 3962 context-overflow incident (80
-heartbeat cycles against a permanent context-overflow 400, no self-rescue):
-
-1. **breaker open** — a `FatalProviderError` (permanent provider rejection)
-   opens the `circuit` channel; heartbeat check-ins are then consumed without
-   routing to the doomed LLM call (`_handle_heartbeat`), the claim node parks
-   idle instead of continue-looping (`circuit.parks_idle`), and for the
-   `context_overflow` reason any wake forces a compaction instead
-   (`decide` → `emergency_compact_summary`).
-2. **overflow self-rescue** — `emergency_compact_summary` tries a real
-   compaction, then falls back to the no-LLM minimal compact when the
-   compaction request itself is permanently rejected; the breaker closes on
-   the first successful LLM call (`llm_node`).
-"""
+"""Permanent failures park background work; fresh input can request another try."""
 
 import json
 from datetime import UTC, datetime
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
-import httpx2
-import openai
 import psycopg
 import pytest
-from langchain_core.exceptions import ModelAPIError
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
-from agent.hooks.compact import (
-    _EMERGENCY_COMPACT_MARKER,
-    CompactionFailedError,
-    compose_summary_message,
-    emergency_compact_summary,
-)
 from agent.state import AgentState, CircuitState
-from agent.tests.claim.claim_status_support import _compact_tail, _pair_compact_cycles
 from agent.tests.claim.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
@@ -54,16 +29,6 @@ from tests.fixtures.units import spawn_agent
 
 # A summary long enough to clear COMPACT_MIN_SUMMARY_CHARS.
 _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
-
-
-class _FakeProviderStatusError(openai.APIStatusError):
-    """An actual SDK status error with a synthetic response."""
-
-    def __init__(self, status_code: int, body: object = None) -> None:
-        response = httpx2.Response(
-            status_code, request=httpx2.Request("POST", "https://audit.invalid")
-        )
-        super().__init__(f"HTTP {status_code}", response=response, body=body)
 
 
 class _RecordingPublisher:
@@ -358,125 +323,22 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker() -> No
 # ── heartbeat gating (claim node) ──
 
 
-async def test_heartbeat_while_breaker_open_forces_compact(
+@pytest.mark.parametrize("reason", ["billing", "context_overflow"])
+async def test_heartbeat_while_breaker_open_parks(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    reason: str,
 ) -> None:
-    """Breaker open with context_overflow + heartbeat wake → the check-in note
-    is NOT appended (no doomed call), and the wake routes into a compaction
-    whose tail is the generated summary — the overflow self-rescue.
-
-    Task #3323: the rescue also emits its live run pair (compact_started with
-    mode=auto, compact_finished success — same compact_id) and the summary
-    carries the durable ava_compact_id anchor."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
-
-    state = _overflow_state(breaker_reason="context_overflow")
-    fake_llm = _fake_llm(_LONG_SUMMARY)
-    publisher = MagicMock()
-    cmd = await claim_node(
-        state,
-        _make_runtime(
-            ops_pool=aops_pool,
-            llm=fake_llm,
-            event_publisher=publisher,
-        ),
-        _config(tid),
-    )
-
-    fake_llm.bind_tools.return_value.ainvoke.assert_called_once()  # the compaction call
-    tail = _compact_tail(cmd.update)
-    assert len(tail) == 1, "forced compact tail must be the summary alone — no heartbeat note"  # pyright: ignore[reportUnknownArgumentType]
-    assert tail[0].content == compose_summary_message(_LONG_SUMMARY)  # pyright: ignore[reportUnknownMemberType]
-    assert cmd.update["compact"].version == 1  # pyright: ignore[reportOptionalSubscript, reportUnknownArgumentType, reportUnknownMemberType]
-    [(started, finished)] = _pair_compact_cycles(publisher)
-    assert started["mode"] == "auto"  # overflow rescue — no explicit request
-    assert finished["status"] == "success"
-    assert tail[0].additional_kwargs["ava_compact_id"] == started["compact_id"]  # pyright: ignore[reportUnknownMemberType]
-
-
-async def test_heartbeat_while_breaker_open_compaction_failure_emits_terminal(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
-    """Task #3323: when the overflow rescue itself exhausts its transient
-    retries (CompactionFailedError), the run still reaches its terminal
-    signal (failure) before the error propagates — no hanging ticking block."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
-
-    state = _overflow_state(breaker_reason="context_overflow")
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=ModelAPIError("provider 502"))
-    publisher = MagicMock()
-
-    with pytest.raises(CompactionFailedError, match="no usable summary"):
-        await claim_node(
-            state,
-            _make_runtime(ops_pool=aops_pool, llm=llm, event_publisher=publisher),
-            _config(tid),
-        )
-
-    [(started, finished)] = _pair_compact_cycles(publisher)
-    assert started["mode"] == "auto"
-    assert finished["status"] == "failure"
-
-
-async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
-    """The 3962 shape: the compaction request itself is rejected (context over
-    the effective input ceiling) — the wake must still be rescued by the
-    no-LLM minimal compact instead of looping forever."""
-    tid = spawn_agent(catalog=model_catalog, authority=config_authority)
-    _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
-
-    state = _overflow_state(breaker_reason="context_overflow")
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(
-        side_effect=_FakeProviderStatusError(
-            400,
-            {"error": {"type": "invalid_request_error", "message": "maximum context length"}},
-        )
-    )
-    cmd = await claim_node(
-        state,
-        _make_runtime(
-            ops_pool=aops_pool,
-            llm=llm,
-        ),
-        _config(tid),
-    )
-
-    tail = _compact_tail(cmd.update)
-    assert _EMERGENCY_COMPACT_MARKER in tail[0].content  # pyright: ignore[reportUnknownMemberType]
-
-
-async def test_heartbeat_while_breaker_open_non_overflow_parks(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
-    """Breaker open with a non-overflow reason (billing): the heartbeat is
+    """Every permanent rejection blocks background model requests: the heartbeat is
     consumed without a note and parks at claim — no LLM call, no compact, no
     doomed re-fire."""
     tid = spawn_agent(catalog=model_catalog, authority=config_authority)
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
-    state = _overflow_state(breaker_reason="billing")
+    state = _overflow_state(breaker_reason=reason)
     fake_llm = _fake_llm(_LONG_SUMMARY)
     cmd = await claim_node(
         state,
@@ -533,13 +395,15 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
 
 
-async def test_claim_parks_idle_while_non_overflow_breaker_open(
+@pytest.mark.parametrize("reason", ["billing", "context_overflow"])
+async def test_claim_parks_idle_while_breaker_open(
     aops_pool: AsyncConnectionPool,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    reason: str,
 ) -> None:
-    """The claim no-batch branch parks a non-overflow open breaker: a
+    """The claim no-batch branch parks every open breaker: a
     self-initiated continue-loop (the next graph invocation after the turn
     boundary) must not re-fire the doomed call. Hosted mode surfaces the park
     as END+turn_idle without blocking on the inbound wait."""
@@ -547,7 +411,7 @@ async def test_claim_parks_idle_while_non_overflow_breaker_open(
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
         halted=False,
-        circuit=CircuitState(open=True, reason="billing", opened_at="2026-08-29T00:00:00+00:00"),
+        circuit=CircuitState(open=True, reason=reason, opened_at="2026-08-29T00:00:00+00:00"),
     )
     cmd = await claim_node(
         state,
@@ -610,72 +474,6 @@ async def test_heartbeat_normal_when_breaker_closed(
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert "Heartbeat." in msgs[0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     assert cmd.goto == "before_llm"
-
-
-# ── emergency_compact_summary (unit) ──
-
-
-async def test_emergency_compact_summary_uses_real_summary() -> None:
-    """The compaction call succeeds → its summary is used (the no-LLM fallback
-    only fires when the request cannot go out)."""
-    msgs: list[AnyMessage] = [SystemMessage(content="<sys>"), HumanMessage(content="hi")]
-    summary = await emergency_compact_summary(
-        msgs,
-        _fake_llm(_LONG_SUMMARY),
-        AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        catalog=build_model_catalog(),
-    )
-    assert summary == _LONG_SUMMARY
-
-
-async def test_emergency_compact_summary_falls_back_on_permanent_rejection() -> None:
-    """Every compaction attempt is permanently rejected → the marker fallback
-    is returned instead of raising — the wipe still happens, the agent is
-    rescued without any model call."""
-    msgs: list[AnyMessage] = [SystemMessage(content="<sys>"), HumanMessage(content="hi")]
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(
-        side_effect=_FakeProviderStatusError(
-            400,
-            {"error": {"type": "invalid_request_error", "message": "maximum context length"}},
-        )
-    )
-
-    summary = await emergency_compact_summary(
-        msgs,
-        llm,
-        AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        catalog=build_model_catalog(),
-    )
-    assert _EMERGENCY_COMPACT_MARKER in summary
-    assert llm.bind_tools.return_value.ainvoke.await_count == 1, (
-        "a permanent rejection must not be retried — the request cannot succeed"
-    )
-
-
-async def test_emergency_compact_summary_preserves_last_prior_summary() -> None:
-    """The fallback embeds the last preserved compaction summary, so the
-    model-less wipe keeps as much memory as possible."""
-    prior = "## Requests\nremember the prior compact. " * 40
-    msgs: list[AnyMessage] = [
-        SystemMessage(content="<sys>"),
-        HumanMessage(
-            content=compose_summary_message(prior),
-            additional_kwargs={"ava_msg_type": "compact_summary"},
-        ),
-        HumanMessage(content="work since the last compact"),
-    ]
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=_FakeProviderStatusError(400))
-
-    summary = await emergency_compact_summary(
-        msgs,
-        llm,
-        AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        catalog=build_model_catalog(),
-    )
-    assert prior in summary
-    assert _EMERGENCY_COMPACT_MARKER in summary
 
 
 # ── breaker close (llm node) ──

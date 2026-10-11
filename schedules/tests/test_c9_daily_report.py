@@ -17,7 +17,7 @@ import pytest
 
 from base.config import settings
 from base.db import Database
-from schedules.catchup import catch_up, fire_slot_once
+from schedules.catchup import fire_slot_once
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEDULE_PATH = REPO_ROOT / "schedules" / "c9-daily-report-schedule.py"
@@ -210,45 +210,6 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     assert attributes["day"] == "2026-09-07"
     assert attributes["window_start"] == "2026-09-05T21:00:00Z"
     assert attributes["window_end"] == "2026-09-06T21:00:00Z"
-
-
-def test_catch_up_boot_with_two_missed_slots_reconciles_each_own_window(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    """QA regression (2026-09-07): a boot that missed two 05:00 slots must
-    reconcile each slot's own day — gapless windows, one event per day."""
-    module = _load_schedule_module()
-
-    def fake_init_gateway(name: str) -> None:
-        del name
-
-    monkeypatch.setattr(module, "init_gateway_process", fake_init_gateway)
-    accounting = _FakeAccounting(module)
-    emitted = _install_fake_accounting(monkeypatch, accounting)
-    schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 0, 30, tzinfo=UTC))
-    monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
-
-    fired_slots = catch_up(
-        database,
-        [(module.CRON, None)],
-        timezone="UTC",
-        fire=module._fire,
-        now=datetime(2026, 9, 8, 10, 30, tzinfo=UTC),
-    )
-
-    # Missed 05:00 slots: 09-06, 09-07, 09-08 — catch-up keeps the two most
-    # recent, and each must reconcile its OWN day.
-    assert fired_slots == [
-        datetime(2026, 9, 7, 5, 0, tzinfo=UTC),
-        datetime(2026, 9, 8, 5, 0, tzinfo=UTC),
-    ]
-    assert accounting.windows == [
-        ("2026-09-06T05:00:00Z", "2026-09-07T05:00:00Z"),
-        ("2026-09-07T05:00:00Z", "2026-09-08T05:00:00Z"),
-    ]
-    days = [cast("dict[str, str | int | float]", event["attributes"])["day"] for event in emitted]
-    assert len(days) == 2
-    assert len(set(days)) == 2
 
 
 def test_fire_reports_failure_without_raising(

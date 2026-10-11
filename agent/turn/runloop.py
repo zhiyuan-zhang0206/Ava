@@ -80,11 +80,9 @@ def emit_error_event(
 def _circuit_reason(exc: FatalProviderError) -> str:
     """Map a permanent provider rejection to its circuit-breaker reason.
 
-    The one reason that matters for behaviour is `context_overflow` — the
-    self-rescuable case the forced-compact arm keys on. Every other rejection
-    (auth / billing / schema / ...) just stops heartbeat re-fires until a
-    real wake succeeds; they map to a stable label for the breaker event,
-    with a generic `permanent` fallback for anything unmapped."""
+    Reasons classify the required user action; every permanent rejection
+    suppresses background wakes until corrected.
+    """
     if exc.context_overflow:
         return CIRCUIT_REASON_CONTEXT_OVERFLOW
     status = exc.status
@@ -366,9 +364,7 @@ async def _handle_fatal_llm_error(
     )
     reason = _circuit_reason(exc) if isinstance(exc, FatalProviderError) else None
     is_blocked_provider_failure = (
-        isinstance(exc, FatalProviderError)
-        and exc.error_class == "permanent"
-        and reason != CIRCUIT_REASON_CONTEXT_OVERFLOW
+        isinstance(exc, FatalProviderError) and exc.error_class == "permanent"
     )
     content = _abort_message(exc, blocked=is_blocked_provider_failure)
     if emit_reports:

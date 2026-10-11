@@ -27,7 +27,7 @@ import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from base.db import Database
-from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
+from schedules.catchup import cluster_timezone, fire_slot_once
 from base.log import init_gateway_process
 from base.host.env.dotenv_boot import resolve_ava_home
 from base.paths import ava_home
@@ -264,7 +264,6 @@ def _dry_run(repo: Path) -> None:
 
 def _main_loop() -> None:
     db = Database.from_settings()
-    catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=_fire)
     last_run_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)

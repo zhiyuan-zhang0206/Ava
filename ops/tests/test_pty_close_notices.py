@@ -93,14 +93,6 @@ class _SpyDatabase(Database):
         return conn
 
 
-@pytest.fixture
-def staged_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The child's staged file, isolated from the session home."""
-    path = tmp_path / "pty-close-notices.json"
-    monkeypatch.setattr(notices, "close_notices_path", lambda: path)
-    return path
-
-
 def test_closure_notice_rejects_non_agent_shell_names() -> None:
     """Sessions that are not agent-owned shells get no notice."""
     assert (
@@ -380,100 +372,12 @@ def test_a_staged_batch_round_trips_through_the_file(tmp_path: Path) -> None:
     path = tmp_path / "pty-close-notices.json"
     stopped = _notice(survivors=((4242, "sudo"),))
 
-    notices.write_pending(path, [stopped])
+    path.write_text(json.dumps({"version": 1, "notices": [stopped.as_dict()]}))
     (read_back,) = notices.read_pending(path)
 
     assert read_back == stopped
     assert read_back.dedup_key() == stopped.dedup_key()
     assert notices._content(read_back) == notices._content(stopped)
-
-
-def test_staging_merges_beside_what_already_waits(tmp_path: Path) -> None:
-    """A next start stages its sweep beside the batch still waiting: the record
-    already on disk stays (same key, first one wins) and the new session appends."""
-    path = tmp_path / "pty-close-notices.json"
-    (waiting,) = notices.stage_crash_notices(
-        closure.Outcome(closed=(_ended(5, session_id=7),)), path
-    )
-
-    staged = notices.stage_crash_notices(
-        closure.Outcome(closed=(_ended(5, session_id=7), _ended(5, session_id=8, starttime=9999))),
-        path,
-    )
-
-    assert [notice.session_id for notice in staged] == [7, 8]
-    assert staged[0] == waiting, "the record already staged is the one kept"
-    assert notices.read_pending(path) == staged
-
-
-def test_the_crash_child_writes_the_staged_batch_once_and_never_resurrects(
-    db_conn: psycopg.Connection, staged_path: Path
-) -> None:
-    """The one-shot child (`python -m ops.pty_close_notices`) end to end: it writes
-    the staged notices — a live owner gets one inbound, a terminated owner none — and
-    removes the file; staged again (a commit whose file was left behind), it
-    delivers nothing new."""
-    live, dead = _agent(db_conn, "running"), _agent(db_conn, "terminated")
-    staged = notices.notices_for(
-        [_ended(live), _ended(dead, session_id=12)], reason=notices.CRASH_REASON
-    )
-    notices.write_pending(staged_path, staged)
-
-    assert notices.main() == 0
-    assert not staged_path.exists(), "a written batch leaves no staged file"
-
-    notices.write_pending(staged_path, staged)
-    assert notices.main() == 0
-
-    ((content, source, _payload),) = _inbounds(db_conn, live)
-    assert source == "system"
-    assert notices.CRASH_REASON in content
-    assert _inbounds(db_conn, dead) == []
-
-
-def test_the_crash_child_reports_an_unreachable_database_and_keeps_the_batch(
-    staged_path: Path, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
-) -> None:
-    def refuse(self: Database, **_kwargs: object) -> psycopg.Connection:
-        raise psycopg.OperationalError("connection refused")
-
-    monkeypatch.setattr(Database, "connect", refuse)
-    notices.write_pending(staged_path, [_notice()])
-
-    assert notices.main() == 1
-
-    assert [notice.session_id for notice in notices.read_pending(staged_path)] == [11]
-    assert any(
-        record["level"].name == "ERROR" and "1 closure notice(s) not written" in record["message"]
-        for record in loguru_records
-    )
-
-
-def test_the_crash_child_reads_a_malformed_file_as_nothing_and_keeps_it(
-    staged_path: Path, loguru_records: list[dict[str, Any]]
-) -> None:
-    """A malformed staged file is never guessed at: the child writes nothing and
-    leaves the file for the operator, like the ledger's unreadable read."""
-    staged_path.write_text("{not json")
-
-    assert notices.main() == 0
-
-    assert staged_path.read_text() == "{not json"
-    assert any(
-        record["level"].name == "WARNING" and "unreadable" in record["message"]
-        for record in loguru_records
-    )
-
-
-def test_the_crash_child_with_nothing_staged_writes_nothing(
-    staged_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def never(**kwargs: object) -> psycopg.Connection:
-        raise AssertionError("an empty staged file dialed the database")
-
-    monkeypatch.setattr(Database, "connect", never)
-
-    assert notices.main() == 0
 
 
 def test_closure_receipt_stores_the_canonical_ops_status(db_conn: psycopg.Connection) -> None:

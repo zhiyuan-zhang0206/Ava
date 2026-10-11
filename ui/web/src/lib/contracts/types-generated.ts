@@ -6157,8 +6157,7 @@ export interface components {
          * @description One bucket's LLM call profile. Latency percentiles are over rows that
          *     carry `latency_ms` (pre-instrumentation rows are NULL and ignored);
          *     `tps` = Σ(in+out+reasoning) tokens / Σ latency seconds (NULL when no
-         *     latency data). `errors` counts llm_provider_error / stream_stalled_retry /
-         *     llm_turn_aborted events.
+         *     latency data). `errors` counts llm_provider_error and llm_turn_aborted events.
          */
         LlmBucket: {
             /** Bucket */

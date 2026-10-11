@@ -158,8 +158,8 @@ class RedisStreamHandler:
         # (monotonic, measured in `_llm._consume_stream_with_stall_timeout`),
         # i.e. pure generation time excluding network / queue / prefill — the
         # denominator of the ops panel "spawn-stage output TPS". None until a
-        # call completes; stays None for non-streaming fallback calls and
-        # empty streams (no honest window → NULL in the payload, never a fake
+        # call completes; stays None for empty streams
+        # (no honest window → NULL in the payload, never a fake
         # number). Stamped after the LAST successful attempt; reset()
         # deliberately does NOT clear it (same one-logical-call rule as
         # llm_latency_ms — the stale-cache retry re-stamps it fresh).

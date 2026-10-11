@@ -37,7 +37,7 @@ from schedules.adversarial_eval_cases import (
 )
 from schedules.agent_status_guard import ensure_agent_status_members
 from base.db import Database
-from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
+from schedules.catchup import cluster_timezone, fire_slot_once
 
 
 CRON = "0 4 * * 3"
@@ -500,9 +500,8 @@ def _fire_weekly_batch(_slot: datetime, _trigger: None) -> None:
 
 
 def main() -> None:
-    """Catch up missed Wednesday slots, then keep serving future weeks."""
+    """Serve future Wednesday slots without replaying downtime."""
     db = Database.from_settings()
-    catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=_fire_weekly_batch)
     while True:
         nxt = next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone())
         while datetime.now(UTC) < nxt:

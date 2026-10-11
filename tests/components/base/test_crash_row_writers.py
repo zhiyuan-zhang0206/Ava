@@ -97,7 +97,6 @@ def test_relaxed_guard_consumers_embed_the_shared_predicates() -> None:
     """Surviving lifecycle guards must use shared predicate constants."""
     expectations = {
         "ops/agents/wake.py": ["RECOVERY_BREAKER_CLEAR"],
-        "services/wake/delivery_watchdog/dispatch_guard.py": ["RECOVERY_BREAKER_CLEAR"],
     }
     for rel, names in expectations.items():
         text = (_REPO / rel).read_text(encoding="utf-8")

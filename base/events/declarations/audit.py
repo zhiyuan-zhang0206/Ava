@@ -103,7 +103,7 @@ EVENTS: dict[str, EventSpec] = {
     "circuit_breaker": audit_event(
         "circuit_breaker",
         "heartbeat circuit breaker opened — a permanent provider rejection stopped "
-        "heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue)",
+        "background model re-fires until the cause is corrected",
     ),
     "status_change": telemetry_audit_event(
         "status_change",

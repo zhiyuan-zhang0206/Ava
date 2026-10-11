@@ -13,17 +13,13 @@ from psycopg_pool import ConnectionPool
 
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
-from base.db import Database
 from base.deploy.maintenance import admission
-from base.events.live.bus import EventBus
 from services.wake.delivery_watchdog import daemon
 
 _Loop = Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]]
 
 _LOOPS: dict[str, _Loop] = {
-    "scan": lambda pool, progress: daemon._scan_loop(
-        pool, Database.from_settings(), EventBus.from_settings(), progress
-    ),
+    "scan": daemon._scan_loop,
 }
 
 
