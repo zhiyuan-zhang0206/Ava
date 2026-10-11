@@ -17,6 +17,8 @@ from base.config import ConfigBoot, ConfigBuildWaitTimeoutError, _full, _lite
 from base.host.env.dotenv_boot import EnvBootResult
 from base.host.proc import run_bounded
 
+_CHILD = Path(__file__).with_name("_boot_owner_child.py")
+
 
 @pytest.fixture(autouse=True)
 def _isolated_owner_environment(tmp_path: Path) -> Iterator[None]:
@@ -48,29 +50,8 @@ def test_constructor_and_skip_boot_do_not_deliver_environment(
 
 
 def test_read_only_owners_keep_delivered_values_through_parallel_eager_builds() -> None:
-    script = """
-import os
-from concurrent.futures import ThreadPoolExecutor
-from base.config import ConfigBoot
-
-before = dict(os.environ)
-owners = [ConfigBoot(), ConfigBoot()]
-for owner in owners:
-    owner.read_process_environment()
-with ThreadPoolExecutor(max_workers=2) as pool:
-    models = list(pool.map(lambda owner: owner.ensure_eager(), owners))
-assert dict(os.environ) == before, sorted(key for key in set(before) | set(os.environ) if before.get(key) != os.environ.get(key))
-assert all(model.lm.llm_model == "delivered-model" for model in models)
-assert all(model.general.timezone == "Asia/Tokyo" for model in models)
-assert all(not model.general.message_timestamps for model in models)
-assert all(owner.field_explicitly_set("timezone") for owner in owners)
-assert all(model.lm.gemini_api_key.get_secret_value() == "delivered-provider-key" for model in models)
-complete = owners[0].complete_read_model()
-assert complete.lm.llm_model == "delivered-model"
-assert dict(os.environ) == before
-"""
     result = run_bounded(
-        [sys.executable, "-c", script],
+        [sys.executable, str(_CHILD)],
         env={
             **os.environ,
             "AVA_CONFIG_FETCH": "skip",

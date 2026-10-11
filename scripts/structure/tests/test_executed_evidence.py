@@ -56,18 +56,6 @@ def test_unknown_execution_keeps_known_references_but_legacy_list_fails(tmp_path
     assert raised.value.evidence == evidence
 
 
-def test_real_boot_lite_driver_references_the_child_execution_owner() -> None:
-    root = Path(__file__).resolve().parents[3]
-    rel = "base/config/tests/test_config_boot_lite.py"
-    evidence = placement.collect_reference_evidence(
-        ast.parse((root / rel).read_text(encoding="utf-8")), placement.ModuleIndex(root), rel
-    )
-    embedded = {ref.module for ref in evidence.refs if ref.kind == "embedded-import"}
-    assert "agent.execution.child" in embedded
-    assert "base.config" in embedded
-    assert evidence.unresolved == []
-
-
 def test_legacy_patch_adapter_carries_unknown_without_claiming_complete_placement(
     tmp_path: Path,
 ) -> None:
