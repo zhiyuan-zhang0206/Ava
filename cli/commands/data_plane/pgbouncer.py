@@ -60,9 +60,9 @@ from base.native_process.os_platform import LockTimeoutError
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.cluster_instance import (
-    _BIND_WAIT_TIMEOUT_S,
-    _pg_socket_dir,
-    _wait_for_reachable_bind,
+    BIND_WAIT_TIMEOUT_S,
+    pg_socket_dir,
+    wait_for_reachable_bind,
 )
 
 # Transaction-pooling defaults. max_client_conn
@@ -108,7 +108,7 @@ def _render_ini(*, pg_port: int, listen_port: int, db_name: str, machine: Machin
     the default `localhost` leaves loopback alone.
 
     The backend socket dir is the one the RUNNING pg actually listens on
-    (`_pg_socket_dir`, the exact directory the admin dial uses): `_start_pg` skips a
+    (`pg_socket_dir`, the exact directory the admin dial uses): `_start_pg` skips a
     pg that is already up, so across the path-only cutover a pre-cutover pg
     still serves the old name-keyed dir — rendering the canonical dir there
     would break every pooled query while admin readiness stayed green.
@@ -136,7 +136,7 @@ def _render_ini(*, pg_port: int, listen_port: int, db_name: str, machine: Machin
     defended client-side (base/db/__init__.py baseline restore per dial/borrow +
     read-write write posture; 2026-09-02 P0)."""
     listen_addr = ", ".join(port_preflight.bind_addrs(machine=machine))
-    socket_dir = _pg_socket_dir()
+    socket_dir = pg_socket_dir()
     from base.db import PG_STATEMENT_TIMEOUT_SET_SQL
 
     connect_query = f"connect_query='{PG_STATEMENT_TIMEOUT_SET_SQL}'"
@@ -369,10 +369,10 @@ def ensure_pgbouncer(
                 return 1
             print(f"  ✓ pgbouncer already running (127.0.0.1:{listen_port}), reloaded")
             return 0
-        if not public and not _wait_for_reachable_bind(machine=machine):
+        if not public and not wait_for_reachable_bind(machine=machine):
             print(
                 f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
-                f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — the degraded "
+                f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — the degraded "
                 "pgbouncer cannot be restarted into a healthy double bind. On reboot "
                 "this means the private network has not come up yet; retry `ava start` "
                 "once it is.",
@@ -402,14 +402,14 @@ def ensure_pgbouncer(
 
 
 def _launch_pooler(listen_port: int, admin_password: str, *, machine: MachineIdentity) -> int:
-    if not _wait_for_reachable_bind(machine=machine):
+    if not wait_for_reachable_bind(machine=machine):
         # Fail fast BEFORE starting: a pooler born now would degrade to loopback-only
         # and the public AVA_DB_URL path would be silently dead (the 2026-08-16
         # outage shape). The boot retry keeps re-running `ava start`, so this only
         # needs to be true once the private network is actually up.
         print(
             f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
-            f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — pgbouncer would "
+            f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — pgbouncer would "
             "silently degrade to loopback-only and every remote agent-runner would "
             "lose the pooled AVA_DB_URL. On reboot this means the private network has "
             "not come up yet; retry `ava start` once it is.",

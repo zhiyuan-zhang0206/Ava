@@ -23,7 +23,7 @@ from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import service_selection
 from cli.commands._repo import _repo_root
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
-from cli.commands.data_plane.cluster_instance import print_data_plane_status
+from cli.commands.data_plane.bringup import print_data_plane_status
 from cli.commands.lifecycle.hold_report import print_hold_section
 from cli.commands.probe import print_service_row
 from ops.roster import build_services

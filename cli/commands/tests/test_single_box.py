@@ -82,7 +82,7 @@ class Born:
 
     def admin(self) -> psycopg.Connection[Any]:
         return psycopg.connect(
-            host=str(ci._pg_socket_dir()), port=self.pg_port, dbname="ava", autocommit=True
+            host=str(ci.pg_socket_dir()), port=self.pg_port, dbname="ava", autocommit=True
         )
 
 
@@ -114,8 +114,8 @@ def _teardown(born: Born) -> None:
         for child in born.retained_children:
             child.wait(timeout=1)
         subprocess.run(
-            [ci._redis_cli_bin(), "-p", str(born.record.ports["redis"]), "shutdown", "nosave"],
-            env=ci._redis_cli_env(born.values["AVA_REDIS_ADMIN_PASSWORD"]),
+            [ci.redis_cli_bin(), "-p", str(born.record.ports["redis"]), "shutdown", "nosave"],
+            env=ci.redis_cli_env(born.values["AVA_REDIS_ADMIN_PASSWORD"]),
             check=False,
             capture_output=True,
         )
@@ -292,7 +292,7 @@ def test_fresh_birth_mints_generation_zero_behind_nologin_owner(born: Born) -> N
 
 
 def test_birth_refuses_unauthenticated_and_owner_logins(born: Born) -> None:
-    socket_dir = str(ci._pg_socket_dir())
+    socket_dir = str(ci.pg_socket_dir())
     for host in ("127.0.0.1", socket_dir):
         # The owner exists but can never log in, with or without a password.
         for password in ("", "anything"):

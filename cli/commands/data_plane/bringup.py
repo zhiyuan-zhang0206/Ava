@@ -14,7 +14,7 @@ from __future__ import annotations
 import socket
 import subprocess
 import sys
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -23,12 +23,19 @@ from urllib.parse import urlsplit
 import psycopg
 
 from base.agents.context.clients import DatabaseFactory
+from base.cluster import ownership
+from base.cluster import postgres as owned_postgres
 from base.cluster.authority.model import Generation
+from base.cluster.dataplane import pooler
 from base.cluster.machine import MachineIdentity
 from base.cluster.record import ClusterRecord
 from base.config import settings
 from base.host.net.url_secret import url_host
 from base.log import logger
+from base.paths import ava_home
+from base.telemetry import EventPipeline
+from cli.commands.data_plane import cluster_instance as instance
+from cli.commands.data_plane import pgbouncer
 from ops.roster.service_spec import DbAccess
 
 
@@ -51,8 +58,6 @@ def ensure_gateway_data_plane(
         redis_password_from_env,
     )
     from base.cluster.authority.api import publish_telemetry_token
-    from base.paths import ava_home
-    from cli.commands.data_plane.cluster_instance import ensure_cluster_storage
 
     rec = get_record(ava_home())
     if rec is None:
@@ -102,7 +107,7 @@ def ensure_gateway_data_plane(
         # any native effect (hba rewrite, migrations). Never converted here.
         print(f"  ✗ {legacy_home_refusal(ava_home().resolve())}", file=sys.stderr)
         return 1
-    return ensure_cluster_storage(
+    return instance.ensure_cluster_storage(
         pg_port=rec.ports["postgres"],
         redis_port=rec.ports["redis"],
         redis_admin_password=settings.data_plane.redis_admin_password,
@@ -186,7 +191,6 @@ def warn_orphaned_local_instance() -> None:
     """
     try:
         from base.cluster import get_record
-        from base.paths import ava_home
 
         rec = get_record(ava_home())
         if rec is None:
@@ -195,9 +199,7 @@ def warn_orphaned_local_instance() -> None:
         # The signal is a live process answering on this cluster's own instance
         # ports — whatever it is, it is not the remote-managed plane and not
         # something this cluster will ever manage again.
-        from cli.commands.data_plane.cluster_instance import _pg_running
-
-        if _pg_running(rec.ports["postgres"], "127.0.0.1"):
+        if instance.pg_running(rec.ports["postgres"], "127.0.0.1"):
             leftovers.append("postgres")
         # A plain listener check: the left-behind Redis always requires its admin
         # password, which a remote-managed home no longer carries.
@@ -221,8 +223,6 @@ def warn_orphaned_local_instance() -> None:
 def prepare_gateway_schema() -> None:
     """Initialize only a journal-owned fresh database, before any pooled login."""
     from base import cluster
-    from base.paths import ava_home
-    from cli.commands.data_plane.cluster_instance import pg_admin_url
     from cli.start_identity import needs_provision
 
     if settings.data_plane.is_remote or not needs_provision(ava_home()):
@@ -230,7 +230,7 @@ def prepare_gateway_schema() -> None:
     rec = cluster.get_record(ava_home())
     if rec is None:
         raise RuntimeError("initialization lost its port reservation")
-    admin_url = pg_admin_url(rec.ports["postgres"])
+    admin_url = instance.pg_admin_url(rec.ports["postgres"])
     identity = cluster.db_identity()
     created = cluster.provision_database(
         identity,
@@ -296,10 +296,8 @@ def admin_session(rec: ClusterRecord, database: str) -> Generator[psycopg.Connec
     from psycopg.conninfo import make_conninfo
 
     from base.cluster.dataplane import pg_admin
-    from base.paths import ava_home
-    from cli.commands.data_plane.cluster_instance import pg_admin_url
 
-    url = make_conninfo(pg_admin_url(rec.ports["postgres"]), dbname=database)
+    url = make_conninfo(instance.pg_admin_url(rec.ports["postgres"]), dbname=database)
     with pg_admin.connect(url, expected_data_dir=ava_home() / "pg", autocommit=True) as conn:
         yield conn
 
@@ -307,8 +305,6 @@ def admin_session(rec: ClusterRecord, database: str) -> Generator[psycopg.Connec
 def db_endpoint() -> str:
     """The home's credential-free database endpoint, as its `.env` records it."""
     from dotenv import dotenv_values
-
-    from base.paths import ava_home
 
     endpoint = dotenv_values(ava_home() / ".env").get("AVA_DB_URL")
     if not endpoint:
@@ -329,7 +325,6 @@ def db_delivery(cls: DbAccess) -> dict[str, str]:
     """
     from base.cluster.authority import GENERATION_ENV, write_grant
     from base.host.env.bootstrap import config_source_is_local
-    from base.paths import ava_home
 
     if not config_source_is_local():
         from base.cluster.authority.unit import unit_delivery
@@ -354,7 +349,6 @@ def api_delivery(cls: DbAccess) -> dict[str, str]:
     """
     from base.cluster.authority.api import API_TOKEN_ENV, api_token
     from base.host.env.bootstrap import config_source_is_local
-    from base.paths import ava_home
 
     if not config_source_is_local():
         from base.cluster.authority.unit import unit_api_delivery
@@ -379,9 +373,8 @@ def _ensure_pooler(
     if not settings.data_plane.pgbouncer_enabled:
         return
     from base.cluster.authority import read_pooler_admin, render_userlist
-    from cli.commands.data_plane.pgbouncer import ensure_pgbouncer
 
-    rc = ensure_pgbouncer(
+    rc = pgbouncer.ensure_pgbouncer(
         pg_port=rec.ports["postgres"],
         listen_port=rec.ports["pgbouncer"],
         db_name=database,
@@ -488,7 +481,6 @@ def complete_gateway_data_plane(
     legacy home and refuses (`legacy_home_refusal`) — never converted here.
     """
     from base import cluster
-    from base.paths import ava_home
     from cli.commands.converge.health_preflight import probe_postgres, probe_redis
     from cli.start_identity import mark_phase, needs_provision
 
@@ -511,11 +503,9 @@ def complete_gateway_data_plane(
         database = cluster.db_identity()
         endpoint = db_endpoint()
         if refresh_schema:
-            from cli.commands.data_plane.cluster_instance import pg_admin_url
-
             cluster.ensure_pgvector_extension(
                 database,
-                base_admin_url=pg_admin_url(rec.ports["postgres"]),
+                base_admin_url=instance.pg_admin_url(rec.ports["postgres"]),
                 expected_data_dir=ava_home() / "pg",
             )
             prepare_memory_vectors(database_factory=database_factory)
@@ -537,3 +527,132 @@ def complete_gateway_data_plane(
     if error := probe_redis(settings.data_plane.redis_url):
         raise RuntimeError(f"consumer Redis readiness failed: {error}")
     mark_phase(ava_home(), "provisioned")
+
+
+def print_data_plane_status(*, database_factory: DatabaseFactory) -> None:
+    """Print this cluster's own pg/redis reachability for `ava status`.
+
+    Postgres is probed in two stages: `pg_isready` (the server accepts connections)
+    then an authenticated `SELECT 1` over the cluster's POOLED front door
+    (`connect()` — PgBouncer when enabled, the direct URL when not; the same swap
+    every consumer dials) as this process's delivered gateway login. A server that
+    is up but refuses that login reports `✗ ... connect failed` rather than a
+    false `✓`: `pg_isready` alone answers without authenticating. Redis pings with
+    its admin password. Both ports come from this cluster's own db_url / redis_url
+    (its per-cluster instance). The pooler line authenticates to its admin console
+    with the operator entry from the home's database authority store.
+
+    The probe goes POOLED, never `direct=True` (user ruling 2026-08: every consumer
+    sits behind PgBouncer): the pooled `SELECT 1` proves the path consumers
+    actually use — client SCRAM against the userlist plus the SCRAM pass-through
+    backend hop. With PgBouncer disabled `pooled_db_url == db_url` and the probe
+    is direct anyway."""
+
+    if settings.data_plane.is_remote:
+        # A remote-managed plane has no local instance to manage — probe the
+        # URLs themselves (the switch) and skip the local pooler line.
+        print("  · data plane remote-managed — probing the URLs (no local instance)")
+        pg_ok, pg_line = remote_pg_reachable(database_factory=database_factory)
+        print(f"  {'✓' if pg_ok else '✗'} {pg_line}")
+        redis_ok, redis_line = remote_redis_reachable()
+        print(f"  {'✓' if redis_ok else '✗'} {redis_line}")
+        return
+
+    # Both probes dial the host their own URL names (self-host URLs are
+    # loopback-rewritten by DataPlaneSettings). The remote branch above returns
+    # before this local probe runs.
+    pg_host = instance.pg_dial_host()
+    redis_host = instance.redis_dial_host()
+    pg_port = urlsplit(settings.data_plane.db_url).port or 5432
+    redis_port = urlsplit(settings.data_plane.redis_url).port or 6379
+    if not instance.pg_running(pg_port, pg_host):
+        print(f"  ✗ postgres ({pg_host}:{pg_port}) unreachable")
+    else:
+        try:
+            with database_factory().connect() as conn:  # pooled front door (PgBouncer when enabled)
+                conn.execute("select 1")
+            print(f"  ✓ postgres ({pg_host}:{pg_port})")
+        except Exception as exc:
+            lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip()]
+            detail = lines[-1] if lines else "connection failed"
+            print(f"  ✗ postgres ({pg_host}:{pg_port}) reachable but connect failed: {detail}")
+    print(
+        f"  {'✓' if instance.redis_reachable(redis_port, redis_host) else '✗'} "
+        f"redis ({redis_host}:{redis_port})"
+    )
+    if settings.data_plane.pgbouncer_enabled:
+        _print_pooler_status()
+
+
+def _print_pooler_status() -> None:
+    """The pooler line: its registry-derived listen port, probed through the
+    admin console as the operator entry from the home's authority store. No
+    registry record means the port is unknowable — say so instead of a false `:0`."""
+    from base.cluster import get_record
+    from base.cluster.authority import AuthorityRefusedError, read_pooler_admin
+
+    rec = get_record(ava_home())
+    if rec is None:
+        print("  - pgbouncer: no registry record — cannot resolve its port")
+        return
+    port = rec.ports["pgbouncer"]
+    try:
+        ok = pooler.pgbouncer_listener_reachable(port, read_pooler_admin(ava_home()).password)
+    except AuthorityRefusedError as exc:
+        print(f"  ✗ pgbouncer (127.0.0.1:{port}): {exc}")
+        return
+    print(f"  {'✓' if ok else '✗'} pgbouncer (127.0.0.1:{port}, transaction pooling)")
+
+
+def stop_cluster_instance(
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+    producer: Callable[[], EventPipeline],
+) -> int:
+    """Stop this cluster's own Postgres + Redis (data preserved on disk). The
+    counterpart of ensure_cluster_storage for `ava stop` of a cluster running its
+    own instance. Best-effort: a not-running instance is a
+    no-op success only after native custody closes."""
+    if settings.data_plane.is_remote:
+        # A remote-managed plane has no local instance to stop — nothing on this
+        # box to tear down, and the provider owns the service lifecycle. But a
+        # cluster that SWITCHED local→remote may still have its old local
+        # instance running; warn so it is torn down deliberately.
+        print(f"\n→ data plane remote-managed ({remote_plane_host()}) — nothing to stop locally")
+        warn_orphaned_local_instance()
+        return 0
+    data = instance.pg_data_dir()
+    port = ownership.configured_redis_port()
+    # Resolve the admin credential before any stop effect: the runtime URL's
+    # ACL user can neither AUTH as `default` nor SHUTDOWN (`-@dangerous`).
+    redis_env = (
+        None if port is None else instance.redis_cli_env(settings.data_plane.redis_admin_password)
+    )
+    print("\n→ stopping per-cluster data plane")
+    # Stop the pooler first (best-effort, no-op if it was never enabled) so clients
+    # are disconnected before Postgres goes down.
+    pgbouncer.stop_pgbouncer()
+    from cli.commands.lifecycle.service_stop import (
+        PROCESS_CLEANUP_WAIT_S,
+        PROCESS_KILL_WAIT_S,
+        report_postgres_stop_escalation,
+    )
+
+    escalation = owned_postgres.stop(
+        data,
+        immediate_wait=PROCESS_CLEANUP_WAIT_S,
+        kill_wait=PROCESS_KILL_WAIT_S,
+        retained_children=retained_children,
+    )
+    if escalation is not None:
+        report_postgres_stop_escalation(escalation, producer=producer)
+    print("  ✓ postgres stopped")
+    if port is not None:
+        subprocess.run(
+            [instance.redis_cli_bin(), "-p", str(port), "shutdown", "nosave"],
+            env=redis_env,
+            check=False,
+            capture_output=True,
+        )
+        print("  ✓ redis stopped")
+    return 0
