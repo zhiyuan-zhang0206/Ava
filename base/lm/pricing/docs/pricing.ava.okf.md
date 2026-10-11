@@ -11,7 +11,7 @@ tags:
 
 # LLM Billing Catalog
 
-`base/lm/pricing/__init__.py` + `pricing_catalog_archive.json` + provider `PriceRates` — how one call becomes one dollar figure. `pricing_catalog.json` remains an empty placeholder that runtime never loads; `load_archive` reads `pricing_catalog_archive.json`.
+`base/lm/pricing/__init__.py` + `pricing_catalog_archive.json` + provider `PriceRates` — how one call becomes one dollar figure. `load_archive` reads `pricing_catalog_archive.json`.
 
 `billing.py` owns provider-call billing spans beside their price selection. Its
 contracts and cache-write/catalog tests live in `pricing/tests/`; usage accounting
@@ -27,7 +27,7 @@ and syntax repair import this owner directly.
 - Optional `cache_write_5m` and `cache_write_1h` rates belong to each selected tier/window. Cache writes are subdivisions of total input, removed from ordinary input before pricing, never added as extra input. Anthropic declares 1.25x input for 5-minute writes and 2x for 1-hour writes, including Fast services ([official pricing](https://platform.claude.com/docs/en/about-claude/pricing), checked 2026-10-08). A reported write without its declared rate makes the call unpriced.
 - `pricing/cache_writes.py` reads LangChain's TTL breakdown without adding its aggregate `cache_creation` a second time. Legacy aggregate-only responses use Anthropic's default 5-minute TTL. The original three-rate tuple and `tally_tokens()` shape remain compatible.
 - Date-only future increases with no provider timezone use the documented conservative UTC+14 boundary and carry an `effective_time_note`; exact published instants are used unchanged.
-- Retired models keep their final rate in `RETIRED_MODEL_PRICING`, an add-only ledger: cost is computed at usage time with the price in force then, so a retirement never drops historical rows and a price change never rewrites history.
+- Cost is computed at usage time with the price in force then and recorded on the usage event as a snapshot, so a price change never rewrites history.
 
 ## Sourcing
 

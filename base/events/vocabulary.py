@@ -56,8 +56,7 @@ class EventSpec:
     ``site``: where a producer the static ``event=`` literal scan cannot see
     (positional emit, dynamic name, SQL write) emits this name. A non-empty
     ``site`` is the producer evidence ``tests/contracts/test_lint_event_kinds.py`` accepts
-    for the name, so the exemption lives with the declaration. ``retired``: a
-    historical name kept readable for existing rows; it must have no producer.
+    for the name, so the exemption lives with the declaration.
 
     ``persist``: the event is kept in ``telemetry_events``. Set it on every event a Postgres
     reader queries by name or prefix; an event nobody reads by name is not stored (it stays in
@@ -74,7 +73,6 @@ class EventSpec:
     family: str | None = None
     doc: str = ""
     site: str = ""
-    retired: bool = False
     persist: bool = False
 
 
@@ -85,7 +83,6 @@ def audit_event(
     payload: Any | None = None,
     tier: EventTier = "business",
     site: str = "",
-    retired: bool = False,
 ) -> EventSpec:
     return EventSpec(
         name=name,
@@ -94,7 +91,6 @@ def audit_event(
         payload=payload,
         doc=doc,
         site=site,
-        retired=retired,
     )
 
 
@@ -104,7 +100,6 @@ def telemetry_audit_event(
     *,
     payload: Any | None = None,
     site: str = "",
-    retired: bool = False,
 ) -> EventSpec:
     """A name that genuinely carries both categories (status_change: the
     loguru side emits telemetry, audit_events emits audit)."""
@@ -116,7 +111,6 @@ def telemetry_audit_event(
         payload=payload,
         doc=doc,
         site=site,
-        retired=retired,
     )
 
 
@@ -129,7 +123,6 @@ def telemetry_event(
     destination: Literal["events", "file"] = "events",
     tier: EventTier = "observation",
     site: str = "",
-    retired: bool = False,
     persist: bool = False,
 ) -> EventSpec:
     return EventSpec(
@@ -141,6 +134,5 @@ def telemetry_event(
         destination=destination,
         doc=doc,
         site=site,
-        retired=retired,
         persist=persist,
     )
