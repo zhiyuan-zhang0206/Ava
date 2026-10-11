@@ -251,7 +251,7 @@ def test_note_carries_full_body_and_tag(
     assert note.additional_kwargs["ava_note_tag"] == NoteTag.PRELOADED_SKILLS.value  # pyright: ignore[reportUnknownMemberType]
     # The access-path heading + the full SKILL.md body (frontmatter included, as
     # ava.help renders a skill) are both present.
-    assert "## ava.skills.ultra-speed" in content
+    assert "## ava.skills.ultra_speed" in content
     assert "Do the fast thing. Never dawdle." in content
     assert "description: go fast" in content  # frontmatter is part of the full text
 
@@ -306,5 +306,5 @@ def test_note_heading_uses_dotted_access_path(
     )
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
-    assert "## ava.skills.ava-memory:consolidation" in note.content
+    assert "## ava.skills.ava_memory.consolidation" in note.content
     assert "consolidation playbook" in note.content
