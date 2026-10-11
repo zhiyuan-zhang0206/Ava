@@ -95,8 +95,11 @@ ava status
 
 ## Step 4: Create your first agent
 
-Open **http://localhost:3000** in your browser, log in with the `AVA_CLUSTER_SECRET` value from
-`~/.ava/.env`, and chat with your agent in the Web UI.
+Open the one-time login link that `ava start` printed in its ready output (it looks like
+`http://localhost:3000/#ticket=...`, is valid for two minutes and works once), and chat with
+your agent in the Web UI. If the link expired, or `ava start` ran without a terminal and
+printed none, open **http://localhost:3000** and log in with the `AVA_CLUSTER_SECRET` value
+from `~/.ava/.env` instead.
 
 Or use the command line:
 
