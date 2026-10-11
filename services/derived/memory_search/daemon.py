@@ -23,6 +23,7 @@ from collections.abc import Callable
 
 import uvicorn
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
@@ -104,7 +105,9 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="memory_search")
 
     def database() -> Database:
-        return Database(db_config_from_boot(boot), gate=gate, local_host=machine.host)
+        return Database(
+            db_config_from_boot(boot), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+        )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     code = 0

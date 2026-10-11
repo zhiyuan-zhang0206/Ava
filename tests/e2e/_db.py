@@ -93,7 +93,7 @@ def enqueue_compact_history_fixture(agent_id: int, *, database: Database) -> int
     This is a test fixture for the existing graph/history contract, not public
     manual-compaction admission. Product callers use observed compact-history.
     """
-    from base.db import insert_compact_request_inbound
+    from base.agents.inbox.compact import insert_compact_request_inbound
     from base.events.live.bus import EventBus
 
     with psycopg.connect(settings.data_plane.db_url) as conn:

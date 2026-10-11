@@ -67,7 +67,7 @@ _FULL_COLS = (
     # same way. The TTL is inlined as a plain SQL literal (the snapshot query
     # takes no params and stays a pure string constant, per the repo's
     # no-interpolation preference); keep the '30' in sync with
-    # base.db.NOTICE_FYI_TTL_DAYS — the C1 tests lock the coupling.
+    # base.agents.inbox.rows.NOTICE_FYI_TTL_DAYS — the C1 tests lock the coupling.
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
     ", a.config_overlay, mp.last_probe_at, a.lease_expires_at, "
     "mp.agent_host_online, a.last_admission_outcome, a.last_admission_at, "

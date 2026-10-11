@@ -27,8 +27,9 @@ from uuid import UUID
 import psycopg
 
 from base import telemetry
+from base.agents.inbox.insert import announce_spawn_prompt
 from base.config.service_read import ConfigAuthority
-from base.db import Database, announce_spawn_prompt
+from base.db import Database
 from base.events.live.announce import publish_agent_spawned_sync
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -173,7 +174,7 @@ def create_agent_row(
             None = cluster defaults. Every `lifecycle="frozen"` field NOT named
             here is resolved from the current cluster default and stamped into
             agents_meta.birth_config in the same INSERT, so a later default flip
-            leaves this agent where it was born (base/agents/birth_config.py).
+            leaves this agent where it was born (base/agents/model/birth_config.py).
         label: optional initial label (the spawner assigning the new agent's
             role). When given, it is written with label_user_set=TRUE so the
             labeler's CAS treats it as already-set and does not overwrite it.

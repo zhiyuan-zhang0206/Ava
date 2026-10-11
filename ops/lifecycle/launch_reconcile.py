@@ -4,7 +4,8 @@ import asyncio
 
 from psycopg_pool import ConnectionPool
 
-from base.db import Database, publish_inbound_wake
+from base.agents.inbox.wake import publish_inbound_wake
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from ops.rpc_schemas.launch_retry import LaunchReconciled, LaunchReconcileRequest

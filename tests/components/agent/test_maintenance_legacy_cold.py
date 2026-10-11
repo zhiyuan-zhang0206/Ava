@@ -20,8 +20,9 @@ from langgraph.types import Command, interrupt
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
-from base.db import Database, insert_inbound_message
+from base.db import Database
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from ops.agent_pause import resume_agents

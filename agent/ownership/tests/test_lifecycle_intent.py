@@ -8,7 +8,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
 from agent.tests.claim.test_inbound_ownership import _admit, agent_row
-from base.db import Database, insert_inbound_message
+from base.agents.inbox.insert import insert_inbound_message
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus

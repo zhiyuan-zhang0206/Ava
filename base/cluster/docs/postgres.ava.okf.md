@@ -58,7 +58,7 @@ legacy adoption exists; old unrecorded installations require operator cutover.
 
 ## Admin authority
 
-`base.db.pg_admin` builds every DDL-capable dial to this server. The OS user
+`base.cluster.dataplane.pg_admin` builds every DDL-capable dial to this server. The OS user
 (the initdb bootstrap superuser) connects over the home's owner-only socket
 and binds the backend to the postmaster above. It acts as itself for roles,
 databases, extensions and grants. Object creation goes through

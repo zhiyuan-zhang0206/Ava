@@ -7,10 +7,11 @@ import asyncio
 from psycopg_pool import ConnectionPool
 
 from base.agents import ForkSourceEmpty
+from base.agents.inbox.wake import publish_inbound_wake
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
-from base.db import Database, publish_inbound_wake
+from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import latest_checkpoint_id

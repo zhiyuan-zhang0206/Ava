@@ -55,6 +55,8 @@ from base.cluster import ensure_cluster_redis_acl, ownership, port_preflight
 from base.cluster import postgres as owned_postgres
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
 from base.cluster.dataplane import pooler
+from base.cluster.dataplane.pg_admin import pg_admin_url as _base_pg_admin_url
+from base.cluster.dataplane.pg_admin import pg_socket_dir
 from base.cluster.dataplane.pg_tools import (
     PG_BIN_LINUX,
     brew_prefix,
@@ -65,8 +67,6 @@ from base.cluster.dataplane.pg_tools import (
 )
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, settings
-from base.db.pg_admin import pg_admin_url as _base_pg_admin_url
-from base.db.pg_admin import pg_socket_dir
 from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
 from base.native_process.child_env import daemon_process_env, inherited_process_env
@@ -297,17 +297,17 @@ def _ensure_pg_data() -> Path:
     return data
 
 
-# Thin shells over the shared admin-plane dial (moved to base.db.pg_admin,
+# Thin shells over the shared admin-plane dial (moved to base.cluster.dataplane.pg_admin,
 # 2026-08-31 — services layer reaches it without importing up into cli). The
 # underscore names stay for existing cli callers and their monkeypatches.
 def _pg_socket_dir(socket_root: Path | None = None) -> Path:
-    """Thin shell over base.db.pg_admin.pg_socket_dir — the home resolution stays
+    """Thin shell over base.cluster.dataplane.pg_admin.pg_socket_dir — the home resolution stays
     in the cli namespace so tests steering `ava_home` keep steering this probe."""
     return pg_socket_dir(socket_root, home=ava_home())
 
 
 def pg_admin_url(pg_port: int) -> str:
-    """Thin shell — the admin URL lives in base.db.pg_admin (services import it
+    """Thin shell — the admin URL lives in base.cluster.dataplane.pg_admin (services import it
     from there); this keeps the cli-side monkeypatch surface stable."""
     return _base_pg_admin_url(pg_port)
 

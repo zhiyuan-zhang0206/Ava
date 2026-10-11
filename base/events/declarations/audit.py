@@ -84,14 +84,14 @@ EVENTS: dict[str, EventSpec] = {
     "send_message": audit_event(
         "send_message",
         "message sent to an agent",
-        site="base/db/__init__.py:497 inbound kind->event_type mapping value",
+        site="base/agents/inbox/insert.py:44 inbound kind->event_type mapping value",
     ),
     "terminate": audit_event(
-        "terminate", "agent terminated", site="base/db/__init__.py:498 same as above"
+        "terminate", "agent terminated", site="base/agents/inbox/insert.py:46 same as above"
     ),
     "restart": audit_event("restart", "agent restart initiated"),
     "cancel": audit_event(
-        "cancel", "in-flight turn cancelled", site="base/db/__init__.py:500 same as above"
+        "cancel", "in-flight turn cancelled", site="base/agents/inbox/insert.py:48 same as above"
     ),
     "resurrect": audit_event("resurrect", "terminated agent woken"),
     "hosted_legacy_adoption": audit_event(

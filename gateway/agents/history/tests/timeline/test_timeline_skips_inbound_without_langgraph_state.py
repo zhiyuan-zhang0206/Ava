@@ -9,9 +9,10 @@ from langchain_core.messages import BaseMessage, HumanMessage
 
 from base.agents.history.timeline import build_timeline_items, tail_window
 from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.inbox.insert import insert_inbound_message
 from base.clock import Clock
 from base.config import settings
-from base.db import Database, create_agent, insert_inbound_message
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.agents.history.tests.test_timeline import _items
 from gateway.agents.history.tests.test_timeline import test_client as test_client
@@ -61,7 +62,7 @@ def test_timeline_anchor_filter_only_includes_chat_inbounds(
     inserts a mixed sequence and verifies the endpoint still returns 200 and lifecycle
     inbounds do not pollute the chat anchor.
     """
-    from base.db import list_chat_anchors
+    from base.agents.inbox.rows import list_chat_anchors
 
     tid = create_agent(db_conn)
     # Mixed chat / lifecycle kinds, in INSERT order
@@ -128,7 +129,7 @@ def test_inbound_with_real_ts_still_advances_anchor_for_legacy_siblings() -> Non
 
     from langchain_core.messages import HumanMessage, ToolMessage
 
-    from base.db import InboundRow
+    from base.agents.inbox.rows import InboundRow
 
     # In production, the inbound's ava_created_at IS the anchor row's created_at
     # (same DB row); here they are set apart only so the two assertions can tell
@@ -166,7 +167,7 @@ def test_compacted_inbound_uses_its_embedded_id_instead_of_oldest_anchor() -> No
 
     from langchain_core.messages import HumanMessage, ToolMessage
 
-    from base.db import InboundRow
+    from base.agents.inbox.rows import InboundRow
 
     stale_anchor = InboundRow(
         4516,
@@ -233,7 +234,7 @@ def test_missing_embedded_anchor_does_not_consume_legacy_fallback() -> None:
 
     from langchain_core.messages import HumanMessage, ToolMessage
 
-    from base.db import InboundRow
+    from base.agents.inbox.rows import InboundRow
 
     missing_modern = HumanMessage(
         content="row no longer present",
@@ -277,7 +278,7 @@ def test_out_of_order_and_duplicate_embedded_ids_preserve_anchor_cursor() -> Non
 
     from langchain_core.messages import HumanMessage
 
-    from base.db import InboundRow
+    from base.agents.inbox.rows import InboundRow
 
     def modern(inbound_id: int) -> HumanMessage:
         return HumanMessage(

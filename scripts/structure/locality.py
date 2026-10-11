@@ -297,7 +297,7 @@ DECISIONS: dict[str, Decision] = {
             "or unbounded, sslmode, pooled-session scrub)"
         ),
         allowed={
-            "base/db/pg_admin.py": (
+            "base/cluster/dataplane/pg_admin.py": (
                 "the OS-user administrator's peer-socket authority (roles, grants, schema "
                 "DDL, owner sessions) behind its own postmaster custody check; the FC-10 "
                 "cutover scripts dial through it, so its transport stays as rehearsed until "

@@ -36,6 +36,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.db import Database
@@ -161,7 +162,7 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="station")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, local_host=machine.host)
+        return Database.from_settings(gate=gate, direct_url=ClusterDirectUrl(machine.host))
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(

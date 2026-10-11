@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import psycopg
 
+from base.agents.inbox.insert import insert_inbound_message
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.db import Database, insert_inbound_message, publish_inbound_wake
+from base.db import Database
 from base.events.live.bus import EventBus
 
 # Batch ceiling per pass: the tables are small by design; the cap keeps a

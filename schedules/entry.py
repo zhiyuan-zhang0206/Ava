@@ -2,6 +2,7 @@
 
 from collections.abc import Generator
 from contextlib import contextmanager
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.clock import Clock, clock_config_from_boot
@@ -38,7 +39,9 @@ def fresh_schedule_entry() -> Generator[ScheduleInputs]:
     gate = ProcessDbGate(process=process_name(), version=version.get)
 
     def database() -> Database:
-        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
+        return Database(
+            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+        )
 
     clients = ClientSet(
         database=database,

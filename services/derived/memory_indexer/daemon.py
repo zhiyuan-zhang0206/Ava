@@ -31,6 +31,7 @@ import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -737,7 +738,9 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="memory_indexer")
 
     def database() -> Database:
-        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
+        return Database(
+            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+        )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     code = 0

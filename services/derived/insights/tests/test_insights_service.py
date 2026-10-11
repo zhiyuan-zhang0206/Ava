@@ -26,6 +26,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.history.checkpoint import FullHistory, single_segment_history
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import Clock, ClockConfig
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
@@ -342,7 +343,7 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
 
     class Store:
         def __init__(
-            self, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+            self, config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
         ) -> None:
             gates.append(gate)
             slices.append(config)

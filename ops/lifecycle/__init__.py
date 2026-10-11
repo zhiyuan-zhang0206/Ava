@@ -21,6 +21,7 @@ from base.agents import (
     ShellSessionKillTiming,
     TerminateResult,
 )
+from base.agents.inbox.insert import insert_inbound_message
 from base.agents.incarnation.native_restart_models import (
     NativeRestartAccepted,
     NativeRestartOperation,
@@ -28,7 +29,7 @@ from base.agents.incarnation.native_restart_models import (
 )
 from base.agents.messages.inbound import WakeTriggerKind
 from base.config import settings
-from base.db import Database, insert_inbound_message
+from base.db import Database
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog

@@ -11,6 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -94,9 +95,9 @@ def test_entry_keeps_one_image_gate_factory_and_producer(
     monkeypatch.setattr("base.native_process.code_version.first_parent_count", version)
     opened: list[ProcessDbGate] = []
 
-    def database(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> object:
+    def database(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> object:
         assert entry.machine is not None
-        assert local_host == entry.machine.host
+        assert direct_url.local_host == entry.machine.host
         opened.append(gate)
         return object()
 

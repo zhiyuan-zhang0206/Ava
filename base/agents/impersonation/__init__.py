@@ -41,9 +41,10 @@ from base.agents.impersonation._store import (
 from base.agents.impersonation.event_log import LOG_PROTOCOL_VERSION
 from base.agents.impersonation.history import append, capture_pending, set_actor
 from base.agents.impersonation.status import ImpersonationStatus, parse_lease
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.caller_identity import CallerIdentity
 from base.config.service_read import ConfigAuthority
-from base.db import Database, publish_inbound_wake
+from base.db import Database
 from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,

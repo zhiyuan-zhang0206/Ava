@@ -10,9 +10,9 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from base.agents.history.chat_anchors import ChatAnchorDemand, chat_anchor_demand
 from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.inbox.rows import ChatAnchor
 from base.clock import Clock
 from base.config import settings
-from base.db import ChatAnchor
 
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps

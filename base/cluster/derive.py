@@ -275,7 +275,7 @@ def inbound_channel(agent_id: int) -> str:
     """The Redis pub/sub channel an agent waits on for inbound wake-ups —
     `ava:inbound:<agent_id>`, via `redis_channel_prefix()`.
 
-    Publish (`base.db.insert_inbound_message` / `insert_compact_request_inbound`,
+    Publish (`base.agents.inbox.insert.insert_inbound_message` / `insert_compact_request_inbound`,
     `ava.self`) and subscribe (`RedisInboundListener`) both derive the channel here
     so the two halves can never drift."""
     return f"{redis_channel_prefix()}:inbound:{agent_id}"

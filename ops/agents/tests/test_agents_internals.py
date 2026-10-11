@@ -12,7 +12,7 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-import base.db
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.observation.snapshot import select_one
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -77,7 +77,7 @@ def _spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
     )
-    base.db.publish_inbound_wake(
+    publish_inbound_wake(
         Database.from_settings(gate=database_gate), EventBus.from_settings(), agent_id, "0"
     )
     return agent_id

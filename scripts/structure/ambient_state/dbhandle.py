@@ -1,6 +1,6 @@
 """The ambient-db rule: a package that holds a `Database` handle dials no database ambiently.
 
-`base.db.connect()` / `pool()` / `async_pool()` / `direct_db_url()` build the dial from the
+`base.db.connect()` / `pool()` / `async_pool()` build the dial from the
 live settings at each call: a process-default database that nothing passes in. A package listed in `DB_HANDLE_PACKAGES` takes a
 `Database` (or an open pool/connection) from its composition root instead; any of those
 ambient entries in one of its non-test modules is a site, frozen like the other
@@ -22,7 +22,7 @@ FIX = (
     "DB_HANDLE_PACKAGES instead of dialing from the live settings; only the root calls "
     "`Database.from_settings()`"
 )
-_PRIMITIVES = frozenset({"connect", "pool", "async_pool", "direct_db_url"})
+_PRIMITIVES = frozenset({"connect", "pool", "async_pool"})
 _DB_MODULES = frozenset({"base.db", "base.db.connections"})
 
 

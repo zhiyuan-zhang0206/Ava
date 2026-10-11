@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.db import Database, DbConfig
 from base.db.code_version_gate import ProcessDbGate
@@ -210,7 +211,9 @@ def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
     monkeypatch.setattr(connections, "ConnectionPool", make_pool)
     expected_url = config.db_url.replace(":6433/", ":5433/") if direct else config.db_url
 
-    assert base.db.connect(config=config, gate=gate, direct=direct) is conn
+    resolver = ClusterDirectUrl(lambda: "127.0.0.1")
+
+    assert base.db.connect(config=config, gate=gate, direct=direct, direct_url=resolver) is conn
     assert dial.call_args.args == (expected_url,)
     assert dial.call_args.kwargs["prepare_threshold"] is None
     if direct:
@@ -218,13 +221,13 @@ def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
     else:
         _assert_session_reset(conn)
 
-    base.db.pool(config=config, gate=gate, direct=direct)
+    base.db.pool(config=config, gate=gate, direct=direct, direct_url=resolver)
     assert make_pool.call_args.args == (expected_url,)
     _assert_pool_hooks(make_pool, conn, direct=direct)
 
     if direct:
         dial.reset_mock()
-        base.db.connect(config=config, gate=gate, direct=True, unbounded=True)
+        base.db.connect(config=config, gate=gate, direct=True, unbounded=True, direct_url=resolver)
         assert dial.call_args.args == (expected_url,)
         assert "options" not in dial.call_args.kwargs
         assert dial.call_args.kwargs["prepare_threshold"] is None

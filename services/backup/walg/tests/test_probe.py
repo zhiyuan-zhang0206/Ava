@@ -306,7 +306,7 @@ def test_the_admin_dial_is_custody_checked_and_bounded(
 ) -> None:
     """The probe reaches the postmaster only through the home's owner-only admin
     socket, bound to its own data directory, with a connect timeout and a statement timeout."""
-    from base.db import pg_admin
+    from base.cluster.dataplane import pg_admin
 
     seen: dict[str, Any] = {}
 

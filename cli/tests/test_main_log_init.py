@@ -30,6 +30,7 @@ import cli.main as _main
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import postgres
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
@@ -367,9 +368,9 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
     # Handles are never dialed; the same real operator gate reaches work and writer.
     from base.db.config import db_config_from_settings
 
-    def construct(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> Database:
+    def construct(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
         gates.append(gate)
-        return Database(db_config_from_settings(), gate=gate, local_host=local_host)
+        return Database(db_config_from_settings(), gate=gate, direct_url=direct_url)
 
     def build(
         *, database: DatabaseFactory, machine: MachineIdentity, home: Path

@@ -28,6 +28,7 @@ import psycopg
 from loguru import logger
 from psycopg_pool import ConnectionPool
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.config.domains.lm import LmSettings
@@ -393,7 +394,11 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="labeler")
 
     def database() -> Database:
-        return Database(db_config_from_boot(machine_config), gate=gate, local_host=machine.host)
+        return Database(
+            db_config_from_boot(machine_config),
+            gate=gate,
+            direct_url=ClusterDirectUrl(machine.host),
+        )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(

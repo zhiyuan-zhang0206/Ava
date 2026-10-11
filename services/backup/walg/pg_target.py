@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.db import pg_admin
+from base.cluster.dataplane import pg_admin
 
 
 @dataclass(frozen=True)

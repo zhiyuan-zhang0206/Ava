@@ -12,6 +12,7 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from ava_builtins.plugins.ava_fleet.task_maintenance import daemon
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint
@@ -86,10 +87,10 @@ def test_entry_shares_the_image_gate_and_fleet_config(
 
     class Store:
         def __init__(
-            self, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+            self, config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
         ) -> None:
             gates.append(gate)
-            assert local_host == machines[0].host
+            assert direct_url.local_host == machines[0].host
 
     def capture() -> LoadedCommit:
         stages.append("capture")

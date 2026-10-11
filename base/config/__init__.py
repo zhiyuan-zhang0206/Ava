@@ -96,7 +96,7 @@ one is a category error and the registry rejects it. Plugin `Config` fields
 (`base/packages/plugins/config_registration.py`) are outside this registry and are not part of
 the frozen set; they behave as `live` and only an explicit overlay pins them.
 
-Resolution + stamping mechanics: `base/agents/birth_config.py`.
+Resolution + stamping mechanics: `base/agents/model/birth_config.py`.
 
 ## Reading per-agent fields from turn-scoped code
 
