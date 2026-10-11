@@ -31,14 +31,14 @@ git clone https://github.com/zhiyuan-zhang0206/Ava.git source && cd source
 # Install dependencies + the `ava` CLI; no cluster is created yet
 uv sync
 
-# Record this machine's identity once (single machine, no auth on loopback). Starts nothing.
+# Record this machine's identity once (single machine). Starts nothing.
 .venv/bin/ava init --serve-gateway --serve-agent-runner --machine-name my-machine
 ```
 
 `uv sync` installs the dependencies: uv, Python 3.12, Postgres 17, Redis, and
 Node.js (Node is recommended on macOS; the web UI and browser tools need it).
-`ava init` records the cluster's identity: its ports, its generated credentials and
-`~/.ava/.env`. It starts no process and creates no database; an initialized home
+`ava init` records the cluster's identity: its ports, its generated credentials
+(including the cluster secret, `AVA_CLUSTER_SECRET`) and `~/.ava/.env`. It starts no process and creates no database; an initialized home
 refuses a second `ava init`.
 
 ---
@@ -72,10 +72,12 @@ against the edited file.
 > found (e.g. uv already existed), add it manually:
 > `export PATH="$HOME/.local/bin:$PATH"`.
 
-> On a single box the cluster runs unauthenticated and binds loopback only, so
-> `AVA_CLUSTER_SECRET` is left empty. A gateway that serves other machines
-> (`--serve-gateway --no-serve-agent-runner`) mints a secret at `ava init`. To set or replace the
-> secret of a running cluster use
+> Every cluster authenticates its API with the cluster secret that `ava init` mints into
+> `~/.ava/.env` (`AVA_CLUSTER_SECRET`); the CLI, SDK and local services present their own
+> credentials automatically. It is also the password of the web UI login. Whether other machines
+> can reach the cluster is a separate setting: a single box listens on loopback only until you
+> declare a private-network address (`--machine-host` / `AVA_MACHINE_HOST`). To replace the secret
+> of a running cluster use
 > [`scripts/data_plane_ops/rotate_cluster_secret.py`](scripts/data_plane_ops/rotate_cluster_secret.py).
 >
 > For the full config reference, see [`.env.example`](.env.example) and the
@@ -93,13 +95,19 @@ ava status
 
 ## Step 4: Create your first agent
 
-Open **http://localhost:3000** in your browser and chat with your agent in the Web UI.
+Open the one-time login link that `ava start` printed in its ready output (it looks like
+`http://localhost:3000/#ticket=...`, is valid for two minutes and works once), and chat with
+your agent in the Web UI. If the link expired, or `ava start` ran without a terminal and
+printed none, open **http://localhost:3000** and log in with the `AVA_CLUSTER_SECRET` value
+from `~/.ava/.env` instead.
 
 Or use the command line:
 
 ```bash
-# Create an agent via the API
+# Create an agent via the API, presenting the cluster secret as a Bearer token
+SECRET=$(grep '^AVA_CLUSTER_SECRET=' ~/.ava/.env | cut -d= -f2)
 curl -XPOST http://localhost:8000/api/agents \
+  -H "Authorization: Bearer $SECRET" \
   -H 'content-type: application/json' \
   -d '{"prompt":"Hello, introduce yourself","prompt_source":"user"}'
 ```
@@ -151,14 +159,10 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ### `ava start` says "AVA_CLUSTER_SECRET is required"
 
-On a single box the cluster is deliberately unauthenticated on loopback, so a
-manually-added `AVA_CLUSTER_SECRET` that the data plane does not expect triggers
-this. Remove the line from `~/.ava/.env` and restart. To enable auth on an
-already-born no-auth cluster, provision a new authenticated cluster with the
-Step 1 birth form and migrate deliberately: an in-place no-auth-to-auth
-transition is not supported. Do not hand-edit only the secret or use the
-secret-rotation script for that posture change. Split deployments (gateway-only
-birth) mint a secret automatically.
+Every gateway home needs a cluster secret, and `ava init` mints one. A home whose `.env`
+has no `AVA_CLUSTER_SECRET` (hand-edited, or born before this rule) refuses to start. Set the
+line in `~/.ava/.env` to a fresh URL-safe token, for example the output of
+`python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`, and run `ava start` again.
 
 ### Postgres connection failed
 

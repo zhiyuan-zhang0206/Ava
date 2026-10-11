@@ -684,3 +684,84 @@ def test_gateway_base_uses_reachable_host(monkeypatch: pytest.MonkeyPatch) -> No
     # IPv6 literals need brackets in a netloc.
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "fd00::1")
     assert daemon._gateway_base() == "http://[fd00::1]:8123"
+
+
+# ── one-time login link on the static login page ─────────────────────────
+
+_LOGIN_PAGE_HARNESS = r"""
+const vm = require("node:vm");
+const page = require("node:fs").readFileSync(0, "utf8");
+const [hash, status] = [process.argv[1], Number(process.argv[2])];
+const script = page.split("<script>").pop().split("</script>")[0];
+const log = [];
+const el = () => ({ addEventListener() {}, value: "", hidden: true, textContent: "", style: {} });
+const elements = { form: el(), submit: el(), error: el(), password: el(), username: el() };
+const window = {
+  location: {
+    origin: "http://localhost:3000", pathname: "/", search: "", hash,
+    replace: (to) => log.push(["replace", to]),
+  },
+};
+vm.runInNewContext(script, {
+  window, navigator: { language: "en" }, URLSearchParams,
+  location: window.location,
+  history: { replaceState: (_s, _t, url) => log.push(["replaceState", url]) },
+  document: {
+    documentElement: {},
+    getElementById: (id) => elements[id === "password" ? "password" : id === "username" ? "username" : id],
+    querySelectorAll: () => [],
+  },
+  fetch: async (url, init) => { log.push(["fetch", url, init.body]); return { ok: status === 200, status }; },
+});
+setTimeout(() => console.log(JSON.stringify({ log, error: elements.error.textContent })), 50);
+"""
+
+
+def _run_login_page(gate: Gate, hash_: str, status: int) -> dict[str, Any]:
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    done = subprocess.run(  # noqa: S603 — fixed argv: node runs the checked-in login page under a stub DOM
+        [node, "-e", _LOGIN_PAGE_HARNESS, hash_, str(status)],
+        input=gate.login_page,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    return json.loads(done.stdout)
+
+
+def _ticket_gate() -> Gate:
+    return Gate(
+        gateway_base="http://localhost:8000",
+        app_base="http://127.0.0.1:20031",
+        static_dir=STATIC,
+    )
+
+
+def test_login_page_redeems_a_ticket_after_clearing_the_fragment() -> None:
+    out = _run_login_page(_ticket_gate(), "#ticket=ticket.human-ab.cd&keep=1", 200)
+    assert out["log"] == [
+        ["replaceState", "/#keep=1"],
+        [
+            "fetch",
+            "http://localhost:8000/api/auth/login-ticket/redeem",
+            '{"ticket":"ticket.human-ab.cd"}',
+        ],
+        ["replace", "/"],
+    ]
+
+
+def test_login_page_reports_a_refused_ticket_and_stays_on_the_form() -> None:
+    out = _run_login_page(_ticket_gate(), "#ticket=spent", 401)
+    assert ["replace", "/"] not in out["log"]
+    assert "expired or was already used" in out["error"]
+
+
+def test_login_page_without_a_ticket_makes_no_request() -> None:
+    assert _run_login_page(_ticket_gate(), "", 200)["log"] == []

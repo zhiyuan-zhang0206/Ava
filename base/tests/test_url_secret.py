@@ -82,7 +82,7 @@ class TestUrlWithUserinfo:
 
     def test_empty_password_still_writes_username(self) -> None:
         """An empty password keeps the username (`user@host`): the username IS the
-        data-plane identity (names-as-data), and a no-secret cluster carries
+        data-plane identity (names-as-data), and a credential-free endpoint URL carries
         identity without a credential."""
         url = _pg("OLD", user="ava")
         out = url_with_userinfo(url, "ava_dev", "")

@@ -85,9 +85,7 @@ def pgbouncer() -> DaemonProbe:
 
     def protocol() -> DaemonProbe:
         loopback = pooler.pgbouncer_listener_reachable(port, admin_password)
-        public = loopback and pooler.pgbouncer_public_listener_reachable(
-            port, POOLER_ADMIN, settings.data_plane.cluster_secret
-        )
+        public = loopback and pooler.pgbouncer_public_listener_reachable(port, POOLER_ADMIN)
         if loopback and public:
             return DaemonProbe.up("native pooler admin console and required listeners answered")
         return DaemonProbe.down(f"pooler listener failure: loopback={loopback}, public={public}")

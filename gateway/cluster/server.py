@@ -15,7 +15,9 @@ from typing import Any
 import uvicorn
 from uvicorn.config import STARTUP_FAILURE
 
+from base.cluster.auth import require_cluster_secret
 from base.cluster.machine import is_gateway
+from base.cluster.port_preflight import serves_off_box
 from base.cluster.transport_encryption import verify_transport_encryption
 from base.config import settings
 from base.db import Database
@@ -66,6 +68,10 @@ def serve(kwargs: dict[str, Any]) -> None:
 
 def main() -> None:
     """Prepare the gateway process and start its ASGI server."""
+    # The API always authenticates: a gateway without a human secret refuses to
+    # serve, before it touches the database or binds a port.
+    if is_gateway():
+        require_cluster_secret(settings.data_plane.cluster_secret, where="this gateway")
     assert_schema_current(settings.data_plane.db_url)
 
     # pidfile — `services/supervision/healthchecks/gateway.py` uses it to probe.
@@ -112,10 +118,10 @@ def main() -> None:
     #   v4-only bind refuses that first dial on every request. NOT "::": asyncio
     #   sets IPV6_V6ONLY on an explicit "::" bind, which refuses plain-IPv4
     #   clients (healthchecks, SDK) outright — verified on macOS.
-    #   A no-secret gateway binds 127.0.0.1 instead: its API is unauthenticated,
-    #   and the no-secret posture is single-box (the data plane is loopback-only
-    #   too — `port_preflight.bind_addrs`), so an all-interfaces bind would expose the
-    #   unauthenticated API to the LAN.
+    #   A gateway whose reachable address is a loopback alias (the single-box
+    #   default, `AVA_MACHINE_HOST` unset) binds 127.0.0.1 instead, like its data
+    #   plane (`port_preflight.bind_addrs`): the API is authenticated either way, but
+    #   a box that declares no private-network address serves no other machine.
     # - **agent-runner**: 127.0.0.1. The gateway does not reach an
     #   agent-runner's gateway directly — gateway→agent-runner RPC goes
     #   to the separate ava-ops server (services/agent_runner/agent_ops), which dispatches
@@ -133,9 +139,9 @@ def main() -> None:
     # mode binds through uvicorn's own bind_socket, which maps "" to a
     # v4-only wildcard — dev-only, and browsers fall back from the refused
     # IPv6 dial instantly.
-    host = "" if is_gateway() and settings.data_plane.cluster_secret else "127.0.0.1"
+    host = "" if is_gateway() and serves_off_box() else "127.0.0.1"
     if host != "127.0.0.1":
-        verify_transport_encryption(host, authenticated=bool(settings.data_plane.cluster_secret))
+        verify_transport_encryption(host, authenticated=True)
     if _GATEWAY_UVICORN_WORKERS != 1:
         raise RuntimeError(
             "gateway must run one uvicorn worker because rate limiters are process-local"

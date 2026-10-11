@@ -110,7 +110,7 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     monkeypatch.setattr("base.telemetry.emit", emit)
     notes: list[str] = []
     try:
-        assert instance._start_pg(port, "", retained_children=retained_children) == 0
+        assert instance._start_pg(port, retained_children=retained_children) == 0
         owner = ownership.postgres(data)
         assert owner is not None
         hung = _wait_for_hung_archive_command(data)

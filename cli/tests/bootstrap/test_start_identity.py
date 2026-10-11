@@ -54,10 +54,11 @@ def test_fresh_identity_committed_before_native_work(inputs: identity.IdentityIn
     # The database endpoint is credential-free: the owner is NOLOGIN and the
     # first start mints write generation 0; no DB password is ever minted here.
     assert urlsplit(db_url).password is None
-    assert env["AVA_CLUSTER_SECRET"] == ""
+    # Every gateway home is born with a human secret, a single box included.
+    assert env["AVA_CLUSTER_SECRET"]
     assert "AVA_DB_ADMIN_PASSWORD" not in env
     assert "AVA_RUNNER_DB_PASSWORD" not in env
-    # Redis always authenticates: a no-secret single box is still born with
+    # Redis always authenticates: a single box is born with
     # independent Redis admin and runtime passwords, the runtime one in its URL.
     redis_admin, redis_runtime = env["AVA_REDIS_ADMIN_PASSWORD"], env["AVA_REDIS_PASSWORD"]
     assert redis_admin and redis_runtime and redis_admin != redis_runtime
@@ -92,8 +93,8 @@ def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Logical backups are encrypted under a passphrase the birth mints and pins
-    (0600), independent of the cluster secret: an empty-secret single box gets
-    a random one, never the public sha256(""). An interrupted birth keeps it."""
+    (0600), independent of the cluster secret: a random one, never the public
+    sha256(""). An interrupted birth keeps it."""
     from services.backup.artifact import passphrase
 
     upsert = identity.upsert_env
@@ -109,7 +110,7 @@ def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
     assert passphrase.pin_path(inputs.home).stat().st_mode & 0o777 == 0o600
     monkeypatch.setattr(identity, "upsert_env", upsert)
     identity.resume_claim(inputs.home)
-    assert dotenv_values(inputs.home / ".env")["AVA_CLUSTER_SECRET"] == ""
+    assert dotenv_values(inputs.home / ".env")["AVA_CLUSTER_SECRET"]
     assert passphrase.resolve(inputs.home) == minted
 
 
@@ -262,7 +263,8 @@ def test_init_uses_explicit_home_not_ambient_projection(
     env = dotenv_values(inputs.home / ".env")
     db_url = env["AVA_DB_URL"]
     assert db_url is not None and "foreign" not in db_url
-    assert env["AVA_CLUSTER_SECRET"] == ""
+    # The cluster's secret is minted for it, never inherited from the caller's environment.
+    assert env["AVA_CLUSTER_SECRET"] and env["AVA_CLUSTER_SECRET"] != "foreign-secret"  # noqa: S105
 
 
 def test_interrupted_init_keeps_admitted_tool_path(
@@ -404,7 +406,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
     assert "AVA_DB_URL" not in env and "AVA_REDIS_URL" not in env
     # The fetch authenticated with the capability's API token; no bearer persisted.
     installed = unit.require_unit_capability(home)
-    assert installed.api is not None and [installed.api.token] == _FETCH_BEARERS
+    assert [installed.api.token] == _FETCH_BEARERS
     assert "AVA_CLUSTER_SECRET" not in env
     assert cluster.get_record(home) is None
 
@@ -666,3 +668,32 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     prepare_init_identity(_single_box())
     assert start_intent.run_start(_start_args(), retained_children=[]) == 1
     assert calls == ["cleared"]
+
+
+def _initialized_gateway_home(inputs: identity.IdentityInput) -> Path:
+    """A born gateway home that has finished its claim, as `ava start` finds it."""
+    identity.prepare_identity(replace(inputs, roles=frozenset({"gateway"})))
+    env = dotenv_values(inputs.home / ".env")
+    with (inputs.home / ".env").open("a") as handle:
+        handle.write("AVA_SERVICE_PATH=/usr/bin:/bin\n")
+    assert env["AVA_CLUSTER_SECRET"]
+    return inputs.home
+
+
+def test_start_admits_a_gateway_home_that_holds_its_secret(inputs: identity.IdentityInput) -> None:
+    home = _initialized_gateway_home(inputs)
+    assert identity.require_initialized(home).roles == frozenset({"gateway"})
+
+
+def test_start_refuses_a_gateway_home_without_a_cluster_secret(
+    inputs: identity.IdentityInput,
+) -> None:
+    """A hand-edited home, or one born before every cluster had a secret, is refused
+    with the instruction to set one, before any native effect."""
+    from base.cluster.auth import ClusterSecretMissingError
+    from base.host.env.dotenv_file import upsert_env
+
+    home = _initialized_gateway_home(inputs)
+    upsert_env(home / ".env", {"AVA_CLUSTER_SECRET": ""})
+    with pytest.raises(ClusterSecretMissingError, match="AVA_CLUSTER_SECRET"):
+        identity.require_initialized(home)

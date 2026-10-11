@@ -28,11 +28,6 @@ export interface paths {
          *
          *     On failure, returns a typed 401 error envelope with detail ``"invalid password"``.
          *
-         *     A no-secret cluster (single-box no-auth posture) has no credential: login
-         *     is a no-op 200 success, deliberately BEFORE the rate limiter — there is
-         *     nothing to guess, and no-secret requests must never count into the
-         *     limiter's failure records.
-         *
          *     Brute-force guard: an IP that fails ``gateway.login_max_failures`` times in
          *     a row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on
          *     those config fields; enforcement in base/cluster/rate_limit.py).
@@ -41,6 +36,62 @@ export interface paths {
          *     lockout exists to stop. A successful login resets the IP's counter.
          */
         post: operations["login_api_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/login-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue Login Ticket
+         * @description Issue a one-time login ticket for a browser, from a human-secret caller.
+         *
+         *     The ticket is a `web_sessions` row valid for ``LOGIN_TICKET_TTL_SECONDS``
+         *     and bound to the human secret's mint: redeeming it
+         *     (``/api/auth/login-ticket/redeem``) opens exactly the session a password
+         *     login with that secret would. Only the human secret (or a session it
+         *     minted) may issue one; a write generation's machine token gets 403, so no
+         *     machine credential can mint a browser session.
+         *
+         *     Returns ``{"ticket": "<opaque>", "expires_in_seconds": <int>}``.
+         */
+        post: operations["issue_login_ticket_api_auth_login_ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/login-ticket/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem Login Ticket
+         * @description Exchange a login ticket for a session cookie; the ticket is consumed.
+         *
+         *     Needs no credential: the ticket is the credential. Redemption revokes the
+         *     ticket row in one atomic statement, so a ticket opens at most one session,
+         *     and only while it is unexpired and the credential that issued it is still
+         *     current. An unknown, malformed, replayed, expired or orphaned ticket all
+         *     get the same 401, and every failure counts against the login limiter
+         *     (429 while locked), so tickets cannot be guessed at.
+         */
+        post: operations["redeem_login_ticket_api_auth_login_ticket_redeem_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -164,9 +215,8 @@ export interface paths {
          *
          *     Raises:
          *         HTTPException: 401 when the request carries neither the active write
-         *             generation's machine API token nor the cluster secret as its bearer
-         *             (a no-secret cluster serves without auth — there is no credential
-         *             to require); 400 when the gateway configuration has no database
+         *             generation's machine API token nor the cluster secret as its bearer;
+         *             400 when the gateway configuration has no database
          *             endpoint.
          */
         get: operations["get_bootstrap_api_bootstrap_get"];
@@ -6250,6 +6300,18 @@ export interface components {
             username?: string | null;
         };
         /**
+         * LoginTicketRedeemRequest
+         * @description POST /api/auth/login-ticket/redeem body; a missing or empty ticket falls
+         *     through to the 401 rather than a 422, like a missing password.
+         */
+        LoginTicketRedeemRequest: {
+            /**
+             * Ticket
+             * @default
+             */
+            ticket: string;
+        };
+        /**
          * MachineDeleteResponse
          * @description DELETE /api/cluster/machines/{name} response.
          */
@@ -9348,6 +9410,59 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    issue_login_ticket_api_auth_login_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    redeem_login_ticket_api_auth_login_ticket_redeem_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginTicketRedeemRequest"];
             };
         };
         responses: {

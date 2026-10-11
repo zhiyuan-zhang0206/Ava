@@ -359,26 +359,6 @@ class GatewaySettings(EnvSettings):
         },
     )
 
-    auth_middleware_enabled: bool = Field(
-        default=True,
-        alias="AVA_AUTH_MIDDLEWARE_ENABLED",
-        description=(
-            "Enable the gateway's HTTP API auth middleware. Set false for e2e "
-            "tests (every request passes without auth while the cluster keeps its "
-            "secret). An EMPTY AVA_CLUSTER_SECRET also serves the API without "
-            "auth — that is the single-box no-secret posture, distinct from this "
-            "test knob. The config API never writes it (an authenticated caller "
-            "must not switch authentication off): the e2e harness sets it in the "
-            "environment."
-        ),
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": False,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     login_max_failures: int = Field(
         default=5,
         gt=0,

@@ -101,7 +101,6 @@ def ensure_gateway_data_plane(
     return ensure_cluster_storage(
         pg_port=rec.ports["postgres"],
         redis_port=rec.ports["redis"],
-        cluster_secret=settings.data_plane.cluster_secret,
         redis_admin_password=settings.data_plane.redis_admin_password,
         redis_password=redis_password_from_env(),
         redis_user=redis_identity(),
@@ -344,12 +343,11 @@ def db_delivery(cls: DbAccess) -> dict[str, str]:
 def api_delivery(cls: DbAccess) -> dict[str, str]:
     """The launch-environment machine API token for one service of class `cls`.
 
-    Delivered only while the cluster's API is authenticated, so a delivered
-    token always means "present a bearer": a pure agent-runner delivers its
-    capability's runner token (none when the cluster is open); the gateway home
-    delivers the active generation's `cls` token while its human secret is set.
-    A remote-managed plane keeps no write generations and delivers nothing; its
-    gateway-local services present the human secret.
+    The cluster's API always authenticates, so every service is delivered a
+    token to present as its bearer: a pure agent-runner delivers its
+    capability's runner token; the gateway home delivers the active generation's
+    `cls` token. A remote-managed plane keeps no write generations and delivers
+    nothing; its gateway-local services present the human secret.
     """
     from base.cluster.authority.api import API_TOKEN_ENV, api_token
     from base.host.env.bootstrap import config_source_is_local
@@ -361,7 +359,7 @@ def api_delivery(cls: DbAccess) -> dict[str, str]:
         if cls != "runner":
             raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class service")
         return unit_api_delivery(ava_home().resolve())
-    if settings.data_plane.is_remote or not settings.data_plane.cluster_secret:
+    if settings.data_plane.is_remote:
         return {}
     return {API_TOKEN_ENV: api_token(ava_home().resolve(), cls)}
 
@@ -377,7 +375,6 @@ def _ensure_pooler(rec: ClusterRecord, database: str, home: Path, generation: Ge
         pg_port=rec.ports["postgres"],
         listen_port=rec.ports["pgbouncer"],
         db_name=database,
-        cluster_secret=settings.data_plane.cluster_secret,
         userlist=render_userlist(home, generation),
         admin_password=read_pooler_admin(home).password,
     )

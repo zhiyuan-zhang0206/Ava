@@ -21,6 +21,7 @@ import pytest
 
 from base.sessions.posixproc import process_group_has_live_members
 from base.sessions.pty import client as pty_client
+from tests.e2e._credentials import current_credentials
 
 __all__ = [
     "E2EProcess",
@@ -761,14 +762,14 @@ def pty_sessions_proc() -> Iterator[None]:
     """The machine's pty-sessions service, which holds every agent shell a scenario opens.
 
     A real `ava start` runs it as a roster unit; here it is a direct process under the
-    suite's AVA_HOME, stopped (sessions closed) with the test.
+    suite's AVA_HOME with the runner machine token, stopped (sessions closed) with the test.
     """
     log_path = (
         Path(__file__).resolve().parents[2] / "tmp" / "e2e-logs" / f"pty-sessions-{os.getpid()}.log"
     )
     with managed_proc(
         [sys.executable, "-m", "services.agent_runner.pty_sessions.daemon"],
-        env=os.environ.copy(),
+        env={**os.environ, **current_credentials().service_env("runner")},
         label="pty-sessions",
         log_path=str(log_path),
     ) as proc:

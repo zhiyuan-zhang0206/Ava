@@ -10,9 +10,8 @@ import for co-located calls, HTTP only to cross a machine).
 Flag-gated and additive: `settings.gateway.mcp_endpoint_enabled`
 (AVA_MCP_ENDPOINT_ENABLED), default off. While off, /mcp answers 404 and
 nothing else changes — the existing mcp-daemon path is untouched either way.
-While on, /mcp always requires its own revocable client token, including on a
-no-secret cluster; cluster cookies and the cluster-secret Bearer are deliberately
-not MCP credentials.
+While on, /mcp always requires its own revocable client token; cluster cookies
+and the cluster-secret Bearer are deliberately not MCP credentials.
 
 Transport: stateless Streamable HTTP (2026-07-28 protocol revision) — one
 fresh transport per POST, no server-side session state, no idle reaping.

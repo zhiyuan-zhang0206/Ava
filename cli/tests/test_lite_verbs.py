@@ -135,7 +135,7 @@ def test_lite_cli_uses_its_local_runner_api_token(
     expected: str | None,
 ) -> None:
     from base.cluster.authority import AuthorityRefusedError, unit
-    from base.cluster.machine import gateway_auth_headers
+    from base.cluster.machine import GatewayApiTokenMissing, gateway_auth_headers
     from base.config import settings
 
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
@@ -161,7 +161,10 @@ def test_lite_cli_uses_its_local_runner_api_token(
     seen: list[dict[str, str]] = []
 
     def handler(_args: types.SimpleNamespace) -> int:
-        seen.append(gateway_auth_headers())
+        try:
+            seen.append(gateway_auth_headers())
+        except GatewayApiTokenMissing:
+            seen.append({})  # no token and no secret: nothing to present, and it says so
         return 0
 
     def parse_args(_argv: list[str] | None) -> types.SimpleNamespace:

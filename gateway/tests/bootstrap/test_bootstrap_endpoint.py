@@ -1,10 +1,8 @@
 """Contract tests for GET /api/bootstrap.
 
-With a cluster secret set, the endpoint requires it as a bearer token — it
-serves cluster secrets, so reachability is never trust. A no-secret cluster
-(empty secret) serves unauthenticated: it has no credential to present and no
-remote runner to protect (the gateway then binds loopback). A single box never
-dials it; only an enrolling agent-runner does, and it presents the secret.
+The endpoint requires the cluster secret (or a machine API token) as a bearer
+token — it serves cluster secrets, so reachability is never trust. A single box
+never dials it; only an enrolling agent-runner does, and it presents its token.
 """
 
 from pathlib import Path
@@ -20,6 +18,7 @@ from base.config.domains.storage.data_plane import self_machine_host
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
 from gateway.app import app
+from tests.fixtures.unit.gateway_auth import without_credentials
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture, not a real secret
 
@@ -67,7 +66,7 @@ def test_bootstrap_rejects_missing_secret(db_conn, monkeypatch: pytest.MonkeyPat
     """No bearer -> 401 (reachability is not trust)."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
-        resp = client.get("/api/bootstrap")
+        resp = without_credentials(client).get("/api/bootstrap")
     assert resp.status_code == 401
 
 
@@ -79,17 +78,15 @@ def test_bootstrap_rejects_wrong_secret(db_conn, monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.usefixtures("served_gateway_home")
-def test_bootstrap_serves_without_auth_when_secret_unset(
+def test_bootstrap_rejects_every_caller_when_secret_unset(
     db_conn,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unset cluster secret is the no-auth posture: the endpoint serves
-    without a bearer (there is no credential to require)."""
+    """A blank secret opens nothing: there is no no-credential posture to serve."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     with TestClient(app) as client:
-        resp = client.get("/api/bootstrap")
-    assert resp.status_code == 200
-    assert "AVA_DB_URL" in resp.json()
+        resp = without_credentials(client).get("/api/bootstrap")
+    assert resp.status_code == 401
 
 
 def test_old_role_runner_request_gets_no_database_login(

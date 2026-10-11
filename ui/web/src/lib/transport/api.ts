@@ -927,6 +927,17 @@ export const api = {
     }).then(ok<{ ok: boolean }>);
   },
 
+  // Exchange the one-time login ticket from an `ava start` link for the same
+  // session cookie `login` sets. The ticket is the credential; the gateway
+  // spends it on the first use, so a second call rejects with 401.
+  redeemLoginTicket: (ticket: string): Promise<{ ok: boolean }> => {
+    return f("/api/auth/login-ticket/redeem", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ticket }),
+    }).then(ok<{ ok: boolean }>);
+  },
+
   // Clear the session cookie. Idempotent — always succeeds.
   logout: (): Promise<{ ok: boolean }> => {
     return f("/api/auth/logout", { method: "POST" }).then(

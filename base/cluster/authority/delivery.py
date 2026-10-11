@@ -127,13 +127,16 @@ class WriteGrant:
 
         return url_with_userinfo(endpoint, self.role, self.password)
 
-    def environment(self, endpoint: str, *, api: bool) -> dict[str, str]:
-        """The process-environment delivery: the login, its generation marker and,
-        when the cluster's API is authenticated (``api``), the class API token."""
+    def environment(self, endpoint: str) -> dict[str, str]:
+        """The process-environment delivery: the login, its generation marker and
+        the class API token."""
         from base.cluster.authority.api import API_TOKEN_ENV
 
-        delivered = {"AVA_DB_URL": self.dsn(endpoint), GENERATION_ENV: str(self.number)}
-        return {**delivered, API_TOKEN_ENV: self.api_token} if api else delivered
+        return {
+            "AVA_DB_URL": self.dsn(endpoint),
+            GENERATION_ENV: str(self.number),
+            API_TOKEN_ENV: self.api_token,
+        }
 
     @property
     def reference(self) -> dict[str, object]:
@@ -205,16 +208,14 @@ def consume(home: Path, cls: GenerationClass) -> WriteGrant:
     return write_grant(home, cls)
 
 
-def operator_environment(
-    home: Path, endpoint: str, *, launcher: str | None, api: bool
-) -> dict[str, str]:
+def operator_environment(home: Path, endpoint: str, *, launcher: str | None) -> dict[str, str]:
     """The environment delivery of an operator process on the gateway ``home``.
 
     Processes the root launcher starts carry their class login in the launch
     environment. An operator process (the ``ava`` CLI, a script, an OS job)
     that no launcher started (``launcher``, the launcher profile its process
     tree descends from, is None) receives the active gateway login dialing
-    ``endpoint`` (and, when ``api``, the gateway API token) only while it runs
+    ``endpoint`` (and the gateway API token) only while it runs
     the home's admitted runtime (``consume``).
 
     Raises:
@@ -229,4 +230,4 @@ def operator_environment(
         grant = consume(home, "gateway")
     except (AuthorityRefusedError, ValueError, OSError) as exc:
         raise AuthorityRefusedError(f"no database authority for this process: {exc}") from exc
-    return grant.environment(endpoint, api=api)
+    return grant.environment(endpoint)

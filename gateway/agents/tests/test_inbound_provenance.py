@@ -46,7 +46,6 @@ def test_cluster_bearer_message_records_http_provenance(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     agent_id = _seed_live_agent(db_conn)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _SECRET)
 
     with TestClient(app) as client:
@@ -70,7 +69,6 @@ def test_browser_message_records_user_session(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     agent_id = _seed_live_agent(db_conn)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _SECRET)
 
     with TestClient(app) as client:

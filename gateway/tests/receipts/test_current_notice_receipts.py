@@ -21,7 +21,6 @@ HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     with TestClient(
         app, headers={"Authorization": f"Bearer {SECRET}"}, raise_server_exceptions=False
     ) as value:
@@ -218,16 +217,6 @@ def test_authentication_is_rechecked_on_replay(
         headers={**HEADERS, "Authorization": "Bearer revoked"},
     )
     assert response.status_code == 401
-
-
-def test_unverified_principal_cannot_create_receipt(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
-    assert _send(client, agent, notice, False).status_code == 422
-    assert db_conn.execute("SELECT count(*) FROM notice_operation_receipts").fetchone() == (0,)
 
 
 def test_reply_concurrent_with_guarded_edit_has_no_lock_cycle(
