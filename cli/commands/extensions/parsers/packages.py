@@ -11,15 +11,24 @@ import sys
 
 
 def _h_packages_status(args: argparse.Namespace) -> int:
+    from base.config import ConfigBoot
     from cli.commands.extensions.packages import cmd_packages_status
 
-    return cmd_packages_status(json_output=args.json_output)
+    config = ConfigBoot()
+    config.read_process_environment()
+
+    return cmd_packages_status(config=config, json_output=args.json_output)
 
 
 def _h_packages_refresh(args: argparse.Namespace) -> int:
+    from base.config import ConfigBoot
     from cli.commands.extensions.packages import cmd_packages_refresh
 
+    config = ConfigBoot()
+    config.read_process_environment()
+
     return cmd_packages_refresh(
+        config=config,
         check_only=args.check,
         only=args.package,
         json_output=args.json_output,
@@ -45,6 +54,7 @@ def _duration(value: str) -> str:
 
 
 def _h_packages_policy(args: argparse.Namespace) -> int:
+    from base.config import ConfigBoot
     from cli.commands.extensions.packages import cmd_packages_policy
 
     if args.update_mode is None and args.check_every is None:
@@ -53,8 +63,10 @@ def _h_packages_policy(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    config = ConfigBoot()
+    config.read_process_environment()
     return cmd_packages_policy(
-        args.name, update_mode=args.update_mode, check_every=args.check_every
+        args.name, config=config, update_mode=args.update_mode, check_every=args.check_every
     )
 
 

@@ -19,10 +19,10 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -593,9 +593,21 @@ def derived_channel(pkg: InstalledPackage) -> ChannelKind | None:
     return None
 
 
-def resolved_policy(pkg: InstalledPackage) -> ResolvedPolicy:
+class PolicyDefaults(Protocol):
+    """Validated policy values supplied by the configuration owner."""
+
+    @property
+    def refresh_default_mode(self) -> UpdateMode: ...
+
+    @property
+    def refresh_default_interval_seconds(self) -> int: ...
+
+
+def resolved_policy(
+    pkg: InstalledPackage, *, defaults_reader: Callable[[], PolicyDefaults]
+) -> ResolvedPolicy:
     """`pkg`'s effective policy: explicit row values win; None values resolve
-    from the source class — channel-backed packages take the settings defaults
+    from the source class — channel-backed packages take the supplied reader defaults
     (auto @ 24h per the user's 2026-09-11 ruling), channelless packages are
     "off". The refresh pass writes a resolved row back at first sight; readers
     (status) resolve without writing."""
@@ -606,8 +618,6 @@ def resolved_policy(pkg: InstalledPackage) -> ResolvedPolicy:
         channel = None
     if channel is None:
         return ResolvedPolicy(channel=None, mode="off", interval_seconds=None)
-    from base.config import settings
-
-    mode: UpdateMode = pkg.update.mode or settings.packages.refresh_default_mode
-    interval = pkg.update.interval_seconds or settings.packages.refresh_default_interval_seconds
+    mode: UpdateMode = pkg.update.mode or defaults_reader().refresh_default_mode
+    interval = pkg.update.interval_seconds or defaults_reader().refresh_default_interval_seconds
     return ResolvedPolicy(channel=channel, mode=mode, interval_seconds=interval)
