@@ -88,9 +88,9 @@ port 14318), `AVA_TELEMETRY_LOKI_URL` and
 `AVA_TELEMETRY_PROMETHEUS_URL` as gateway-local backend URLs. Pure runners do
 not consume those loopback backend URLs: they derive the gateway collector
 ingress host from `AVA_GATEWAY_URL` and authenticate with the telemetry
-token. The remote receiver exists only on a gateway with a
-non-empty secret and an exact non-loopback `AVA_MACHINE_HOST`; combined
-single-box hosts collapse to the local receiver even when their secret is set.
+token. The remote receiver exists only on a gateway with an exact
+non-loopback `AVA_MACHINE_HOST`; combined single-box hosts collapse to the local
+receiver.
 
 ## Key dependencies
 
