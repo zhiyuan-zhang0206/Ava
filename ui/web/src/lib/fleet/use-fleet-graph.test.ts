@@ -58,7 +58,6 @@ const API_GRAPH: WireFleetGraph = {
       last_seen_at: "2026-06-17T00:00:00Z",
     },
   ],
-  stale: false,
   telemetry_stale: false,
   snapshot_at: null,
 };
@@ -93,7 +92,6 @@ describe("useFleetGraph", () => {
     expect(result.current.graph).toEqual({
       nodes: [],
       edges: [],
-      stale: false,
       telemetry_stale: false,
       snapshot_at: null,
     });
@@ -170,7 +168,6 @@ describe("useFleetGraph", () => {
         },
       ],
       edges: [],
-      stale: false,
       telemetry_stale: false,
       snapshot_at: null,
     } as unknown as WireFleetGraph;
@@ -199,28 +196,9 @@ describe("useFleetGraph", () => {
     expect(result.current.graph).toEqual({
       nodes: [],
       edges: [],
-      stale: false,
       telemetry_stale: false,
       snapshot_at: null,
     });
-  });
-
-  it("preserves the generated stale flag and renders a degraded 200 as unavailable", async () => {
-    getFleetGraph.mockResolvedValue({
-      nodes: [],
-      edges: [],
-      stale: true,
-      telemetry_stale: false,
-      snapshot_at: null,
-    });
-
-    const { result } = renderHook(() => useFleetGraph(), {
-      wrapper: withClient(freshClient()),
-    });
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.graph.stale).toBe(true);
-    expect(result.current.error).toBe(true);
   });
 
   it("stale-while-error: a failed poll after data keeps the last good graph (error flagged, not blanked)", async () => {

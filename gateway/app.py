@@ -216,7 +216,6 @@ def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
         max_failures_reader=lambda: config.view.gateway.login_max_failures,
         lockout_seconds_reader=lambda: config.view.gateway.login_lockout_seconds,
     )
-    app.state.fleet_graph_stale_emitter = fleet_graph_router.FleetGraphStaleEmitter()
     # The insights service's Unix socket: no connection until the first proxied read.
     app.state.insights_client = insights_router.build_client()
 
