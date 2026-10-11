@@ -63,6 +63,15 @@ async def test_late_cancel_closes_after_compact_and_replay_cannot_overwrite(
         {"permit": "authorize", "flush": "flush_checkpoint", "ack_lost": "acknowledge"}[stage],
         inject,
     )
+    if stage == "ack_lost":
+        with pytest.raises(psycopg.OperationalError):
+            await accepted.host.run_turn(accepted.agent)
+        assert model.calls == 1 and len(cancelled) == 1
+        status = accepted.status(client)
+        assert not status["continuation_released"]
+        await accepted.host.run_turn(accepted.agent)
+        assert accepted.status(client) == status and model.calls == 1
+        return
     await accepted.host.run_turn(accepted.agent)
     status = accepted.status(client)
     assert status["outcome"] == "applied" and model.calls == 1 and len(cancelled) == 1

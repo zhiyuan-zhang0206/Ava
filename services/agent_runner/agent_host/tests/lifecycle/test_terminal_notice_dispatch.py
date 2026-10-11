@@ -28,14 +28,14 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
         PendingInboundWake,
     )
 
-    pool = _PendingScanPool([(17, False, False)])
+    pool = _PendingScanPool([(17, False)])
     host = _host(
         pool=pool,
         checkpointer=object(),
         graph=object(),
         catalog=model_catalog,
     )
-    expected = [PendingInboundWake(agent_id=17, stale=False, recovery=False)]
+    expected = [PendingInboundWake(agent_id=17, stale=False)]
     monkeypatch.setattr(
         "services.agent_runner.agent_host.lifecycle.maintenance.pending_wakes",
         Mock(return_value=expected if held else None),

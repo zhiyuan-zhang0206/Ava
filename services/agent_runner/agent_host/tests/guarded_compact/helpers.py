@@ -93,6 +93,12 @@ async def make_host(
             },
         )
         await flush_checkpoint(saver, agent)
+        async with aops_pool.connection() as conn:
+            await conn.execute(
+                "INSERT INTO inbound_messages(agent_id,content,kind,source) "
+                "VALUES(%s,'Continue with this fresh input','chat','user')",
+                (agent,),
+            )
     host = AgentHost(
         policy=configured_policy(),
         pool=aops_pool,

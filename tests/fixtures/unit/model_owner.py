@@ -3,7 +3,6 @@
 import pytest
 
 from ava.sdk_surface.install import Installation
-from base.agents.messages.delivery_outbox import DeliverySenderConfig
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
@@ -25,7 +24,6 @@ def model_installation(
         undo=(),
         catalog=model_catalog,
         authority=config_authority,
-        delivery_sender=DeliverySenderConfig(config_authority),
     )
 
 

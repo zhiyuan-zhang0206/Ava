@@ -1,31 +1,4 @@
-"""`ava agents` — operator CLI for agent lifecycle (thin client over the gateway).
-
-The from-the-box ops surface: observe and control agent processes without curling
-the gateway or opening the web UI. Each verb forwards to an existing gateway route
-(the gateway owns the effect; the CLI adds only rendering + arg parsing) and fails
-fast (`raise_for_status()`) on any HTTP error. Ordered by escalating force:
-
-  ls              GET  /api/agents                       read one directory page
-  send <id> <txt> POST /api/agents/{id}/messages         deliver a chat inbound (source required)
-  cancel <id>     observe native work, then POST /cancel-work             cancel that active work
-  compact <id>    observe closed history, then POST /compact-history       accept manual compaction
-  restart <id>    POST /api/agents/{id}/restart          bounce the process, state preserved
-  terminate <id>  POST /api/agents/{id}/terminate        graceful stop + exit
-  kill <id>       POST /api/agents/{id}/terminate(force) hard-stop a stuck agent
-
-Both terminate and kill accept `--kill-all-shell-sessions`: also kill every
-shell session the agent owns on its home machine (watchers included), so none
-of them can wake it again.
-
-`send` is the shell-level message primitive: the completion notices of
-`ava.shell.run_background` and watcher exit notices are generated command lines
-ending in `ava agents send ... --source shell:N|watcher:N`, and a host operator
-can message any agent directly. A `send` that cannot reach the gateway is not
-lost: the deferred-delivery outbox (`base.agents.messages.delivery_outbox`) records it on this
-machine and the ops daemon redelivers it once the gateway returns — the same
-coverage the SDK send path has. Richer capabilities (spawn an agent, inspect its
-events) stay in the `ava.*` SDK and the web UI.
-"""
+"""Agent control CLI: ordinary send, terminate, cancel, restart and resurrection."""
 
 from __future__ import annotations
 
@@ -35,8 +8,6 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from base.agents import ShellSessionKillTiming
-from base.agents.messages.delivery_outbox import DeliverySenderConfig
-from ops.rpc_schemas.billing_recovery import BillingRecoveryMode, BillingRecoveryRunOutcome
 
 _TIMEOUT_S = 15.0
 
@@ -163,35 +134,13 @@ def cmd_agents_send(
     tail_file: str | None = None,
     *,
     completion: bool = False,
-    sender: DeliverySenderConfig | None = None,
 ) -> int:
-    """`ava agents send <id> <content> --source S [--tail-file PATH]` — deliver a
-    chat inbound via POST /api/agents/{id}/messages.
+    """Send chat with explicit provenance, optional output tail and finite retries.
 
-    `--source` is required and validated at the argparse layer: a missing or
-    unknown source is a usage error (exit 2) before any command code runs, and
-    no environment fallback is consulted on this path (user ruling 2026-09-20:
-    explicit parameters only). Machine callers pass `shell:N` / `watcher:N`; a
-    human operator — or a tool acting for one — passes `user`; a tool that
-    collaborates beside the user declares `external_agent:NAME[:INSTANCE]`, which
-    the target reads as a message from that external agent. A source that
-    still reaches the gateway is re-validated there (`AgentMessageIn.source` ->
-    `base.agents.messages.envelope.validate_source`) and rejected 422 with the legal set
-    printed. A programmatic caller with no source gets this option list as a
-    ProvenanceError, which the CLI handlers report without a traceback.
-
-    `--tail-file` appends the last `_TAIL_LINES` lines of PATH to the message —
-    the background-run / watcher completion notices use it to carry the end of
-    the command's output (result line or traceback) so the agent usually does
-    not need a follow-up read. Delivery auto-resurrects a terminated target
-    (gateway behavior, same as the SDK path).
-
-    A failed send is not lost: the deferred-delivery outbox
-    (`base.agents.messages.delivery_outbox`) records a transport failure or a transient HTTP
-    response (429/5xx) on this machine under the message's idempotency key, and
-    the machine's ops daemon redelivers it once the gateway returns. 4xx stay
-    loud and unrecorded — the wire reason is application semantics, replay
-    cannot change it."""
+    A call retries transient transport and known transient HTTP responses with one
+    idempotency key. Final errors are exposed. Normal delivery can wake a terminated
+    target on its home machine. No sender journal or later background delivery is
+    created."""
     # argparse enforces --source for the CLI; the guard covers programmatic callers.
     source = _explicit_send_source(source)
     status = send_agent_message(
@@ -200,7 +149,6 @@ def cmd_agents_send(
         source=source,
         tail_file=tail_file,
         completion=completion,
-        sender=sender,
     )
     print(f"  ✓ agent {agent_id} send: {status}")
     return 0
@@ -231,120 +179,42 @@ def send_agent_message(
     agent_id: int,
     content: str,
     *,
-    origin_agent_id: int | None = None,
     source: str,
     tail_file: str | None = None,
     completion: bool = False,
-    sender: DeliverySenderConfig | None = None,
 ) -> str:
-    """Deliver one chat inbound to `agent_id` carrying `source` — the single transport.
-
-    Shared by `agents send` and `impersonate send` (the attested send as a
-    leased identity): one idempotency keying, one deferred-delivery outbox
-    safety net, one error surface.
-
-    `--tail-file` appends the last `_TAIL_LINES` lines of PATH to the message —
-    the background-run / watcher completion notices use it to carry the end of
-    the command's output (result line or traceback) so the agent usually does
-    not need a follow-up read.
-
-    A failed send is not lost: the deferred-delivery outbox
-    (`base.agents.messages.delivery_outbox`) records a transport failure or a transient HTTP
-    response (429/5xx) on this machine under the message's idempotency key, and
-    the machine's ops daemon redelivers it once the gateway returns. 4xx stay
-    loud and unrecorded — the wire reason is application semantics, replay
-    cannot change it. Returns the gateway's delivery status; HTTP errors raise
-    to the calling command."""
+    """Deliver with bounded same-key retries and expose the final failure."""
     import sys
+    import time
+    from uuid import uuid4
 
-    from base.agents.messages import delivery_outbox
     from base.agents.messages.delivery.retry import NETWORK_ERRORS, retryable_response
-    from base.config import Settings, settings
-    from base.config.service_read import ConfigAuthority
-    from base.paths import ava_home
-
-    if sender is None:
-        sender = delivery_outbox.DeliverySenderConfig(
-            ConfigAuthority(
-                runtime=settings,
-                all_domains=settings if settings.profile is None else Settings(profile=None),
-                env_path=ava_home() / ".env",
-            )
-        )
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
     from base.host.net.http_dial import post as dial_post
 
     if tail_file is not None:
         content = _with_tail(content, tail_file)
-    # All attempts of one logical message share one key; minting it here also
-    # arms the server's client_message_id receipt for the flush replay.
-    key = delivery_outbox.logical_key(
-        sender=sender,
-        agent_id=agent_id,
-        source=source,
-        content=content,
-        completion_notice=completion,
-    )
-    headers = gateway_auth_headers()
-    headers = {**headers, "Idempotency-Key": key}
+    headers = {**gateway_auth_headers(), "Idempotency-Key": str(uuid4())}
+    body = {
+        "content": content,
+        "source": source,
+        **({"completion_notice": True} if completion else {}),
+    }
     url = f"{gateway_api_base()}/api/agents/{agent_id}/messages"
-    try:
-        resp = dial_post(
-            url,
-            json={
-                "content": content,
-                "source": source,
-                **({"completion_notice": True} if completion else {}),
-            },
-            timeout=_TIMEOUT_S,
-            headers=headers,
-        )
-    except NETWORK_ERRORS:
-        delivery_outbox.record_failed_send(
-            authority=sender.authority,
-            agent_id=agent_id,
-            origin_agent_id=origin_agent_id,
-            source=source,
-            content=content,
-            client_message_id=key,
-            completion_notice=completion,
-        )
-        raise
-    if retryable_response(resp):
-        delivery_outbox.record_failed_send(
-            authority=sender.authority,
-            agent_id=agent_id,
-            origin_agent_id=origin_agent_id,
-            source=source,
-            content=content,
-            client_message_id=key,
-            completion_notice=completion,
-        )
-    elif resp.is_success:
-        delivery_outbox.retire_send(
-            sender=sender,
-            agent_id=agent_id,
-            source=source,
-            content=content,
-            key=key,
-            completion_notice=completion,
-        )
-    else:
-        delivery_outbox.retire_send(
-            sender=sender,
-            agent_id=agent_id,
-            source=source,
-            content=content,
-            key=key,
-            completion_notice=completion,
-            completed=False,
-        )
-    if resp.status_code >= 400:
-        # Surface the response body before raising: the 422 detail carries the
-        # legal source set / validation reason, which is the actionable part.
-        print(resp.text, file=sys.stderr)
-    resp.raise_for_status()
-    return str(resp.json().get("status"))
+    for attempt in range(3):
+        try:
+            response = dial_post(url, json=body, timeout=_TIMEOUT_S, headers=headers)
+        except NETWORK_ERRORS:
+            if attempt == 2:
+                raise
+        else:
+            if not retryable_response(response) or attempt == 2:
+                if response.status_code >= 400:
+                    print(response.text, file=sys.stderr)
+                response.raise_for_status()
+                return str(response.json().get("status"))
+        time.sleep(0.5 * (2**attempt))
+    raise AssertionError("bounded message delivery exhausted without an outcome")
 
 
 def cmd_agents_cancel(agent_id: int) -> int:
@@ -445,53 +315,6 @@ def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} resurrect: {resp.json().get('status')}")
     return 0
-
-
-def cmd_agents_resurrect_billing(*, execute: bool) -> int:
-    """`ava agents resurrect-billing` — POST /api/agents/resurrect-billing.
-
-    The explicit post-outage recovery entry (task #3919): with no flags it
-    prints a strictly read-only preview — the billing-class halt candidates,
-    the halted-but-alive survey, and the provider balance readout; with
-    `--execute` it runs the batch (balance gate -> per-agent
-    `resurrect-billing` on each home machine) and prints the per-agent
-    outcome. Refused runs exit 1; previews and runs exit 0.
-    """
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.host.net.http_dial import post as dial_post
-
-    url = f"{gateway_api_base()}/api/agents/resurrect-billing"
-    resp = dial_post(
-        url,
-        json={"execute": execute},
-        timeout=_BATCH_TIMEOUT_S,
-        headers=gateway_auth_headers(),
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    mode = BillingRecoveryMode(data["mode"])
-    outcome = BillingRecoveryRunOutcome(data["outcome"])
-    balance = data["balance"]
-    print(f"  mode: {mode} — outcome: {outcome}")
-    if data.get("refusal_reason"):
-        print(f"  refused: {data['refusal_reason']}")
-    print(f"  balance: ok={balance['ok']} — {balance['detail']}")
-    agents = data["agents"]
-    if not agents:
-        print("  (no billing-class halt victims to resurrect)")
-    for a in agents:
-        suffix = f" — {a['reason']}" if a.get("reason") else ""
-        print(f"  - agent {a['agent_id']} [{a['machine']}] {a['status']}{suffix}")
-    halted = data.get("halted_alive") or []
-    if halted:
-        print(
-            "  halted but alive — no action needed; the halt clears on their next successful turn:"
-        )
-        for a in halted:
-            print(f"  - agent {a['agent_id']} [{a['machine']}] streak={a['streak']}")
-    if not execute:
-        print("  (preview only; rerun with --execute to perform)")
-    return 1 if outcome is BillingRecoveryRunOutcome.REFUSED else 0
 
 
 def _terminate(

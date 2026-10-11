@@ -94,11 +94,6 @@ EVENTS: dict[str, EventSpec] = {
         "cancel", "in-flight turn cancelled", site="base/db/__init__.py:500 same as above"
     ),
     "resurrect": audit_event("resurrect", "terminated agent woken"),
-    "billing_resurrect": audit_event(
-        "billing_resurrect",
-        "billing batch recovery run: billing-class halt victims reinstated after "
-        "the provider balance gate passed (task #3919)",
-    ),
     "hosted_legacy_adoption": audit_event(
         "hosted_legacy_adoption",
         "a hosted successor replaced a legacy NULL-resource owner before lease "

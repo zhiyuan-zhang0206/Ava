@@ -25,7 +25,7 @@ async def test_actual_scan_keeps_pending_compact_and_later_chat_on_work_lane(
     rows = await accepted.host.pending_inbound_wakes(180)
     work = {row.agent_id: row for row in rows}
     assert set(work) == {accepted.agent, other} and quiet not in work
-    assert not work[accepted.agent].recovery and not work[other].recovery
+    assert not work[accepted.agent].stale and not work[other].stale
     assert accepted.status(client)["outcome"] == "accepted"
     # No Redis signal is required to rediscover either accepted producer.
     again = await accepted.host.pending_inbound_wakes(180)

@@ -270,6 +270,7 @@ async def _beat_forever(
     """Liveness and ownership renewal, independent of the idle dispatcher.
     beat() precedes DB renewal — process health must not depend on the DB."""
     heartbeat_ok = True
+    renewal_failures = 0
     while True:
         _require_helper_parent_chain()
         liveness.beat()
@@ -281,10 +282,13 @@ async def _beat_forever(
         if not admission.quiesced():
             try:
                 await asyncio.wait_for(host.renew_ownership(), timeout=_OWNERSHIP_RENEW_TIMEOUT_S)
-            except TimeoutError:
-                _log.warning("[agent-host] ownership renewal timed out")
-            except (psycopg.OperationalError, PoolTimeout):
-                _log.exception("[agent-host] ownership renewal failed — retrying next beat")
+            except (TimeoutError, psycopg.OperationalError, PoolTimeout):
+                renewal_failures += 1
+                _log.exception("[agent-host] database renewal failed (%s/3)", renewal_failures)
+                if renewal_failures >= 3:
+                    raise
+            else:
+                renewal_failures = 0
         published = await _publish_turn_progress_heartbeat(
             bus, machine, scheduler.active_agents, host.database_waits, host.turn_progress
         )
@@ -304,17 +308,10 @@ async def _ownership_beat_completion(
     *,
     read_alert_seconds: Callable[[], float],
 ) -> Exception | None:
-    """Retain a failed heartbeat for the service's stop/join boundary.
-
-    A heartbeat failure must not cancel boot settlement, dispatch or turn drain.
-    Its owning task retains the original exception; shutdown raises it after join.
-    """
-    try:
-        await _beat_forever(
-            liveness, host, scheduler, machine, bus, read_alert_seconds=read_alert_seconds
-        )
-    except Exception as error:
-        return error
+    """Propagate exhausted renewal failures to the service task group."""
+    await _beat_forever(
+        liveness, host, scheduler, machine, bus, read_alert_seconds=read_alert_seconds
+    )
     return None
 
 
@@ -567,8 +564,6 @@ async def _dispatch_host(
             turn_progress=host.turn_progress,
             turn_admission=host.admission,
             stale_after_s=float(config.view.daemon.wedged_agent_inbound_age_seconds),
-            recovery_wake_batch=config.view.daemon.host_recovery_wake_batch,
-            recovery_wake_inflight=config.view.daemon.host_recovery_wake_inflight,
             scan_interval_s=float(config.view.agent.db_notify_wait_timeout_seconds),
             subscription_read_timeout_s=float(config.view.agent.db_notify_wait_timeout_seconds),
         ).run()

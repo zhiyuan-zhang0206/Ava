@@ -1,25 +1,4 @@
-"""Agent lifecycle + event-publish RPC ops.
-
-spawn / terminate / resurrect / restart / self-exit finalize, plus the
-InboundArrived / PageClosed event publishes the agent-runner emits. One of the
-op clusters beside `ops.cluster.operations` / `ops.host_config` / `ops.inventory` /
-`ops.uploads`; each cluster is self-contained — no op here calls an op in another cluster.
-
-This package door holds the lifecycle ops; its submodules hold the pieces the
-ops compose: `launch` (runner-side spawn validation and wake), `termination`
-(durable termination messages and force fences), `events` (best-effort event
-fan-out), `resurrect_gates` (durable automatic-resurrection gates) and
-`billing_recovery` (the explicit billing batch recovery).
-
-Both the gateway FastAPI handlers (`gateway/agents/lifecycle.py`, `gateway/routers/upload/router.py`)
-and the agent-runner ops server (`services/agent_runner/agent_ops/daemon.py:_dispatch`) call
-these directly; the ops server runs them in-process. Cross-machine routing stays
-in the FastAPI handler wrappers — forwarding never recurses inside an op. The
-one forwarding call site in this module is `resurrect_if_terminated`, which is
-NOT an op (only the gateway routers call it, never the ops server dispatch), so
-its home-machine forward cannot loop either. The durable automatic-resurrection
-gates it consults are re-exported here from `resurrect_gates`.
-"""
+"""Home-machine launch and supported lifecycle operations, with explicit input wake."""
 
 from __future__ import annotations
 
@@ -33,7 +12,6 @@ from psycopg_pool import ConnectionPool
 
 from base.agents import (
     AgentStatus,
-    CrashRecoveryResult,
     InvalidModelConfig,
     MachinePaused,
     RestartResult,
@@ -69,12 +47,6 @@ from ops.agents.wake import ResurrectTriggerStaleError
 from ops.cluster import rpc as _cluster_rpc
 from ops.cluster_status import kill_agent_shells
 from ops.lifecycle import termination
-from ops.lifecycle.crash_harvest import (
-    CrashRecoveryRequestFailure as CrashRecoveryRequestFailure,
-)
-from ops.lifecycle.crash_harvest import (
-    _recover_crash_marked_blocking as _recover_crash_marked_blocking,
-)
 
 # Re-exported from `events`; callers keep module-qualified sites.
 from ops.lifecycle.events import (
@@ -102,16 +74,10 @@ from ops.lifecycle.resurrect_gates import (
     clear_wake_suppression as _clear_wake_suppression,
 )
 from ops.lifecycle.resurrect_gates import (
-    recovery_halt_reason as _recovery_halt_reason,
-)
-from ops.lifecycle.resurrect_gates import (
     recovery_halted as _recovery_halted,
 )
 from ops.lifecycle.resurrect_gates import (
     system_notice_source_of_trigger as _system_notice_source_of_trigger,
-)
-from ops.lifecycle.resurrect_gates import (
-    wake_suppression_active as _wake_suppression_active,
 )
 from ops.lifecycle.termination import (
     _force_terminate_transaction as _force_terminate_transaction,
@@ -123,8 +89,6 @@ from ops.lifecycle.termination import (
     force_mark_terminated as force_mark_terminated,
 )
 from ops.rpc_schemas import (
-    BillingResurrectAgentResponse,
-    RecoverCrashMarkedResponse,
     RestartAgentRequest,
     RestartAgentResponse,
     ResurrectAgentRequest,
@@ -143,8 +107,6 @@ async def terminate_agent_op(
     agent_id: int,
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
-    *,
-    recovery_wake: str | None = None,
 ) -> TerminateAgentResponse:
     """Local-target graceful or force terminate. Caller handles cross-machine.
 
@@ -157,15 +119,10 @@ async def terminate_agent_op(
     agent's last step (`agent.ownership.hosted.apply_hosted_lifecycle`). The
     response's `shell_sessions` reports which of the two happened.
 
-    `recovery_wake` is the delivery watchdog's in-process request (never part
-    of the HTTP body): a force terminate also commits that marked system chat
-    in its own transaction, so the agent it ends is always resurrectable.
     """
-    if recovery_wake is not None and not body.force:
-        raise ValueError("recovery_wake rides a force terminate")
     if body.force:
         _old_status, pid, killed_page_names, command_id, cutoff = await asyncio.to_thread(
-            _terminate_force_blocking, db, bus, agent_id, body, db_pool, recovery_wake
+            _terminate_force_blocking, db, bus, agent_id, body, db_pool
         )
         await _cancel_hosted_turn_best_effort(agent_id, command_id)
         for page_name in killed_page_names:
@@ -265,7 +222,6 @@ def _terminate_force_blocking(
     agent_id: int,
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
-    recovery_wake: str | None,
 ) -> tuple[AgentStatus, int | None, list[str], int, int]:
     """Commit the force fence before publishing its wake and lifecycle hint."""
     old_status, pid, killed_page_names, inbound_id, cutoff = _force_terminate_transaction(
@@ -274,7 +230,6 @@ def _terminate_force_blocking(
         source=body.source,
         message=body.message,
         kill_all_shell_sessions=body.kill_all_shell_sessions,
-        recovery_wake=recovery_wake,
     )
     _publish_force_terminate_inbound(db, bus, agent_id, inbound_id, body.source)
     publish_agent_updated_sync(bus, agent_id)
@@ -343,69 +298,20 @@ async def resurrect_if_terminated(
     trigger_inbound_id: int,
     trigger_inbound_kind: WakeTriggerKind,
 ) -> AgentStatus:
-    """Resurrect `agent_id` when it is terminated, so a just-delivered inbound is
-    handled by a live process instead of sitting unclaimed forever.
+    """Try one home-machine wake for an exact newly delivered input.
 
-    Call this right after an inbound has been persisted for an agent that may be
-    terminated (a chat delivery, a user-triggered compact). `resurrect_agent_op`
-    inserts its own newer 'resurrect' inbound; the claim node resolves a batch by
-    recency, so the resurrect wins over any stale prior-life terminate sharing
-    the batch and the just-delivered inbound survives to be processed.
-
-    Chat delivery, compact, and the delivery watchdog pass an exact
-    `trigger_inbound_id` plus its expected kind. They travel on the distinct
-    internal `resurrect-if-pending-work` lifecycle path, then the home runner's
-    final terminated -> idling UPDATE verifies that exact work is still
-    pending, newer than the current termination, and above the force-intent
-    fence. Explicit manual resurrection uses `resurrect-explicit`; crash and
-    wedged recovery use their exact controller claims in the local runner.
-
-    Returns the agent's status after the attempt: the post-resurrect status when
-    a process was spawned, otherwise the unchanged status (a non-terminated agent
-    is returned untouched). Known resurrection refusals and machine pauses are
-    reported while the inbound stays queued; a durable refusal (e.g.
-    `runtime_cutover_required`) is a WARNING naming it. Unknown local or remote
-    errors propagate to the caller instead of returning an apparent success.
-
-    The process must start on the agent's home machine (`agents_meta.machine`)
-    — launching it here when the agent lives elsewhere trips the boot placement
-    gate and crash-loops (agent 1513 incident). A local-homed agent resurrects
-    in-process; a remote-homed one is forwarded as a 'lifecycle' op to its home
-    machine's ops server, the same dispatch the gateway's /resurrect route uses
-    (`forward_to_home_machine`). An unreachable home machine skips the
-    resurrect with an INFO record — the queued inbound is picked up when the machine
-    is back (next delivery re-triggers this, or a manual resurrect).
-
-    This is deliberately NOT wired into the terminate / cancel / restart ops:
-    those signals are no-ops on an already-dead agent (reviving an agent only to
-    kill or pause it would reverse the caller's intent), so they short-circuit on
-    TERMINATED instead.
-
-    A system-family chat trigger (source `system` / `system:<subtype>`) never
-    starts a resurrect: framework notifications (e.g. watcher reclamation
-    notices) ride the queue for the owner's next resurrect through any other
-    channel — they do not create one (user ruling 2026-08-27; task #3687).
-    The delivery watchdog's hosted-turn recovery chat is the exception — it
-    carries the `hosted_turn_recovery` payload marker and must revive its
-    wedged owner (task #3687 review). User / peer chats, compact requests,
-    and system notes with an explicit resurrect request remain unaffected.
-    """
+    Fresh chat can wake a terminated agent after a fix. Background heartbeat and
+    other automatic triggers stop after a permanent provider rejection. System
+    chat notices cannot resurrect, including old hosted-turn recovery markers.
+    The home CAS verifies the pending input is newer than termination and above
+    the force fence. No watchdog retries a failed attempt. Unknown errors reach
+    the sender; known placement/refusal conditions are logged with the input queued.
+    A new message or explicit operator resurrection can try again later."""
     status = await asyncio.to_thread(get_agent_status, db, agent_id)
     if status is not AgentStatus.TERMINATED:
         return status
-    if await asyncio.to_thread(_wake_suppression_active, db, agent_id):
-        _log.debug(
-            "resurrect_if_terminated: automatic wake suppressed for agent %s; "
-            "skipping auto-resurrect",
-            agent_id,
-        )
-        return status
-    if await asyncio.to_thread(_recovery_halted, db, agent_id):
-        _log.debug(
-            "resurrect_if_terminated: recovery circuit breaker tripped for agent %s "
-            "after consecutive permanent provider rejections; skipping auto-resurrect",
-            agent_id,
-        )
+    if trigger_inbound_kind != "chat" and await asyncio.to_thread(_recovery_halted, db, agent_id):
+        _log.warning("automatic wake stopped after a permanent provider error: agent %s", agent_id)
         return status
     notice_source = await asyncio.to_thread(
         _system_notice_source_of_trigger, db, agent_id, trigger_inbound_id
@@ -580,86 +486,10 @@ async def restart_agent_op(
     return RestartAgentResponse(status=RestartResult.ENQUEUED)
 
 
-async def recover_crash_marked_op(
-    db: Database, bus: EventBus, agent_id: int
-) -> RecoverCrashMarkedResponse:
-    """Local-target adjudication of a stalled crash-marked harvest — runs on
-    the agent's home machine (the ops server's 'lifecycle' dispatch target).
-    Off-loop: the transaction waits on the row lock."""
-    return await asyncio.to_thread(_recover_crash_marked_blocking, db, bus, agent_id)
-
-
-async def recover_crash_marked_if_stalled(
-    db: Database, bus: EventBus, agent_id: int, *, stalled_inbound_id: int
-) -> tuple[CrashRecoveryResult | CrashRecoveryRequestFailure, str | None]:
-    """Ask `agent_id`'s home machine to adjudicate harvesting its crash-marked
-    corpse, so the stalled chat `stalled_inbound_id` stops waiting on a dead
-    owner (delivery-watchdog escalation, task #3618).
-
-    Fail-closed and never raising: returns `(decision, reason)` where decision
-    is the home runner's verdict — 'harvested' (the row took the reaper's
-    terminal shape; see `RecoverCrashMarkedResponse`), 'already_terminated',
-    'refused' — or a local transport verdict: 'unreachable' (home machine's
-    ops server did not answer) / 'error' (anything else). An active wake
-    halted recovery state short-circuits before any RPC — the recovery
-    breaker's streak or an active wake-suppression window — and its reason
-    ('permanent_provider_reject' when the breaker tripped) is the refusal
-    reported."""
-    halt_reason = await asyncio.to_thread(_recovery_halt_reason, db, agent_id)
-    if halt_reason is not None:
-        _log.debug(
-            "recover_crash_marked_if_stalled: automatic recovery is halted for "
-            "agent %s (%s); skipping the harvest request for inbound %s",
-            agent_id,
-            halt_reason,
-            stalled_inbound_id,
-        )
-        return CrashRecoveryResult.REFUSED, halt_reason
-    try:
-        home = await asyncio.to_thread(get_agent_machine, db, agent_id)
-        try:
-            payload: dict[str, object] = {
-                "path": f"/api/agents/{agent_id}/recover-crash-marked",
-                "body": {},
-            }
-            forwarded = await _cluster_rpc.dispatch_to_machine(
-                db,
-                target_machine=home,
-                kind="lifecycle",
-                payload=payload,
-            )
-            response = RecoverCrashMarkedResponse.model_validate(forwarded)
-            return response.status, response.reason
-        except _cluster_rpc.ClusterOpUnreachable:
-            if home == machine_name():
-                # Local ops server not reachable (test / single-process):
-                # adjudicate in-process, like the other lifecycle ops.
-                response = await recover_crash_marked_op(db, bus, agent_id)
-                return response.status, response.reason
-            raise
-    except _cluster_rpc.ClusterOpUnreachable as exc:
-        _log.info(
-            "recover_crash_marked_if_stalled: agent %s home machine unreachable "
-            "(%s); stalled inbound %s stays pending",
-            agent_id,
-            exc,
-            stalled_inbound_id,
-        )
-        return CrashRecoveryRequestFailure.UNREACHABLE, str(exc)
-    except Exception:
-        _log.warning(
-            "recover_crash_marked_if_stalled: harvest request for agent %s (inbound %s) failed",
-            agent_id,
-            stalled_inbound_id,
-            exc_info=True,
-        )
-        return CrashRecoveryRequestFailure.ERROR, "harvest request failed"
-
-
 _LIFECYCLE_PATH = re.compile(
     r"^/api/agents/(?P<id>\d+)/"
     r"(?P<action>terminate|resurrect-explicit|"
-    r"resurrect-if-pending-work|resurrect-billing|recover-crash-marked|restart|restart-work)$"
+    r"resurrect-if-pending-work|restart|restart-work)$"
 )
 
 
@@ -676,23 +506,14 @@ async def lifecycle_op(
 ) -> (
     TerminateAgentResponse
     | ResurrectAgentResponse
-    | BillingResurrectAgentResponse
-    | RecoverCrashMarkedResponse
     | RestartAgentResponse
     | NativeRestartAccepted
     | NativeRestartRefused
 ):
-    """Parse the lifecycle path from a 'lifecycle' op payload and dispatch to
-    the appropriate per-action op. Returns the per-action response model (the
-    ops server serializes it into the /ops response).
+    """Dispatch terminate, restart and explicit or exact-pending-input resurrection.
 
-    Path shapes accepted: terminate/restart plus the internal
-    `resurrect-explicit`, guarded `resurrect-if-pending-work`,
-    billing-guarded `resurrect-billing` (task #3919), and
-    `recover-crash-marked` (the stalled-corpse harvest) paths.
-    Anything else raises ValueError — the ops server converts that to a failed
-    op result.
-    """
+    Retired billing recovery and crash-harvest paths fail validation without effects.
+    Unknown paths raise ValueError, which the ops server exposes as a failed result."""
     m = _LIFECYCLE_PATH.match(path)
     if m is None:
         raise ValueError(f"lifecycle path not recognized: {path!r}")
@@ -728,12 +549,6 @@ async def lifecycle_op(
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
         )
-    if action == "resurrect-billing":
-        from ops.lifecycle.billing_recovery import resurrect_billing_agent_op
-
-        return await resurrect_billing_agent_op(db, bus, agent_id)
-    if action == "recover-crash-marked":
-        return await recover_crash_marked_op(db, bus, agent_id)
     if action == "restart":
         return await restart_agent_op(
             db, bus, agent_id, RestartAgentRequest.model_validate(body), db_pool, catalog=catalog

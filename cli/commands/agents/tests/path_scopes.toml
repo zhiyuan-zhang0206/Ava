@@ -12,7 +12,6 @@
     "test_impersonation_bridge.py",
     "test_impersonation_bridge_parsers.py",
     "test_impersonation_bridge_part2.py",
-    "test_impersonation_send_event_log.py",
     "test_relay_heartbeat_ownership.py",
     "test_relay_status.py",
     "test_rpc_result_domains.py"

@@ -25,9 +25,9 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.lm.catalog import ModelCatalog
-from services.agent_runner.agent_host.tests.native_cancel.test_transfer import (
-    _CHILD,
-    _child_failure,
+from services.agent_runner.agent_host.tests.native_restart.child_fixture import (
+    CHILD,
+    child_failure,
 )
 
 
@@ -44,7 +44,7 @@ async def test_dead_original_host_is_superseded_without_new_restart_target(
     )
     db_conn.commit()
     child = subprocess.Popen(  # noqa: S603 -- fixed interpreter and existing isolated proof fixture
-        [sys.executable, "-c", _CHILD],
+        [sys.executable, "-c", CHILD],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -58,7 +58,7 @@ async def test_dead_original_host_is_superseded_without_new_restart_target(
     try:
         assert child.stdout is not None
         line = await asyncio.wait_for(asyncio.to_thread(child.stdout.readline), 15)
-        assert line, _child_failure(child)
+        assert line, child_failure(child)
         target = NativeWorkTarget.model_validate_json(line)
         request = NativeRestartRequest(target=target)
         with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:

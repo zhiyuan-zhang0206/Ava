@@ -11,7 +11,7 @@ from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_sn
 from agent.startup import reconcile_claimed_inbounds_at_startup
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit
+from services.agent_runner.agent_host.recovery.tests.helpers import admit as _admit
 from services.agent_runner.agent_host.recovery.tests.test_reconcile_after_abort import (
     _build_graph,
     _CountingSaver,

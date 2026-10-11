@@ -81,6 +81,21 @@ async def test_real_host_http_once_summary_cold_ack_and_next_chat(
     accepted = client.post(path + "/compact-history", json=observed.json(), headers=headers)
     assert accepted.status_code == 202, accepted.text
     injected = install(monkeypatch, fault)
+    if fault != "none":
+        await assert_interrupted(
+            host,
+            client,
+            path,
+            headers,
+            accepted,
+            generated_models,
+            ordinary,
+            injected,
+            fault,
+            db_conn,
+            agent,
+        )
+        return
     await host.run_turn(agent)
     status = client.get(
         path + "/compact-commands/" + accepted.json()["command_id"], headers=headers
@@ -123,3 +138,34 @@ def assert_original_completion(
     assert len(ordinary) == 1
     assert generated_models[0].calls == 1
     assert injected == ([] if fault == "none" else [fault])
+
+
+async def assert_interrupted(
+    host: Any,
+    client: TestClient,
+    path: str,
+    headers: dict[str, str],
+    accepted: Any,
+    generated_models: list[SummaryModel],
+    ordinary: list[object],
+    injected: list[str],
+    fault: str,
+    db_conn: psycopg.Connection,
+    agent: int,
+) -> None:
+    with pytest.raises(psycopg.OperationalError):
+        await host.run_turn(agent)
+    interrupted = client.get(
+        path + "/compact-commands/" + accepted.json()["command_id"], headers=headers
+    ).json()
+    assert not interrupted["continuation_released"]
+    assert injected == [fault] and generated_models[0].calls == 1
+    _insert(db_conn, agent)
+    await host.run_turn(agent)
+    assert len(ordinary) == 1 and generated_models[0].calls == 1
+    assert (
+        client.get(
+            path + "/compact-commands/" + accepted.json()["command_id"], headers=headers
+        ).json()
+        == interrupted
+    )

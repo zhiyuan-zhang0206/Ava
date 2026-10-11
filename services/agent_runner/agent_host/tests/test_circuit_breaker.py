@@ -278,14 +278,14 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     assert blocked_history not in rows[0][1]
 
 
-async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
+async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancestor(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
 ) -> None:
-    """Forced compaction is a healthy recovery path, not an ancestor escalation."""
+    """A permanent overflow rejection also halts unattended retries."""
     ancestor_id = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
     child_id = spawn_agent(
         spawner=f"agent:{ancestor_id}", catalog=model_catalog, authority=config_authority
@@ -321,7 +321,7 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (ancestor_id,))
-        assert cur.fetchone() == (0,)
+        assert cur.fetchone() == (1,)
 
 
 async def test_fatal_llm_stream_error_does_not_open_breaker() -> None:
@@ -746,7 +746,7 @@ def _ancestor_halt_notes(db_conn: psycopg.Connection, ancestor_id: int) -> list[
             (ancestor_id,),
         ).fetchall()
     ]
-    return [note for note in reports if "reason=permanent_provider_reject" in note]
+    return [note for note in reports if "blocked after a permanent provider rejection" in note]
 
 
 def _recovery_halt_errors(publisher: _RecordingPublisher) -> list[dict[str, Any]]:

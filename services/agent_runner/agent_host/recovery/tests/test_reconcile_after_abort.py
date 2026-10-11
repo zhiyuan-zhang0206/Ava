@@ -38,7 +38,7 @@ from base.agents.history.tests.test_inbound_sideload_failures import _read_input
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement as settlement_mod
-from services.agent_runner.agent_host.recovery.tests.test_hosted_db_recovery import _admit
+from services.agent_runner.agent_host.recovery.tests.helpers import admit as _admit
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
@@ -137,13 +137,13 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
 
     assert _statuses(db_conn, [committed, orphan, stale]) == {
         committed: "done",
-        orphan: "pending",
+        orphan: "done",
         stale: "done",
     }
     records = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
     assert len(records) == 1
     extra = records[0]["extra"]
-    assert (extra["committed"], extra["reset"], extra["dead_lettered"]) == (1, 1, 1)
+    assert (extra["committed"], extra["reset"], extra["dead_lettered"]) == (1, 0, 2)
 
 
 async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
@@ -166,7 +166,7 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
     await settlement_mod.reconcile_inbounds_after_abort(
         aops_pool, saver, incarnation, resources=None, inputs=configured_policy().reconcile_inputs
     )
-    settled = {committed: "done", orphan: "pending"}
+    settled = {committed: "done", orphan: "done"}
     assert _statuses(db_conn, [committed, orphan]) == settled
     logged = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
     await reconcile_claimed_inbounds_at_startup(
@@ -444,10 +444,10 @@ async def test_mixed_claims_fall_back_for_unproven_orphan(
     )
 
     assert saver.aget_calls == 1
-    assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
+    assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
     records = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
     extra = records[0]["extra"]
-    assert (extra["committed"], extra["reset"], extra["dead_lettered"]) == (1, 1, 0)
+    assert (extra["committed"], extra["reset"], extra["dead_lettered"]) == (1, 0, 1)
 
 
 async def test_committed_and_later_removed_is_finalized_not_reset(
@@ -583,7 +583,7 @@ async def test_unresolved_window_falls_back_to_the_full_read(
     )
 
     assert saver.aget_calls == 1
-    assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
+    assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
 
 
 async def test_thread_without_messages_writes_falls_back_to_the_full_read(
@@ -609,7 +609,7 @@ async def test_thread_without_messages_writes_falls_back_to_the_full_read(
     )
 
     assert saver.aget_calls == 1
-    assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "pending"}
+    assert _statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
 
 
 async def test_materialized_thread_with_only_pending_write_falls_back(

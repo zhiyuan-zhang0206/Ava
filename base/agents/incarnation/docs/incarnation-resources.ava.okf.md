@@ -106,7 +106,7 @@ Same-host admission preserves the stored receipt rather than rewriting its facts
 Owner domain closure:
 [[domain-closure.ava.okf.md|domain closure]].
 
-Successful hosted admission can return its exact predecessor proof to the native
-work owner in the same transaction; it does not widen resource admission.
-Guarded work identity and cancel recovery:
+Hosted admission retains the exact owner and resource fences. It does not
+produce a cross-generation work-transfer certificate or recover cancellation.
+Guarded work identity and cancellation:
 [[native-work-cancel.ava.okf.md|native work cancellation]].

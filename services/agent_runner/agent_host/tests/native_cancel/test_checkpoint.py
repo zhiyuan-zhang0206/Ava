@@ -113,13 +113,13 @@ async def test_cold_original_without_marker_or_transfer_is_uncertain(
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool)
-    graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
+    graph, _saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
     original = await graph.aget_state(config)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         await asyncio.to_thread(
             accept_native_cancel, pool, "no-stop-proof", target.agent_id, target
         )
-    assert not await recover_native_cancel(aops_pool, saver, graph, incarnation, resources=None)
+    assert not await recover_native_cancel(aops_pool, incarnation)
     unchanged = await graph.aget_state(config)
     assert unchanged.config == original.config
     assert unchanged.values["halted"] is False
@@ -135,8 +135,8 @@ async def test_no_protected_command_never_adds_cold_startup_hold(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     incarnation, target = await managed_work(db_conn, aops_pool)
-    graph, saver, _config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
-    assert await recover_native_cancel(aops_pool, saver, graph, incarnation, resources=None)
+    _graph, _saver, _config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
+    assert await recover_native_cancel(aops_pool, incarnation)
 
 
 async def test_empty_database_set_does_not_override_live_continuation_resource(
@@ -174,7 +174,7 @@ async def test_lost_or_misaligned_pointer_holds_pending_original_command(
     )
 
     incarnation, target = await managed_work(db_conn, aops_pool)
-    graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
+    graph, _saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         await asyncio.to_thread(accept_native_cancel, pool, "pointer-gap", target.agent_id, target)
     db_conn.execute(
@@ -183,7 +183,7 @@ async def test_lost_or_misaligned_pointer_holds_pending_original_command(
     )
     db_conn.commit()
     original = await graph.aget_state(config)
-    assert not await recover_native_cancel(aops_pool, saver, graph, incarnation, resources=None)
+    assert not await recover_native_cancel(aops_pool, incarnation)
     assert (await graph.aget_state(config)).config == original.config
     with pytest.raises(NativeWorkUncertainError, match="must settle"):
         await prepare_native_invocation(aops_pool, NativeWorkContinuation(uuid4()), incarnation)

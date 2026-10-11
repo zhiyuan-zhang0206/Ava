@@ -241,12 +241,12 @@ class TurnScheduler:
         except TurnStallTimeoutError:
             # The no-progress stall guard aborted the invocation cleanly (it
             # DID unwind): the task ends, the runtime was dropped by run_turn,
-            # and the next wake resumes from the checkpoint after re-running
+            # and the next wake requires fresh input after re-running
             # the startup reconcile.
             logger.error(
                 "hosted turn for agent {agent_id} aborted after a "
                 "no-progress stall — dropping the task; the next wake "
-                "resumes from the checkpoint",
+                "requires fresh input",
                 event="host_turn_stall_aborted",
                 agent_id=agent_id,
             )
@@ -260,7 +260,7 @@ class TurnScheduler:
                 self._config_fingerprint(agent_id) if self._config_fingerprint is not None else None
             )
             logger.exception(
-                "hosted turn crashed — dropping the task; the next wake retries",
+                "hosted turn crashed — dropping the task; fresh input may start a new turn",
                 event="host_turn_crashed",
                 agent_id=agent_id,
                 exception_type=type(exc).__name__,
@@ -364,7 +364,7 @@ class TurnScheduler:
             logger.error(
                 "hosted turn for agent {agent_id} did not unwind {waited_s:.1f}s after cancel "
                 "— it is blocked somewhere asyncio cannot interrupt (a C call); the host is "
-                "exiting anyway and this agent's turn resumes from its checkpoint on restart "
+                "exiting; this agent requires fresh input after restart "
                 "(last completed LLM step: {idle_s}s ago)",
                 event="host_turn_uncancellable",
                 agent_id=agent_id,
@@ -445,12 +445,10 @@ class PendingInboundWake:
     that grace (an active turn may legitimately run up to the exec +
     LLM-retry budget). A fresh pending row still receives the scan's normal
     wake, but does not interrupt a legitimate turn that happens to be running.
-    ``recovery`` marks a wake without ordinary inbound or active lease work.
     """
 
     agent_id: int
     stale: bool
-    recovery: bool = False
 
 
 class _WakeScheduler(Protocol):
@@ -504,8 +502,6 @@ class InboundWakeDispatcher:
         turn_admission: TurnAdmission | None = None,
         stale_after_s: float | None = None,
         scan_interval_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
-        recovery_wake_batch: int = 4,
-        recovery_wake_inflight: int = 4,
         max_scan_backoff_s: float = _DEFAULT_MAX_SCAN_BACKOFF_S,
         subscription_read_timeout_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
         subscription_read_deadline_grace_s: float = _DEFAULT_SUBSCRIPTION_READ_SLACK_S,
@@ -519,9 +515,6 @@ class InboundWakeDispatcher:
         self._turn_admission = turn_admission if turn_admission is not None else TurnAdmission(0)
         self._stale_after_s = stale_after_s
         self._scan_interval_s = scan_interval_s
-        self._recovery_wake_batch = recovery_wake_batch
-        self._recovery_wake_inflight = recovery_wake_inflight
-        self._recovery_in_flight: dict[int, asyncio.Task[None]] = {}
         self._max_scan_backoff_s = max_scan_backoff_s
         self._subscription_read_timeout_s = subscription_read_timeout_s
         self._subscription_read_deadline_grace_s = subscription_read_deadline_grace_s
@@ -641,68 +634,8 @@ class InboundWakeDispatcher:
             scan_backoff_s=self._scan_interval_s,
         )
 
-    def _wake_scanned_candidate(
-        self, candidate: PendingInboundWake, started: set[int], recovery_started: int
-    ) -> int:
-        starts_turn = candidate.agent_id not in self._scheduler.active_agents
-        if (
-            candidate.recovery
-            and starts_turn
-            and (
-                recovery_started >= self._recovery_wake_batch
-                or len(self._recovery_in_flight) >= self._recovery_wake_inflight
-            )
-        ):
-            return recovery_started
-        if starts_turn:
-            started.add(candidate.agent_id)
-            if candidate.recovery:
-                recovery_started += 1
-        task = self._scheduler.wake(candidate.agent_id)
-        if candidate.recovery and starts_turn and task is not None:
-            self._recovery_in_flight[candidate.agent_id] = task
-            task.add_done_callback(partial(self._release_recovery_slot, candidate.agent_id))
-            logger.info(
-                "hosted recovery wake started for agent {agent_id}; {in_flight} in flight",
-                event="host_recovery_wake_started",
-                agent_id=candidate.agent_id,
-                in_flight=len(self._recovery_in_flight),
-            )
-        return recovery_started
-
-    def _release_recovery_slot(self, agent_id: int, task: asyncio.Task[None]) -> None:
-        """Only a pre-start reaper replacement inherits this scan wake's slot.
-        Scan reconciliation defers release until that reaper runs."""
-        if self._recovery_in_flight.get(agent_id) is not task or not task.done():
-            return
-        if task.cancelled() and self._scheduler.task_for(agent_id) is task:
-            # The queued pre-start reaper owns this slot's transfer or release.
-            return
-        successor = self._scheduler.task_for(agent_id) if task.cancelled() else None
-        if (
-            successor is not None
-            and successor is not task
-            and not successor.done()
-            and self._scheduler.reaped_successor(agent_id) is successor
-        ):
-            self._recovery_in_flight[agent_id] = successor
-            successor.add_done_callback(partial(self._release_recovery_slot, agent_id))
-            return
-        del self._recovery_in_flight[agent_id]
-        logger.info(
-            "hosted recovery wake released for agent {agent_id}; {in_flight} in flight",
-            event="host_recovery_wake_released",
-            agent_id=agent_id,
-            in_flight=len(self._recovery_in_flight),
-        )
-
-    def _release_completed_recovery_slots(self) -> None:
-        for agent_id, task in tuple(self._recovery_in_flight.items()):
-            if task.done():
-                self._release_recovery_slot(agent_id, task)
-
     async def scan_once(self) -> None:
-        """Wake all work; bound recovery starts by batch and in-flight limits."""
+        """Wake new input and controls; cancel stalled tasks without replay."""
         if self._pending_scan is None:
             return
         if self._stale_after_s is None:
@@ -712,13 +645,9 @@ class InboundWakeDispatcher:
             # the scan after the hold releases.
             return
 
-        # Reconcile completed tasks before admitting more recovery turns.
-        self._release_completed_recovery_slots()
-
         # Old inbox/DB timestamps cannot license cancellation; only the current
         # monotonic progress clock can.
         started: set[int] = set()
-        recovery_started = 0
         candidates = await self._pending_scan(self._stale_after_s)
         raise_if_cancellation_pending()
         for candidate in candidates:
@@ -729,7 +658,9 @@ class InboundWakeDispatcher:
                     raise HostRestartRequiredError(
                         f"hosted turn for agent {candidate.agent_id} did not unwind"
                     )
-            recovery_started = self._wake_scanned_candidate(candidate, started, recovery_started)
+            if candidate.agent_id not in self._scheduler.active_agents:
+                started.add(candidate.agent_id)
+            self._scheduler.wake(candidate.agent_id)
         await self._cancel_stalled_turns(started)
 
     def _candidate_stalled(self, candidate: PendingInboundWake) -> bool:

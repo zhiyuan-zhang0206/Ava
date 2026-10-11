@@ -16,7 +16,6 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from base.agents.context import AvaContext
 from base.events.live.publisher import AgentEventPublisher
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 from ...invocation import driver
 from ...runtime import TurnOutcome
@@ -89,11 +88,8 @@ async def _drive(
             bus=MagicMock(),
             original_incarnation=RuntimeIncarnation(42, uuid4(), uuid4()),
         ),
-        MagicMock(),
-        asyncio.Lock(),
         invoke,
         MagicMock(),
-        reconcile_inputs=configured_policy().reconcile_inputs,
     )
 
 
