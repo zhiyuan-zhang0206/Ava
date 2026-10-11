@@ -9,7 +9,6 @@ development home installs nothing and registers nothing.
 from __future__ import annotations
 
 from base.cluster.dataplane.walg_binary import ensure_walg_binary
-from base.config import settings
 from base.host.private_storage import ensure_private_dir
 from cli.commands.converge.spec import ConvergeCtx
 from services.backup.walg import config as walg_config
@@ -25,7 +24,7 @@ def converge_walg(ctx: ConvergeCtx) -> None:
     """
     if not walg_config.enabled(path_reader=lambda: ctx.read_config().view.walg.walg_config_file):
         return
-    if settings.data_plane.is_remote:
+    if ctx.read_config().view.data_plane.is_remote:
         raise RuntimeError(
             "AVA_WALG_CONFIG_FILE is set but this cluster's Postgres is remote-managed: "
             "WAL archiving needs the locally launched Postgres (unset the key)"

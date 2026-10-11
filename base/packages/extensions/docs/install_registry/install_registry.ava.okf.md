@@ -44,15 +44,7 @@ installed_at, updated_at, trust, scanned_at, accepted_findings, update}`
 
 ## Schema v2 — update policy & channels
 
-`Registry.version` is 2 since the content-channel support. Beside the per-row
-`update` above, the registry carries a top-level `channels` map
-(`ChannelState`: one row per channel kind — remote URL, ref, last seen head,
-last check). The reader accepts exactly v2: a v1 file is refused (the
-lazy-migration shim is retired — every writer has been v2-only since #2355),
-and a file carrying a *newer* version is refused as before — no build guesses
-at another shape; `load()` itself never writes.
-The surface over all of it: `ava packages status`
-([[../../../../cli/commands/extensions/packages/docs/packages.ava.okf.md|the package commands]]).
+See [[base/packages/extensions/docs/install_registry/policy-inputs.ava.okf.md|update policy and explicit defaults inputs]].
 
 ## Trust tiers
 
@@ -129,8 +121,8 @@ it on demand (exit 2 on criticals).
 A **mitigation layer, not a boundary**: known shapes of known attacks, in text
 it can read. A clean report means "no rule matched", never "safe". Rationale +
 rejected alternatives:
-[the decision record](../../../../docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md);
-open gaps: [what's left](../../../../future/infra/security/skill-supply-chain-trust.md).
+[the decision record](../../../../../docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md);
+open gaps: [what's left](../../../../../future/infra/security/skill-supply-chain-trust.md).
 
 Beyond the load dir, a plugin can contribute skill roots at scan time via
 The `skill_sources` a plugin declares (`PluginContributions`) — the `ava_code` plugin uses it to surface

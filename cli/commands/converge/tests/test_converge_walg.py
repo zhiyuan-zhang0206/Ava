@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from base.cluster.machine.boot import machine_from_boot
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
 from cli.commands.converge import walg as converge_walg_module
@@ -31,16 +31,19 @@ def installs(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return installed
 
 
-def _remote(monkeypatch: pytest.MonkeyPatch, *, remote: bool) -> None:
-    """`is_remote` is derived from the URLs; the converge step only reads the verdict."""
-    monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: remote))
-
-
 def _ctx(
-    sandbox: Sandbox, *, operator_database: Callable[[], Any], producer: Callable[[], EventPipeline]
+    sandbox: Sandbox,
+    *,
+    operator_database: Callable[[], Any],
+    producer: Callable[[], EventPipeline],
+    enabled: bool = True,
+    remote: bool = False,
 ) -> ConvergeCtx:
     config = ConfigBoot()
-    config.set_field("walg_config_file", settings.walg.walg_config_file)
+    config.set_field("walg_config_file", sandbox.config_file if enabled else None)
+    host = "192.0.2.10" if remote else "127.0.0.1"
+    config.set_field("db_url", f"postgresql://test:test@{host}:5433/ava")
+    config.set_field("redis_url", "redis://127.0.0.1:6380/0")
     return ConvergeCtx(
         repo=sandbox.home,
         ava_home=sandbox.home,
@@ -73,14 +76,19 @@ def test_off_installs_and_writes_nothing(
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
-    _remote(monkeypatch, remote=False)
 
-    converge_walg_module.converge_walg(
-        _ctx(sandbox, operator_database=operator_database, producer=operator_pipeline)
+    ctx = _ctx(
+        sandbox,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        enabled=False,
+        remote=True,
     )
+    converge_walg_module.converge_walg(ctx)
 
     assert installs == []
     assert not (sandbox.home / "backups").exists()
+    assert not ctx.config.is_full()
 
 
 def test_on_installs_validates_pins_the_key_and_makes_the_state_directory(
@@ -91,7 +99,6 @@ def test_on_installs_validates_pins_the_key_and_makes_the_state_directory(
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    _remote(monkeypatch, remote=False)
 
     converge_walg_module.converge_walg(
         _ctx(sandbox, operator_database=operator_database, producer=operator_pipeline)
@@ -113,7 +120,6 @@ def test_a_bad_configuration_fails_converge_not_postgres(
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    _remote(monkeypatch, remote=False)
     sandbox.write_config(valid_config(sandbox.key_file, WALG_PREVENT_WAL_OVERWRITE="false"))
 
     with pytest.raises(walg_config.WalgConfigError, match="WALG_PREVENT_WAL_OVERWRITE"):
@@ -132,7 +138,6 @@ def test_a_different_key_than_the_pinned_one_fails_converge(
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    _remote(monkeypatch, remote=False)
     converge_walg_module.converge_walg(
         _ctx(sandbox, operator_database=operator_database, producer=operator_pipeline)
     )
@@ -152,11 +157,15 @@ def test_a_remote_managed_data_plane_cannot_archive(
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    _remote(monkeypatch, remote=True)
 
     with pytest.raises(RuntimeError, match="remote-managed"):
         converge_walg_module.converge_walg(
-            _ctx(sandbox, operator_database=operator_database, producer=operator_pipeline)
+            _ctx(
+                sandbox,
+                operator_database=operator_database,
+                producer=operator_pipeline,
+                remote=True,
+            )
         )
 
     assert installs == []
@@ -218,6 +227,10 @@ def test_the_key_being_unset_removes_the_tick(
 
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    ensure_walg_job(_ctx(sandbox, operator_database=operator_database, producer=operator_pipeline))
+    ensure_walg_job(
+        _ctx(
+            sandbox, operator_database=operator_database, producer=operator_pipeline, enabled=False
+        )
+    )
 
     assert job_calls == ["unregister"]
