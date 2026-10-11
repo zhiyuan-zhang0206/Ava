@@ -384,11 +384,11 @@ def test_upsert_leaves_lookalike_export_keys_alone(tmp_path: Path) -> None:
 
 
 def test_remove_env_drops_export_prefixed_lines(tmp_path: Path) -> None:
-    """A retired key actually leaves the surface even when it was hand-written
+    """A removed key actually leaves the surface even when it was hand-written
     with the export prefix — Settings reads both forms as the same key."""
     f = tmp_path / ".env"
-    f.write_text("export AVA_PGBOUNCER_PORT=6543\nKEEP=1\n")
-    remove_env(f, {"AVA_PGBOUNCER_PORT"})
+    f.write_text("export AVA_OLD_KEY=6543\nKEEP=1\n")
+    remove_env(f, {"AVA_OLD_KEY"})
     assert f.read_text() == "KEEP=1\n"
 
 

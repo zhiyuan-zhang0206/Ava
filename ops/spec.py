@@ -68,7 +68,7 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
     coupling it to the agent-plugin-registration plane would be cross-plane
     semantics. A plugin gates its own service (whether it starts) via an explicit
     settings field in ``ServiceSpec.gate`` — e.g. task-maintenance's
-    ``AVA_TASK_MAINTENANCE_ENABLED`` — which is deterministic at daemon-start and
+    Fleet ``task_maintenance_enabled`` — which is deterministic at daemon-start and
     unaffected by any per-agent config overlay. start / root / status all
     follow, since they derive from `build_services()`.
 
