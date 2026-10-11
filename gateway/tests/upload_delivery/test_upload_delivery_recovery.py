@@ -219,7 +219,7 @@ def test_receiver_same_physical_root_different_home_counts_once_and_verifies_rea
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_copies").fetchone() == (1,)
 
 
-def test_receiver_wrong_actual_unit_and_legacy_writer_cannot_overwrite_nested_final(
+def test_receiver_wrong_actual_unit_cannot_overwrite_nested_final(
     uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
 ):
     client, agent = uploaded_agent
@@ -230,17 +230,11 @@ def test_receiver_wrong_actual_unit_and_legacy_writer_cannot_overwrite_nested_fi
     )
     with pytest.raises(UploadDeliveryConflictError):
         receiver.receive(app.state.db_pool, request)
-    from base.agents.upload_delivery.paths import sanitize_upload_name
-
     path = Path(proof_for(request).directory) / request.manifest.objects[0].name
-    flat = path.parent.parent.parent / sanitize_upload_name(
-        str(path.relative_to(path.parent.parent.parent))
-    )
-    flat.write_bytes(b"old disconnected writer")
     assert path.read_bytes() == b"bytes"
 
 
-def test_legacy_flat_admission_counts_hidden_files_and_receiving_reservation(
+def test_silent_admission_counts_hidden_files_and_receiving_reservation(
     uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
 ):
     client, agent = uploaded_agent
@@ -249,7 +243,9 @@ def test_legacy_flat_admission_counts_hidden_files_and_receiving_reservation(
 
     monkeypatch.setattr(uploads, "MAX_AGENT_UPLOAD_BYTES", 5)
     response = client.post(
-        f"/api/agents/{agent}/uploads?deliver=false", files=[("files", ("flat", b"x"))]
+        f"/api/agents/{agent}/uploads",
+        headers={**HEADERS, "Idempotency-Key": "silent"},
+        files=[("files", ("flat", b"x"))],
     )
     assert response.status_code == 413
 

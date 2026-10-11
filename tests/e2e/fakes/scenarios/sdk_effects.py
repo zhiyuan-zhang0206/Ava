@@ -73,7 +73,8 @@ def build_upload(model: str, *, agent_id: int | None) -> RecordingModel:
     code = (
         "import ava\n"
         "from pathlib import Path\n"
-        f"p = Path.home() / 'Downloads' / f'AvaAgent-{{ava.self.AGENT_ID}}' / {UPLOAD_NAME!r}\n"
+        "root = Path.home() / 'Downloads' / f'AvaAgent-{ava.self.AGENT_ID}' / '.delivered-v1'\n"
+        "p = next(q for q in root.glob('*/*') if not q.name.startswith('.'))\n"
         "print('upload-content', p.read_text())"
     )
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))

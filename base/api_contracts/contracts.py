@@ -501,8 +501,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         "/api/keyed/v1/agents/{agent_id}/uploads/{batch_id}/objects/{ordinal}",
     ): RouteContract(),
     ("POST", "/api/agents/{agent_id}/uploads"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="save files to disk + enqueue inbound; a retry duplicates files",
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="silent save only: the claimed manifest is published as immutable objects and the original receipt replays under the same key; no inbound is queued",
     ),
 }
 

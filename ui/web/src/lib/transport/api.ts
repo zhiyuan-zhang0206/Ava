@@ -786,31 +786,30 @@ export const api = {
 
   submitUploadedFiles,
 
-  // `deliver=false` saves the files silently and returns their reference urls
-  // without notifying the agent — the native-image-attachment path, where the
-  // caller carries the returned url into the next multimodal message. The
-  // default (true) is the paperclip / drag-drop notify path for arbitrary files.
+  // Saves the files silently and returns their reference urls without notifying
+  // the agent — the native-image-attachment path, where the caller carries the
+  // returned url into the next multimodal message. Each call is one keyed
+  // operation (a fresh key unless the caller retries with its own); delivering
+  // arbitrary files to the agent is `submitUploadedFiles`.
   uploadFiles: (
     agentId: number,
     files: File[],
     onProgress?: (pct: number) => void,
-    deliver = true,
-    operationKey?: string,
+    operationKey: string = newOperationKey(),
   ): Promise<UploadedBatch> => {
-    if (operationKey !== undefined && (typeof operationKey !== "string" || !operationKey || operationKey.length > 128)) {
+    if (typeof operationKey !== "string" || !operationKey || operationKey.length > 128) {
       throw new Error("idempotency key must contain 1 to 128 characters");
     }
-    if (deliver && operationKey !== undefined) throw new Error("keyed uploads currently require deliver=false");
-    const uploadKey = deliver ? undefined : (operationKey ?? newOperationKey());
     const formData = new FormData();
     for (const file of files) {
       formData.append("files", file, file.name);
     }
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", url(`/api/agents/${agentId}/uploads?deliver=${deliver}`));
+      xhr.open("POST", url(`/api/agents/${agentId}/uploads`));
       xhr.withCredentials = true;
-      if (uploadKey !== undefined) xhr.setRequestHeader("Idempotency-Key", uploadKey);
+      xhr.setRequestHeader("Idempotency-Key", operationKey);
+      xhr.setRequestHeader("Idempotency-Scope", "principal-v1");
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && onProgress) {
           onProgress(Math.round((e.loaded / e.total) * 100));

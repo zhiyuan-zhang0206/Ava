@@ -346,7 +346,6 @@ OpKind = Literal[
     "shell_kill",
     "agent_skill_view",
     "shell_capture",
-    "upload_receive",
     "upload-receive-v1",
 ]
 
@@ -449,23 +448,6 @@ class ShellCapturePayload(BaseModel):
     agent_id: int
     session_id: int
     lines: int = 200
-
-
-class UploadReceivePayload(BaseModel):
-    """`upload_receive` op payload: pull one uploaded file from the gateway
-    onto this runner's local uploads dir.
-
-    The gateway stores every upload on its own disk and serves it back at
-    ``/api/agents/<id>/uploads/<name>``. An agent that runs on a REMOTE
-    runner cannot read the gateway's local disk, so the gateway dispatches
-    this op after saving: the runner fetches the file over HTTP (same
-    cluster-secret bearer as every other runner -> gateway dial) and writes
-    it into its own ``~/Downloads/AvaAgent-<id>/``. The notification message
-    then carries this host's absolute path — the address the agent can act
-    on directly."""
-
-    agent_id: int
-    name: str
 
 
 # ── per-OpKind result models ──
@@ -616,15 +598,6 @@ class ShellCaptureResult(BaseModel):
     lines: list[str]
     created_at: datetime | None = None
     uptime_seconds: int = 0
-
-
-class UploadReceiveResult(BaseModel):
-    """`upload_receive` op result — the local absolute path the file was
-    written to on this runner (``~/Downloads/AvaAgent-<id>/<name>``), the
-    address the agent notification message carries so a remote agent can
-    read the file off its own disk."""
-
-    path: str
 
 
 class AgentSessionGroup(BaseModel):

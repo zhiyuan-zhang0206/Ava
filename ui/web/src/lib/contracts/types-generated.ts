@@ -3828,13 +3828,11 @@ export interface paths {
         put?: never;
         /**
          * Upload Files
-         * @description Upload one or more files in a single batch. Each file is saved to
-         *     ~/Downloads/AvaAgent-{agent_id}/ and returned with its reference url.
+         * @description Save one or more files silently and return each file's reference url.
          *
-         *     `deliver=true` (default) inserts a single inbound listing every saved path,
-         *     so the agent learns about the whole batch at once. `deliver=false` saves
-         *     silently (no inbound) — the caller carries the returned urls into a later
-         *     multimodal message.
+         *     No inbound is queued: the caller carries the returned urls into a later
+         *     multimodal message. `deliver=true` is refused; delivering a batch to the
+         *     agent is `POST /api/keyed/v1/agents/{id}/uploads`.
          *
          *     response_model makes FastAPI validate the return + emit the schema into
          *     OpenAPI components; the frontend codegen auto-syncs to types-generated.ts.
@@ -14005,7 +14003,10 @@ export interface operations {
             query?: {
                 deliver?: boolean;
             };
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
             path: {
                 agent_id: number;
             };

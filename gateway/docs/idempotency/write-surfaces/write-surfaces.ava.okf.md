@@ -69,4 +69,4 @@ Owners:
 | `POST /api/agents/{agent_id}/messages/reconcile` | natural | idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery |
 | `POST /api/agents/{agent_id}/system-note` | keyed | optional principal-scoped identity reuses one system-note inbound; changed payload or resurrection policy conflicts |
 | `PATCH /api/tasks/{task_id}` | keyed / transactional | receipt commits with task and notification; replay skips writes and wakes |
-| `POST /api/agents/{agent_id}/uploads` | one-shot | [upload acceptance owner](../../../routers/docs/upload-batches.ava.okf.md) |
+| `POST /api/agents/{agent_id}/uploads` | keyed / receipt | silent save under a required principal-v1 key; [upload acceptance owner](../../../routers/docs/upload-batches.ava.okf.md) |

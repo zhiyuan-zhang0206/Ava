@@ -7458,7 +7458,7 @@
     "/api/agents/{agent_id}/uploads": {
       "post": {
         "summary": "Upload Files",
-        "description": "Upload one or more files in a single batch. Each file is saved to\n~/Downloads/AvaAgent-{agent_id}/ and returned with its reference url.\n\n`deliver=true` (default) inserts a single inbound listing every saved path,\nso the agent learns about the whole batch at once. `deliver=false` saves\nsilently (no inbound) — the caller carries the returned urls into a later\nmultimodal message.\n\nresponse_model makes FastAPI validate the return + emit the schema into\nOpenAPI components; the frontend codegen auto-syncs to types-generated.ts.",
+        "description": "Save one or more files silently and return each file's reference url.\n\nNo inbound is queued: the caller carries the returned urls into a later\nmultimodal message. `deliver=true` is refused; delivering a batch to the\nagent is `POST /api/keyed/v1/agents/{id}/uploads`.\n\nresponse_model makes FastAPI validate the return + emit the schema into\nOpenAPI components; the frontend codegen auto-syncs to types-generated.ts.",
         "operationId": "upload_files_api_agents__agent_id__uploads_post",
         "parameters": [
           {
@@ -7476,8 +7476,28 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "default": true,
+              "default": false,
               "title": "Deliver"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
             }
           }
         ],

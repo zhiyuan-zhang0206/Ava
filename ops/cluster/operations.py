@@ -2,8 +2,7 @@
 
 Stopping announcements, live status snapshots, persistent-shell probes and the
 per-agent command view. One of the op clusters beside `ops.lifecycle`,
-`ops.host_config`, `ops.inventory` and `ops.uploads`; each cluster is
-self-contained.
+`ops.host_config` and `ops.inventory`; each cluster is self-contained.
 
 Most of these are thin wrappers; this layer is the agent-runner-callable RPC
 surface the ops server dispatches (`services/agent_runner/agent_ops/daemon.py:_dispatch`) and
