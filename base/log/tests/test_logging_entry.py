@@ -167,3 +167,33 @@ print(json.dumps({"records": records, "loaded": sorted(name for name in sys.modu
         tmp_path / "home",
     )
     assert observed == {"records": [], "loaded": []}
+
+
+def test_fresh_ops_prepares_before_configuration(tmp_path: Path) -> None:
+    observed = run_probe(
+        """
+import importlib.abc, json, runpy, sys
+sys.path.insert(0, sys.argv[1])
+from loguru import logger
+records = []
+logger.add(lambda message: records.append(message.record["message"]), diagnose=False)
+class ConfigurationReached(Exception):
+    pass
+class ConfigurationBoundary(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "base.config":
+            raise ConfigurationReached()
+sys.meta_path.insert(0, ConfigurationBoundary())
+sys.argv = ["agent-ops"]
+try:
+    runpy.run_module("services.agent_runner.agent_ops.daemon", run_name="__main__")
+except ConfigurationReached:
+    reached = True
+else:
+    reached = False
+logger.warning("must be quiet before process initialization")
+print(json.dumps({"reached": reached, "records": records}))
+""",
+        tmp_path / "home",
+    )
+    assert observed == {"reached": True, "records": []}

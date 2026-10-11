@@ -33,6 +33,9 @@ from pathlib import Path
 if __name__ == "__main__":
     # Reject unknown argv before imports can load Settings or touch local state.
     argparse.ArgumentParser(description=__doc__).parse_args()
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
 
 
 import asyncio
