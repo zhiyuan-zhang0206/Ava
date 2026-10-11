@@ -8,12 +8,13 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.api_contracts.idempotency import keyed_headers
 from gateway.tests.test_idempotency import _count_inbounds
 from gateway.tests.test_idempotency import agent_id as agent_id
 from gateway.tests.test_idempotency import client as client
 
 
-def test_authenticated_admin_legacy_retry_and_scoped_reconcile(
+def test_authenticated_admin_retry_and_scoped_reconcile(
     client: TestClient,
     db_conn: psycopg.Connection,
     agent_id: int,
@@ -25,23 +26,35 @@ def test_authenticated_admin_legacy_retry_and_scoped_reconcile(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     url = f"/api/agents/{agent_id}/messages"
     body = {"content": "admin principal retry", "source": "user"}
-    legacy_headers = {"Authorization": f"Bearer {secret}", "Idempotency-Key": "legacy-flight"}
-    first = client.post(url, json=body, headers=legacy_headers)
-    repeated = client.post(url, json=body, headers=legacy_headers)
-    assert first.status_code == repeated.status_code == 201
+    headers = {"Authorization": f"Bearer {secret}"} | keyed_headers("new-logical-message")
+    first = client.post(url, json=body, headers=headers)
+    repeated = client.post(url, json=body, headers=headers)
+    assert first.status_code == repeated.status_code == 201, first.text
     assert first.json()["inbound_id"] == repeated.json()["inbound_id"]
-    headers = legacy_headers | {
-        "Idempotency-Scope": "principal-v1",
-        "Idempotency-Key": "new-logical-message",
-    }
-    scoped = client.post(url, json=body, headers=headers)
-    assert scoped.status_code == 201, scoped.text
     reconciled = client.post(f"{url}/reconcile", json=body, headers=headers)
     assert reconciled.status_code == 200, reconciled.text
-    assert reconciled.json()["inbound_id"] == scoped.json()["inbound_id"]
+    assert reconciled.json()["inbound_id"] == first.json()["inbound_id"]
     conflict = client.post(url, json=body | {"content": "changed"}, headers=headers)
     assert conflict.status_code == 409
-    assert _count_inbounds(db_conn, agent_id, "admin principal retry") == 2
+    assert _count_inbounds(db_conn, agent_id, "admin principal retry") == 1
+
+
+@pytest.mark.parametrize("route", ["", "/reconcile"])
+def test_key_without_principal_scope_is_rejected_before_any_write(
+    client: TestClient, db_conn: psycopg.Connection, agent_id: int, route: str
+) -> None:
+    body = {"content": "unscoped key", "source": "user"}
+    url = f"/api/agents/{agent_id}/messages{route}"
+    missing = client.post(url, json=body, headers={"Idempotency-Key": "unscoped"})
+    assert missing.status_code == 422
+    assert "Idempotency-Scope" in missing.text
+    wrong = client.post(
+        url,
+        json=body,
+        headers={"Idempotency-Key": "unscoped", "Idempotency-Scope": "principal-v2"},
+    )
+    assert wrong.status_code == 422
+    assert _count_inbounds(db_conn, agent_id, "unscoped key") == 0
 
 
 def test_browser_rotation_and_bearer_share_admin_retry_namespace(
@@ -91,13 +104,13 @@ def test_same_key_retry_lands_once(
     resp1 = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "hello once", "source": "user"},
-        headers={"Idempotency-Key": "key-1"},
+        headers=keyed_headers("key-1"),
     )
     assert resp1.status_code == 201, resp1.text
     resp2 = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "hello once", "source": "user"},
-        headers={"Idempotency-Key": "key-1"},
+        headers=keyed_headers("key-1"),
     )
     assert resp2.status_code == 201, resp2.text
     assert resp1.json()["inbound_id"] == resp2.json()["inbound_id"]
@@ -109,12 +122,12 @@ def test_same_key_different_body_fails_closed(client: TestClient, agent_id: int)
     first = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "first body", "source": "user"},
-        headers={"Idempotency-Key": "key-body-conflict"},
+        headers=keyed_headers("key-body-conflict"),
     )
     second = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "different body", "source": "user"},
-        headers={"Idempotency-Key": "key-body-conflict"},
+        headers=keyed_headers("key-body-conflict"),
     )
     assert first.status_code == 201, first.text
     assert second.status_code == 409, second.text
@@ -138,12 +151,12 @@ def test_same_key_different_agent_fails_closed(
     first = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "same body", "source": "user"},
-        headers={"Idempotency-Key": "key-agent-conflict"},
+        headers=keyed_headers("key-agent-conflict"),
     )
     second = client.post(
         f"/api/agents/{other_id}/messages",
         json={"content": "same body", "source": "user"},
-        headers={"Idempotency-Key": "key-agent-conflict"},
+        headers=keyed_headers("key-agent-conflict"),
     )
     assert first.status_code == 201, first.text
     assert second.status_code == 409, second.text
@@ -158,7 +171,7 @@ def test_concurrent_same_key_requests_land_once(
         response = client.post(
             f"/api/agents/{agent_id}/messages",
             json={"content": "from two tabs", "source": "user"},
-            headers={"Idempotency-Key": "key-two-tabs"},
+            headers=keyed_headers("key-two-tabs"),
         )
         return response.status_code, response.json()
 
@@ -182,12 +195,12 @@ def test_different_keys_land_twice(
     resp1 = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "twice", "source": "user"},
-        headers={"Idempotency-Key": "key-a"},
+        headers=keyed_headers("key-a"),
     )
     resp2 = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "twice", "source": "user"},
-        headers={"Idempotency-Key": "key-b"},
+        headers=keyed_headers("key-b"),
     )
     assert resp1.status_code == 201 and resp2.status_code == 201
     assert _count_inbounds(db_conn, agent_id, "twice") == 2
@@ -196,7 +209,7 @@ def test_different_keys_land_twice(
 def test_client_message_unique_index_allows_nulls_but_rejects_duplicate_keys(
     db_conn: psycopg.Connection, agent_id: int
 ) -> None:
-    """The partial unique index preserves legacy key-less callers."""
+    """The partial unique index preserves key-less callers."""
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
@@ -223,7 +236,7 @@ def test_client_message_unique_index_allows_nulls_but_rejects_duplicate_keys(
 def test_no_key_passes_through(
     client: TestClient, db_conn: psycopg.Connection, agent_id: int
 ) -> None:
-    """A legacy key-less caller behaves exactly as before — no dedup."""
+    """A key-less caller gets no dedup."""
     resp = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "legacy", "source": "user"},
@@ -234,7 +247,7 @@ def test_no_key_passes_through(
 
 def test_non_alwk_route_ignores_key(client: TestClient) -> None:
     """Routes not declaring AT_LEAST_ONCE_WITH_KEY ignore the header."""
-    resp = client.get("/api/agents", headers={"Idempotency-Key": "ignored"})
+    resp = client.get("/api/agents", headers=keyed_headers("ignored"))
     assert resp.status_code == 200, resp.text
 
 
@@ -243,13 +256,13 @@ def test_replay_preserves_status_and_body(client: TestClient, agent_id: int) -> 
     resp1 = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "replay", "source": "user"},
-        headers={"Idempotency-Key": "key-replay"},
+        headers=keyed_headers("key-replay"),
     )
     body1 = resp1.json()
     resp2 = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "replay", "source": "user"},
-        headers={"Idempotency-Key": "key-replay"},
+        headers=keyed_headers("key-replay"),
     )
     assert resp2.status_code == resp1.status_code
     assert resp2.json() == body1

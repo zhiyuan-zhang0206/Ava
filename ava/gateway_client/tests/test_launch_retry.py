@@ -10,7 +10,6 @@ import pytest
 
 from ava import agents, gateway_client
 from ava.gateway_client import transport
-from base.agents import GatewayUnavailable
 
 PRIOR = uuid4()
 ATTEMPT = uuid4()
@@ -120,7 +119,8 @@ def test_http_failure_never_downgrades_or_retries(status: int) -> None:
     assert calls[0].url.path == "/api/keyed/v1/agents/42/retry-launch"
 
 
-def test_response_loss_is_one_attempt_and_explicit_replay_keeps_identity() -> None:
+@pytest.mark.usefixtures("retry_waits")
+def test_response_loss_is_retried_with_the_same_identity() -> None:
     calls: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -133,9 +133,6 @@ def test_response_loss_is_one_attempt_and_explicit_replay_keeps_identity() -> No
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
         transport.use_client(http),
     ):
-        with pytest.raises(GatewayUnavailable):
-            submit()
-        assert len(calls) == 1
         assert submit() == 42
     assert len(calls) == 2
     assert calls[0].url == calls[1].url

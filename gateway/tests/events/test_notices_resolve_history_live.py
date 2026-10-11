@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.agents.observation.snapshot import select_one
+from base.api_contracts.idempotency import keyed_headers
 from base.config import settings
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
@@ -501,7 +502,7 @@ def test_supersede_publishes_global_notice_id(
         resp = client.post(
             f"/api/agents/{agent_id}/notices",
             json={"title": "new notice", "content": None},
-            headers={"Idempotency-Key": str(uuid4())},
+            headers=keyed_headers(str(uuid4())),
         )
     assert resp.status_code == 201, resp.text
     body = resp.json()
@@ -524,7 +525,7 @@ def test_post_notice_sets_default_expire_at(db_conn: psycopg.Connection) -> None
         resp = client.post(
             f"/api/agents/{aid}/notices",
             json={"title": "default expiry notice", "content": "detail"},
-            headers={"Idempotency-Key": str(uuid4())},
+            headers=keyed_headers(str(uuid4())),
         )
     assert resp.status_code == 201
     after = datetime.now(UTC)
@@ -553,7 +554,7 @@ def test_post_notice_with_explicit_expire_at(db_conn: psycopg.Connection) -> Non
                 "title": "explicit expiry notice",
                 "expire_at": target.isoformat(),
             },
-            headers={"Idempotency-Key": str(uuid4())},
+            headers=keyed_headers(str(uuid4())),
         )
     assert resp.status_code == 201
 
@@ -577,7 +578,7 @@ def test_post_notice_clamps_expire_at_when_exceeding_limit(db_conn: psycopg.Conn
                 "title": "exceeding expiry notice",
                 "expire_at": target.isoformat(),
             },
-            headers={"Idempotency-Key": str(uuid4())},
+            headers=keyed_headers(str(uuid4())),
         )
     assert resp.status_code == 201
 
@@ -601,7 +602,7 @@ def test_post_notice_past_expire_at_is_422(db_conn: psycopg.Connection) -> None:
                 "title": "past expiry notice",
                 "expire_at": past.isoformat(),
             },
-            headers={"Idempotency-Key": str(uuid4())},
+            headers=keyed_headers(str(uuid4())),
         )
     assert resp.status_code == 422
     assert "expire_at is in the past" in resp.json()["detail"]

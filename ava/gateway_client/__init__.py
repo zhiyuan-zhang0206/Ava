@@ -83,7 +83,6 @@ from ava.gateway_client.transport import (
 )
 from base.agents import GatewayUnavailable as GatewayUnavailable
 from base.agents.context import AvaContext
-from base.api_contracts.idempotency import PRINCIPAL_SCOPE
 from base.api_contracts.memory_search import MemorySearchPurpose
 from base.log import logger
 
@@ -181,7 +180,7 @@ def spawn(
     idempotency_key: str,
 ) -> int:
     """Create or fork an agent with a caller-owned immutable identity."""
-    from base.api_contracts.idempotency import PRINCIPAL_SCOPE, validate_idempotency_key
+    from base.api_contracts.idempotency import validate_idempotency_key
 
     idempotency_key = validate_idempotency_key(idempotency_key)
     body: dict = {"spawner": spawner}
@@ -197,13 +196,12 @@ def spawn(
         body["config"] = config
     if label is not None:
         body["label"] = label
-    # Every retry keeps the caller's key, body and fixed admission path.
-    # An ambiguous outcome remains terminal to this invocation.
+    # Every retry keeps the caller's key, body and fixed admission path, so an
+    # ambiguous outcome is retried and the server replays the original creation.
     resp = post(
         "/api/keyed/v1/agents",
         body,
         idempotency_key=idempotency_key,
-        idempotency_scope=PRINCIPAL_SCOPE,
     )
     raise_from_response(resp)
     data = resp.json()
@@ -490,7 +488,6 @@ def register_page(
         f"/api/keyed/v1/agents/{agent_id}/pages",
         body,
         idempotency_key=uuid.uuid4().hex,
-        idempotency_scope=PRINCIPAL_SCOPE,
     )
     raise_from_response(resp)
     return resp.json()
@@ -511,7 +508,6 @@ def close_page(agent_id: int, name: str) -> bool:
         f"/api/keyed/v1/agents/{agent_id}/pages/{name}/close",
         {"expected_page_id": observed["id"]},
         idempotency_key=uuid.uuid4().hex,
-        idempotency_scope=PRINCIPAL_SCOPE,
     )
     raise_from_response(resp)
     return True

@@ -32,8 +32,9 @@ The SDK validates the receipt's agent/prior/new attempt identities and explicit
 acceptance/execution flags. Acceptance is historical intent, not runner readiness
 or execution evidence, and survives deletion of current target metadata.
 
-There is no legacy fallback, discovery cache, automatic ambiguous-failure retry
-or client journal. Connect-family retries retain the same path, body and key.
+There is no legacy fallback, discovery cache or client journal. Transport
+retries (connection failures and ambiguous outcomes) retain the same path, body
+and key.
 The project does not retain SDK compatibility for the former single-argument
 call or admission flag. Browser HTTP entry cleanup is tracked separately in
 #4473; old installed consumers are not an adoption or completion gate. No

@@ -12,8 +12,8 @@ import ava
 from ava.agents import work
 from ava.gateway_client import transport
 from ava.sdk_surface import agent_identity
-from base.agents import GatewayUnavailable
 from base.agents.incarnation.native_work_models import NativeWorkTarget
+from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 TARGET = NativeWorkTarget(
     work_id=uuid4(), agent_id=42, machine="local", generation=uuid4(), owner=uuid4(), protocol=1
@@ -62,7 +62,8 @@ def test_observation_and_cancel_use_scoped_routes_and_exact_target() -> None:
     assert json.loads(calls[1].content) == TARGET.model_dump(mode="json")
 
 
-def test_lost_response_is_not_retried_and_caller_replay_keeps_original_target() -> None:
+@pytest.mark.usefixtures("retry_waits")
+def test_lost_response_is_retried_and_keeps_the_original_target() -> None:
     calls: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -77,9 +78,6 @@ def test_lost_response_is_not_retried_and_caller_replay_keeps_original_target() 
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
         transport.use_client(http),
     ):
-        with pytest.raises(GatewayUnavailable):
-            work.cancel(TARGET, idempotency_key="intent")
-        assert len(calls) == 1
         assert work.cancel(TARGET, idempotency_key="intent").command_id == COMMAND
     assert len(calls) == 2
     assert (

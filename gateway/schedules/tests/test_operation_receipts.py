@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import base.db
+from base.api_contracts.idempotency import keyed_headers
 from gateway.app import app
 from gateway.schedules import router
 from tests.fixtures.gateway_config import gateway_test_client
@@ -37,12 +38,12 @@ def test_delayed_restart_replay_cannot_undo_newer_stop(db_conn: psycopg.Connecti
     with gateway_test_client(app) as client:
         sid = _create(client)
         path = f"/api/schedules/{sid}/restart"
-        headers = {"Idempotency-Key": "restart-one"}
+        headers = keyed_headers("restart-one")
         original = client.post(path, headers=headers)
         assert original.status_code == 200
         assert client.post(f"/api/schedules/{sid}/stop").status_code == 200
         assert client.post(path, headers=headers).json() == original.json()
-        assert client.post(path, headers={"Idempotency-Key": "restart-two"}).status_code == 409
+        assert client.post(path, headers=keyed_headers("restart-two")).status_code == 409
     assert db_conn.execute(
         "SELECT enabled, desired_revision FROM schedules WHERE id = %s", (sid,)
     ).fetchone() == (False, 2)
@@ -54,7 +55,7 @@ def test_edit_receipt_replays_original_result_and_conflicts_on_changed_payload(
     with gateway_test_client(app) as client:
         sid = _create(client)
         path = f"/api/schedules/{sid}"
-        headers = {"Idempotency-Key": "edit-one"}
+        headers = keyed_headers("edit-one")
         original = client.put(path, json={"script": "print(1)"}, headers=headers)
         assert original.status_code == 200
         assert client.put(path, json={"script": "print(2)"}).status_code == 200
@@ -74,6 +75,7 @@ def test_edit_receipt_replays_original_result_and_conflicts_on_changed_payload(
         {"Idempotency-Key": "x" * 129},
         {"Idempotency-Scope": "principal-v1"},
         {"Idempotency-Key": "x", "Idempotency-Scope": "unknown"},
+        {"Idempotency-Key": "unscoped"},
     ],
 )
 def test_malformed_operation_identity_does_not_change_schedule(
@@ -92,9 +94,7 @@ def test_new_restart_identity_is_a_new_deliberate_rerun(db_conn: psycopg.Connect
         sid = _create(client)
         for key in ("one", "two"):
             assert (
-                client.post(
-                    f"/api/schedules/{sid}/restart", headers={"Idempotency-Key": key}
-                ).status_code
+                client.post(f"/api/schedules/{sid}/restart", headers=keyed_headers(key)).status_code
                 == 200
             )
     assert db_conn.execute(

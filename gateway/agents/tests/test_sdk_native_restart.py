@@ -21,8 +21,10 @@ from gateway.app import app
 from gateway.tests.test_idempotency import client as client
 from ops.lifecycle.native_restart import restart_native_work_op
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 
+@pytest.mark.usefixtures("retry_waits")
 async def test_sdk_recovers_original_restart_after_lost_response_and_source_cleanup(
     client: TestClient,
     db_conn: psycopg.Connection,
@@ -61,6 +63,7 @@ async def test_sdk_recovers_original_restart_after_lost_response_and_source_clea
 
     monkeypatch.setattr(lifecycle, "forward_to_home_machine", forward)
     posts: list[httpx.Request] = []
+    lose = True
 
     def handle(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
@@ -70,7 +73,7 @@ async def test_sdk_recovers_original_restart_after_lost_response_and_source_clea
             result = client.post(
                 request.url.path, json=json.loads(request.content), headers=dict(request.headers)
             )
-            if len(posts) == 1:
+            if lose:
                 assert result.status_code == 200, result.text
                 raise httpx.ReadTimeout("committed response lost", request=request)
         return httpx.Response(
@@ -89,7 +92,9 @@ async def test_sdk_recovers_original_restart_after_lost_response_and_source_clea
         observed = work.observe(target.agent_id)
         with pytest.raises(GatewayUnavailable):
             work.restart(observed, idempotency_key="intent", config_overlay=overlay)
-        assert len(posts) == len(calls) == 1
+        assert len(posts) > 1
+        assert len(calls) == 1
+        lose = False
         original = db_conn.execute(
             "SELECT command_id FROM native_restart_commands WHERE agent_id=%s", (target.agent_id,)
         ).fetchone()
