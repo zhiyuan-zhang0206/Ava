@@ -44,6 +44,7 @@ engine on the fixture's full 97-entry geometry.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -440,7 +441,15 @@ def test_render_is_deterministic_and_environment_independent(
     world: tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]],
 ) -> None:
     """Same specs, same bytes — twice in-process, and once more in a
-    subprocess with a scrubbed environment (the #3339/#2456 lesson)."""
+    subprocess with a scrubbed environment (the #3339/#2456 lesson).
+
+    The scrub drops everything except ``PATH``, ``AVA_HOME`` and
+    ``AVA_CONFIG_FETCH=skip``, and the last two must be given explicitly.
+    ``AVA_HOME`` is the session's isolated test home: without it the child
+    falls back to ``~/.ava`` (via the passwd entry, even with no ``HOME``) and
+    boots against the operator's production ``.env``. ``AVA_CONFIG_FETCH=skip``
+    keeps that boot offline, so it never asks a gateway for config.
+    """
     core_specs, plugin_specs, dashboard = world
     rendered = render_to_json(dashboard)
     assert rendered == render_to_json(render_dashboard(core_specs, plugin_specs))
@@ -460,7 +469,11 @@ def test_render_is_deterministic_and_environment_independent(
         capture_output=True,
         text=True,
         cwd="/",
-        env={"PATH": "/usr/bin:/bin"},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "AVA_HOME": os.environ["AVA_HOME"],
+            "AVA_CONFIG_FETCH": "skip",
+        },
         check=True,
     )
     import hashlib
