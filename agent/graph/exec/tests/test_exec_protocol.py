@@ -44,6 +44,8 @@ from base.paths import ava_home
 from tests.fixtures.pin_agent import exec_context
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
+_ENVELOPE_CRASH_CHILD = Path(__file__).parent / "resources" / "_envelope_crash_child.py"
+
 
 @patch.dict(os.environ)
 def _context_description(agent_id: int | None) -> dict[str, Any]:
@@ -382,24 +384,8 @@ def test_writer_killed_before_commit_leaves_no_envelope_at_all(
     import sys
 
     path = tmp_path / "req-crash.json"
-    script = (
-        "import os, sys\n"
-        "from pathlib import Path\n"
-        "import agent.graph.exec.protocol as protocol\n"
-        "def die(*_args, **_kwargs):\n"
-        "    os._exit(9)\n"
-        "if sys.argv[2] == 'os.replace':\n"
-        "    os.replace = die\n"
-        "elif sys.argv[2] == 'os.fsync':\n"
-        "    os.fsync = die\n"
-        "else:\n"
-        "    raise ValueError('Unknown envelope kill point')\n"
-        "protocol.write_request(Path(sys.argv[1]), code='x=1', "
-        "context={'identity': {'agent_id': 7, 'owns_loop': True, 'actor': None}}, "
-        "timeout_s=1.0, state=None, incarnation=None)\n"
-    )
-    completed = subprocess.run(  # noqa: S603 — our own venv python running a fixed in-test script
-        [sys.executable, "-c", script, str(path), kill_point], check=False
+    completed = subprocess.run(  # noqa: S603 — our own venv python running a fixed child script
+        [sys.executable, str(_ENVELOPE_CRASH_CHILD), str(path), kill_point], check=False
     )
 
     assert completed.returncode == 9

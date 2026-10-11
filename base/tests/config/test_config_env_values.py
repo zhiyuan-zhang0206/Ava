@@ -6,7 +6,6 @@ import os
 import secrets
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -15,6 +14,8 @@ from pydantic import ValidationError
 import base.log
 from base import config
 from base.config.service_read import ConfigAuthority
+
+_CONFIG_CHILD = Path(__file__).with_name("_config_child.py")
 
 
 @pytest.fixture
@@ -202,14 +203,8 @@ def test_eval_isolation_env_aliases_parse(tmp_path: Path) -> None:
     proc = subprocess.run(  # noqa: S603 -- fixed argv, sys.executable is trusted
         [
             sys.executable,
-            "-c",
-            textwrap.dedent("""
-                from base.config.domains.agent.eval import AgentEvalSettings
-                config = AgentEvalSettings()
-                assert config.eval_isolation is True
-                assert config.eval_network_allowlist == ["web", "understand"]
-                print("ok")
-            """),
+            str(_CONFIG_CHILD),
+            "eval_isolation",
         ],
         capture_output=True,
         text=True,

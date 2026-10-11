@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -173,16 +174,12 @@ def test_building_a_context_imports_no_connection_stack() -> None:
     """The exec child builds an `AvaContext` at boot; the clients wait for first use."""
     import subprocess
 
-    code = (
-        "import sys\n"
-        "from base.agents.context import AvaContext\n"
-        "from base.agents.context.identity import AgentIdentity\n"
-        "AvaContext(identity=AgentIdentity(1, True)).describe\n"
-        "print(sorted(m for m in ('psycopg_pool', 'redis', 'httpx', 'langchain_core') "
-        "if m in sys.modules))\n"
-    )
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=120, check=False
+        [sys.executable, "-I", str(Path(__file__).with_name("_context_import_child.py"))],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip().endswith("[]")
