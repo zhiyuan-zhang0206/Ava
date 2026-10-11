@@ -100,29 +100,15 @@ def throwaway_root(monkeypatch: pytest.MonkeyPatch, postgres_access: None) -> It
 
 # ── Direction 1: a genuinely orphaned instance is reaped ──
 
-_ORPHAN_OWNER = """
-import os, sys, time
-from pathlib import Path
-import base.cluster.dataplane.pg_throwaway_base as pg_base
-import base.cluster.dataplane.pg_tools as pg_tools
-
-pg_base.default_base = lambda: Path(sys.argv[1])
-# `cm` must stay referenced: a dropped context manager is finalized, and its
-# GeneratorExit would run the very teardown this test needs never to happen.
-cm = pg_tools.throwaway_postgres()
-url = cm.__enter__()
-open(sys.argv[2] + ".part", "w").write(url)
-os.replace(sys.argv[2] + ".part", sys.argv[2])
-time.sleep(600)
-"""
+_ORPHAN_OWNER = Path(__file__).with_name("_orphan_owner_child.py")
 
 
 def test_sweep_reaps_an_instance_whose_owner_was_killed(
     throwaway_root: Path, tmp_path: Path
 ) -> None:
     url_file = tmp_path / "url"
-    owner = subprocess.Popen(  # noqa: S603 — this interpreter + a literal script
-        [sys.executable, "-c", _ORPHAN_OWNER, str(throwaway_root), str(url_file)],
+    owner = subprocess.Popen(  # noqa: S603 — this interpreter + a fixed child script
+        [sys.executable, str(_ORPHAN_OWNER), str(throwaway_root), str(url_file)],
         cwd=repo_root(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
