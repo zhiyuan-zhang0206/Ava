@@ -15,7 +15,7 @@ def test_cluster_status_op_returns_snapshot(
     from ops.cluster_status import ClusterStatus
 
     snap = ClusterStatus(
-        machine_name="wsl", serve_gateway=False, serve_agent_runner=True, paused=False
+        machine_name="runner-a", serve_gateway=False, serve_agent_runner=True, paused=False
     )
     expected_pool = object()
     seen: list[object] = []
