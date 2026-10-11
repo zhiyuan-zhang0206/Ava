@@ -57,8 +57,6 @@ def _bridge_config(home: Path) -> RedisBridgeConfig | None:
     """Return this host's relay config, or None when no relay should exist."""
     if sys.platform != "darwin" or settings.data_plane.is_remote:
         return None
-    if not settings.data_plane.cluster_secret:
-        return None
 
     from base.cluster import get_record
     from base.cluster.machine import reachable_host

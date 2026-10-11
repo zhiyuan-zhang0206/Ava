@@ -165,25 +165,6 @@ def test_current_field_values_decodes_empty_nodecode_list(
     assert rec.warnings == []
 
 
-def test_auth_middleware_set_roundtrips_through_env(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
-):
-    """A `.env` write of auth_middleware_enabled (the e2e harness's knob; the
-    config API refuses it) writes the key the model actually reads. The field's alias used to fall back to its upper-cased
-    NAME (AUTH_MIDDLEWARE_ENABLED), which a validation_alias-only field never
-    listens on — a written value was silently lost and the panel never served
-    the file value."""
-    from base.host.env import runtime_config as rt
-
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
-    rt.write_fields({"auth_middleware_enabled": False}, set())
-
-    text = (tmp_path / ".env").read_text()
-    keys = {line.split("=", 1)[0] for line in text.splitlines() if "=" in line}
-    assert keys == {"AVA_AUTH_MIDDLEWARE_ENABLED"}
-    assert authority.current_field_values()["auth_middleware_enabled"] is False
-
-
 def test_retired_env_aliases_are_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
     """The retired names are inert: a stale key left in an environment no longer
     reaches its field (defaults / the None sentinel survive) — the settings
@@ -196,7 +177,6 @@ def test_retired_env_aliases_are_not_read(monkeypatch: pytest.MonkeyPatch) -> No
 
     for key in (
         "AVA_GATEWAY_URL",
-        "AVA_AUTH_MIDDLEWARE_ENABLED",
         "AVA_SECURITY_SCAN_ENABLED",
         "AVA_PERMISSIONS_HELPER_PORT",
         "AVA_AGENT_COMMUNICATION_STYLE",
@@ -211,7 +191,6 @@ def test_retired_env_aliases_are_not_read(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setitem(os.environ, "AVA_OPS_ALERTS_WEBHOOK_TOKEN", "tok-legacy")
 
     assert GatewaySettings().gateway_url == ""
-    assert GatewaySettings().auth_middleware_enabled is True
     assert AgentEvalSettings().security_scan_enabled is True
     assert ServiceSettings().permissions_helper_port == 9223
     assert AgentSettings().agent_communication_style is None

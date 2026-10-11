@@ -194,15 +194,10 @@ def require_human_credential(request: Request) -> None:
 
     Guards routes that mint a credential outliving any write generation (MCP
     client tokens): a generation-bound admission must not leave behind a
-    credential its own revocation cannot end. An open API (no secret, or the
-    middleware switched off) has no credential to tell apart and passes.
+    credential its own revocation cannot end.
     """
     from fastapi import HTTPException
 
-    from base.config import settings
-
-    if not settings.gateway.auth_middleware_enabled or not settings.data_plane.cluster_secret:
-        return
     if getattr(request.state, "source_verified_by", None) not in HUMAN_CREDENTIAL_FACTS:
         raise HTTPException(
             status_code=403,

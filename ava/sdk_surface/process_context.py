@@ -72,7 +72,7 @@ def _gateway(url: str, *, config: ConfigBoot, timeout_reader: Callable[[], float
     return httpx.Client(
         base_url=url,
         timeout=httpx.Timeout(timeout_reader()),
-        headers=bearer_header(bearer) if bearer else {},
+        headers=bearer_header(bearer),
         transport=transport_for_url(url),
     )
 

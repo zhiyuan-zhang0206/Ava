@@ -27,7 +27,6 @@ SECRET = "compound-test-secret"  # noqa: S105 -- isolated test authentication
 def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterator[TestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
 
     async def accept(db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         return SpawnedAgent(id=body.agent_id)
@@ -139,7 +138,8 @@ def test_snapshot_replays_after_task_and_birth_metadata_deleted(
     assert replay.status_code == 201, replay.text
     assert replay.json()["task"] == accepted["task"]
     assert replay.json()["agent_id"] == accepted["agent_id"]
-    assert replay.json()["launch"] is None
+    assert replay.json()["launch"]["accepted"] is True
+    assert replay.json()["launch"]["execution_observed"] is False
 
 
 def test_replay_skips_preset_and_changed_default_policy(
@@ -205,7 +205,7 @@ def test_launch_failure_retains_accepted_pair_and_original_attempt(
     assert _counts(db_conn) == before
 
 
-def test_historical_birth_snapshot_does_not_override_current_launch_owner(
+def test_changed_placement_returns_historical_acceptance_without_launch(
     client: TestClient,
     db_conn: psycopg.Connection,
     body: dict[str, Any],
@@ -221,16 +221,18 @@ def test_historical_birth_snapshot_does_not_override_current_launch_owner(
         (original["agent_id"],),
     )
     db_conn.commit()
-    seen: list[tuple[str, dict[str, object] | None, str]] = []
+    seen: list[str] = []
 
-    async def observe(db: object, target: str, launch: LaunchAgentRequest) -> SpawnedAgent:
-        seen.append((target, launch.config, str(launch.launch_attempt_id)))
+    async def unexpected(db: object, target: str, launch: LaunchAgentRequest) -> SpawnedAgent:
+        seen.append(target)
         return SpawnedAgent(id=launch.agent_id)
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", observe)
+    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", unexpected)
     replay = client.post(PATH, json=body, headers=HEADERS)
     assert replay.status_code == 201
-    assert seen == [("operator-new-machine", {}, original["launch_attempt_id"])]
+    assert seen == []
+    assert replay.json()["launch_attempt_id"] == original["launch_attempt_id"]
+    assert replay.json()["launch"]["accepted"] is True
     assert (
         db_conn.execute("SELECT birth_snapshot FROM task_assignment_receipts").fetchone() == history
     )
@@ -254,7 +256,7 @@ def test_missing_or_wrong_admission_headers_cannot_write(
     assert _counts(db_conn) == before
 
 
-def test_revoked_and_unverified_principals_cannot_replay(
+def test_revoked_principals_cannot_replay(
     client: TestClient,
     db_conn: psycopg.Connection,
     body: dict[str, Any],
@@ -264,8 +266,6 @@ def test_revoked_and_unverified_principals_cannot_replay(
     before = _counts(db_conn)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-compound-secret")
     assert client.post(PATH, json=body, headers=HEADERS).status_code == 401
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
-    assert client.post(PATH, json=body, headers=HEADERS).status_code == 422
     assert _counts(db_conn) == before
 
 

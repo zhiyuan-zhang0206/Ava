@@ -15,6 +15,7 @@ from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.routers.upload import batches as upload_batches
 from gateway.routers.upload.batches import UploadItem
+from tests.fixtures.gateway_config import spawn_via_http
 
 
 def _post(
@@ -33,7 +34,7 @@ def uploaded_agent(
 ) -> Iterator[tuple[TestClient, int]]:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     with TestClient(app) as client:
-        agent = client.post("/api/agents", json={}).json()["id"]
+        agent = spawn_via_http(client, {}).json()["id"]
         yield client, agent
 
 

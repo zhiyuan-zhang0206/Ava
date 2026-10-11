@@ -51,7 +51,7 @@ def test_foreign_redis_keeps_acl_and_config(
         with redis.Redis.from_url(url, decode_responses=True) as client:  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
             client.config_set("requirepass", "admin")  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
             before = client.execute_command("ACL", "LIST")  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
-            assert instance.start_redis(port, "admin", "runtime", "", "unowned") == 1
+            assert instance.start_redis(port, "admin", "runtime", "unowned") == 1
             assert client.execute_command("ACL", "LIST") == before  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
     assert config.read_text() == "original config\n"
 
@@ -65,7 +65,7 @@ def test_foreign_postgres_listener_refuses_before_hba_or_initdb(
     monkeypatch.setattr(ownership, "strict_listeners_on", lambda _port: [123])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(instance, "_ensure_pg_data", lambda: pytest.fail("must not initialize"))
     with pytest.raises(RuntimeError, match="no owned data-plane process"):
-        instance._start_pg(15433, "", retained_children=retained_children)
+        instance._start_pg(15433, retained_children=retained_children)
     assert not (pg_data / "pg_hba.conf").exists()
 
 
@@ -81,7 +81,6 @@ def test_foreign_pooler_listener_refuses_before_config_or_signal(
             pg_port=15433,
             listen_port=16433,
             db_name="ava",
-            cluster_secret="",
             userlist=b"",
             admin_password=_UNUSED_ADMIN,
         )
@@ -114,7 +113,6 @@ def test_pooler_birth_change_prevents_reload(
             pg_port=15433,
             listen_port=16433,
             db_name="ava",
-            cluster_secret="",
             userlist=b"",
             admin_password=_UNUSED_ADMIN,
         )
@@ -204,7 +202,7 @@ def _assert_warm_pg_repeat(
     persisted: bytes,
     retained_children: list[subprocess.Popen[bytes]],
 ) -> None:
-    assert instance._start_pg(port, "", retained_children=retained_children) == 0
+    assert instance._start_pg(port, retained_children=retained_children) == 0
     repeated = ownership.postgres(data)
     assert repeated is not None and first.same_birth(repeated)
     assert pg.receipt_path(data).read_bytes() == persisted
@@ -222,7 +220,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
 
     data, port = _private_pg_configuration(tmp_path, monkeypatch)
     try:
-        assert instance._start_pg(port, "", retained_children=retained_children) == 0
+        assert instance._start_pg(port, retained_children=retained_children) == 0
         first, persisted = _assert_pg_birth(data, port)
         with psycopg.connect(instance.pg_admin_url(port), autocommit=True) as conn:
             ownership.require_postgres_connection(conn, data)
@@ -236,7 +234,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
             with pytest.raises(psycopg.OperationalError):
                 conn.execute("SELECT 1")
         assert plane.stop(2, retained_children=retained_children) == []
-        assert instance._start_pg(port, "", retained_children=retained_children) == 0
+        assert instance._start_pg(port, retained_children=retained_children) == 0
         second, _receipt = _assert_pg_birth(data, port)
         assert not first.same_birth(second)
         with psycopg.connect(instance.pg_admin_url(port), autocommit=True) as conn:
@@ -307,7 +305,7 @@ def test_pgdata_symlink_cannot_adopt_another_homes_receipt(
         instance, "_ensure_pg_data", Mock(side_effect=AssertionError("initdb effect"))
     )
     with pytest.raises(RuntimeError, match="symlink"):
-        instance._start_pg(15433, "", retained_children=retained_children)
+        instance._start_pg(15433, retained_children=retained_children)
     assert hba.read_text() == "foreign authority\n"
 
 
@@ -318,7 +316,7 @@ def test_real_stopped_postmaster_cannot_pass_warm_readiness(
 ) -> None:
     data, port = _private_pg_configuration(tmp_path, monkeypatch)
     try:
-        assert instance._start_pg(port, "", retained_children=retained_children) == 0
+        assert instance._start_pg(port, retained_children=retained_children) == 0
         owner, before = _assert_pg_birth(data, port)
         assert owner.send_signal(signal.SIGSTOP)
         try:
@@ -327,7 +325,7 @@ def test_real_stopped_postmaster_cannot_pass_warm_readiness(
                 context.setattr(instance, "_PG_PROBE_TIMEOUT_S", 0.1)
                 _forbid_new_pg_admission(context)
                 with pytest.raises(RuntimeError, match="did not become ready"):
-                    instance._start_pg(port, "", retained_children=retained_children)
+                    instance._start_pg(port, retained_children=retained_children)
             assert owner.live() and pg.receipt_path(data).read_bytes() == before
         finally:
             owner.send_signal(signal.SIGCONT)
@@ -353,13 +351,13 @@ def test_real_interrupted_admission_completes_same_postmaster(
         with monkeypatch.context() as context:
             context.setattr(instance, "_pg_running", interrupted)
             with pytest.raises(KeyboardInterrupt, match="before admission"):
-                instance._start_pg(port, "", retained_children=retained_children)
+                instance._start_pg(port, retained_children=retained_children)
         captured = pg._read(data)
         assert captured is not None and captured.state == "captured"
         owner = captured.process()
         with monkeypatch.context() as context:
             _forbid_new_pg_admission(context)
-            assert instance._start_pg(port, "", retained_children=retained_children) == 0
+            assert instance._start_pg(port, retained_children=retained_children) == 0
         admitted, persisted = _assert_pg_birth(data, port)
         assert owner.same_birth(admitted)
         _assert_warm_pg_repeat(data, port, owner, persisted, retained_children)

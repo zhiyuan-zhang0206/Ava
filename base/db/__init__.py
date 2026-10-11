@@ -96,7 +96,7 @@ def create_agent(db: psycopg.Connection) -> int:
     function is "create agent". Also INSERTs the agents_meta row —
     per-agent counters for shell/monitor/schedule depend on the
     agents_meta row existing. The spawn path (gateway POST
-    /api/agents with prompt) uses a BackgroundTask to LLM-generate a
+    /api/keyed/v1/agents with prompt) uses a BackgroundTask to LLM-generate a
     short name in the background and CAS-write; non-spawn paths
     (this function, eval callers) do not auto-name; the caller is
     expected to PATCH /api/agents/{id} manually as needed.

@@ -268,8 +268,8 @@ def fetch_bootstrap_config(
 
     Presents `Authorization: Bearer <bearer>`: an explicit `bearer` (a joining
     start holding its bundle's token), else this process's machine API token
-    (`AVA_API_TOKEN`, delivered by the launcher or the boot pass), else none (an
-    open cluster). Read from os.environ, not Settings — this runs during the
+    (`AVA_API_TOKEN`, delivered by the launcher or the boot pass), else none (the
+    gateway then answers 401). Read from os.environ, not Settings — this runs during the
     Settings import.
 
     Raises:

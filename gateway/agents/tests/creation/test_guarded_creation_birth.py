@@ -144,7 +144,7 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
         _validate_launch_row(
             app.state.db_pool, LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=original)
         )
-    receipt = find_creation(db_conn, key, digest, immutable_snapshot=True)
+    receipt = find_creation(db_conn, key, digest)
     assert (
         receipt is not None and receipt.launch_attempt_id == original and not receipt.launch_pending
     )
@@ -159,26 +159,6 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
         replacement,
     )
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
-
-
-def test_prior_guarded_key_without_snapshot_fails_before_effects(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    legacy = client.post("/api/agents", json=BODY, headers=HEADERS)
-    assert legacy.status_code == 201, legacy.text
-    prior_key = principal_key(AuthPrincipal("cluster", "administrator"), "POST", PATH, "intent")
-    db_conn.execute(
-        "UPDATE agents_meta SET creation_key=%s WHERE id=%s", (prior_key, legacy.json()["id"])
-    )
-    db_conn.commit()
-    monkeypatch.setattr(machines, "lookup_role", _no_revalidation)
-    response = client.post(PATH, json=BODY, headers=HEADERS)
-    assert response.status_code == 409 and "snapshot is unavailable" in response.text
-    assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
-    assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
-    assert db_conn.execute("SELECT count(*) FROM agent_creation_snapshots").fetchone() == (0,)
 
 
 def test_snapshot_fault_rolls_back_then_same_key_accepts_fresh_birth(

@@ -24,10 +24,9 @@ checkpoint, removed source checkpoint or changed defaults cannot replace it.
 All calls use `POST /api/keyed/v1/agents` with `Idempotency-Key` and
 `Idempotency-Scope: principal-v1`. Every connection retry and caller retry uses
 that path, key and body. There is no capability GET, cached generation selection
-or fallback to `/api/agents`, including after 404/405, 409, 422, 5xx or an
-uncertain transport outcome. Older routing rejects the guarded path without
-creating an agent. A subsequent request reaching an older router after a
-successful birth also fails there; it cannot create a legacy replacement.
+or fallback to another creation path, including after 404/405, 409, 422, 5xx or
+an uncertain transport outcome. A router without the guarded path rejects the
+request without creating an agent.
 
 The transport retains the route owner's conservative retry gate. Connection
 failures known to occur before sending may retry. A lost read/write response

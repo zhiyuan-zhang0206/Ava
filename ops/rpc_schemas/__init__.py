@@ -52,7 +52,7 @@ from ops.rpc_schemas.terminate import TerminateAgentResponse as TerminateAgentRe
 
 
 class SpawnAgentRequest(BaseModel):
-    """POST /api/agents request body — for frontend / SDK; frontend does
+    """POST /api/keyed/v1/agents request body — for frontend / SDK; frontend does
     not need to know checkpoint ids.
 
     If `fork_from` is given, the gateway resolves the latest checkpoint

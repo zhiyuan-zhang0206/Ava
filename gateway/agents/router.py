@@ -1,6 +1,6 @@
-"""Agent CRUD + spawn endpoints — /api/agents/*.
+"""Agent CRUD + spawn endpoints — /api/agents/* and /api/keyed/v1/agents.
 
-Covers list / get / spawn / label patch, the birth-chain read
+Covers list / get / keyed spawn / label patch, the birth-chain read
 (`GET /api/agents/{id}/born-chain` — the light half of `/neighbors` that the
 inherited-memory context note resolves), plus the model registry
 (`GET /api/models`) the spawn dialog renders. The lifecycle surface
@@ -46,11 +46,7 @@ from base.lm.catalog import ModelCatalog
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents import forward
-from gateway.agents.creation import (
-    CreationLaunchArguments,
-    create_and_launch_agent,
-    scoped_creation_key,
-)
+from gateway.agents.creation import create_and_launch_agent, scoped_creation_key
 from gateway.agents.forward import forward_spawn_to_remote
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
 from gateway.http.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
@@ -643,15 +639,14 @@ def _creation_availability(
     return snap.availability
 
 
-@router.post("/api/agents", status_code=201, response_model_exclude_none=True)
-async def post_agents(
+@router.post("/api/keyed/v1/agents", status_code=201, response_model_exclude_none=True)
+async def post_guarded_agents(
     body: SpawnAgentRequest,
     request: Request,
-    idempotency_key: str | None = Header(
-        default=None, alias="Idempotency-Key", min_length=1, max_length=128
-    ),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    idempotency_scope: str = Header(alias=SCOPE_HEADER),
 ) -> SpawnedAgent:
-    """Spawn a new agent — uniform HTTP path for SDK / frontend / scripts.
+    """Create or fork an agent through principal-bound keyed admission.
 
     Spawn is HTTP-uniform: every spawn funnels through
     `create_and_launch_agent`, which creates the agent row in the gateway
@@ -670,41 +665,18 @@ async def post_agents(
     body.machine = None targets the local machine (which must be a registered
     agent-runner).
 
+    Callers must keep the key fixed for one intent: a retry replays the retained
+    birth instead of creating another agent.
+
     400: the target machine is registered but has no agent-runner capability
     (wire `reason='spawn_target_not_agent_runner'`). 404: the target is not in the
-    registry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet).
-    """
-    key = scoped_creation_key(request, idempotency_key)
-    return await _create_agent_http(body, request, key)
-
-
-@router.post("/api/keyed/v1/agents", status_code=201, response_model_exclude_none=True)
-async def post_guarded_agents(
-    body: SpawnAgentRequest,
-    request: Request,
-    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
-    idempotency_scope: str = Header(alias=SCOPE_HEADER),
-) -> SpawnedAgent:
-    """Create or fork an agent through principal-bound keyed admission.
-
-    Older routing cannot execute this path. Callers must keep it fixed for an
-    intent and never fall back to the legacy path after an uncertain response.
+    registry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet),
+    or the key already identifies a different request. 422: the scope header is
+    not principal-v1.
     """
     if idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="guarded creation requires principal-v1 scope")
     key = scoped_creation_key(request, idempotency_key, operation_path="/api/keyed/v1/agents")
-    return await _create_agent_http(body, request, key, immutable_birth=True)
-
-
-async def _create_agent_http(
-    body: SpawnAgentRequest, request: Request, key: str | None, *, immutable_birth: bool = False
-) -> SpawnedAgent:
-    """Share the existing HTTP birth/launch behavior without changing other entry scopes."""
-    arguments: CreationLaunchArguments = {}
-    if key is not None:
-        arguments["creation_key"] = key
-    if immutable_birth:
-        arguments["immutable_birth"] = True
     target = body.machine if body.machine is not None else machine_name()
     try:
         return await create_and_launch_agent(
@@ -715,7 +687,7 @@ async def _create_agent_http(
             request.app.state.bus,
             catalog=request.app.state.catalog,
             authority=request.app.state.config_authority,
-            **arguments,
+            creation_key=key,
         )
     except CreationConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

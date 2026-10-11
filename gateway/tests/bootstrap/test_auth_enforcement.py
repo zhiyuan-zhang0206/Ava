@@ -456,73 +456,16 @@ def test_api_agents_rejects_wrong_bearer_secret() -> None:
     assert resp.status_code == 401
 
 
-# ── Empty secret = no auth (the no-secret cluster posture) ─────────────
+# ── A blank secret authenticates nobody ────────────────────────────────
 
 
-def test_empty_secret_serves_without_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An empty cluster secret IS the no-auth state (user decision: off is fully
-    off): the middleware passes every request through, and the app starts with
-    no secret at all. A no-secret cluster binds loopback only (see `main()`),
-    so this never exposes an unauthenticated API to the LAN."""
+def test_blank_secret_rejects_every_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    """There is no open posture: a gateway whose secret is blank (the process refuses
+    to start in that state, `require_cluster_secret`) still never admits a caller on
+    a blank bearer, and a blank secret never verifies as one."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     with TestClient(app) as client:
-        resp = client.get("/api/agents")
-    assert resp.status_code == 200
-
-
-def test_gateway_starts_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No-secret startup is legal: the lifespan no longer refuses to serve an
-    unauthenticated API (that is now a first-class configuration)."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
-    with TestClient(app) as client:
-        resp = client.get("/api/status")
-    assert resp.status_code == 200
-
-
-def test_gateway_starts_when_auth_disabled_without_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The e2e knob: auth_middleware_enabled=false lets requests pass while the
-    cluster keeps its secret (for internal service-to-service auth)."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", False)
-    with TestClient(app) as client:
-        resp = client.get("/api/agents")
-    assert resp.status_code == 200
-
-
-def test_check_reports_authenticated_without_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A no-secret cluster has no credential to verify: /api/auth/check reports
-    authenticated so the frontend AuthGuard renders the app instead of sending
-    the user to a login page that cannot succeed."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
-    with TestClient(app) as client:
-        resp = client.get("/api/auth/check")
-    assert resp.status_code == 200
-    assert resp.json()["authenticated"] is True
-
-
-def test_login_succeeds_without_secret_and_bypasses_limiter(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A no-secret cluster accepts login as a no-op success. The rate limiter
-    is bypassed entirely — there is no credential to guess, and no-secret
-    requests must never count into its failure records."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
-    records: list[str] = []
-
-    def _record_failure(ip: str) -> None:
-        records.append(ip)
-
-    with TestClient(app) as client:
-        monkeypatch.setattr(app.state.login_limiter, "record_failure", _record_failure)
-        resp = client.post("/api/auth/login", json={"password": ""})
-    assert resp.status_code == 200
-    assert resp.json()["ok"] is True
-    assert records == [], "no-secret login must not touch the limiter's failure counter"
+        assert client.get("/api/agents").status_code == 401
+        assert client.get("/api/agents", headers={"Authorization": "Bearer "}).status_code == 401
+        assert client.get("/api/auth/check").json()["authenticated"] is False
+        assert client.post("/api/auth/login", json={"password": ""}).status_code == 401

@@ -141,7 +141,6 @@ def _sdk_via_inprocess_gateway(
         monkeypatch.setattr(_settings.lm, _attr, SecretStr("sk-test"))
 
     monkeypatch.setattr(_settings.data_plane, "cluster_secret", "sdk-test-secret")
-    monkeypatch.setattr(_settings.gateway, "auth_middleware_enabled", True)
     from gateway import app as gateway_app
 
     monkeypatch.setattr(gateway_app, "ConfigBoot", snapshot_process_config)

@@ -23,7 +23,6 @@ SECRET = "credential-receipt-test-secret"  # noqa: S105 -- isolated fixture
 def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterator[TestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     with TestClient(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
         yield value
 

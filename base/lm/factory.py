@@ -173,7 +173,7 @@ def validate_model_config(
 ) -> str:
     """Validate the selected model, its explicit effort and launch credentials.
 
-    Called at the spawn boundary (gateway POST /api/agents handler) to fail
+    Called at the spawn boundary (gateway keyed spawn handler) to fail
     fast before forwarding to the runner — a 400 with a clear message is
     better than an agent process starting and silently hanging.
 

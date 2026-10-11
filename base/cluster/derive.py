@@ -322,6 +322,8 @@ def derive_env(
     `AVA_DB_URL` is the ONE access endpoint; `pgbouncer_enabled` decides its port
     at generation — pooler (default) or direct Postgres. No pgbouncer-port env key."""
     p = rec.ports
+    if not cluster_secret:
+        raise ValueError("identity requires a cluster secret: the cluster API always authenticates")
     if not (redis_admin_password and redis_password):
         raise ValueError(
             "identity requires explicit data-plane credentials: Redis always "

@@ -326,7 +326,7 @@ def _register_and_probe(state: _StartState) -> int | None:
 
 
 def _print_gateway_hint() -> None:
-    """Where a remote agent-runner dials this gateway.
+    """Where a remote agent-runner dials this gateway, and how a browser logs in.
 
     The gateway's own .env holds the loopback URL (a box reaches its own gateway over
     loopback); this prints the OTHER address, so whoever just brought the gateway up can
@@ -335,9 +335,14 @@ def _print_gateway_hint() -> None:
     from base.cluster.machine import reachable_host
     from base.config import settings as _settings
     from base.host.net.predicates import is_loopback_host
+    from base.paths import ava_home
 
     port = _settings.gateway.gateway_port
     host = reachable_host()
+    print(
+        f"\n→ web login password: the AVA_CLUSTER_SECRET value in {ava_home() / '.env'} "
+        "(the CLI, SDK and local services present their own credentials)"
+    )
     if is_loopback_host(host):
         print(
             f"\n→ gateway reachable at http://{host}:{port} (loopback only — set "

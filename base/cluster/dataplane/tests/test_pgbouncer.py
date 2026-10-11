@@ -7,13 +7,10 @@ import pytest
 from base.cluster import port_preflight
 from base.cluster.dataplane import pooler as base_pooler
 
-_SECRET = "s3cr3t"  # noqa: S105 — test fixture, not a real credential
-
 
 def _fail_admin_dial(
     _listen_port: int,
     _role: str,
-    _cluster_secret: str,
     host: str = "127.0.0.1",
 ) -> bool:
     pytest.fail(f"public probe must not make a network dial to {host}")
@@ -22,20 +19,20 @@ def _fail_admin_dial(
 def test_public_probe_is_a_noop_for_loopback_only_bind(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No-secret clusters have no public listener, so the fast path calls nothing."""
-    monkeypatch.setattr(port_preflight, "bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
+    """A loopback-only pooler has no public listener, so the fast path calls nothing."""
+    monkeypatch.setattr(port_preflight, "bind_addrs", lambda: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
 
     def _fail_host_lookup() -> str:
-        pytest.fail("no-secret probe must not resolve the reachable host")
+        pytest.fail("loopback-only probe must not resolve the reachable host")
 
     def _fail_listener_scan(_port: int) -> set[str]:
-        pytest.fail("no-secret probe must not inspect listeners")
+        pytest.fail("loopback-only probe must not inspect listeners")
 
     monkeypatch.setattr("base.cluster.machine.reachable_host", _fail_host_lookup)
     monkeypatch.setattr(port_preflight, "listener_addrs", _fail_listener_scan)
     monkeypatch.setattr(base_pooler, "admin_reachable", _fail_admin_dial)
 
-    assert base_pooler.pgbouncer_public_listener_reachable(6433, "ava_main", "") is True
+    assert base_pooler.pgbouncer_public_listener_reachable(6433, "ava_main") is True
 
 
 def test_public_probe_accepts_the_exact_reachable_host_in_the_socket_table(
@@ -51,13 +48,13 @@ def test_public_probe_accepts_the_exact_reachable_host_in_the_socket_table(
     monkeypatch.setattr(
         port_preflight,
         "bind_addrs",
-        lambda _secret: ["127.0.0.1", "10.0.0.5"],  # pyright: ignore[reportUnknownArgumentType]
+        lambda: ["127.0.0.1", "10.0.0.5"],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(port_preflight, "listener_addrs", _listener_addrs)
     monkeypatch.setattr(base_pooler, "admin_reachable", _fail_admin_dial)
 
-    assert base_pooler.pgbouncer_public_listener_reachable(6433, "ava_main", _SECRET) is True
+    assert base_pooler.pgbouncer_public_listener_reachable(6433, "ava_main") is True
     assert scanned == [6433]
 
 
@@ -85,10 +82,10 @@ def test_public_probe_interprets_socket_table_bindings(
     monkeypatch.setattr(
         port_preflight,
         "bind_addrs",
-        lambda _secret: ["127.0.0.1", "10.0.0.5"],  # pyright: ignore[reportUnknownArgumentType]
+        lambda: ["127.0.0.1", "10.0.0.5"],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(port_preflight, "listener_addrs", _listener_addrs)
     monkeypatch.setattr(base_pooler, "admin_reachable", _fail_admin_dial)
 
-    assert base_pooler.pgbouncer_public_listener_reachable(6433, "ava_main", _SECRET) is expected
+    assert base_pooler.pgbouncer_public_listener_reachable(6433, "ava_main") is expected

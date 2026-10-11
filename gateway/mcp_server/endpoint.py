@@ -10,9 +10,8 @@ import for co-located calls, HTTP only to cross a machine).
 Flag-gated and additive: `settings.gateway.mcp_endpoint_enabled`
 (AVA_MCP_ENDPOINT_ENABLED), default off. While off, /mcp answers 404 and
 nothing else changes — the existing mcp-daemon path is untouched either way.
-While on, /mcp always requires its own revocable client token, including on a
-no-secret cluster; cluster cookies and the cluster-secret Bearer are deliberately
-not MCP credentials.
+While on, /mcp always requires its own revocable client token; cluster cookies
+and the cluster-secret Bearer are deliberately not MCP credentials.
 
 Transport: stateless Streamable HTTP (2026-07-28 protocol revision) — one
 fresh transport per POST, no server-side session state, no idle reaping.
@@ -413,10 +412,9 @@ def _register_spawn_tools(
             config=config_overlay,
         )
         target = body.machine if body.machine is not None else machine_name()
-        # Same path as POST /api/agents: `create_and_launch_agent` (preflight +
-        # row creation off the event loop, then the launch op). Referenced
-        # through the router module so tests patch the same seam as the REST
-        # spawn route.
+        # Same path as the keyed REST spawn route: `create_and_launch_agent`
+        # (preflight + row creation off the event loop, then the launch op).
+        # Referenced through the router module so tests patch the same seam.
         try:
             spawned = await _agents_router.create_and_launch_agent(
                 body,
@@ -427,7 +425,6 @@ def _register_spawn_tools(
                 catalog=catalog,
                 authority=authority,
                 creation_key=creation_key,
-                immutable_birth=True,
             )
         except HTTPException as exc:
             raise ToolError(str(exc.detail)) from exc

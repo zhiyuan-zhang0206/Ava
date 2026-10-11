@@ -74,7 +74,7 @@ For coordinated downtime and recovery, use the shared
 `docs/conventions/operations/graceful-maintenance.md` in the Ava source checkout.
 
 **Bring-up ordering is strict.** Agent processes are never started directly —
-they are always created through the gateway (`POST /api/agents`, which
+they are always created through the gateway (`POST /api/keyed/v1/agents`, which
 `ava.agents.spawn` / the frontend / `scripts/entrypoints/agent.py` all share). So
 **start the gateway first, then start agents**; a spawn issued before the
 gateway is up has nowhere to land.

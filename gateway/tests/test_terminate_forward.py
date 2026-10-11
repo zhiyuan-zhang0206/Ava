@@ -23,6 +23,7 @@ from base.db import Database
 from gateway.agents import forward as forward_module
 from gateway.agents import lifecycle as lifecycle_module
 from gateway.app import app
+from tests.fixtures.gateway_config import spawn_via_http
 
 
 @pytest.fixture
@@ -48,7 +49,7 @@ class TestTerminateRouting:
     ) -> None:
         """machine == local + force=false → takes local graceful path, INSERT terminate inbound."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "local-test")
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
@@ -68,7 +69,7 @@ class TestTerminateRouting:
     ) -> None:
         """A local force request is accepted by the same home-runner path."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "local-test")
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
@@ -97,7 +98,7 @@ class TestTerminateRouting:
             return {"status": "enqueued"}
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
@@ -128,7 +129,7 @@ class TestTerminateRouting:
             return {"status": "enqueued"}
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
@@ -150,7 +151,7 @@ class TestTerminateRouting:
             raise MachineNotRegistered("machine 'remote-mac' not in machines table")
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/terminate")
@@ -167,7 +168,7 @@ class TestTerminateRouting:
             raise CrossMachineGatewayUnavailable("target unreachable after 3 retries")
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/terminate")
@@ -196,7 +197,7 @@ def test_remote_home_machine_is_forwarded(
         return {"status": "enqueued"}
 
     with TestClient(app) as client:
-        agent_id = client.post("/api/agents", json={}).json()["id"]
+        agent_id = spawn_via_http(client, {}).json()["id"]
         _set_agent_machine(db_conn, agent_id, "stale-runner")
         monkeypatch.setattr(forward_module, "enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
         resp = client.post(f"/api/agents/{agent_id}/terminate")
@@ -233,7 +234,7 @@ def test_restart_overlay_is_validated_without_gateway_agent_domain(
 
     monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
-        agent_id = client.post("/api/agents", json={}).json()["id"]
+        agent_id = spawn_via_http(client, {}).json()["id"]
         _set_agent_machine(db_conn, agent_id, "remote-runner")
         with monkeypatch.context() as profile_patch:
             profile_patch.setattr(base_config, "settings", Settings(profile="gateway"))
@@ -285,7 +286,7 @@ class TestTerminateOpenTasksHint:
         self, _force_local_machine: str, db_conn: psycopg.Connection
     ) -> None:
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "local-test")
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
@@ -296,7 +297,7 @@ class TestTerminateOpenTasksHint:
     ) -> None:
         """Only in_progress counts; rows come newest first."""
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "local-test")
             _insert_open_task(
                 db_conn, owner=agent_id, title="done task", status="done", age_minutes=1
@@ -326,7 +327,7 @@ class TestTerminateOpenTasksHint:
         self, _force_local_machine: str, db_conn: psycopg.Connection
     ) -> None:
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "local-test")
             seeded = [
                 _insert_open_task(
@@ -383,7 +384,7 @@ class TestTerminateShellSessions:
             return {"status": "enqueued", "shell_sessions": {"when": "now", "killed": [0, 1]}}
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             _seed_shell_ttls(db_conn, agent_id, [0, 1, 2])
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
@@ -411,7 +412,7 @@ class TestTerminateShellSessions:
             return {"status": "enqueued", "shell_sessions": {"when": "at_exit", "killed": []}}
 
         with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
+            agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             _seed_shell_ttls(db_conn, agent_id, [0])
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]

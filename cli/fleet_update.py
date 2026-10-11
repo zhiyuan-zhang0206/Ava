@@ -69,7 +69,8 @@ _SECRETS = (
     (re.compile(r"(?i)([a-z][a-z0-9+.-]*://[^/\s:@]*:)[^@\s/]+@"), r"\1<redacted>@"),
 )
 _GATEWAY_PROGRAM = """\
-import json, sys, time
+import json, sys, time, uuid
+from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
 from base.host.net.http_dial import get, post
 base, headers = gateway_api_base(), gateway_auth_headers()
@@ -77,7 +78,8 @@ if sys.argv[1] == "roster":
     rows = get(f"{base}/api/cluster/roster?fresh=true", headers=headers, timeout=90); rows.raise_for_status()
     keep = ("name", "online", "identity_mismatch", "head_sha", "running_sha", "serve_agent_runner")
     print(json.dumps([{key: row[key] for key in keep} for row in rows.json()])); sys.exit(0)
-spawned = post(f"{base}/api/agents", headers=headers, json={"machine": sys.argv[2]}, timeout=60)
+keyed = {**headers, "Idempotency-Key": uuid.uuid4().hex, SCOPE_HEADER: PRINCIPAL_SCOPE}
+spawned = post(f"{base}/api/keyed/v1/agents", headers=keyed, json={"machine": sys.argv[2]}, timeout=60)
 out = {"completed": False, "spawn": spawned.status_code}
 if spawned.status_code >= 300:
     print(json.dumps(out)); sys.exit(1)

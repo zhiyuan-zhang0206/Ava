@@ -175,20 +175,7 @@ def test_lost_launch_ack_keeps_first_attempt_and_first_prompt(
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
 
 
-def test_missing_snapshot_fails_closed_without_backfill(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-) -> None:
-    path = "/api/keyed/v1/guide/draft"
-    assert client.post(path, json={"nl": "one"}, headers=HEADERS).status_code == 200
-    db_conn.execute("DELETE FROM agent_creation_snapshots")
-    db_conn.commit()
-    assert client.post(path, json={"nl": "one"}, headers=HEADERS).status_code == 409
-    assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
-    assert db_conn.execute("SELECT count(*) FROM agent_creation_snapshots").fetchone() == (0,)
-
-
-def test_replay_reauthenticates_and_unverified_posture_cannot_create(
+def test_replay_reauthenticates(
     client: TestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
@@ -199,8 +186,6 @@ def test_replay_reauthenticates_and_unverified_posture_cannot_create(
     assert client.post(path, json={"nl": "one"}, headers=HEADERS).status_code == 200
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-draft-secret")
     assert client.post(path, json={"nl": "one"}, headers=HEADERS).status_code == 401
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
-    assert client.post(path, json={"nl": "one"}, headers=HEADERS).status_code == 422
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
 
 
@@ -233,13 +218,9 @@ def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
     assert retry.status_code == 200, retry.text
     replacement = retry.json()["launch_attempt_id"]
     assert replacement != str(attempt)
-    original = find_creation(db_conn, key, digest, immutable_snapshot=True)
+    original = find_creation(db_conn, key, digest)
     assert original is not None and original.launch_attempt_id == attempt
     assert not original.launch_pending
-    # Preserve this existing projection for legacy/MCP callers; it is a separate
-    # known recovery gap, not an immutable original-attempt receipt.
-    legacy = find_creation(db_conn, key, digest)
-    assert legacy is not None and str(legacy.launch_attempt_id) == replacement
     with pytest.raises(ValueError, match="launch"):
         _validate_launch_row(
             app.state.db_pool, LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=attempt)

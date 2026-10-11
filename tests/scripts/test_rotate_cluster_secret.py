@@ -252,9 +252,9 @@ def test_a_pin_that_contradicts_the_record_is_refused(
     assert _secret(home) == _OLD
 
 
-def test_an_open_api_has_nothing_to_rotate(home: Path) -> None:
+def test_a_home_without_a_secret_has_nothing_to_rotate(home: Path) -> None:
     (home / ".env").write_text("AVA_CLUSTER_SECRET=\n")
-    with pytest.raises(rotate.RotationRefusedError, match="open API"):
+    with pytest.raises(rotate.RotationRefusedError, match="no AVA_CLUSTER_SECRET"):
         rotate.advance(home, None, lambda _rotation: None)
     assert passphrase.pinned(home) is None
 

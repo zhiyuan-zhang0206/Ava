@@ -11,11 +11,12 @@ from base.db import Database, fetch_one, pool
 from base.events.live.bus import EventBus
 from gateway.agents.system_note import _system_note_blocking
 from gateway.app import app
+from tests.fixtures.gateway_config import spawn_via_http
 
 
 def test_system_note_replay_and_immutable_policy(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
-        agent = client.post("/api/agents", json={}).json()["id"]
+        agent = spawn_via_http(client, {}).json()["id"]
         path = f"/api/agents/{agent}/system-note"
         headers = {"Idempotency-Key": "note-receipt"}
         body = {"content": "assigned", "resurrect": False}
@@ -103,7 +104,7 @@ def test_replay_survives_reassignment_and_checks_content(
 
 def test_missing_key_cannot_insert_system_note(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
-        agent = client.post("/api/agents", json={}).json()["id"]
+        agent = spawn_via_http(client, {}).json()["id"]
         response = client.post(f"/api/agents/{agent}/system-note", json={"content": "once"})
     assert response.status_code == 422
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (0,)

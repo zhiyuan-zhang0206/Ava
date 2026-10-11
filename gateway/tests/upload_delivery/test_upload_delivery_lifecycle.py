@@ -232,7 +232,6 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     unit = source.current_unit()
     agent = _seed_agent(db_conn)
     db_conn.execute(

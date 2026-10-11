@@ -14,6 +14,7 @@ import psycopg
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from tests.fixtures.gateway_config import spawn_via_http
 
 
 def _checkpoint(conn: psycopg.Connection, agent_id: int) -> str:
@@ -65,17 +66,15 @@ class TestForkConfigStability:
                     "config": {"llm_model": "claude-sonnet-5"},
                 },
             )
-            src = client.post(
-                "/api/agents",
-                json={
+            src = spawn_via_http(
+                client,
+                {
                     "spawner": "user",
                     "config": {"preset": "coder", "llm_model": "deepseek-flash"},
                 },
             ).json()["id"]
             _checkpoint(db_conn, src)
-            fork = client.post("/api/agents", json={"spawner": "user", "fork_from": src}).json()[
-                "id"
-            ]
+            fork = spawn_via_http(client, {"spawner": "user", "fork_from": src}).json()["id"]
         overlay, preset_name = _row(db_conn, fork)
         assert preset_name == "coder"
         # The fork copies the source's live model pin verbatim.
@@ -86,14 +85,13 @@ class TestForkConfigStability:
         self, db_conn: psycopg.Connection
     ) -> None:
         with TestClient(app) as client:
-            src = client.post(
-                "/api/agents",
-                json={"spawner": "user", "config": {"llm_model": "claude-sonnet-5"}},
+            src = spawn_via_http(
+                client, {"spawner": "user", "config": {"llm_model": "claude-sonnet-5"}}
             ).json()["id"]
             _checkpoint(db_conn, src)
-            r = client.post(
-                "/api/agents",
-                json={
+            r = spawn_via_http(
+                client,
+                {
                     "spawner": "user",
                     "fork_from": src,
                     "config": {"llm_model": "claude-sonnet-5"},
@@ -107,14 +105,13 @@ class TestForkConfigStability:
 
     def test_fork_model_change_is_rejected(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            src = client.post(
-                "/api/agents",
-                json={"spawner": "user", "config": {"llm_model": "claude-sonnet-5"}},
+            src = spawn_via_http(
+                client, {"spawner": "user", "config": {"llm_model": "claude-sonnet-5"}}
             ).json()["id"]
             _checkpoint(db_conn, src)
-            r = client.post(
-                "/api/agents",
-                json={
+            r = spawn_via_http(
+                client,
+                {
                     "spawner": "user",
                     "fork_from": src,
                     "config": {"llm_model": "deepseek-v4-pro"},
@@ -127,17 +124,17 @@ class TestForkConfigStability:
 
     def test_fork_skill_removal_is_rejected(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            src = client.post(
-                "/api/agents",
-                json={
+            src = spawn_via_http(
+                client,
+                {
                     "spawner": "user",
                     "config": {"skills_to_expand_at_start": ["a", "b"]},
                 },
             ).json()["id"]
             _checkpoint(db_conn, src)
-            r = client.post(
-                "/api/agents",
-                json={
+            r = spawn_via_http(
+                client,
+                {
                     "spawner": "user",
                     "fork_from": src,
                     "config": {"skills_to_expand_at_start": ["a"]},
@@ -150,9 +147,9 @@ class TestForkConfigStability:
         self, db_conn: psycopg.Connection
     ) -> None:
         with TestClient(app) as client:
-            src = client.post(
-                "/api/agents",
-                json={
+            src = spawn_via_http(
+                client,
+                {
                     "spawner": "user",
                     "config": {
                         "skills_to_inject_into_system_prompt": ["a"],
@@ -161,9 +158,9 @@ class TestForkConfigStability:
                 },
             ).json()["id"]
             _checkpoint(db_conn, src)
-            r = client.post(
-                "/api/agents",
-                json={
+            r = spawn_via_http(
+                client,
+                {
                     "spawner": "user",
                     "fork_from": src,
                     "config": {
@@ -188,14 +185,14 @@ class TestForkConfigStability:
         self, db_conn: psycopg.Connection
     ) -> None:
         with TestClient(app) as client:
-            src = client.post(
-                "/api/agents",
-                json={"spawner": "user", "config": {"skills_to_inject_into_system_prompt": ["a"]}},
+            src = spawn_via_http(
+                client,
+                {"spawner": "user", "config": {"skills_to_inject_into_system_prompt": ["a"]}},
             ).json()["id"]
             _checkpoint(db_conn, src)
-            r = client.post(
-                "/api/agents",
-                json={
+            r = spawn_via_http(
+                client,
+                {
                     "spawner": "user",
                     "fork_from": src,
                     "config": {"skills_to_inject_into_system_prompt": ["a", "b"]},
@@ -223,9 +220,9 @@ class TestForkConfigStability:
             # The source pins an explicit (empty) inject list: the cluster default
             # is the ["*"] wildcard, against which a narrow fork list would be a
             # removal and correctly rejected.
-            src = client.post(
-                "/api/agents",
-                json={
+            src = spawn_via_http(
+                client,
+                {
                     "spawner": "user",
                     "config": {
                         "llm_model": "claude-sonnet-5",
@@ -234,9 +231,8 @@ class TestForkConfigStability:
                 },
             ).json()["id"]
             _checkpoint(db_conn, src)
-            r = client.post(
-                "/api/agents",
-                json={"spawner": "user", "fork_from": src, "config": {"preset": "extra"}},
+            r = spawn_via_http(
+                client, {"spawner": "user", "fork_from": src, "config": {"preset": "extra"}}
             )
             assert r.status_code == 201, r.text
             fork = r.json()["id"]
@@ -260,19 +256,18 @@ class TestForkConfigStability:
                     "config": {"llm_model": "deepseek-v4-pro"},
                 },
             )
-            src = client.post(
-                "/api/agents", json={"spawner": "user", "config": {"llm_model": "claude-sonnet-5"}}
+            src = spawn_via_http(
+                client, {"spawner": "user", "config": {"llm_model": "claude-sonnet-5"}}
             ).json()["id"]
             _checkpoint(db_conn, src)
-            r = client.post(
-                "/api/agents",
-                json={"spawner": "user", "fork_from": src, "config": {"preset": "other"}},
+            r = spawn_via_http(
+                client, {"spawner": "user", "fork_from": src, "config": {"preset": "other"}}
             )
         assert r.status_code == 400
         assert r.json()["reason"] == "fork_config_change_not_allowed"
 
     def test_fork_source_row_missing_is_404(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
-            r = client.post("/api/agents", json={"spawner": "user", "fork_from": 99999})
+            r = spawn_via_http(client, {"spawner": "user", "fork_from": 99999})
         assert r.status_code == 404
         assert r.json()["reason"] == "agent_not_found"
