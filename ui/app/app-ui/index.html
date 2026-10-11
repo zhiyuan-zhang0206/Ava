@@ -272,7 +272,7 @@
       async function render() {
         const config = await invoke("app_config");
         const target = config.entryUrl || "";
-        const desktop = ["macos", "windows"].includes(config.platform);
+        const desktop = config.platform === "macos";
         document.getElementById("connecting-target").textContent = target;
         document.getElementById("unreachable-target").textContent = target;
         document.getElementById("server").value = target;

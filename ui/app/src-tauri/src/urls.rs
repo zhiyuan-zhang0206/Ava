@@ -274,8 +274,7 @@ pub fn is_allowed_nav(url: &Url, endpoints: Option<&Endpoints>) -> bool {
 }
 
 /// The app's own bundled assets, whose origin differs per platform
-/// (`tauri://localhost` on macOS/Linux, `http://tauri.localhost` on Windows,
-/// `http://tauri.localhost` on Android).
+/// (`tauri://localhost` on macOS/Linux, `http://tauri.localhost` on Android).
 fn is_app_asset(url: &Url) -> bool {
     match url.scheme() {
         "tauri" | "asset" | "ipc" => true,
