@@ -96,3 +96,18 @@ def test_local_launch_without_owner_cannot_publish_authority(
     with pytest.raises(ValueError, match="caller-owned child retention"):
         bringup.ensure_gateway_data_plane()
     effect.assert_not_called()
+
+
+def test_gateway_hint_names_where_the_web_login_password_lives(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A browser logs in with the cluster secret, which `ava init` minted into the home's
+    `.env`: the ready output says where, without printing the secret."""
+    from base.paths import ava_home
+
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "never-printed-secret")
+    _start._print_gateway_hint()
+    out = capsys.readouterr().out
+    assert "web login password" in out and "AVA_CLUSTER_SECRET" in out
+    assert str(ava_home() / ".env") in out
+    assert "never-printed-secret" not in out
