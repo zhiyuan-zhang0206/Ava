@@ -86,3 +86,5 @@ The existing gates have not been weakened. Repository-wide component ownership,
 consumer migration, recognized unknowns and the existing private/patch gates
 must be reconciled before hook activation. An inactive checker or a clean leaf
 slice is not completion of the public-contract capability.
+
+<!-- Superseded in part by: decisions/engineering/design/simplification/2026-10-11-meizel-nested-dag-locality.md (file privacy is kept; component entries, the audit and its pyproject declarations are replaced by per-directory exports) -->
