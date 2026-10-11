@@ -192,15 +192,6 @@ def _add_start_parser(
         "--disable-service frontend). Pass the bare service name. Bare `ava start` preserves "
         "this selection; use `--all-services` to reset it or `--only-service` to replace it.",
     )
-    start_p.add_argument(
-        # Internal: an update / recovery / restart forwards its transient disabled set
-        # (e.g. leave frontend running) without rewriting the operator's durable
-        # --disable-service marker. Hidden from --help; operators never pass it.
-        "--persist-services",
-        action="store_false",
-        default=True,
-        help=argparse.SUPPRESS,
-    )
     selection.add_argument(
         "--all-services", action="store_true", help="explicitly select the entire roster"
     )

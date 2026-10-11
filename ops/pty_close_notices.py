@@ -28,18 +28,16 @@ idempotent per (machine, agent_id, session_id, shell-birth): the
 so a notice written twice is delivered once.
 
 Crash sweeps log locally. They neither stage notices nor replay a previous
-start's journal. Existing staged files remain available for inspection.
+start's journal. Files an earlier version staged are left untouched and unread.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, cast
 
 import psycopg
 from psycopg import sql
@@ -111,31 +109,6 @@ class ClosureNotice:
         if self.survivors:
             record["survivors"] = [{"pid": pid, "name": name} for pid, name in self.survivors]
         return record
-
-    @classmethod
-    def from_dict(cls, record: Mapping[str, Any]) -> ClosureNotice:
-        """Rebuild the notice a staged file recorded, exactly as `as_dict` wrote it.
-
-        A staged batch is the notices an earlier attempt tried to write — same
-        key, same text — so the re-send after a failure is a retry of that
-        attempt, not a fresh notice about the same shell.
-        """
-        return cls(
-            machine=str(record["machine"]),
-            agent_id=int(record["agent_id"]),
-            session_id=int(record["session_id"]),
-            name=str(record["name"]),
-            shell_pid=int(record["shell_pid"]),
-            shell_birth=str(record["shell_birth"]),
-            reason=str(record["reason"]),
-            closed_at=str(record["closed_at"]),
-            survivors=tuple(
-                (int(item["pid"]), str(item["name"]))
-                for item in cast("list[dict[str, Any]]", record.get("survivors") or [])
-            ),
-            operation=None if record.get("operation") is None else str(record["operation"]),
-            acquired_at=None if record.get("acquired_at") is None else str(record["acquired_at"]),
-        )
 
 
 def closure_notice(
@@ -213,39 +186,10 @@ def notices_for(
     return [notice for notice in built if notice is not None]
 
 
-# The staged file's shape: a versioned envelope, like the ledger's.
-
-
-def read_pending(path: Path) -> list[ClosureNotice]:
-    """The notices staged for delivery; empty when none wait.
-
-    Missing reads empty. An unreadable or malformed file is logged and reads
-    empty, like the ledger: never a guessed notice, and the file stays in
-    place for the operator (a later stage replaces it with the next batch).
-    """
-    try:
-        raw = json.loads(path.read_text())
-    except FileNotFoundError:
-        return []
-    except (OSError, ValueError) as exc:
-        logger.warning(
-            "[pty-close-notices] staged notices {path} unreadable ({exc})", path=path, exc=exc
-        )
-        return []
-    try:
-        records = cast("list[dict[str, Any]]", raw["notices"])
-        return [ClosureNotice.from_dict(record) for record in records]
-    except (KeyError, TypeError, ValueError) as exc:
-        logger.warning(
-            "[pty-close-notices] staged notices {path} malformed ({exc})", path=path, exc=exc
-        )
-        return []
-
-
 def _one_per_key(notices: Sequence[ClosureNotice]) -> list[ClosureNotice]:
     """One notice per dedup key, the first occurrence winning.
 
-    Both the staged merge and the database batch need each key spelled once: a
+    The database batch needs each key spelled once: a
     batch that carried one key twice would claim it once and then deliver every
     copy that finds itself owned — two inbounds for one shell birth.
     """

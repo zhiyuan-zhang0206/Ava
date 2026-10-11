@@ -222,9 +222,6 @@ class AgentNotFound(ResurrectError, AvaAgentError):  # noqa: N818 — style cons
 class ResurrectAlreadyAlive(ResurrectError): ...  # noqa: N818
 
 
-class ResurrectBudgetExhausted(ResurrectError): ...  # noqa: N818
-
-
 class ResurrectRefused(ResurrectError):  # noqa: N818 — style consistent with ResurrectAlreadyAlive
     """Resurrection refused a runtime or billing recovery guard.
 

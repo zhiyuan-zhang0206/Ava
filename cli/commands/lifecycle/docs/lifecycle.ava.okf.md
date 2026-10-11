@@ -42,11 +42,10 @@ listener. An explicit force request alone permits a kill, with a separate
 bounded settle wait when the graceful deadline is spent. The data-plane stop
 requests [owned PostgreSQL](../../../../base/cluster/docs/postgres.ava.okf.md) fast
 shutdown (SIGINT), so neither waits on idle client connections a drained state
-cannot protect (issue #2307). When the data-plane phase still fails after the
-services phase stopped, `_temporary_stop` compensates with a bounded internal
-`ava start` (restoring services only when native storage admits startup)
-instead of leaving the unit dark; the stop report and journal record the
-outcome (issue #2307).
+cannot protect (issue #2307). When the data-plane phase fails after the
+services phase stopped, `_temporary_stop` reports the failure and exits non-zero;
+it does not restart anything, and the operator decides whether to retry the stop
+or run `ava start`.
 
 `_stop_extras` uses the same exact-home helper retirement as destroy: native
 job, executable, socket and direct root-child ownership are checked before native
