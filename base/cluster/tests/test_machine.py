@@ -16,6 +16,7 @@ import pytest
 
 from base.cluster import machine as _machine
 from base.cluster.machine import (
+    GatewayApiTokenMissing,
     MachineIdentity,
     MachineNameMissing,
     MachineRoleInvalid,
@@ -415,7 +416,9 @@ def test_gateway_auth_headers_present_when_secret_set(monkeypatch: pytest.Monkey
     assert gateway_auth_headers() == {"Authorization": "Bearer s3cr3t"}
 
 
-def test_gateway_auth_headers_empty_when_no_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """secret empty (dev/test, middleware no-op) returns empty dict; both modes usable at the same call site."""
+def test_gateway_auth_headers_raise_when_no_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The API always authenticates: no token and no secret is an error, not an empty header."""
+    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    assert gateway_auth_headers() == {}
+    with pytest.raises(GatewayApiTokenMissing):
+        gateway_auth_headers()

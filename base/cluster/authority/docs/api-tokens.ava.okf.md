@@ -34,8 +34,9 @@ none and no launcher profile; exec children and watchers inherit delivered token
 only an operator or gateway-profile process without one presents the human secret,
 while a process launched with the agent or runner profile and lacking one raises
 `GatewayApiTokenMissing` (a remote-managed plane delivers no token, so its gateway
-home presents the human secret). An empty-secret single box delivers no token and
-keeps its open API.
+home presents the human secret). Every gateway home has a secret, so every launched
+service is delivered a token; a process holding neither a token nor the secret
+raises `GatewayApiTokenMissing`.
 
 The OTLP relay ingress is telemetry, not a write path: its bearer is `telemetry_token(secret)` (HMAC-SHA256 under the
 human secret), so it changes only when that secret rotates; remote units

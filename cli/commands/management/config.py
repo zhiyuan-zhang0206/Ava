@@ -111,8 +111,7 @@ def _auth_headers() -> dict[str, str]:
     if not bearer and (home / "db-authority" / "unit.json").exists():
         from base.cluster.authority.unit import consume_unit
 
-        api = consume_unit(home.resolve()).api
-        bearer = "" if api is None else api.token
+        bearer = consume_unit(home.resolve()).api.token
     return bearer_header(bearer) if bearer else {}
 
 

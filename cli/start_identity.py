@@ -20,6 +20,7 @@ from typing import Any, cast
 from dotenv import dotenv_values
 
 from base import cluster
+from base.cluster.auth import require_cluster_secret
 from base.host.atomic_io import write_text_atomic
 from base.host.env.dotenv_file import upsert_env
 from base.host.private_storage import ensure_private_dir, ensure_private_file
@@ -164,9 +165,9 @@ def _new_record(inputs: IdentityInput) -> cluster.ClusterRecord:
 
 def _gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[str, str]:
     vals = inputs.values
-    secret = vals.get("AVA_CLUSTER_SECRET", "")
-    if not secret and inputs.roles != frozenset({"gateway", "agent-runner"}):
-        secret = secrets.token_urlsafe(32)
+    # Every cluster is born with a human secret: an explicit input wins, else one
+    # is minted. The API is always authenticated.
+    secret = vals.get("AVA_CLUSTER_SECRET") or secrets.token_urlsafe(32)
     db, redis = cluster.per_cluster_base_urls(rec)
     derived = cluster.derive_env(
         rec,
@@ -188,6 +189,7 @@ def _gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[s
             derived.pop(key)
     # Explicit remote-managed URLs are never rewritten into local URLs.
     derived.update(vals)
+    derived["AVA_CLUSTER_SECRET"] = secret
     return derived
 
 
@@ -381,6 +383,7 @@ def require_initialized(home: Path) -> InitializedHome:
                 "existing home has no recorded identity or is incomplete; "
                 "explicit reattachment is required"
             )
+        require_cluster_secret(env.get("AVA_CLUSTER_SECRET") or "", where=f"home {home}")
     elif not env.get("AVA_GATEWAY_URL"):
         raise RuntimeError("existing remote unit has no gateway identity")
     _require_host_declarations(home, roles, env)

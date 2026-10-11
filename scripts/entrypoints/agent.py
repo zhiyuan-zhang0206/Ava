@@ -29,9 +29,8 @@ from base.host.net.http_dial import post as dial_post
 
 def main() -> None:
     base = gateway_api_base()  # role-blind: the configured gateway_url (localhost on a dev cluster)
-    # /api/agents is an authenticated route: present the cluster secret as a
-    # Bearer token (empty dict in dev/test where no secret is set). Without it a
-    # multi-host gateway rejects this bootstrap spawn with 401.
+    # /api/agents is an authenticated route: present the machine API token (or the
+    # cluster secret) as a Bearer token; without it the gateway rejects this spawn with 401.
     resp = dial_post(f"{base}/api/agents", json={"spawner": "user"}, headers=gateway_auth_headers())
     resp.raise_for_status()
     agent_id = int(resp.json()["id"])

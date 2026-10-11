@@ -18,7 +18,8 @@ def gateway_test_client(application: FastAPI, **kwargs: Any) -> Generator[TestCl
     """Run the real Gateway lifespan with this test's current configuration inputs.
 
     Only assembled Gateway apps belong here. Startup-delivery tests and local
-    FastAPI stand-ins keep their own explicit composition boundaries.
+    FastAPI stand-ins keep their own explicit composition boundaries. The client
+    is authenticated by default (`tests.fixtures.unit.gateway_auth`).
     """
     from gateway import app as gateway_app
 

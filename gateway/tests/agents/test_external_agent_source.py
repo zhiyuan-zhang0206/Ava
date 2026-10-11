@@ -31,6 +31,7 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
+from tests.fixtures.unit.gateway_auth import without_credentials
 
 _ENVELOPE_INPUTS = EnvelopeReadInputs(Clock.from_settings, lambda: False)
 _SECRET = "external-agent-source-secret"  # noqa: S105 -- isolated test credential
@@ -60,7 +61,6 @@ async def _admit(db: psycopg.Connection, pool: AsyncConnectionPool) -> RuntimeIn
 def authenticated_gateway(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     """The CLI's `send` posts through a real gateway app with the cluster credential on."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _SECRET)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(
         "base.cluster.machine.gateway_api_base", Mock(return_value="http://testserver")
     )
@@ -185,7 +185,7 @@ async def test_an_unauthenticated_external_agent_declaration_is_refused(
     """Declaring an identity is not a credential: the gateway check still applies."""
     incarnation = await _admit(db_conn, aops_pool)
     with authenticated_gateway(monkeypatch) as client:
-        response = client.post(
+        response = without_credentials(client).post(
             f"/api/agents/{incarnation.agent_id}/messages",
             json={"content": "hello", "source": _EXTERNAL},
         )

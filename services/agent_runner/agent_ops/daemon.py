@@ -584,12 +584,11 @@ async def _main() -> None:
     liveness = LivenessGroup()
 
     try:
-        # Every /ops dial presents a machine API token of this generation; an
-        # open cluster serves /ops unauthenticated on loopback.
+        # Every /ops dial presents a machine API token of this generation.
         acceptance = _ops_acceptance()
-        bind_host = _ops_bind_host(acceptance)
+        bind_host = _ops_bind_host()
         if bind_host != "127.0.0.1":
-            verify_transport_encryption(bind_host, authenticated=acceptance is not None)
+            verify_transport_encryption(bind_host, authenticated=True)
         endpoint = _endpoint()
         server = await start_health_server(
             "ops",

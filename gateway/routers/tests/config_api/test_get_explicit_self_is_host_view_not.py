@@ -84,7 +84,7 @@ def test_put_remote_host_field_dispatches_config_write(
     payload = kwargs["payload"]
     assert payload["overrides"] == {"ops_concurrency": 12}
     assert payload["local"] is False
-    assert payload["actor"] is None  # unauthenticated test client: no verified principal
+    assert payload["actor"] == "cluster_bearer:administrator"  # the verified caller
     assert isinstance(payload["trace_id"], str) and payload["trace_id"]
 
 

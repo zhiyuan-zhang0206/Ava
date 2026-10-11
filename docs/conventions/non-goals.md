@@ -122,8 +122,8 @@ first and ask "what changed that made it worth doing".
   identity or permissions system. A cluster secret authenticates SDK callers
   directly and browser users through an HttpOnly session cookie; an exact CORS
   allowlist and cookie-mutation `Origin` check constrain that ambient browser
-  credential. An empty secret remains the explicit single-box no-auth posture,
-  with loopback-only binding. This does not attempt to restrain an agent inside
+  credential. Every cluster has a secret; a box that declares no reachable
+  address (`AVA_MACHINE_HOST`) binds loopback only. This does not attempt to restrain an agent inside
   the boundary: the agent itself holds `execute_code` (= arbitrary bash + the
   full SDK), so any per-agent token available to its process could be read or
   bypassed. **Trigger** for distinct identities and permissions: onboarding

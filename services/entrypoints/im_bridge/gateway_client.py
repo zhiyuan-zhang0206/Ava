@@ -32,7 +32,7 @@ class GatewayClient:
     ) -> None:
         self._config = config
         self._base = gateway_url.rstrip("/")
-        # The machine API token's Bearer (`gateway_auth_headers()`), empty in the open posture.
+        # The machine API token's Bearer (`gateway_auth_headers()`).
         self._auth_headers = dict(auth_headers)
         self._client: httpx.AsyncClient | None = None
 

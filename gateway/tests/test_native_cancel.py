@@ -26,7 +26,6 @@ from services.agent_runner.agent_host.tests.runtime.hosted_resources import host
 def _headers(patch: pytest.MonkeyPatch) -> dict[str, str]:
     secret = "native-cancel-offline-secret"  # noqa: S105 — isolated fixture credential
     patch.setattr(settings.data_plane, "cluster_secret", secret)
-    patch.setattr(settings.gateway, "auth_middleware_enabled", True)
     return {
         "Authorization": f"Bearer {secret}",
         "Idempotency-Scope": "principal-v1",
