@@ -97,7 +97,9 @@ def sweep(path: Path) -> closure.Outcome:
     A still-live recorded shell and its known groups are attempted; when the shell
     is gone, only its recorded members are attempted. Known job-only survivors are
     diagnostic evidence, not a terminal-presence gate, so they do not retain a
-    ledger entry.
+    ledger entry. The outcome also names recorded busy sessions whose shells the
+    crash already ended, so their owners can be notified without claiming that
+    unrecorded descendants disappeared.
     """
     recorded = read(path)
     targets = [target for target in recorded if _has_live_process(target)]
@@ -110,7 +112,23 @@ def sweep(path: Path) -> closure.Outcome:
         )
         outcome = closure.close_sessions(targets, grace_s=SWEEP_HANGUP_WAIT_S, kill_s=SWEEP_KILL_S)
     write(path, (target for target in recorded if _alive(target.shell)))
-    return outcome
+    return _with_ended_busy(outcome, recorded)
+
+
+def _with_ended_busy(outcome: closure.Outcome, recorded: list[closure.Target]) -> closure.Outcome:
+    """Add the recorded busy sessions whose shell is gone and that the closure did not report."""
+    reported = {closed.name for closed in outcome.closed}
+    ended = tuple(
+        closure.ClosedSession(target.name, target.shell)
+        for target in recorded
+        if target.name not in reported and _was_busy(target) and not _alive(target.shell)
+    )
+    return closure.Outcome(outcome.closed + ended, outcome.survivors)
+
+
+def _was_busy(target: closure.Target) -> bool:
+    """The ledger records a known foreground target besides its shell."""
+    return any(member != target.shell for member in target.members)
 
 
 def _alive(identity: OwnedProcess) -> bool:
