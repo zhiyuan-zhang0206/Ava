@@ -188,8 +188,9 @@ class UnderstandingEnqueueFailed(TypedDict):
 
 class UnderstandingChunkFailed(TypedDict):
     """`understanding_chunk_failed` payload — a queued understanding chunk
-    failed for good (drifted indices, exhausted retries, a generation error
-    past its attempts). The stretch stays undescribed."""
+    failed (drifted indices, a generation, checkpoint or database error, a stopping host, a
+    claimer that died, a checkpoint that never caught up). A chunk is attempted once and the
+    stretch stays undescribed."""
 
     agent_id: int
     job_id: int
@@ -238,7 +239,7 @@ class UnderstandingGroupFailed(TypedDict):
 
 class UnderstandingLeafOutOfOrder(TypedDict):
     """`understanding_leaf_out_of_order` payload — a level-1 node landed before one that already
-    has a parent, and an upper-level rebuild was queued (or already pending) for the agent."""
+    has a parent. Nothing repairs it automatically: the agent's upper levels need a manual build."""
 
     agent_id: int
     job_id: int
@@ -340,7 +341,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "understanding_chunk_failed": telemetry_event(
         "understanding_chunk_failed",
-        "a queued understanding chunk failed for good and stays undescribed",
+        "a queued understanding chunk failed (attempted once, never retried) and stays undescribed",
         payload=UnderstandingChunkFailed,
         tier="anomaly",
         site="base/agents/history/hierarchy/chunk_consumer.py:_settle",
@@ -375,7 +376,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "understanding_leaf_out_of_order": telemetry_event(
         "understanding_leaf_out_of_order",
-        "an understanding leaf landed before an already grouped one; an upper-level rebuild was queued for the agent",
+        "an understanding leaf landed before an already grouped one; the agent's upper levels need a manual build",
         payload=UnderstandingLeafOutOfOrder,
         tier="anomaly",
         site="base/agents/history/hierarchy/chunks.py:write_group_nodes",

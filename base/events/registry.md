@@ -161,6 +161,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `auth401_rejected` | gateway auth-401 rejections in the 60s window (aggregate count) | noise | count | — | events | — |
 | `agent_registry` | agent registry max id — the agents-table high-water mark (absolute state, 60s sample) | noise | max_id | — | events | — |
 | `memory_search_stats` | memory search store rows + last save duration (absolute state, 60s sample) | noise | rows, last_save_seconds | — | events | — |
+| `upload_delivery_held` | a delivered upload batch was held after a permanent copy failure or its last copy attempt; nothing retries it and the person has to upload again | anomaly | agent_id, batch_id, reason | — | events | — |
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events | — |
 | `fleet_graph_stale` | the fleet-graph route served the stale/last-good graph after a degraded upstream read — one event per degradation episode, not per poll | anomaly | route, reason | — | events | — |
 | `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events | — |
@@ -258,12 +259,12 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `label_generate_rejected` | label generation rejected as not a label | noise | — | — | events | — |
 | `label_generate_retired` | label generation given up on after repeated failures | noise | — | — | events | — |
 | `understanding_enqueue_failed` | a chunk-triggered understanding job could not be enqueued (best-effort; the next trigger covers the same stretch) | anomaly | agent_id, compact_version, error | — | events | — |
-| `understanding_chunk_failed` | a queued understanding chunk failed for good and stays undescribed | anomaly | agent_id, job_id, attempts, error | — | events | — |
+| `understanding_chunk_failed` | a queued understanding chunk failed (attempted once, never retried) and stays undescribed | anomaly | agent_id, job_id, attempts, error | — | events | — |
 | `understanding_chunk_skipped` | a queued understanding chunk was closed without a node (unsupported provider path or an empty chunk) | anomaly | agent_id, job_id, reason | — | events | — |
 | `understanding_chunk_gap` | a chunk was described only in part: the listed stretches (overlap leftovers, turns missing from a closing snapshot) have no node | anomaly | agent_id, job_id, gaps | — | events | — |
 | `understanding_snapshot_lag` | a compaction stamped its boundary before the checkpoint held the last message (the bounded wait timed out) | anomaly | agent_id, waited_seconds | — | events | — |
 | `understanding_group_failed` | an upper-level understanding grouping check failed; the level's open nodes stay ungrouped until its next check threshold of new nodes arrives | anomaly | agent_id, level, open_nodes, error | — | events | — |
-| `understanding_leaf_out_of_order` | an understanding leaf landed before an already grouped one; an upper-level rebuild was queued for the agent | anomaly | agent_id, job_id, span_end | — | events | — |
+| `understanding_leaf_out_of_order` | an understanding leaf landed before an already grouped one; the agent's upper levels need a manual build | anomaly | agent_id, job_id, span_end | — | events | — |
 | `understanding_backlog` | one sample of the understanding chunk queue per consumer round: pending, running and the oldest pending age | observation | pending, running, oldest_pending_age_seconds | — | events | — |
 | `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events | — |
 | `loki_write_path_probe_throttled` | Loki write-path probe persistently throttled | anomaly | consecutive_throttles, reason | — | events | — |

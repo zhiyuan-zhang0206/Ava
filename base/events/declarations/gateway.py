@@ -169,6 +169,18 @@ class PageServeDirMissing(TypedDict):
     port: int
 
 
+class UploadDeliveryHeld(TypedDict):
+    """`upload_delivery_held` payload — gateway/upload_delivery/worker.py.
+
+    A delivered upload batch stopped for good: a permanent copy failure, or the last of its
+    copy attempts failed. The batch stays `hold`; the person re-uploads.
+    """
+
+    agent_id: int
+    batch_id: str
+    reason: str
+
+
 class GateAuthProbeFailed(TypedDict):
     """`gate_auth_probe_failed` payload — services/entrypoints/gate/daemon.py.
 
@@ -291,6 +303,14 @@ EVENTS: dict[str, EventSpec] = {
         payload=MemorySearchStats,
         tier="noise",
         site=("services/derived/memory_search/app.py:emit_memory_search_stats (positional emit)"),
+    ),
+    "upload_delivery_held": telemetry_event(
+        "upload_delivery_held",
+        "a delivered upload batch was held after a permanent copy failure or its last copy attempt; "
+        "nothing retries it and the person has to upload again",
+        payload=UploadDeliveryHeld,
+        tier="anomaly",
+        site="gateway/upload_delivery/worker.py:UploadRecovery.failure",
     ),
     # gate entry-point diagnostics
     "gate_auth_probe_failed": telemetry_event(

@@ -100,7 +100,7 @@ records remote proof. Timeout, response loss or native restart permits repeating
 only this same copy. Unsupported protocol, checksum conflict, absent/ambiguous
 unit or changed placement becomes bounded inspectable HOLD with a safe reason;
 no redirect, overwrite, fallback or fabricated ready outcome. A retryable outage
-keeps pending state/backoff. A future reviewed operator policy may cancel an undelivered intent or restore its frozen target; no cancel/unseal endpoint is implemented. Retargeting is a new intent, never receipt mutation.
+keeps pending state/backoff for at most three copy attempts, then HOLDs. A future reviewed operator policy may cancel an undelivered intent or restore its frozen target; no cancel/unseal endpoint is implemented. Retargeting is a new intent, never receipt mutation.
 
 ### One retained inbound acceptance
 
@@ -112,7 +112,7 @@ A retained accepted outcome is consulted first on recovery, even when the inboun
 or agent has since been deleted; it never recreates a deleted IID. New deleted
 or moved targets HOLD without notification. Target termination/resurrection uses
 the existing pending-inbound policy after commit; acceptance is not execution.
-Post-commit wake is a hint, repaired only for the original still-pending row.
+Post-commit wake is a single best-effort hint; a lost one is not repaired by a scan.
 
 The implementation status distinguishes receiving, pending-copy, inbound-accepted
 and HOLD. Copy proof commits with the final inbound outcome rather than exposing
@@ -128,7 +128,7 @@ Do not cancel `to_thread` and pretend its native writer ended. Hard process deat
 leaves fixed files/retained intent for recovery, never authorizes cleanup.
 Remote Ops keeps its existing maintenance admission and worker-future tracking.
 A slow copy must not starve unrelated intents or health: bounded batch/network
-attempts and bounded rotating scans, not a new worker framework.
+attempts, not a new worker framework.
 
 Shared manifest/storage/receipt facts belong below Gateway/Ops in `base.agents`
 with a focused upload package; Gateway owns acceptance/source round, Ops owns
