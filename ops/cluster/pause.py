@@ -93,13 +93,7 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
 
     if (
         current.maintenance is not None
-        and current.maintenance.phase
-        in (
-            MaintenancePhase.STOPPING,
-            MaintenancePhase.STOPPED,
-            MaintenancePhase.STARTING,
-            MaintenancePhase.READY,
-        )
+        and current.maintenance.phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED)
         and not start_serving.is_serving()
     ):
         return "services have stopped; ava start must pass readiness before resume"

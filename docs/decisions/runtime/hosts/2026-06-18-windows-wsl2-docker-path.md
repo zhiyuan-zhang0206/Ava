@@ -47,3 +47,5 @@ running a gateway inside WSL2 remains available, but is a workaround rather than
 the platform's documented shape. -->
 
 Superseded in part by: [decisions/2026-09-28-retire-windows-docker-compose.md](2026-09-28-retire-windows-docker-compose.md) — the Docker Compose data plane this entry chose for Windows is retired; a gateway on Windows hardware runs inside WSL2 on the native Linux path.
+
+Superseded in part by: [decisions/2026-10-11-remove-windows-and-wsl-support.md](2026-10-11-remove-windows-and-wsl-support.md) — Windows and WSL support is removed.

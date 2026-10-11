@@ -27,10 +27,10 @@ requires a separately designed operation; viewing history never enqueues it.
 
 ## Acceptance and recovery
 
-`notify_alert_group` calls only authenticated `POST /send/alert-outbound-v1` with
+`notify_alert_group` calls only authenticated `POST /send/alert-outbound` with
 strict positive `group_id` and `source_origin=native-v1`. The daemon reads the
 immutable source body from Postgres; caller text, unknown fields and origins are
-rejected. A 404 from an old daemon is a hold, never fallback to legacy `/send`.
+rejected. A 404 from a daemon that lacks the route is a hold, never fallback to legacy `/send`.
 Errors log safe classification, not URLs, credentials or context tokens.
 
 `AlertOutboundBridge` resolves all loaded adapters' current owner/account/rendering

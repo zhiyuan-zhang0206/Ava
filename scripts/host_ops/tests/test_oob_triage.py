@@ -43,7 +43,7 @@ _STATUS_SAMPLE: dict[str, object] = {
         "phase": "stopping",
         "undelivered": {},
     },
-    "operation": "local-pause:wsl:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605",
+    "operation": "local-pause:runner-a:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605",
     "scope": "local unit; excludes independent OS-managed extras and remote hosts",
     "status": "resumed",
 }
@@ -66,7 +66,7 @@ def _status_payload(
     phase: str | None = "stopping",
     liveness: str | None = "dead",
     failures: dict[str, str] | None = None,
-    operation: object = "local-pause:wsl:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605",
+    operation: object = "local-pause:runner-a:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605",
     acquired_at: object = "2026-09-17T00:42:14.184784+00:00",
 ) -> dict[str, object]:
     payload = copy.deepcopy(_STATUS_SAMPLE)
@@ -107,7 +107,7 @@ def _journal_payload(
     return {
         "acquired_at": "2026-09-17T00:42:14.184784+00:00",
         "driver": {"root": {"argv": "zsh -c echo S3-STOP2-ISSUED"}, "leader": None},
-        "holder": "local-pause:wsl:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605",
+        "holder": "local-pause:runner-a:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605",
         "maintenance": maintenance,
         "state": state,
     }
@@ -115,24 +115,24 @@ def _journal_payload(
 
 def test_orphaned_stop_class_hold_renders_the_start_command() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(), host="wsl")
+    result = module.classify_status(_status_payload(), host="runner-a")
     assert result.classification == "orphaned"
     assert result.hold == "present"
     assert result.source == "status"
     assert result.line == "hold=present phase=stopping driver=dead state=paused"
-    assert result.command == "ssh wsl 'cd ~/.ava/source && .venv/bin/ava start'"
+    assert result.command == "ssh runner-a 'cd ~/.ava/source && .venv/bin/ava start'"
 
 
 def test_orphaned_pre_stop_hold_renders_the_start_command() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(phase="draining"), host="wsl")
+    result = module.classify_status(_status_payload(phase="draining"), host="runner-a")
     assert result.classification == "orphaned"
-    assert result.command == "ssh wsl 'cd ~/.ava/source && .venv/bin/ava start'"
+    assert result.command == "ssh runner-a 'cd ~/.ava/source && .venv/bin/ava start'"
 
 
 def test_live_shepherd_reads_owned_not_orphaned() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(liveness="alive"), host="wsl")
+    result = module.classify_status(_status_payload(liveness="alive"), host="runner-a")
     assert result.classification == "owned"
     assert result.line == "hold=present phase=stopping driver=alive state=paused"
     # The command table is decoupled from the classification (D-addendum):
@@ -142,28 +142,28 @@ def test_live_shepherd_reads_owned_not_orphaned() -> None:
 
 def test_failed_receipts_read_stranded_not_orphaned() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(failures={"6288": "timeout"}), host="wsl")
+    result = module.classify_status(_status_payload(failures={"6288": "timeout"}), host="runner-a")
     assert result.classification == "stranded"
     assert result.failures == 1
 
 
 def test_missing_shepherd_is_undetermined_not_orphaned() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(liveness=None), host="wsl")
+    result = module.classify_status(_status_payload(liveness=None), host="runner-a")
     assert result.classification == "undetermined"
     assert result.line == "hold=present phase=stopping driver=missing state=paused"
 
 
 def test_unreadable_shepherd_is_undetermined() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(liveness="unreadable"), host="wsl")
+    result = module.classify_status(_status_payload(liveness="unreadable"), host="runner-a")
     assert result.classification == "undetermined"
     assert result.line == "hold=present phase=stopping driver=unreadable state=paused"
 
 
 def test_resumed_ledger_is_no_hold() -> None:
     module = _triage_module()
-    result = module.classify_status(copy.deepcopy(_STATUS_SAMPLE), host="wsl")
+    result = module.classify_status(copy.deepcopy(_STATUS_SAMPLE), host="runner-a")
     assert result.classification == "no-hold"
     assert result.hold == "absent"
     assert result.line == "hold=absent"
@@ -172,14 +172,14 @@ def test_resumed_ledger_is_no_hold() -> None:
 
 def test_inactive_status_is_no_hold() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(status="inactive"), host="wsl")
+    result = module.classify_status(_status_payload(status="inactive"), host="runner-a")
     assert result.classification == "no-hold"
     assert result.line == "hold=absent"
 
 
 def test_invalid_journal_is_undetermined() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(status="invalid"), host="wsl")
+    result = module.classify_status(_status_payload(status="invalid"), host="runner-a")
     assert result.hold == "invalid"
     assert result.classification == "undetermined"
     assert result.line == "hold=invalid"
@@ -188,16 +188,16 @@ def test_invalid_journal_is_undetermined() -> None:
 
 def test_journal_fallback_is_undetermined_with_identity_placeholder() -> None:
     module = _triage_module()
-    result = module.classify_journal(_journal_payload(), host="wsl")
+    result = module.classify_journal(_journal_payload(), host="runner-a")
     assert result.source == "journal"
     assert result.classification == "undetermined"
     assert result.line == "hold=present phase=stopping driver=? state=paused"
-    assert result.command == "ssh wsl 'cd ~/.ava/source && .venv/bin/ava start'"
+    assert result.command == "ssh runner-a 'cd ~/.ava/source && .venv/bin/ava start'"
 
 
 def test_resumed_journal_is_no_hold() -> None:
     module = _triage_module()
-    result = module.classify_journal(_journal_payload(state="resumed"), host="wsl")
+    result = module.classify_journal(_journal_payload(state="resumed"), host="runner-a")
     assert result.classification == "no-hold"
     assert result.line == "hold=absent"
 
@@ -210,7 +210,7 @@ def test_both_reads_failed_degrade_to_the_undetermined_line() -> None:
         calls.append(command)
         return None
 
-    result = module.triage("wsl", read=fake_read)
+    result = module.triage("runner-a", read=fake_read)
     assert calls == [module._STATUS_COMMAND, module._JOURNAL_COMMAND]
     assert result.reachable is False
     assert result.source == "none"
@@ -227,7 +227,7 @@ def test_status_json_hold_is_the_primary_source() -> None:
         commands.append(command)
         return {"hold": _status_payload()}
 
-    result = module.triage("wsl", read=fake_read)
+    result = module.triage("runner-a", read=fake_read)
     assert commands == [module._STATUS_COMMAND]
     assert module._STATUS_COMMAND.endswith("ava status --json")
     assert result.source == "status"
@@ -242,7 +242,7 @@ def test_status_surprise_falls_back_to_the_journal_read() -> None:
             return {"hold": {"status": "some-unknown-word"}}
         return _journal_payload()
 
-    result = module.triage("wsl", read=fake_read)
+    result = module.triage("runner-a", read=fake_read)
     assert result.source == "journal"
     assert result.classification == "undetermined"
 
@@ -251,23 +251,22 @@ def test_whitelist_drops_remote_free_text() -> None:
     module = _triage_module()
     payload = _status_payload(phase="draining", operation="evil; touch /tmp/pwned")
     payload["driver"] = {"liveness": "dead", "root": {"argv": "SECRET-ARGV"}, "leader": None}
-    result = module.classify_status(payload, host="wsl")
+    result = module.classify_status(payload, host="runner-a")
     assert result.operation is None
     serialized = json.dumps(module.triage_json(result))
     assert "evil" not in serialized
     assert "SECRET-ARGV" not in serialized
 
 
-def test_uncovered_phase_renders_no_command() -> None:
+def test_an_unknown_phase_is_a_structural_surprise() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(phase="ready"), host="wsl")
-    assert result.classification == "orphaned"
-    assert result.command is None
+    with pytest.raises(ValueError, match="unknown maintenance phase"):
+        module.classify_status(_status_payload(phase="starting"), host="runner-a")
 
 
 def test_plain_pause_without_maintenance_payload_still_classifies() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(phase=None), host="wsl")
+    result = module.classify_status(_status_payload(phase=None), host="runner-a")
     assert result.classification == "orphaned"
     assert result.line == "hold=present phase=? driver=dead state=paused"
     assert result.command is None
@@ -276,13 +275,13 @@ def test_plain_pause_without_maintenance_payload_still_classifies() -> None:
 def test_age_seconds_counts_from_acquired_at() -> None:
     module = _triage_module()
     now = dt.datetime(2026, 9, 17, 2, 42, 14, 184784, tzinfo=dt.UTC).timestamp()
-    result = module.classify_status(_status_payload(), host="wsl", now=now)
+    result = module.classify_status(_status_payload(), host="runner-a", now=now)
     assert result.age_seconds == 7200
 
 
 def test_json_contract_keys() -> None:
     module = _triage_module()
-    result = module.classify_status(_status_payload(), host="wsl")
+    result = module.classify_status(_status_payload(), host="runner-a")
     payload = module.triage_json(result)
     assert set(payload) == {
         "host",
@@ -305,7 +304,7 @@ def test_json_contract_keys() -> None:
 
 def test_host_pattern_accepts_aliases_and_rejects_free_text() -> None:
     module = _triage_module()
-    assert module._HOST_PATTERN.fullmatch("wsl")
+    assert module._HOST_PATTERN.fullmatch("runner-a")
     assert module._HOST_PATTERN.fullmatch("user@host.example")
     assert module._HOST_PATTERN.fullmatch("a" * 253)
     assert module._HOST_PATTERN.fullmatch("a" * 254) is None
@@ -343,7 +342,7 @@ def test_read_source_success_builds_the_bounded_argv(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
     payload = module._read_source(
-        "wsl", module._STATUS_COMMAND, connect_timeout_s=5.0, command_timeout_s=10.0
+        "runner-a", module._STATUS_COMMAND, connect_timeout_s=5.0, command_timeout_s=10.0
     )
     assert payload == {"status": "paused"}
     argv, kwargs = calls[0]
@@ -353,7 +352,7 @@ def test_read_source_success_builds_the_bounded_argv(monkeypatch: pytest.MonkeyP
         "BatchMode=yes",
         "-o",
         "ConnectTimeout=5",
-        "wsl",
+        "runner-a",
         module._STATUS_COMMAND,
     ]
     assert kwargs["timeout"] == 10.0
@@ -388,7 +387,7 @@ def test_read_source_degrades_on_every_failure(monkeypatch: pytest.MonkeyPatch) 
         monkeypatch.setattr(module.subprocess, "run", fake_run)
         assert (
             module._read_source(
-                "wsl", module._STATUS_COMMAND, connect_timeout_s=5.0, command_timeout_s=10.0
+                "runner-a", module._STATUS_COMMAND, connect_timeout_s=5.0, command_timeout_s=10.0
             )
             is None
         )
@@ -416,7 +415,7 @@ def test_operation_whitelist_rejects_non_pattern_characters(value: str) -> None:
 
 def test_operation_whitelist_bounds_and_accepts_the_real_shape() -> None:
     module = _triage_module()
-    real = "local-pause:wsl:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605"
+    real = "local-pause:runner-a:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605"
     assert module._whitelisted(real, module._OPERATION_PATTERN) == real
     assert module._whitelisted("a" * 120, module._OPERATION_PATTERN) == "a" * 120
     assert module._whitelisted("a" * 121, module._OPERATION_PATTERN) is None

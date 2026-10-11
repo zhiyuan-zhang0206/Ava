@@ -27,7 +27,7 @@ unchanged. The new domain binds the HTTP operation to that original command.
   operation key, positive BIGINT path, explicit `NativeWorkTarget` and restart
   options (`source`, raw `config_overlay`). Every observed target field and
   protocol is required. No SDK/UI activation or legacy fallback.
-- Internal fixed `/api/agents/{agent_id}/restart-work-v1` lifecycle path:
+- Internal fixed `/api/agents/{agent_id}/restart-work` lifecycle path:
   explicit scoped operation key and the same original request. Old Ops servers
   reject this path. Native work protocol 1 is target qualification, not evidence
   that the restart executor supports this request protocol.
@@ -86,7 +86,7 @@ daemon/Gateway reconstruction; original owner exit before apply; actual
 successor admission; A accepted then B current then old A replay; source cleanup;
 withdrawn model normalization once; a later overlay never overwritten by replay;
 co-queued chat preserved; legacy route behavior; missing protocol/invalid path;
-and old versioned-path rejection with no fallback. The complete candidate must
+and unknown-path rejection with no fallback. The complete candidate must
 show one original lifecycle effect and no second graph invocation across lost
 responses, not just one accepted command.
 

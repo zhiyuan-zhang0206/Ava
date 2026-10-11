@@ -432,7 +432,7 @@ async def test_guarded_resurrect_path_requires_trigger(
         await lifecycle.lifecycle_op(
             database,
             event_bus,
-            "/api/agents/42/resurrect-if-pending-work-v2",
+            "/api/agents/42/resurrect-if-pending-work",
             {"resurrected_by": "system"},
             stub_pool,
             catalog=build_model_catalog(),  # type: ignore[arg-type]
@@ -450,11 +450,11 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
 ) -> None:
     """A mismatched path/guard pair cannot silently fall back to an
     unconditional manual resurrect."""
-    with pytest.raises(ValueError, match="only valid for resurrect-if-pending-work-v2"):
+    with pytest.raises(ValueError, match="only valid for resurrect-if-pending-work"):
         await lifecycle.lifecycle_op(
             database,
             event_bus,
-            "/api/agents/42/resurrect-explicit-v2",
+            "/api/agents/42/resurrect-explicit",
             {"resurrected_by": "system"},
             stub_pool,  # type: ignore[arg-type]
             trigger_inbound_id=99,
@@ -465,7 +465,7 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
 
 
 @pytest.mark.asyncio
-async def test_explicit_v2_resurrect_dispatches_manual_op(
+async def test_explicit_resurrect_dispatches_manual_op(
     monkeypatch: pytest.MonkeyPatch,
     stub_pool: MagicMock,
     database: Database,
@@ -473,7 +473,7 @@ async def test_explicit_v2_resurrect_dispatches_manual_op(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The versioned unguarded path is the only runner path used by a new
+    """The explicit unguarded path is the only runner path used by a new
     gateway for a deliberate manual or system lifecycle resurrection."""
 
     captured: dict[str, object] = {}
@@ -502,7 +502,7 @@ async def test_explicit_v2_resurrect_dispatches_manual_op(
     result = await lifecycle.lifecycle_op(
         database,
         event_bus,
-        "/api/agents/42/resurrect-explicit-v2",
+        "/api/agents/42/resurrect-explicit",
         {"resurrected_by": "user"},
         stub_pool,
         catalog=build_model_catalog(),  # type: ignore[arg-type]

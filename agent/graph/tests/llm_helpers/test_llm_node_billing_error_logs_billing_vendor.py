@@ -116,7 +116,6 @@ async def test_llm_node_transient_provider_error_propagates_for_retry(
             1,
             model="deepseek-flash",
             agent_id=7,
-            ledger=ledger,
             catalog=build_model_catalog(),
             max_attempts_pin=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)

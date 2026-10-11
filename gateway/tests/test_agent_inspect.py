@@ -112,7 +112,7 @@ def test_inspect_live_returns_only_window_independent_fields(
         config_overlay={"llm_model": "claude-opus-4-8"},
     )
     with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
+        cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
     _pause_row(db_conn, agent_id=aid, duration_s=1800, hours_ago=1)
     db_conn.commit()
 
@@ -120,7 +120,7 @@ def test_inspect_live_returns_only_window_independent_fields(
         _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         assert (target_machine, kind, payload) == (
-            "wsl",
+            "runner-a",
             "shell_probe",
             {"agent_id": aid},
         )
@@ -151,7 +151,7 @@ def test_inspect_live_returns_only_window_independent_fields(
         "heartbeat",
     }
     assert body["agent_id"] == aid
-    assert body["machine"] == "wsl"
+    assert body["machine"] == "runner-a"
     assert body["status"] == "idling"
     assert body["shells_available"] is True
     assert body["observation"]["runtime_owner"] == "unknown"
@@ -253,7 +253,7 @@ def test_inspect_shells_probed_on_agents_machine(
     session probing in the gateway)."""
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
+        cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
     db_conn.commit()
 
     seen: dict[str, object] = {}
@@ -275,7 +275,7 @@ def test_inspect_shells_probed_on_agents_machine(
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert seen == {
-        "machine": "wsl",
+        "machine": "runner-a",
         "kind": "shell_probe",
         "payload": {"agent_id": aid},
     }
@@ -301,7 +301,7 @@ def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
 
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
+        cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
         cur.execute(
             "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) VALUES (%s, %s, %s)",
             (aid, 5, deadline),
@@ -334,7 +334,7 @@ def test_inspect_shells_degrade_to_empty_on_unreachable(
     list — the inspector shows 'None open' instead of 503ing the whole panel."""
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
+        cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
     db_conn.commit()
 
     async def _unreachable_dispatch(
@@ -357,7 +357,7 @@ def test_inspect_shells_degrade_to_empty_on_failed_op(
     same graceful degradation to an empty shell list."""
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
+        cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
     db_conn.commit()
 
     async def _failed_dispatch(

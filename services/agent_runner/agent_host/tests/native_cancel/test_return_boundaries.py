@@ -41,12 +41,14 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 __all__ = ["blocked_host"]
 
 
+@pytest.mark.parametrize("fault_site", ["none", "after_ack"])
 @pytest.mark.parametrize("ending", ["provider_failure", "restart", "terminate"])
 async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     ending: str,
+    fault_site: str,
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
@@ -86,7 +88,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
             database_gate=database_gate,
             machine=machine_identity,
         )
-        faults = _install_faults(monkeypatch, initial.agent_id, "after_ack")
+        faults = _install_faults(monkeypatch, initial.agent_id, fault_site)
         running = asyncio.create_task(
             host._invoke_until_done(
                 initial.agent_id,
@@ -113,13 +115,21 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
                 )
             queued = _insert(db_conn, initial.agent_id)
             release.set()
+            if fault_site != "none":
+                with pytest.raises(psycopg.OperationalError):
+                    await asyncio.wait_for(running, 10)
+                assert faults.invocations == 1
+                assert db_conn.execute(
+                    "SELECT status FROM inbound_messages WHERE id=%s", (queued,)
+                ).fetchone() == ("pending",)
+                return
             outcome = await asyncio.wait_for(running, 10)
         finally:
             release.set()
             if not running.done():
                 running.cancel()
             await asyncio.gather(running, return_exceptions=True)
-        assert faults.injected and faults.invocations == 1
+        assert not faults.injected and faults.invocations == 1
         assert not outcome.native_held and outcome.exited == (ending == "terminate")
         assert db_conn.execute(
             "SELECT outcome FROM native_cancel_commands WHERE id=%s", (accepted.command_id,)

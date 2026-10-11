@@ -1,9 +1,9 @@
 """GET /api/ops/monitor HTTP integration tests — the Postgres read path.
 
-The window's events are real `telemetry_events` rows and the `agents` table is real SQL for the
-restarts-breakdown labels. Locks the endpoint contract: envelope shape, window → bucket sizing,
-zero-filling, payload field-name wiring from the emit sites (kind / latency_ms / name), exact
-percentiles, and the fixed-grid alignment against meta.bucket_starts.
+The window's events are real `telemetry_events` rows. Locks the endpoint contract: envelope
+shape, window → bucket sizing, zero-filling, payload field-name wiring from the emit sites
+(kind / latency_ms / name), exact percentiles, and the fixed-grid alignment against
+meta.bucket_starts.
 """
 
 from __future__ import annotations
@@ -20,14 +20,6 @@ from fastapi.testclient import TestClient
 from gateway.app import app
 from gateway.cluster import ops_monitor
 from gateway.cluster.ops_series import _GRID_ORIGIN, _bucket_starts
-
-
-def _insert_agent(db: psycopg.Connection, *, label: str) -> int:
-    with db.cursor() as cur:
-        cur.execute("INSERT INTO agents (label) VALUES (%s) RETURNING id", (label,))
-        row = cur.fetchone()
-    assert row is not None
-    return row[0]
 
 
 def _add(
@@ -74,9 +66,8 @@ def _assert_zero_totals(body: dict[str, Any]) -> None:
     assert body["sse"]["totals"] == {"queue_full": 0, "publish_error": 0, "event_log_drop": 0}
     assert body["llm"]["totals"]["calls"] == 0
     assert body["llm"]["totals"]["latency_p50_ms"] is None
-    assert body["restarts"]["totals"] == {"agent_restarts": 0, "service_starts": 0}
+    assert body["restarts"]["totals"] == {"service_starts": 0}
     assert body["restarts"]["services"] == []
-    assert body["restarts"]["agents"] == []
     # every llm bucket with no data: percentiles/max None, counts 0
     assert body["llm"]["series"][0] == {
         "bucket": 0,
@@ -157,7 +148,7 @@ def _seed_llm_bucket(db: psycopg.Connection) -> int:
     # a row with no numeric latency counts as a call but not toward the latency figures
     _add(db, event="llm_usage", payload={"in_total": 1}, ts=inside)
     _add(db, event="llm_provider_error", ts=inside)
-    _add(db, event="stream_stalled_retry", ts=inside)
+    _add(db, event="llm_provider_error", ts=inside)
     db.commit()
     return i
 
@@ -200,19 +191,9 @@ def test_ops_monitor_llm_tps_is_tokens_over_latency_seconds(db_conn: psycopg.Con
     assert llm["totals"]["tps"] == pytest.approx(363.9, abs=0.1)
 
 
-def test_ops_monitor_restarts_wires_agent_and_service_breakdown(
-    db_conn: psycopg.Connection,
-) -> None:
-    """agent_restarted / service_started series plus the whole-window
-    breakdowns: services by attributes.name (with last_start), agents by the
-    stream agent_id label with labels from the real agents table."""
-    a100 = _insert_agent(db_conn, label="worker-a")
-    a101 = _insert_agent(db_conn, label="worker-b")
-    db_conn.commit()
-    _add(db_conn, event="agent_restarted", agent_id=a100, ts_offset_hours=2)
-    _add(db_conn, event="agent_restarted", agent_id=a100, ts_offset_hours=2)
-    _add(db_conn, event="agent_restarted", agent_id=a101, ts_offset_hours=4)
-    _add(db_conn, event="agent_restarted", ts_offset_hours=6)  # no agent id: series only
+def test_ops_monitor_restarts_wires_service_breakdown(db_conn: psycopg.Connection) -> None:
+    """service_started series plus the whole-window breakdown: services by
+    attributes.name (with last_start)."""
     _add(db_conn, event="service_started", payload={"name": "gateway"}, ts_offset_hours=3)
     _add(db_conn, event="service_started", payload={"name": "gateway"}, ts_offset_hours=1)
     _add(db_conn, event="service_started", payload={"name": "restarter"}, ts_offset_hours=2)
@@ -220,8 +201,7 @@ def test_ops_monitor_restarts_wires_agent_and_service_breakdown(
     with TestClient(app) as client:
         body = client.get("/api/ops/monitor").json()
     restarts = body["restarts"]
-    # 4 rows total: the no-agent-id row counts in the series but not the breakdown
-    assert restarts["totals"] == {"agent_restarts": 4, "service_starts": 3}
+    assert restarts["totals"] == {"service_starts": 3}
     assert restarts["services"] == [
         {"name": "gateway", "starts": 2, "last_start": restarts["services"][0]["last_start"]},
         {"name": "restarter", "starts": 1, "last_start": restarts["services"][1]["last_start"]},
@@ -230,11 +210,6 @@ def test_ops_monitor_restarts_wires_agent_and_service_breakdown(
     for s in restarts["services"]:
         assert s["last_start"] is not None
         datetime.fromisoformat(s["last_start"])
-    # top agents: a100 (2) first, a101 (1) second, labels from the agents table
-    assert restarts["agents"] == [
-        {"agent_id": a100, "label": "worker-a", "restarts": 2},
-        {"agent_id": a101, "label": "worker-b", "restarts": 1},
-    ]
 
 
 def test_ops_monitor_grid_alignment(db_conn: psycopg.Connection) -> None:

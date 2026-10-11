@@ -10,14 +10,14 @@ import time
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
+from base.cluster import session_name
 from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.log import logger
-from cli.commands._repo import ServiceSpec, session_name
 from cli.commands.probe import ReadinessWait
 from cli.start_runtime import StartRuntime
-from ops.roster.service_spec import api_access, db_access, profile_marker
+from ops.roster.service_spec import ServiceSpec, api_access, db_access, profile_marker
 
 _ROOT_SOCKET_NAME = "ava-root.sock"
 _ROOT_STDOUT_LOG = "root.stdout.log"
@@ -90,11 +90,11 @@ def _root_tree_roster(
     roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity
 ) -> tuple[ServiceSpec, ...]:
     """The capability/config-selected units for this root."""
-    from cli.commands._repo import _services_for_roles_annotated
+    from ops.spec import services_for_capabilities_annotated
 
     return tuple(
         spec
-        for spec, reason in _services_for_roles_annotated(roles, machine=machine)
+        for spec, reason in services_for_capabilities_annotated(roles, machine=machine)
         if reason is None and spec.session not in launch_skip
     )
 
@@ -356,11 +356,6 @@ def _bring_up_root(
     retained_children: list[subprocess.Popen[bytes]],
 ) -> dict[str, Any]:
     """Start through the required platform owner; never change ownership on failure."""
-    if sys.platform == "win32":
-        raise _RootDriverError(
-            "native Windows root supervision requires its transport and Job ownership "
-            "adapter; session service startup is no longer supported"
-        )
     if _helper_spawn_committed():
         if not _helper_wire_ok():
             raise _RootDriverError(

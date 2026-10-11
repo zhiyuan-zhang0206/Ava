@@ -1,10 +1,7 @@
-# Native variant of deploy/lgtm/config/loki.yaml — only paths, listener
-# addresses, and the single-binary ring address differ from the container
-# configuration. Every limit and query-defense setting stays identical.
 # Loki 3.x single-binary config — filesystem storage, no auth (local viewer).
-# Paths under /loki: the image ships /loki owned by the loki user (uid 10001),
-# and a fresh named volume preserves that ownership (mounting a root-owned
-# path like /var/loki breaks the non-root default user).
+# Converge renders this template into the native config directory: storage
+# paths, listener addresses and ports are substituted; every limit and
+# query-defense setting below is fixed here.
 auth_enabled: false
 
 server:

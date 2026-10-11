@@ -209,103 +209,26 @@ def send_message(
     source: str,
     completion_notice: bool = False,
 ) -> None:
-    """POST /api/agents/{id}/messages — deliver a chat inbound.
+    """Deliver with bounded same-key HTTP retries; failures return to the caller.
 
-    `content` is either a plain string or a list of OpenAI-shaped content blocks
-    (`{"type": "text", ...}` / `{"type": "image_url", "image_url": {"url": ...}}`)
-    for a multimodal message; an image url must reference an upload of the
-    target agent. The gateway commits the inbound before publishing live
-    arrival and waking/resurrecting its owner in the current request.
-
-    Uses a per-call 120 s timeout (overriding the global 20 s client
-    default) so a large message body or a gateway-side auto-resurrect
-    does not trigger a read timeout.
-
-    AtLeastOnceWithKey (doorplate): `client_message_id` is committed on the
-    inbound row under a unique constraint. Every retry uses the same generated
-    `Idempotency-Key`, so it returns that row's stable id instead of duplicating
-    the message even if the first HTTP response was lost.
-
-    Deferred delivery (`base.agents.messages.delivery_outbox`, task #3757): all attempts of
-    one logical message — this call's own retries and a caller's later re-sends
-    of the same (target, source, content) within the dedup window — share one
-    key while the message is undelivered, and a final failure is recorded
-    durably on this machine for bounded redelivery once the gateway returns.
-    `GatewayUnavailable` can leave the commit outcome uncertain. HTTP 500 and
-    responses carrying `committed=true` or `retryable=false` are exposed once,
-    without enrolling automatic outbox recovery. The original HTTP response
-    retains its durable receipt and logical key for the caller to inspect.
+    The gateway's durable inbound key prevents duplicate acceptance after response
+    loss. There is no sender journal or delivery after this invocation exits.
     """
+    from uuid import uuid4
+
     import httpx
 
-    from ava.sdk_surface import agent_identity
-    from ava.sdk_surface import settings as sdk_settings
-    from base.agents.messages import delivery_outbox
-    from base.agents.messages.delivery.retry import retryable_response
-
-    origin_agent_id = agent_identity.agent_id()
-    sender = sdk_settings.delivery_sender_config()
-
-    body = {
-        "content": content,
-        "source": source,
-        **({"completion_notice": completion_notice} if completion_notice else {}),
-    }
-    key = delivery_outbox.logical_key(
-        sender=sender,
-        agent_id=agent_id,
-        source=source,
-        content=content,
-        completion_notice=completion_notice,
+    response = post(
+        f"/api/agents/{agent_id}/messages",
+        {
+            "content": content,
+            "source": source,
+            **({"completion_notice": True} if completion_notice else {}),
+        },
+        timeout=httpx.Timeout(120.0),
+        idempotency_key=str(uuid4()),
     )
-    try:
-        resp = post(
-            f"/api/agents/{agent_id}/messages",
-            body,
-            timeout=httpx.Timeout(120.0),
-            idempotency_key=key,
-        )
-    except GatewayUnavailable:
-        delivery_outbox.record_failed_send(
-            authority=sender.authority,
-            agent_id=agent_id,
-            origin_agent_id=origin_agent_id,
-            source=source,
-            content=content,
-            client_message_id=key,
-            completion_notice=completion_notice,
-        )
-        raise
-    if retryable_response(resp):
-        delivery_outbox.record_failed_send(
-            authority=sender.authority,
-            agent_id=agent_id,
-            origin_agent_id=origin_agent_id,
-            source=source,
-            content=content,
-            client_message_id=key,
-            completion_notice=completion_notice,
-        )
-    elif resp.is_success:
-        delivery_outbox.retire_send(
-            sender=sender,
-            agent_id=agent_id,
-            source=source,
-            content=content,
-            key=key,
-            completion_notice=completion_notice,
-        )
-    else:
-        delivery_outbox.retire_send(
-            sender=sender,
-            agent_id=agent_id,
-            source=source,
-            content=content,
-            key=key,
-            completion_notice=completion_notice,
-            completed=False,
-        )
-    raise_from_response(resp)
+    raise_from_response(response)
 
 
 def send_system_note(

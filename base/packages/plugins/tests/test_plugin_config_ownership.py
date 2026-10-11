@@ -13,7 +13,7 @@ from base.packages.plugins.config_registration import (
     bind_plugin_config,
     disk_image_path,
     is_per_agent_field,
-    read_authority_config,
+    read_config_image,
     validate_config_overlay,
 )
 from base.packages.plugins.tests.test_plugin_config import (
@@ -120,5 +120,5 @@ def test_authority_path_canonicalizes_a_symlink_home_without_creating_it(
     monkeypatch.setenv("AVA_HOME", str(alias))
     path = disk_image_path("canonical-probe")
     assert path == missing_home.resolve() / "configs" / "canonical-probe" / "config.json"
-    assert read_authority_config("canonical-probe", _FixtureConfig, path) == _FixtureConfig()
+    assert read_config_image(_FixtureConfig, path) == _FixtureConfig()
     assert not missing_home.exists()

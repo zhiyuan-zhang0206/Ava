@@ -21,21 +21,14 @@ class LlmUsage(TypedDict):
     Optional ``price_write_5m`` / ``price_write_1h`` and corresponding
     ``cache_write_5m`` / ``cache_write_1h`` preserve cache-creation subdivisions
     of total input and their TTL-specific USD per 1M rates.
-    All four are absent on rows written before the snapshot shipped, and on
-    calls of a model with no known price (a row never carries a null cost —
-    absent means unpriced).
+    All four are absent on calls of a model with no known price (a row never
+    carries a null cost — absent means unpriced).
 
     ``calls`` is the constant 1 — it exists so the OTLP mapping mints
     ``ava_llm_usage_calls_total`` (per-agent/per-model call counts come from a
     Counter, not from a histogram's count, which drops the agent_id key).
     ``unpriced`` is 1 exactly when the price snapshot is absent (so unpriced
-    call volume is countable in Prometheus); it is omitted on priced calls.
-
-    ``cache_mechanism`` / ``cache_scope`` are present only when the call site
-    knows the request's cache provenance (task #2660): the Gemini explicit
-    cache path labels ``mixed`` / ``explicit_block`` because the API reports
-    only the explicit block in ``cache_read``; absent keys mean unknown, never
-    fabricated."""
+    call volume is countable in Prometheus); it is omitted on priced calls."""
 
     model: str
     calls: int
@@ -56,8 +49,6 @@ class LlmUsage(TypedDict):
     unpriced: int | None
     usage_kind: str
     source: NotRequired[str]
-    cache_mechanism: NotRequired[str]
-    cache_scope: NotRequired[str]
 
 
 class TurnEnd(TypedDict):
@@ -81,43 +72,6 @@ class LlmRetry(TypedDict):
 
     outcome: Literal["succeeded", "attempts_exhausted", "budget_exhausted"]
     duration_seconds: float
-
-
-class StreamStalledRetry(TypedDict):
-    """`stream_stalled_retry` payload — agent/graph/llm/_stream.py.
-
-    The stalled stream's provider identity and shape, so stalls are countable
-    per vendor/model — the provider-health dimension the LLM telemetry
-    previously lacked (2026-09-14/15 wave: 100% of stalled requests were
-    api.deepseek.com, but nothing in the event stream said so).
-
-    ``elapsed_s`` is the stalled segment's wall-clock (the bound that expired);
-    it also maps onto the OTLP metric surface as a histogram with
-    ``vendor``/``model``/``stage`` as datapoint attributes. ``stage`` is
-    ``ttft`` (no first chunk), ``mid-stream`` (gap after chunks arrived) or
-    ``total`` (the per-attempt duration ceiling).
-    """
-
-    vendor: str | None
-    model: str
-    stage: str
-    elapsed_s: float
-
-
-class StreamStallPairTerminated(TypedDict):
-    """`stream_stall_pair_terminated` payload — agent/graph/llm/_stream.py.
-
-    The call-terminating stall pair (the stream segment and its non-streaming
-    fallback both expired) carries the same provider identity as the
-    ``stream_stalled_retry`` it co-emits with, so the pair joins back to the
-    stall that opened it; ``timeout_s`` is the shared
-    ``llm_stream_ttft_timeout_seconds`` bound both segments ran under.
-    """
-
-    vendor: str | None
-    model: str
-    stage: str
-    timeout_s: float
 
 
 class LlmProviderError(TypedDict):
@@ -197,34 +151,6 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         persist=True,
     ),
-    "stream_stalled_retry": telemetry_event(
-        "stream_stalled_retry",
-        "stream stalled, retried (vendor/model/stage/elapsed_s carry the provider-health "
-        "dimension; elapsed_s also maps to an OTLP histogram)",
-        payload=StreamStalledRetry,
-        family=LLM_ERROR_FAMILY,
-        tier="anomaly",
-        persist=True,
-    ),
-    # Excluded from LLM_ERROR_FAMILY (task #3884, reaffirmed 2026-09-18):
-    # each pair co-emits 1:1 with stream_stalled_retry, so family sums would
-    # double-count the call. The Provider stalls panel/rule (task #3948)
-    # displays the pair; test_event_contract pins the family at 4.
-    "stream_stall_pair_terminated": telemetry_event(
-        "stream_stall_pair_terminated",
-        "two adjacent stream stalls (stream segment + non-streaming fallback) terminated "
-        "the call early; retried on the delayed stall schedule",
-        payload=StreamStallPairTerminated,
-        tier="anomaly",
-        persist=True,
-    ),
-    "stream_overloaded_retry": telemetry_event(
-        "stream_overloaded_retry",
-        "stream overloaded, retried",
-        family=LLM_ERROR_FAMILY,
-        tier="anomaly",
-        persist=True,
-    ),
     "thinking_block_sanitized": telemetry_event(
         "thinking_block_sanitized", "thinking block sanitized", tier="noise"
     ),
@@ -246,14 +172,8 @@ EVENTS: dict[str, EventSpec] = {
     "circuit_breaker_closed": telemetry_event(
         "circuit_breaker_closed", "heartbeat circuit breaker closed", tier="noise"
     ),
-    "circuit_breaker_compact": telemetry_event(
-        "circuit_breaker_compact", "forced overflow compact fired by the open breaker", tier="noise"
-    ),
     "heartbeat_circuit_open": telemetry_event(
         "heartbeat_circuit_open", "heartbeat consumed while the breaker is open", tier="noise"
-    ),
-    "emergency_compact": telemetry_event(
-        "emergency_compact", "emergency compaction (overflow self-rescue)", tier="noise"
     ),
     "compact_boundary_stamp": telemetry_event(
         "compact_boundary_stamp",

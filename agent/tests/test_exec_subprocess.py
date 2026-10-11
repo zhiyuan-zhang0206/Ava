@@ -3,7 +3,6 @@
 `_run_in_subprocess` (the exec node is not wired to it until PR2).
 
 Each case spawns one real child (~1s for `import ava`); keep the count low.
-POSIX-only cases (signals, process groups) are skipped on Windows.
 """
 
 from __future__ import annotations
@@ -215,7 +214,7 @@ async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """Isolated mode ignores Python encoding env vars, so the production
-    child command itself must force UTF-8 on every platform, including Windows."""
+    child command itself must force UTF-8 on every platform."""
     monkeypatch.setenv("PYTHONUTF8", "0")
     monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
 
@@ -465,7 +464,7 @@ async def test_outer_task_cancel_reaps_child_and_descendant(
                 await task
         for pid in reversed(pids):
             kill_process_tree(pid, grace_s=0.0)
-        if os.name != "nt" and pids:
+        if pids:
             with contextlib.suppress(ChildProcessError, ProcessLookupError):
                 os.waitpid(pids[0], 0)
 
@@ -638,7 +637,6 @@ async def test_subprocess_unknown_lifecycle_class_crashes(
     assert result.exc.exc_msg == ("child reported unknown lifecycle class '_MysteryLifecycle'")
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
 async def test_subprocess_kills_process_group_on_timeout(
     tmp_path: Path, database_gate: ProcessDbGate
 ) -> None:

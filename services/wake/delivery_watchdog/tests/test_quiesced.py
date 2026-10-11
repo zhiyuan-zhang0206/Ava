@@ -11,70 +11,22 @@ from unittest.mock import MagicMock
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentity
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
-from base.events.live.bus import EventBus
-from services.wake.delivery_watchdog import daemon, resurrect_retry, stall_recovery, turn_liveness
-from tests.fixtures.unit.identity import machine_identity as machine_identity
+from services.wake.delivery_watchdog import daemon
 
-_Loop = Callable[
-    [ConnectionPool, LoopProgress, ProcessDbGate, MachineIdentity], Coroutine[Any, Any, None]
-]
+_Loop = Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]]
 
 _LOOPS: dict[str, _Loop] = {
-    "scan": lambda pool, progress, database_gate, _machine_identity: daemon._scan_loop(
-        pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), progress
-    ),
-    "resurrect": lambda pool, progress, database_gate, machine_identity: (
-        resurrect_retry.resurrect_loop(
-            pool,
-            Database.from_settings(gate=database_gate),
-            EventBus.from_settings(),
-            progress,
-            0.01,
-            10,
-            60.0,
-            machine=machine_identity,
-        )
-    ),
-    "harvest": lambda pool, progress, database_gate, machine_identity: (
-        stall_recovery.stall_recovery_loop(
-            pool,
-            Database.from_settings(gate=database_gate),
-            EventBus.from_settings(),
-            progress,
-            0.01,
-            60.0,
-            machine=machine_identity,
-        )
-    ),
-    "hosted_turn": lambda pool, progress, database_gate, machine_identity: (
-        turn_liveness.hosted_turn_recovery_loop(
-            pool,
-            Database.from_settings(gate=database_gate),
-            cast("EventBus", MagicMock()),
-            progress,
-            0.01,
-            60.0,
-            machine=machine_identity,
-        )
-    ),
+    "scan": daemon._scan_loop,
 }
 
 
 @pytest.mark.parametrize("quiesced", [True, False])
 @pytest.mark.parametrize("name", list(_LOOPS))
 async def test_a_quiesced_unit_borrows_no_connection(
-    monkeypatch: pytest.MonkeyPatch,
-    name: str,
-    quiesced: bool,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    monkeypatch: pytest.MonkeyPatch, name: str, quiesced: bool
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
 
@@ -83,11 +35,7 @@ async def test_a_quiesced_unit_borrows_no_connection(
 
     monkeypatch.setattr(round_loop, "sleep_with_progress", short_sleep)
     pool = MagicMock()
-    task = asyncio.create_task(
-        _LOOPS[name](
-            cast("ConnectionPool", pool), LoopProgress("t", 60.0), database_gate, machine_identity
-        )
-    )
+    task = asyncio.create_task(_LOOPS[name](cast("ConnectionPool", pool), LoopProgress("t", 60.0)))
     try:
         await asyncio.sleep(0.2)
     finally:

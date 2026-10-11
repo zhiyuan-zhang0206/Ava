@@ -230,7 +230,6 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
                 prior.registry,
                 catalog=prior.catalog,
                 authority=prior.authority,
-                delivery_sender=prior.delivery_sender,
                 sampling=prior.sampling,
                 clock_factory=prior.clock_factory,
                 producer=prior.producer,

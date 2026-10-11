@@ -92,8 +92,7 @@ def _shutdown_config() -> ConfigBoot:
 
 def _assert_boot_primary(exc: BaseException, failure: str) -> None:
     if failure == "heartbeat_boot":
-        assert isinstance(exc, ValueError)
-        assert str(exc) == "boot settlement stopped independently"
+        assert isinstance(exc, asyncio.CancelledError)
         assert any("heartbeat defect" in note for note in exc.__notes__)
 
 
@@ -233,8 +232,8 @@ def _assert_heartbeat_order(events: list[str], failure: str) -> None:
         assert events.index("turns_drained") < events.index("beat_stopped")
         assert events.index("turns_drained") < events.index("sampling_stopped")
     if failure == "heartbeat":
-        assert events.index("beat_failed") < events.index("dispatcher_continued")
-        assert events.index("dispatcher_continued") < events.index("turns_drained")
+        assert "dispatcher_continued" not in events
+        assert events.index("beat_failed") < events.index("pools_closed")
 
 
 def _shutdown_child(failure: str, home: Path) -> subprocess.CompletedProcess[str]:
@@ -261,7 +260,7 @@ def _shutdown_child(failure: str, home: Path) -> subprocess.CompletedProcess[str
         ("signal", "KeyboardInterrupt"),
         ("exception", "ExceptionGroup[ValueError]"),
         ("dispatcher_returns", "ExceptionGroup[RuntimeError]"),
-        ("heartbeat", "RuntimeError"),
+        ("heartbeat", "ExceptionGroup[RuntimeError]"),
     ],
 )
 def test_failed_background_still_drains_and_releases(
@@ -305,10 +304,6 @@ def test_failed_background_still_drains_and_releases(
         assert events.index("turns_drained") < events.index("beat_stopped")
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="POSIX SIGTERM path; Windows stops route through the private console",
-)
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
     """SIGTERM exits within the bound while a wedged default-executor job stands."""
     # The exit bound only matters relative to the stop budget it protects:
@@ -375,9 +370,8 @@ def test_failed_heartbeat_during_boot_still_closes_pools_and_pidfile(unit_home: 
         "beat_started",
         "beat_failed",
         "beat_stopped",
-        "boot_continued",
         "sampling_stopped",
         "pools_closed",
         "pidfile_removed",
-        "ValueError",
+        "CancelledError",
     ]

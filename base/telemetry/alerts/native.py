@@ -84,7 +84,7 @@ def notify_alert_group(group_id: int) -> bool:
     base = im_bridge_rpc_url()
     try:
         response = httpx.post(
-            f"{base}/send/alert-outbound-v1",
+            f"{base}/send/alert-outbound",
             json={"group_id": group_id, "source_origin": AlertGroupOrigin.NATIVE.value},
             headers=gateway_auth_headers(),
             timeout=10.0,

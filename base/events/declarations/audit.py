@@ -94,11 +94,6 @@ EVENTS: dict[str, EventSpec] = {
         "cancel", "in-flight turn cancelled", site="base/db/__init__.py:500 same as above"
     ),
     "resurrect": audit_event("resurrect", "terminated agent woken"),
-    "billing_resurrect": audit_event(
-        "billing_resurrect",
-        "billing batch recovery run: billing-class halt victims reinstated after "
-        "the provider balance gate passed (task #3919)",
-    ),
     "hosted_legacy_adoption": audit_event(
         "hosted_legacy_adoption",
         "a hosted successor replaced a legacy NULL-resource owner before lease "
@@ -108,9 +103,8 @@ EVENTS: dict[str, EventSpec] = {
     "circuit_breaker": audit_event(
         "circuit_breaker",
         "heartbeat circuit breaker opened — a permanent provider rejection stopped "
-        "heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue)",
+        "background model re-fires until the cause is corrected",
     ),
-    "report_activity": audit_event("report_activity", "activity report", retired=True),
     "status_change": telemetry_audit_event(
         "status_change",
         "agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name",
@@ -121,7 +115,6 @@ EVENTS: dict[str, EventSpec] = {
     "skill_invoked": audit_event("skill_invoked", "skill invoked by an agent"),
     "task_create": audit_event("task_create", "task created"),
     "task_update": audit_event("task_update", "task updated", payload=TaskUpdate),
-    "report_breached": audit_event("report_breached", "guarantee report breached", retired=True),
     "computer_action": audit_event(
         "computer_action",
         "computer-use desktop action (executed or refused)",

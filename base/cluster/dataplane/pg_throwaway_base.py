@@ -14,7 +14,7 @@ keep that module under its line ceiling (the same reason
   itself — never the RAM-sized platform default — and the selection refuses
   loudly when the disk fallback cannot hold the declared footprint.
 
-Why the capacity step exists (2026-09-14 WSL incident): the throwaway cluster
+Why the capacity step exists (2026-09-14 incident): the throwaway cluster
 defaulted to /dev/shm — 7.8 GiB on that host — while a full-restore drill of a
 10.16 GiB artifact needs >=17 GiB of restored data. The postmaster died
 mid-restore when the cluster outgrew the tmpfs; the drill surfaced only
@@ -35,7 +35,6 @@ pull the Settings tree any earlier.
 from __future__ import annotations
 
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
@@ -45,10 +44,10 @@ from base.log import logger
 def default_base() -> Path:
     """The platform default base for throwaway data dirs: `/dev/shm` on Linux (RAM, so
     scratch clusters get tmpfs speed), else the OS temp dir (macOS has no /dev/shm; its
-    SSD-backed `$TMPDIR` is fast enough; Windows uses `%TEMP%`). Read from the host at
+    SSD-backed `$TMPDIR` is fast enough). Read from the host at
     each call; tests replace this function."""
     shm = Path("/dev/shm")  # noqa: S108 — deliberate tmpfs for throwaway cluster data
-    if sys.platform != "win32" and shm.is_dir():
+    if shm.is_dir():
         return shm
     return Path(tempfile.gettempdir())
 

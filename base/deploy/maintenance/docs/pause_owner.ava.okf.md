@@ -13,10 +13,9 @@ current DB capability: it matches only the local journal, so it still works
 while the gateway or Postgres is unavailable and a delayed generation A resume
 cannot unpause generation B.
 
-Only a maintenance hold (below) writes the journal. A `paused` or `resumed`
-record without a hold is what the retired updater's stop op left: a `paused`
-one keeps business closed, and no command clears it. An unreadable journal
-refuses new work the same way. Both have one exit: after confirming no `ava
+Only a maintenance hold (below) writes the journal. A record without a hold
+and an unreadable journal both read as invalid: they keep business closed and
+refuse new work, and no command clears them. They have one exit: after confirming no `ava
 stop` is in flight for this home, an operator
 removes the file by hand (`rm $AVA_HOME/run/deploy-pause-owner.json`) and runs
 `ava start`.
@@ -27,5 +26,3 @@ was taken under (`base/deploy/maintenance/hold_driver.py`). It has no expiry tim
 automatic release; only its exact
 operation's `ava start` ends it. Ordinary
 compensation and a newer maintenance operation cannot release or overwrite it.
-This is distinct from a retired updater's pause record, which has no exit but
-the manual removal above.

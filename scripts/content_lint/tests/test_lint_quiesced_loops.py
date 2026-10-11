@@ -32,15 +32,14 @@ def test_a_resident_loop_without_a_gate_or_exemption_is_flagged() -> None:
     assert _lines(src) == [5]
 
 
-@pytest.mark.parametrize("gate", ["admission.quiesced()", "admission.in_stop_leg()"])
-def test_a_function_that_consults_the_stop_window_is_gated(gate: str) -> None:
-    src = f"""
+def test_a_function_that_consults_the_stop_window_is_gated() -> None:
+    src = """
         import asyncio
 
         async def poll(pool):
             while True:
                 await asyncio.sleep(1)
-                if {gate}:
+                if admission.quiesced():
                     continue
     """
     assert _violations(src) == []

@@ -18,8 +18,7 @@ prune`. The best-effort off-site leg publishes the encrypted artifact to OSS
 iff absent (`services.backup.artifact.offsite`); an unconfigured,
 unavailable or failing store keeps the local artifact, and nothing here deletes
 a remote object (see `future/infra/data/pg-backup.md`). The dump uses PostgreSQL's
-compressed custom format; legacy gzip artifacts stay restorable
-(`gunzip_if_needed`).
+compressed custom format.
 
 The LangGraph checkpoint tables (`checkpoint_blobs`, `checkpoints`, and
 `checkpoint_writes`) are the only copy of conversation history: messages, tool
@@ -39,7 +38,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import subprocess
 import threading
 import time
@@ -97,9 +95,7 @@ def _require_aware(now: datetime) -> datetime:
 
 def backup_dir() -> Path:
     # `<home>/backups/db`: the home itself already scopes the cluster (path-only
-    # identity), so the dump dir needs no per-cluster token. Pre-cutover dumps
-    # under `backups/<cluster-name>` are left in place (at most ``backup_keep`` of
-    # them); rotation continues in the new dir.
+    # identity), so the dump dir needs no per-cluster token.
     return ava_home() / "backups" / "db"
 
 
@@ -194,27 +190,20 @@ def _passwordless_conninfo(db_url: str) -> tuple[str, str]:
     return conninfo, password if isinstance(password, str) else ""
 
 
-def _key_file(directory: Path, *, legacy_empty_secret: bool = False) -> Path:
+def _key_file(directory: Path) -> Path:
     """A private temporary key file holding the pinned logical-backup passphrase."""
-    return backup_passphrase.write_key_file(directory, legacy_empty_secret=legacy_empty_secret)
+    return backup_passphrase.write_key_file(directory)
 
 
-def decrypt_artifact(
-    artifact: Path, custom_dump: Path, *, legacy_empty_secret: bool = False
-) -> None:
-    """Decrypt one managed artifact into a custom-format dump.
+def decrypt_artifact(artifact: Path, custom_dump: Path) -> None:
+    """Decrypt one managed artifact into its raw `pg_dump --format=custom` archive.
 
-    `custom_dump` is the raw `pg_dump --format=custom` archive for artifacts
-    written by the current pipeline; for legacy `<db>-<ts>.dump.gz.enc`
-    artifacts it is the gzip-compressed archive (call `gunzip_if_needed`).
     The caller owns `custom_dump` and removes it once consumed. The pinned
-    passphrase decrypts, never placed on argv; `legacy_empty_secret` (an
-    explicit restore option, never a fallback) uses the public pre-cutover key
-    of an empty-secret home instead.
+    passphrase decrypts, never placed on argv.
     """
     custom_dump.touch(mode=0o600, exist_ok=False)
     custom_dump.chmod(0o600)
-    key_file = _key_file(custom_dump.parent, legacy_empty_secret=legacy_empty_secret)
+    key_file = _key_file(custom_dump.parent)
     try:
         proc = subprocess.run(  # noqa: S603
             [
@@ -236,45 +225,10 @@ def decrypt_artifact(
             timeout=_DUMP_TIMEOUT_S,
         )
         if proc.returncode != 0:
-            hint = "" if legacy_empty_secret else f"; {backup_passphrase.LEGACY_RESTORE_HINT}"
-            raise RuntimeError(f"backup decrypt exited {proc.returncode}{hint}")
+            raise RuntimeError(f"backup decrypt exited {proc.returncode}")
     finally:
         with suppress(OSError):
             key_file.unlink(missing_ok=True)
-
-
-def gunzip_if_needed(path: Path, *, timeout_s: float = _DUMP_TIMEOUT_S) -> None:
-    """Decompress `path` in place when it is a gzip stream, else leave it alone.
-
-    The current pipeline publishes raw custom-format dumps (`.dump.enc`), but
-    legacy artifacts (`.dump.gz.enc`, written before the double-gzip removal)
-    carry a gzip layer around the archive. Restore paths call this so every
-    managed artifact stays restorable through one procedure during and after
-    the transition; the gzip magic header (``1f 8b``) decides.
-    """
-    with path.open("rb") as handle:
-        magic = handle.read(2)
-    if magic != b"\x1f\x8b":
-        return
-    decompressed = path.with_name(path.name + ".raw")
-    try:
-        # 0600 like every other decrypted intermediate: the plaintext dump must
-        # not widen to umask (typically 0644) when the archive is replaced.
-        fd = os.open(decompressed, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as output:
-            proc = subprocess.run(  # noqa: S603
-                ["gzip", "--decompress", "--stdout", str(path)],
-                stdout=output,
-                stderr=subprocess.PIPE,
-                check=False,
-                timeout=timeout_s,
-            )
-        if proc.returncode != 0:
-            raise RuntimeError(f"backup gunzip exited {proc.returncode}")
-        decompressed.replace(path)
-    finally:
-        with suppress(OSError):
-            decompressed.unlink(missing_ok=True)
 
 
 def _available_target(directory: Path, dbname: str, now: datetime) -> Path:
@@ -546,9 +500,8 @@ def _dump_and_encrypt(
     dump_cmd = [
         str(pg_tool("pg_dump")),
         "--format=custom",
-        # The archive's own zstd compression (PG 17+). A second, external
-        # compression pass used to gzip the already-compressed archive (13-47 s
-        # benchmarked on the production DB for <1% size gain) — removed 2026-08-27.
+        # The archive's own zstd compression (PG 17+); a second, external pass over
+        # the already-compressed archive gained <1% for 13-47 s on the production DB.
         "--compress=zstd:3",
         "--file",
         str(dump_partial),

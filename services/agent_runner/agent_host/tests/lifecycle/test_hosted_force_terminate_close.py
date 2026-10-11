@@ -158,13 +158,11 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
         await close_hosted_turn(
             aops_pool,
             aops_pool,
-            Database.from_settings(gate=database_gate),
             event_bus,
             Mock(),
             incarnation,
             outcome,
             resources=None,
-            wake_enabled=configured_policy().recovery_wake_enabled,
             prompt_reap_enabled=configured_policy().recrash_reap_enabled,
             reconcile_inputs=configured_policy().reconcile_inputs,
             machine=machine_identity,

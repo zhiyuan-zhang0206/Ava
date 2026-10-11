@@ -10,7 +10,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import re
 import shutil
 import socket
 import subprocess
@@ -25,8 +24,9 @@ import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-COMPOSE_PATH = REPO_ROOT / "deploy/lgtm/docker-compose.yml"
-RUNTIME_ENV_PATH = REPO_ROOT / "deploy/lgtm/config/grafana/runtime.env"
+NATIVE_DIR = REPO_ROOT / "deploy/lgtm/native"
+RUNTIME_ENV_PATH = NATIVE_DIR / "config/runtime.env"
+VERSIONS_PATH = NATIVE_DIR / "versions.yml"
 DASHBOARD_DIR = REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards"
 PROVISIONING_DIR = REPO_ROOT / "deploy/lgtm/config/grafana/provisioning"
 ALERT_RULES_PATH = PROVISIONING_DIR / "alerting/rules.yml"
@@ -44,28 +44,53 @@ def _grafana_distribution() -> tuple[Path, Path]:
     return Path(binary), Path(home)
 
 
-_COMPOSE_DEFAULT = re.compile(r"\$\{[A-Z_]+:-([^}]*)\}")
+# The settings `native/config/grafana.ini` and `run.sh` give a real native Grafana, spelled as
+# the GF_* environment the disposable test instance reads, plus the placeholders the converge
+# renders into `runtime.env` (loopback defaults, as on a single-box home). The Telegram contact
+# point needs a non-empty token, so it gets run.sh's inert placeholders.
+_NATIVE_ENVIRONMENT = {
+    "GF_AUTH_ANONYMOUS_ENABLED": "true",
+    "GF_AUTH_ANONYMOUS_ORG_ROLE": "Viewer",
+    "GF_USERS_ALLOW_SIGN_UP": "false",
+    "GF_SECURITY_ALLOW_EMBEDDING": "true",
+    "GF_SERVER_SERVE_FROM_SUB_PATH": "true",
+    "GF_ANALYTICS_REPORTING_ENABLED": "false",
+    "GF_ANALYTICS_CHECK_FOR_UPDATES": "false",
+    "AVA_ALERTS_WEBHOOK_TOKEN": "",
+    "AVA_ALERTS_TELEGRAM_BOT_TOKEN": "unconfigured",
+    "AVA_ALERTS_TELEGRAM_CHAT_ID": "0",
+    "GRAFANA_PG_PASSWORD": "",
+}
+_RUNTIME_ENV_PLACEHOLDERS = {
+    "GRAFANA_PROVISIONING_PATH": "/etc/grafana/provisioning/dashboards",
+    "AVA_TEMPO_QUERY_URL": "http://127.0.0.1:3200",
+    "LOKI_URL": "http://127.0.0.1:3100",
+    "PROMETHEUS_URL": "http://127.0.0.1:9090",
+    "PG_URL": "127.0.0.1:5433",
+    "ALERTS_WEBHOOK_URL": "http://127.0.0.1:8000/api/alerts",
+}
 
 
-def _grafana_environment() -> dict[str, str]:
-    compose: dict[str, Any] = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
-    raw: dict[str, object] = compose["services"]["grafana"]["environment"]
-    # Compose interpolates `${NAME:-default}` before Grafana sees the value; with nothing set the
-    # default is what the container gets (the Telegram contact point needs a non-empty token).
-    environment = {str(key): _COMPOSE_DEFAULT.sub(r"\1", str(value)) for key, value in raw.items()}
+def _native_runtime_environment() -> dict[str, str]:
+    """The `runtime.env` run.sh sources, with the converge placeholders filled in."""
+    environment: dict[str, str] = {}
     for line in RUNTIME_ENV_PATH.read_text(encoding="utf-8").splitlines():
         if line and not line.startswith("#"):
             key, value = line.split("=", 1)
+            for name, replacement in _RUNTIME_ENV_PLACEHOLDERS.items():
+                value = value.replace(f"{{{{{name}}}}}", replacement)
+            assert "{{" not in value, f"unfilled runtime.env placeholder in {line!r}"
             environment[key] = value
     return environment
 
 
+def _grafana_environment() -> dict[str, str]:
+    return {**_NATIVE_ENVIRONMENT, **_native_runtime_environment()}
+
+
 def _shipped_grafana_version() -> str:
-    compose: dict[str, Any] = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
-    image = str(compose["services"]["grafana"]["image"])
-    prefix = "grafana/grafana:"
-    assert image.startswith(prefix)
-    return image.removeprefix(prefix)
+    versions: dict[str, Any] = yaml.safe_load(VERSIONS_PATH.read_text(encoding="utf-8"))
+    return str(versions["grafana"]["version"])
 
 
 def _dashboard(filename: str) -> dict[str, Any]:
@@ -246,18 +271,16 @@ def _assert_viewer_cannot_persist_dashboard(base_url: str) -> None:
 
 
 def test_shipped_grafana_runtime_contract() -> None:
-    """Keep security, concurrency, and capacity settings transport-neutral."""
-    compose: dict[str, Any] = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
-    grafana: dict[str, Any] = compose["services"]["grafana"]
+    """Keep security and concurrency settings aligned between grafana.ini and runtime.env."""
     environment = _grafana_environment()
+    ini = (NATIVE_DIR / "config/grafana.ini").read_text(encoding="utf-8")
 
-    assert grafana["env_file"] == ["./config/grafana/runtime.env"]
     assert environment["GF_USERS_VIEWERS_CAN_EDIT"] == "true"
+    assert "viewers_can_edit = true" in ini
     assert environment["GF_DATABASE_QUERY_RETRIES"] == "5"
+    assert "query_retries = 5" in ini
     assert environment["GF_LIVE_MAX_CONNECTIONS"] == "0"
-    assert float(grafana["cpus"]) == 2.0
-    assert grafana["mem_limit"] == "2g"
-    assert grafana["memswap_limit"] == "2g"
+    assert "max_connections = 0" in ini
 
 
 def test_default_dashboard_refresh_is_load_bounded() -> None:

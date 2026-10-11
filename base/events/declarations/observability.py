@@ -30,16 +30,9 @@ class LokiWritePathProbeThrottled(TypedDict):
 
 
 class ResolvedMarker(TypedDict, total=False):
-    """`warning_resolved` / `error_resolved` payload, supporting two eras.
+    """`warning_resolved` / `error_resolved` payload: an immutable Loki event
+    class and the `event_dismissals` row that carries its resolution state."""
 
-    Legacy producers named one mutable Postgres event with `target_event_id`
-    and/or `match`; those attributes remain declared so historical marker
-    lines stay contract-valid. New producers declare an immutable Loki event
-    class and the `event_dismissals` row that carries its resolution state.
-    """
-
-    target_event_id: NotRequired[int]
-    match: NotRequired[str]
     resolved_by: NotRequired[int]
     category: NotRequired[str]
     level: NotRequired[str]
@@ -222,7 +215,7 @@ EVENTS: dict[str, EventSpec] = {
     # remains the active-resolution source of truth (task #1468).
     "warning_resolved": telemetry_event(
         "warning_resolved",
-        "class-level warning dismissal marker (legacy target-event attributes remain accepted)",
+        "class-level warning dismissal marker",
         payload=ResolvedMarker,
         tier="anomaly",
         site=(
@@ -233,7 +226,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "error_resolved": telemetry_event(
         "error_resolved",
-        "class-level error/critical dismissal marker (legacy target-event attributes remain accepted)",
+        "class-level error/critical dismissal marker",
         payload=ResolvedMarker,
         tier="anomaly",
         site=(

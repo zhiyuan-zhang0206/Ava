@@ -49,8 +49,8 @@ def test_machine_spec_tuple_with_description() -> None:
 
 @pytest.mark.usefixtures("restore_context")
 def test_machine_spec_tuple_empty_when_no_description() -> None:
-    ava.bind_context(AvaContext(machine=_machine("wsl", None)))
-    assert self_mod.MACHINE_SPEC == ("wsl", "")
+    ava.bind_context(AvaContext(machine=_machine("runner-a", None)))
+    assert self_mod.MACHINE_SPEC == ("runner-a", "")
 
 
 @pytest.mark.usefixtures("restore_context")

@@ -22,7 +22,6 @@ import psycopg
 import pytest
 
 from base.db import create_agent
-from base.native_process.os_platform import is_windows
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
@@ -32,10 +31,6 @@ from tests.path_scoped import pty_shells as support
 from tests.path_scoped.pty_service import _REPO, PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 from tests.path_scoped.pty_shells import new, output_until, type_line, wait_for
-
-pytestmark = [
-    pytest.mark.skipif(is_windows(), reason="pty sessions are POSIX-only"),
-]
 
 # A stand-in for the agent host: a separate process that creates a session through the
 # client, reports it, and stays alive until it is killed.
@@ -408,12 +403,10 @@ def test_the_sweep_never_reports_a_busy_session_whose_shell_is_still_running(
         bystander.wait(timeout=10)
 
 
-def test_a_crashed_service_tells_the_owner_of_a_busy_session_at_the_next_start(
+def test_a_crashed_service_keeps_local_evidence_without_notifying_or_replaying(
     pty_service: PtyServiceProcess, unit_home: Path, db_conn: psycopg.Connection, db_url: str
 ) -> None:
-    """SIGKILL the service while a session runs a job: the hangup ends everything, so the
-    sweep has nothing to close, yet the next start hands the busy session to the one-shot
-    child, which leaves its owner one system inbound."""
+    """A real crash sweep preserves an old notice file and sends no owner message."""
     owner = create_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -421,7 +414,7 @@ def test_a_crashed_service_tells_the_owner_of_a_busy_session_at_the_next_start(
             (owner,),
         )
     db_conn.commit()
-    # The unit's `.env` declares what the child needs: its name and its database.
+    # A reachable database must not turn a sweep into an automatic notification.
     (unit_home / ".env").write_text(
         f"AVA_MACHINE_NAME=crash-box\nAVA_DB_URL={db_url}\nAVA_REDIS_URL={os.environ['AVA_REDIS_URL']}\n",
         encoding="utf-8",
@@ -440,7 +433,14 @@ def test_a_crashed_service_tells_the_owner_of_a_busy_session_at_the_next_start(
     pty_service.wait()
     assert jobs.wait_exit(shell.pid, timeout=10), "precondition: the hangup ends the shell"
 
+    old_journal = unit_home / "run" / "pty-close-notices.json"
+    old_content = '{"version":1,"notices":[]}'
+    old_journal.write_text(old_content)
+
     pty_service.start()
+    assert client.request("ping")["pid"] == pty_service.pid
+    assert old_journal.read_text() == old_content
+    assert ledger.read(ledger_path()) == []
 
     def inbounds() -> list[tuple[str, str]]:
         with db_conn.cursor() as cur:
@@ -451,16 +451,13 @@ def test_a_crashed_service_tells_the_owner_of_a_busy_session_at_the_next_start(
         db_conn.commit()
         return [(str(source), str(content)) for source, content in rows]
 
-    assert wait_for(lambda: bool(inbounds()), timeout=20), pty_service.output()
-    ((source, content),) = inbounds()
-    assert source == "system" and name in content and "ending uncleanly" in content
+    assert inbounds() == []
 
 
-def test_an_unreachable_database_costs_the_start_a_log_line_and_nothing_else(
+def test_a_crash_sweep_with_an_unreachable_database_still_serves_new_sessions(
     pty_service: PtyServiceProcess, unit_home: Path
 ) -> None:
-    """The crash notices are a side channel: with the database refusing connections the
-    service still starts, answers and serves, and the log says the notices were lost."""
+    """Restart does not stage a notice or require database connectivity."""
     (unit_home / ".env").write_text(
         "AVA_MACHINE_NAME=crash-box\nAVA_DB_URL=postgresql://nobody:nothing@127.0.0.1:1/none\n",
         encoding="utf-8",
@@ -480,6 +477,6 @@ def test_an_unreachable_database_costs_the_start_a_log_line_and_nothing_else(
     pty_service.start()
 
     assert client.request("ping")["pid"] == pty_service.pid
-    assert wait_for(lambda: "were not all written" in pty_service.output(), timeout=20)
+    assert not (unit_home / "run" / "pty-close-notices.json").exists()
     new("ava-agent-987-shell-9-after", unit_home)
     assert client.has_session("ava-agent-987-shell-9-after")

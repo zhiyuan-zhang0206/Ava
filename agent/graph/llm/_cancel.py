@@ -4,8 +4,7 @@
 ``subscribe_interrupt`` cancel event and decides which won: a cancel that
 fires first discards the partial generation and returns the halted Command
 (goto=after_exec, so claim dispatches the inbound); a completed stream
-propagates exceptions (consecutive-error tracking + provider-error
-classification applied) and returns None.
+propagates classified provider errors and returns None.
 
 Split out of ``node.py`` (Task #1004 >800-line outlier). Imports ``LlmGoto``
 from ``node.py`` (the node module owns the goto type); ``node.py`` therefore
@@ -23,7 +22,6 @@ from langgraph.types import Command
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
 from agent.graph.llm_errors import (
-    LlmLedger,
     LLMStreamError,
     _classify_and_log_provider_error,
 )
@@ -40,14 +38,13 @@ async def _race_stream_vs_cancel(
     agent_id: int,
     stream_coro: Coroutine[Any, Any, None],
     handler: RedisStreamHandler,
-    ledger: LlmLedger,
 ) -> Command[LlmGoto] | None:
     """Race the streaming task against the durable-interrupt cancel event.
 
     Returns the cancelled Command (halted=True → after_exec, so claim
     dispatches the inbound) when the cancel event fires first; returns None
     once the stream completed cleanly (stream exceptions propagate, with the
-    ledger's consecutive-error record and provider-error classification applied).
+    provider-error classification applied).
 
     subscribe_interrupt is RAII: on node entry it watches for a durable
     interrupt inbound (kind cancel/terminate) by polling the durable queue,
@@ -96,20 +93,14 @@ async def _race_stream_vs_cancel(
             )
             return Command[LlmGoto](update={"halted": True}, goto=AFTER_EXEC)
 
-        except LLMStreamError as e:
-            ledger.record_consecutive_error(
-                str(agent_id),
-                e,
-                max_cap=ctx.require_agent().read("lm", "llm_retry_max_consecutive_same_error"),
-            )
+        except LLMStreamError:
             raise
         except Exception as e:
             # Classify the provider exception (base.lm.errors.classify_error) and
             # log the structured (error_class, provider, status) for the postmortem.
             # A PERMANENT class (400 context length / schema, 401/402/403 auth /
             # billing / forbidden, 404 unknown model, 422 schema) or a configured
-            # fatal error type (e.g. engine_overloaded_error that survived the
-            # non-streaming fallback in _consume_llm) becomes a FatalProviderError:
+            # fatal error type (e.g. engine_overloaded_error returned by the stream) becomes a FatalProviderError:
             # the retry policy skips it and the host settles the turn to idle
             # instead of exhausting the full backoff budget and dying into
             # terminated. TRANSIENT errors reach the explicit retry predicate;

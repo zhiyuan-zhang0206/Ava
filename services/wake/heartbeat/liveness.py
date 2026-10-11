@@ -77,7 +77,7 @@ _log = logging.getLogger("services.wake.heartbeat.liveness")
 # (default 8s), the SAME setting the roster's probe reads
 # (gateway/cluster/status.py), so the two probes stay aligned by construction
 # (task #1200: a 3.0s hardcode here and in the roster flipped a slow-but-healthy
-# WSL runner offline — its status_snapshot measured 3.07-3.27s — while a
+# runner offline — its status_snapshot measured 3.07-3.27s — while a
 # genuinely offline host still refuses fast, so the wider budget costs only the
 # anti-jitter margin, never the detection latency of a real outage).
 

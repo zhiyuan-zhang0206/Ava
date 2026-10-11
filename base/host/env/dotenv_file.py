@@ -159,7 +159,7 @@ def upsert_env(
     matches the file on disk, the call returns having changed nothing — no snapshot,
     no rewrite, no audit record. Converge runs this on every `ava start`, and a
     boot-retry storm re-runs that start per attempt; without the skip, each retry
-    manufactured an `old == new` audit record (task #3637, the WSL converge noise).
+    manufactured an `old == new` audit record (task #3637).
     The skip compares rendered BYTES, not decoded values: a quoted or oddly-spaced
     line still takes the normal write path and is normalized by that write.
 
@@ -226,29 +226,17 @@ def remove_env(
     audit_site: str | None = None,
     actor: str | None = None,
     trace_id: str | None = None,
-    expected_values: dict[str, str] | None = None,
 ) -> None:
     """Remove the named keys from a unit's .env, preserving unrelated lines.
 
     The counterpart of `upsert_env` for keys that must LEAVE the surface (e.g.
-    the retired AVA_PGBOUNCER_PORT) — an idempotent line filter, snapshotting
-    first like every other .env write. A missing key is a no-op; a missing file
+    a key whose declaration was removed) — an idempotent line filter,
+    snapshotting first like every other .env write. A missing key is a no-op; a missing file
     stays missing."""
     if not path.exists():
         return
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
         content = path.read_text()
-        if expected_values is not None:
-            from io import StringIO
-
-            from dotenv import dotenv_values
-
-            present = dotenv_values(stream=StringIO(content))
-            if any(
-                present.get(key) is not None and present.get(key) != value
-                for key, value in expected_values.items()
-            ):
-                raise RuntimeError("legacy env changed before owned import removal")
         lines = content.splitlines()
         out = [line for line in lines if env_line_key(line) not in keys]
         if len(out) == len(lines):

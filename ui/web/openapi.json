@@ -751,44 +751,6 @@
         }
       }
     },
-    "/api/agents/resurrect-billing": {
-      "post": {
-        "summary": "Post Agents Resurrect Billing",
-        "description": "Billing batch recovery — the explicit, operator-triggered entry (task #3919).\n\n`execute=false` (the default) is a strictly read-only preview: the\nbilling-class halt candidates, the halted-but-alive survey (report-only),\nand the provider balance readout, nothing written. `execute=true` re-checks the provider balance (the run refuses\nbelow the configured floor) and then resurrects each candidate on its home\nmachine through the versioned `resurrect-billing-v1` op, which enforces the\nbilling-halt whitelist under the metadata row lock.\nIdempotent: the candidate set self-clears after a run, a repeated run is an\naudited no-op, and a concurrent second run is refused by the run-level\nadvisory lock.",
-        "operationId": "post_agents_resurrect_billing_api_agents_resurrect_billing_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BillingResurrectRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BillingResurrectResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/agents/{agent_id}/restart": {
       "post": {
         "summary": "Post Agent Restart",
@@ -935,7 +897,7 @@
     "/api/keyed/v1/agents/{agent_id}/restart-work": {
       "post": {
         "summary": "Native Restart",
-        "description": "Accept the original ACTIVE restart once through its versioned executor.",
+        "description": "Accept the original ACTIVE restart once through its dedicated executor.",
         "operationId": "native_restart_api_keyed_v1_agents__agent_id__restart_work_post",
         "parameters": [
           {
@@ -1588,7 +1550,7 @@
     "/api/agents/{agent_id}/traces/{trace_id}/messages": {
       "get": {
         "summary": "Get Trace Checkpoint Messages",
-        "description": "Full turn content for one OTel trace, resolved on demand from checkpoints.\n\nTrace v2 content-retrieval path: spans carry metadata only (task #792), so\nclicking an LM span needs this endpoint to bring back the turn's complete\nmessages — system prompt included (the checkpoint's `messages` channel is\nthe whole conversation, not a window).\n\n`pruned` semantics: the checkpoint link is written by the agent after each\nturn (`checkpoints.metadata.trace_id`), and checkpoint_cleanup keeps only\nthe latest K checkpoints per thread, so an old trace resolves to nothing —\nthe response is pruned=true with an empty list and the caller renders the\n\"trimmed\" state. A trace id with no matching checkpoint is the same shape (the\nlink itself may predate the feature or the turn committed no checkpoint).\n\n404: agent_id does not exist. 503: checkpoint store read failed.",
+        "description": "Full turn content for one OTel trace, resolved on demand from checkpoints.\n\nTrace v2 content-retrieval path: spans carry metadata only (task #792), so\nclicking an LM span needs this endpoint to bring back the turn's complete\nmessages — system prompt included (the checkpoint's `messages` channel is\nthe whole conversation, not a window).\n\n`pruned` semantics: the checkpoint link is written by the agent after each\nturn (`checkpoints.metadata.trace_id`). Checkpoints are never deleted, so\na trace id that resolves to nothing means no checkpoint carries it (the\nlink itself may predate the feature or the turn committed no checkpoint);\nthe response is then pruned=true with an empty list, which the caller\nrenders as absent content rather than an error.\n\n404: agent_id does not exist. 503: checkpoint store read failed.",
         "operationId": "get_trace_checkpoint_messages_api_agents__agent_id__traces__trace_id__messages_get",
         "parameters": [
           {
@@ -9018,38 +8980,6 @@
         "title": "AgentObservation",
         "description": "Machine reachability is not proof of runtime ownership.\n\nThis compatibility slice has no generation/owner binding. A fresh lease\nalone, or a PID, must not invent one. UI uses absolute deadlines."
       },
-      "AgentRestartRow": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "restarts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Restarts"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "label",
-          "restarts"
-        ],
-        "title": "AgentRestartRow",
-        "description": "One agent's restart count within the window."
-      },
       "AgentRoster": {
         "properties": {
           "agents": {
@@ -9345,7 +9275,7 @@
           "exec_failed"
         ],
         "title": "AgentStats",
-        "description": "Observed turn + exec counters within the selected window.\n\n`turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns\nexcluded); duration fields are null when no duration evidence survives.\nThe metadata declares retained historical histogram precision.\n`exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome\n(exec_failed / exec(timeout) / exec_cancelled; the prefix regex also\ncounts legacy exec_thread_stuck rows for historical continuity)."
+        "description": "Observed turn + exec counters within the selected window.\n\n`turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns\nexcluded); duration fields are null when no duration evidence survives.\nThe metadata declares retained historical histogram precision.\n`exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome\n(exec_failed / exec_timeout / exec_cancelled)."
       },
       "AgentStatus": {
         "type": "string",
@@ -9961,202 +9891,6 @@
           "launch_unknown"
         ],
         "title": "AvailabilityReason"
-      },
-      "BillingBalanceReport": {
-        "properties": {
-          "ok": {
-            "type": "boolean",
-            "title": "Ok"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail"
-          },
-          "threshold": {
-            "type": "number",
-            "title": "Threshold"
-          },
-          "total": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total"
-          },
-          "currency": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Currency"
-          }
-        },
-        "type": "object",
-        "required": [
-          "ok",
-          "detail",
-          "threshold"
-        ],
-        "title": "BillingBalanceReport",
-        "description": "Provider balance probe result carried on every billing-recovery response.\n\n`ok=False` always carries the human-readable `detail`; the run refuses\nexecution on it (fail closed)."
-      },
-      "BillingHaltedAliveRow": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "machine": {
-            "type": "string",
-            "title": "Machine"
-          },
-          "streak": {
-            "type": "integer",
-            "title": "Streak"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "machine",
-          "streak"
-        ],
-        "title": "BillingHaltedAliveRow",
-        "description": "One billing-halted agent that is still alive — reported, never actioned.\n\nThe entry only resurrects terminated victims. A halted agent that is still\nalive parks heartbeats and clears its own halt on the next successful turn,\nso the batch lists these rows for operator visibility and deliberately\ntakes no action on them; releasing their hold is a follow-up candidate,\nnot part of this entry."
-      },
-      "BillingRecoveryMode": {
-        "type": "string",
-        "enum": [
-          "dry_run",
-          "execute"
-        ],
-        "title": "BillingRecoveryMode",
-        "description": "The operator's requested billing batch action."
-      },
-      "BillingRecoveryOutcome": {
-        "type": "string",
-        "enum": [
-          "candidate",
-          "resurrected",
-          "already_alive",
-          "refused",
-          "deferred",
-          "failed"
-        ],
-        "title": "BillingRecoveryOutcome",
-        "description": "One agent's outcome in the operator's billing recovery batch."
-      },
-      "BillingRecoveryRunOutcome": {
-        "type": "string",
-        "enum": [
-          "preview",
-          "executed",
-          "refused"
-        ],
-        "title": "BillingRecoveryRunOutcome",
-        "description": "Result of the entire run, separate from any one agent's recovery outcome."
-      },
-      "BillingResurrectAgentOutcome": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "machine": {
-            "type": "string",
-            "title": "Machine"
-          },
-          "status": {
-            "$ref": "#/components/schemas/BillingRecoveryOutcome"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "machine",
-          "status"
-        ],
-        "title": "BillingResurrectAgentOutcome",
-        "description": "One agent's line in the billing batch-recovery summary.\n\n`candidate` (dry-run listing) / `resurrected` / `already_alive` /\n`refused` / `deferred` / `failed`; `reason` carries the guard or failure\ndetail where one exists."
-      },
-      "BillingResurrectRequest": {
-        "properties": {
-          "execute": {
-            "type": "boolean",
-            "title": "Execute",
-            "default": false
-          }
-        },
-        "type": "object",
-        "title": "BillingResurrectRequest",
-        "description": "POST /api/agents/resurrect-billing request body — the explicit,\noperator-triggered billing batch-recovery entry (task #3919).\n\n`execute=False` (the default) is a strictly read-only preview: the\nbilling-class halt candidates, the halted-but-alive survey, and the\nprovider balance readout, nothing written. `execute=True` re-checks the\nprovider balance and, when the gate passes, resurrects each candidate on\nits home machine through the versioned `resurrect-billing-v1` op."
-      },
-      "BillingResurrectResponse": {
-        "properties": {
-          "mode": {
-            "$ref": "#/components/schemas/BillingRecoveryMode"
-          },
-          "outcome": {
-            "$ref": "#/components/schemas/BillingRecoveryRunOutcome"
-          },
-          "refusal_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refusal Reason"
-          },
-          "balance": {
-            "$ref": "#/components/schemas/BillingBalanceReport"
-          },
-          "agents": {
-            "items": {
-              "$ref": "#/components/schemas/BillingResurrectAgentOutcome"
-            },
-            "type": "array",
-            "title": "Agents"
-          },
-          "halted_alive": {
-            "items": {
-              "$ref": "#/components/schemas/BillingHaltedAliveRow"
-            },
-            "type": "array",
-            "title": "Halted Alive"
-          }
-        },
-        "type": "object",
-        "required": [
-          "mode",
-          "outcome",
-          "balance",
-          "agents",
-          "halted_alive"
-        ],
-        "title": "BillingResurrectResponse",
-        "description": "POST /api/agents/resurrect-billing response — the run-level summary.\n\n`preview`: dry-run. `executed`: the run acted (a no-op when the whitelist\nwas already empty — also audited). `refused`: the run did not act;\n`refusal_reason` names the gate ('balance gate not satisfied: ...' or a\nconcurrent run holding the single-flight lock).\n\n`agents` carries the candidates (preview) or the per-agent outcomes;\n`halted_alive` is the report-only survey of billing-halted rows that are\nstill alive — never actioned."
       },
       "Body_upload_api_keyed_v1_agents__agent_id__uploads_post": {
         "properties": {
@@ -13068,7 +12802,7 @@
           "errors"
         ],
         "title": "LlmBucket",
-        "description": "One bucket's LLM call profile. Latency percentiles are over rows that\ncarry `latency_ms` (pre-instrumentation rows are NULL and ignored);\n`tps` = Σ(in+out+reasoning) tokens / Σ latency seconds (NULL when no\nlatency data). `errors` counts llm_provider_error / stream_stalled_retry /\nllm_turn_aborted events."
+        "description": "One bucket's LLM call profile. Latency percentiles are over rows that\ncarry `latency_ms` (pre-instrumentation rows are NULL and ignored);\n`tps` = Σ(in+out+reasoning) tokens / Σ latency seconds (NULL when no\nlatency data). `errors` counts llm_provider_error and llm_turn_aborted events."
       },
       "LlmReport": {
         "properties": {
@@ -16064,11 +15798,6 @@
             "type": "integer",
             "title": "Bucket"
           },
-          "agent_restarts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Agent Restarts"
-          },
           "service_starts": {
             "type": "integer",
             "minimum": 0.0,
@@ -16078,11 +15807,10 @@
         "type": "object",
         "required": [
           "bucket",
-          "agent_restarts",
           "service_starts"
         ],
         "title": "RestartBucket",
-        "description": "One bucket's process-restart counts: agent processes (agent_restarted)\nand gateway-side services (service_started)."
+        "description": "One bucket's service start count (service_started)."
       },
       "RestartReport": {
         "properties": {
@@ -16100,13 +15828,6 @@
             "type": "array",
             "title": "Services"
           },
-          "agents": {
-            "items": {
-              "$ref": "#/components/schemas/AgentRestartRow"
-            },
-            "type": "array",
-            "title": "Agents"
-          },
           "totals": {
             "$ref": "#/components/schemas/RestartTotals"
           }
@@ -16115,7 +15836,6 @@
         "required": [
           "series",
           "services",
-          "agents",
           "totals"
         ],
         "title": "RestartReport"
@@ -16130,11 +15850,6 @@
       },
       "RestartTotals": {
         "properties": {
-          "agent_restarts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Agent Restarts"
-          },
           "service_starts": {
             "type": "integer",
             "minimum": 0.0,
@@ -16143,7 +15858,6 @@
         },
         "type": "object",
         "required": [
-          "agent_restarts",
           "service_starts"
         ],
         "title": "RestartTotals"
@@ -16173,7 +15887,7 @@
         },
         "type": "object",
         "title": "ResurrectAgentRequest",
-        "description": "Resurrect agent request body.\n\nThe public `POST /api/agents/{id}/resurrect` endpoint uses this for an\nexplicit lifecycle wake with no work guard. The internal versioned\npending-work path also carries it alongside the exact chat or compact\nrequest id and kind; controller recovery calls the lower lifecycle helper\nwith its own exact death claim.\n\n`resurrected_by` default \"user\" — frontend resurrect button does not\nneed to pass it; SDK paths pass f\"agent:{my_id}\"; pending-work and\ncontroller auto-resurrect pass \"system\". Written into the\nlifecycle 'resurrect' inbound's source; the claim-side dispatch\ncomposes it into the marker `[system ts] You have been resurrected\nby {resurrected_by}` so the agent knows who resurrected it.\n\nThe value must pass `base.agents.messages.envelope.validate_source` (same check as\n`AgentMessageIn.source`): the same value becomes the prompt chat\ninbound's source, and the claim node's envelope wrap raises on\nanything outside the whitelist — killing the freshly resurrected\nprocess on its first claim. Validating here turns that process-fatal\nvalue into a 422 at the HTTP boundary (the agent-240 incident).\n\n`prompt` is **optional at this HTTP boundary**. The frontend resurrect\nbutton is a pure lifecycle event — there is no message to deliver, so it\nsends no prompt and the agent just gets the \"you have been resurrected\"\nmarker. Peer agents no longer have a dedicated resurrect API — they send\na chat message (`ava.agents.send_message`) and auto-resurrect handles the\nrest. When a prompt is given it is INSERTed as a chat inbound in **the same\ntransaction** as the lifecycle 'resurrect' inbound. The session may be\ncreated before commit, but its child blocks on the agent row and cannot\nclaim or process either inbound until both are committed."
+        "description": "Resurrect agent request body.\n\nThe public `POST /api/agents/{id}/resurrect` endpoint uses this for an\nexplicit lifecycle wake with no work guard. The internal\npending-work path also carries it alongside the exact chat or compact\nrequest id and kind; controller recovery calls the lower lifecycle helper\nwith its own exact death claim.\n\n`resurrected_by` default \"user\" — frontend resurrect button does not\nneed to pass it; SDK paths pass f\"agent:{my_id}\"; pending-work and\ncontroller auto-resurrect pass \"system\". Written into the\nlifecycle 'resurrect' inbound's source; the claim-side dispatch\ncomposes it into the marker `[system ts] You have been resurrected\nby {resurrected_by}` so the agent knows who resurrected it.\n\nThe value must pass `base.agents.messages.envelope.validate_source` (same check as\n`AgentMessageIn.source`): the same value becomes the prompt chat\ninbound's source, and the claim node's envelope wrap raises on\nanything outside the whitelist — killing the freshly resurrected\nprocess on its first claim. Validating here turns that process-fatal\nvalue into a 422 at the HTTP boundary (the agent-240 incident).\n\n`prompt` is **optional at this HTTP boundary**. The frontend resurrect\nbutton is a pure lifecycle event — there is no message to deliver, so it\nsends no prompt and the agent just gets the \"you have been resurrected\"\nmarker. Peer agents no longer have a dedicated resurrect API — they send\na chat message (`ava.agents.send_message`) and auto-resurrect handles the\nrest. When a prompt is given it is INSERTed as a chat inbound in **the same\ntransaction** as the lifecycle 'resurrect' inbound. The session may be\ncreated before commit, but its child blocks on the agent row and cannot\nclaim or process either inbound until both are committed."
       },
       "ResurrectAgentResponse": {
         "properties": {
@@ -19350,7 +19064,7 @@
           "messages"
         ],
         "title": "TraceCheckpointMessagesResponse",
-        "description": "GET /api/agents/{id}/traces/{trace_id}/messages response — the full\nmessage list (incl. the system prompt) of the turn that produced one OTel\ntrace, resolved on demand from the checkpoints table.\n\nSpans are metadata-only (trace v2): this endpoint is how content comes\nback. `pruned` distinguishes the two absence shapes:\n- pruned=true, checkpoint_id=None — the trace's checkpoint was dropped by\n  compact/checkpoint trim (retention is the latest K checkpoints), so the\n  content is gone; the span metadata in the mirror still exists. The\n  frontend renders this as \"trimmed\" rather than an error.\n- pruned=false — the checkpoint exists; messages is its `messages` channel\n  (the full conversation at that point, system prompt included).\n\n`messages[i]` is one LangChain BaseMessage `model_dump()` — the same raw\nshape as GET /api/agents/{id}/messages."
+        "description": "GET /api/agents/{id}/traces/{trace_id}/messages response — the full\nmessage list (incl. the system prompt) of the turn that produced one OTel\ntrace, resolved on demand from the checkpoints table.\n\nSpans are metadata-only (trace v2): this endpoint is how content comes\nback. `pruned` distinguishes the two absence shapes:\n- pruned=true, checkpoint_id=None — no checkpoint carries this trace id\n  (the link predates the feature, or the turn committed no checkpoint), so\n  there is no content to return; the span metadata in the mirror still\n  exists. Checkpoints are never deleted. Callers render this as absent\n  content rather than an error.\n- pruned=false — the checkpoint exists; messages is its `messages` channel\n  (the full conversation at that point, system prompt included).\n\n`messages[i]` is one LangChain BaseMessage `model_dump()` — the same raw\nshape as GET /api/agents/{id}/messages."
       },
       "UiContributionsResponse": {
         "properties": {
