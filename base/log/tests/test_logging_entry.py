@@ -39,6 +39,7 @@ records = []
 sink = logger.add(lambda message: records.append(message.record["message"]), diagnose=False)
 logger.configure(extra={"caller": "retained"})
 import base.log
+assert base.log.logger is logger
 from cli.main import main
 logger.info("after import")
 for _ in range(2):

@@ -19,6 +19,11 @@ while direct calls to its `main()` retain the enclosing process sinks.
 `base.log.process` owns concrete startup and typed event-pipeline binding;
 executable roots import it when they actually initialize logging.
 
+The lightweight entry declares only its own `prepare_process_logging`
+operation. The compatible `base.log.logger` access borrows Loguru's unchanged
+logger; it is not an Ava definition owner or a completed public-contract
+migration of logger consumers.
+
 ## What is it
 
 `base/log/process.py` is the concrete process logging owner spanning kernel / gateway / SDK subprocesses / all daemons. A global loguru logger singleton, with per-process entry `init_*` called once to bind process-level fields (`agent_id`) and assemble sinks. All `from base.log import logger` get the same logger that automatically carries these fields.

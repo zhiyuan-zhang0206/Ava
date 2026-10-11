@@ -5,7 +5,7 @@ resources or importing telemetry. Executable roots use
 ``base.log.process`` for concrete, typed startup and event-pipeline binding.
 """
 
-from loguru import logger
+from loguru import logger as logger
 
 from base.log.sinks import (
     _FILE_SINK_SIZE_LIMIT as _FILE_SINK_SIZE_LIMIT,
@@ -35,7 +35,7 @@ from base.log.sinks import (
     add_sink as add_sink,
 )
 
-__all__ = ["logger", "prepare_process_logging"]
+__all__ = ["prepare_process_logging"]
 
 
 def prepare_process_logging() -> None:
