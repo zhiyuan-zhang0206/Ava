@@ -29,6 +29,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from base.agents import AgentStatus
+from base.api_contracts.idempotency import keyed_headers
 from gateway.app import app
 from gateway.routers.tasks import get_tasks
 from ops import lifecycle as ops_lifecycle
@@ -130,7 +131,7 @@ class TestRemindInterval:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"remind_interval_seconds": None},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert "cannot be disabled" in resp.json()["detail"]
@@ -143,7 +144,7 @@ class TestRemindInterval:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"remind_interval_seconds": 86401},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert _remind_interval_seconds(db_conn, tid) == 1800
@@ -155,7 +156,7 @@ class TestRemindInterval:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"remind_interval_seconds": 0},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert _remind_interval_seconds(db_conn, tid) == 1800
@@ -167,7 +168,7 @@ class TestRemindInterval:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"remind_interval_seconds": 86400},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
         assert resp.json()["remind_interval_seconds"] == 86400
@@ -180,7 +181,7 @@ class TestOwner:
         tid = _make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
-                f"/api/tasks/{tid}", json={"owner": None}, headers={"Idempotency-Key": str(uuid4())}
+                f"/api/tasks/{tid}", json={"owner": None}, headers=keyed_headers(str(uuid4()))
             )
         assert resp.status_code == 422
         assert "cannot be released" in resp.json()["detail"]
@@ -196,7 +197,7 @@ class TestOwner:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"owner": new_owner},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
         assert resp.json()["owner"] == new_owner
@@ -228,7 +229,7 @@ class TestOwner:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"owner": owner},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
         assert _task_notes(db_conn, owner) == []
@@ -256,7 +257,7 @@ class TestOwner:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"owner": new_owner},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
         assert resurrection_calls == [(new_owner, "system_note")]
@@ -273,7 +274,7 @@ class TestOwner:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"owner": new_owner},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
         assert len(_task_notes(db_conn, new_owner)) == 1
@@ -297,7 +298,7 @@ class TestPriority:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"priority": "P0"},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
         assert resp.json()["priority"] == "P0"
@@ -310,7 +311,7 @@ class TestPriority:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"priority": "P9"},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         # Rejected by pydantic (the body types priority as the shared Priority
         # enum), so the 422 envelope carries its structured list in `errors`.
@@ -327,7 +328,7 @@ class TestTitle:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"title": "renamed"},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
         assert resp.json()["title"] == "renamed"
@@ -340,7 +341,7 @@ class TestTitle:
         tid = _make_task(db_conn, owner=owner, title="other")
         with TestClient(app) as client:
             resp = client.patch(
-                f"/api/tasks/{tid}", json={"title": "t"}, headers={"Idempotency-Key": str(uuid4())}
+                f"/api/tasks/{tid}", json={"title": "t"}, headers=keyed_headers(str(uuid4()))
             )
         assert resp.status_code == 422
         assert "already exists" in resp.json()["detail"]
@@ -353,7 +354,7 @@ class TestRootTaskImmutable:
             resp = client.patch(
                 f"/api/tasks/{root_id}",
                 json={"status": "done"},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert "root task" in resp.json()["detail"]
@@ -366,7 +367,7 @@ class TestRootTaskImmutable:
             resp = client.patch(
                 f"/api/tasks/{root_id}",
                 json={"owner": new_owner},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert _owner(db_conn, root_id) is None  # still unowned
@@ -376,7 +377,7 @@ class TestRootTaskImmutable:
             resp = client.patch(
                 "/api/tasks/999999",
                 json={"status": "done"},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 404
 
@@ -393,7 +394,7 @@ class TestRootTaskImmutable:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"status": removed_status},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         body = resp.json()

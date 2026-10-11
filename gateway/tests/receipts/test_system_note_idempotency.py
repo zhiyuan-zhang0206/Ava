@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from base.api_contracts.idempotency import keyed_headers
 from base.db import Database, fetch_one, pool
 from base.events.live.bus import EventBus
 from gateway.agents.system_note import _system_note_blocking
@@ -18,7 +19,7 @@ def test_system_note_replay_and_immutable_policy(db_conn: psycopg.Connection) ->
     with TestClient(app) as client:
         agent = spawn_via_http(client, {}).json()["id"]
         path = f"/api/agents/{agent}/system-note"
-        headers = {"Idempotency-Key": "note-receipt"}
+        headers = keyed_headers("note-receipt")
         body = {"content": "assigned", "resurrect": False}
         first = client.post(path, json=body, headers=headers)
         second = client.post(path, json=body, headers=headers)
@@ -29,6 +30,21 @@ def test_system_note_replay_and_immutable_policy(db_conn: psycopg.Connection) ->
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent,))
         assert cur.fetchone() == (1,)
+
+
+def test_system_note_key_requires_the_principal_scope(db_conn: psycopg.Connection) -> None:
+    with TestClient(app) as client:
+        agent = spawn_via_http(client, {}).json()["id"]
+        response = client.post(
+            f"/api/agents/{agent}/system-note",
+            json={"content": "assigned", "resurrect": False},
+            headers={"Idempotency-Key": "unscoped-note"},
+        )
+    assert response.status_code == 422
+    assert "Idempotency-Scope" in response.text
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent,))
+        assert cur.fetchone() == (0,)
 
 
 def test_concurrent_retries_return_one_inbound(

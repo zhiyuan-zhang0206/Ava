@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.api_contracts.idempotency import keyed_headers
 from base.config import settings
 from gateway.agents.notice_operations import current as current_notice_receipts
 from gateway.agents.notice_operations import router as guarded_notices
@@ -62,7 +63,7 @@ def test_original_snapshot_survives_replacement_and_deletion(
     later = client.post(
         f"/api/agents/{agent}/notices",
         json={"title": "B"},
-        headers={"Idempotency-Key": str(uuid4())},
+        headers=keyed_headers(str(uuid4())),
     )
     assert later.status_code == 201
     assert _send(client, agent, notice, dismiss, key="fresh").status_code == 409
@@ -271,7 +272,7 @@ def test_creation_waits_for_guarded_owner_lock(
             client.post,
             f"/api/agents/{agent}/notices",
             json={"title": "B"},
-            headers={"Idempotency-Key": "later"},
+            headers=keyed_headers("later"),
         )
         try:
             assert not later.done()

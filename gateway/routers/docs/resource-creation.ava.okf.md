@@ -9,11 +9,11 @@ tags: []
 
 `POST /api/presets` and `POST /api/schedules` accept an optional
 `Idempotency-Key`. Shared `gateway.http.auth.request_principal.optional_request_key`
-validates the 1–128 character key and explicit scope using the existing verified
-credential binding. Legacy requests omit scope; unsupported scope or scope without
-key is refused. CLI/browser mint one legacy key per invocation; they do not
-silently enable principal-v1 or retry unsupported gateways. Names remain unique
-business constraints, separate from creation identity.
+validates the 1–128 character key and its required `Idempotency-Scope:
+principal-v1` using the existing verified credential binding. A key without that
+scope, an unsupported scope, or a scope without a key is refused with 400.
+CLI/browser mint one key per invocation and send it with the scope. Names remain
+unique business constraints, separate from creation identity.
 
 Shared `gateway/routers/receipts/creation.py` owns the validated request fingerprint
 and original resource identity for both callers. Each caller owns its transaction.

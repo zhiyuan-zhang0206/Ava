@@ -56,7 +56,7 @@ execution status; see [[ava/agents/docs/compaction.ava.okf.md]].
 `ava.agents.work` observes and controls one explicit active turn through
 `observe`, `cancel`, `restart` and `restart_status`; see [[work-control.ava.okf.md]].
 
-Every creation and fork requires an explicit 1–128 character `idempotency_key`. Retain the same key, effective body and verified principal on retry. All SDK calls use the fixed keyed admission path. A fork copies the original resolved checkpoint and first prompt once; replay returns its committed child before inspecting later source state. See [[strong-creation.ava.okf.md|Keyed agent creation]]. Ambiguous transport outcomes are not automatically retried.
+Every creation and fork requires an explicit 1–128 character `idempotency_key`. Retain the same key, effective body and verified principal on retry. All SDK calls use the fixed keyed admission path. A fork copies the original resolved checkpoint and first prompt once; replay returns its committed child before inspecting later source state. See [[strong-creation.ava.okf.md|Keyed agent creation]]. Ambiguous transport outcomes are retried automatically under the same key and replay the original birth.
 
 `get_launch_attempt(agent_id)` observes the current attempt UUID. Explicit guarded
 `retry_launch` retains that observation and a caller key; see [[launch-retry.ava.okf.md]].

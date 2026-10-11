@@ -30,8 +30,8 @@ pending wake and cannot resurrect completed/deleted inbound work. Existing
 action/kind rules and deliberate later FYI read-with-reply operations remain
 unchanged.
 
-These paths have `legacy_keyed_retry=False`: every caller makes a single attempt
-and never retries an ambiguous response automatically. The existing domain
-receipt table is reused without FK or TTL retention. There is no client journal.
+A caller retries an ambiguous response under the same key and observed row; the
+receipt replays the original acceptance. The existing domain receipt table is
+reused without FK or TTL retention. There is no client journal.
 See `gateway/agents/docs/notice-receipts.ava.okf.md` for the transaction and
 event rules.

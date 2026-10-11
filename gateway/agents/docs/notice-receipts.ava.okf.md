@@ -7,7 +7,8 @@ tags: [gateway, notices]
 
 # Notice Operation Receipts
 
-Notice creation and resolution require `Idempotency-Key` headers.
+Notice creation and resolution require `Idempotency-Key` and
+`Idempotency-Scope: principal-v1` headers.
 `notice_operation_receipts` owns each normalized request and its immutable
 result, scoped by concrete HTTP path and the credential-aware key. The receipt
 and all notice/reply mutations commit together. Concurrent retries serialize
@@ -30,8 +31,7 @@ Receipts have no TTL pruning: expiration cannot turn a known operation into a
 new side effect. Any future retention design needs explicit expired-key
 semantics. The SDK `notify` requires an explicit key for recovery;
 relative expiration inputs require their normalized absolute deadline to be
-reused. The mixed-version rollout gate sends new keys while withholding
-ambiguous automatic retries when gateway support is unproven.
+reused. The SDK transport retries an ambiguous outcome under the same key.
 
 Browser resolution uses the fixed required-key/principal route
 `POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve`. It reuses this same
@@ -42,8 +42,7 @@ same key for a manual retry of an unchanged action/reply/target after failure;
 changed input starts a new intent. It does not persist or automatically retry
 requests, and an unsupported server is refused without fallback.
 CLI and IM bridge resolution use the same route, sending one fresh key and the
-`principal-v1` scope per invocation; they remain single attempts and add no
-automatic ambiguous-failure retries.
+`principal-v1` scope per invocation; they remain single attempts.
 
 ## Guarded current-notice mutations
 
@@ -75,5 +74,5 @@ These are the only current-notice edit/withdraw surfaces. SDK `edit_notice` and
 `dismiss_notice` observe the agent's open notice id through
 `GET /api/notices/open?agent_id=<id>&include_awaiting=true` and send nothing
 when none is open; each call sends one fresh key and the `principal-v1` scope.
-A 409 means the observed row is no longer current. No ambiguous outcome is
-retried automatically.
+A 409 means the observed row is no longer current. An ambiguous outcome is
+retried under the same key and replays the original acceptance.

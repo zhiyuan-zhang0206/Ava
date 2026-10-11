@@ -10,13 +10,13 @@ from ava.agents import work
 from ava.agents.tests.test_work import TARGET
 from ava.gateway_client import transport
 from ava.sdk_surface import agent_identity
-from base.agents import GatewayUnavailable
 from base.agents.incarnation.native_restart_models import (
     NativeRestartAcceptance,
     NativeRestartOutcome,
     NativeRestartProgress,
 )
 from tests.fixtures.pin_agent import pin_agent
+from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 ACCEPTED = NativeRestartAcceptance(
     command_id=123, target=TARGET, config_overlay={"completion_notice_policy": "hourly"}
@@ -61,26 +61,28 @@ def test_restart_and_status_use_exact_guarded_command() -> None:
     )
 
 
-def test_restart_requires_explicit_replay_after_lost_response() -> None:
+@pytest.mark.parametrize("failure", ["timeout", "unavailable"])
+@pytest.mark.usefixtures("retry_waits")
+def test_restart_is_retried_with_the_same_identity_after_a_lost_response(failure: str) -> None:
     calls: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
         calls.append(request)
         if len(calls) == 1:
-            raise httpx.ReadTimeout("response lost", request=request)
+            if failure == "timeout":
+                raise httpx.ReadTimeout("response lost", request=request)
+            return httpx.Response(502)
         return httpx.Response(200, json=ACCEPTED.model_dump(mode="json"))
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
         transport.use_client(http),
     ):
-        with pytest.raises(GatewayUnavailable):
-            work.restart(TARGET, idempotency_key="intent", config_overlay=ACCEPTED.config_overlay)
-        assert len(calls) == 1
         assert (
             work.restart(TARGET, idempotency_key="intent", config_overlay=ACCEPTED.config_overlay)
             == ACCEPTED
         )
+    assert len(calls) == 2
     assert (
         calls[0].url == calls[1].url
         and calls[0].headers == calls[1].headers
@@ -88,7 +90,7 @@ def test_restart_requires_explicit_replay_after_lost_response() -> None:
     )
 
 
-@pytest.mark.parametrize("status", [404, 409, 422, 500, 502])
+@pytest.mark.parametrize("status", [404, 409, 422, 500])
 def test_refused_or_unsupported_restart_never_falls_back(status: int) -> None:
     calls: list[httpx.Request] = []
 

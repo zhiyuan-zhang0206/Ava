@@ -8,12 +8,13 @@ tags: []
 # Schedule mutation receipts and revision convergence
 
 `PUT /api/schedules/{id}` and `POST .../start`, `.../stop`, `.../restart`
-accept an optional `Idempotency-Key` (1–128 characters). The existing
+accept an optional `Idempotency-Key` (1–128 characters). The required
 `Idempotency-Scope: principal-v1` binds a key to the verified credential and
-route; unsupported scopes or a scope without a key return 400. Unkeyed legacy
-requests remain separate intents and cannot be automatically retried safely.
-The CLI and browser mint one legacy key per invocation, without silently activating principal-v1 on an unnegotiated server; retry code must reuse that
-key and immutable request. No client outbox is involved.
+route; a key without the scope, an unsupported scope, or a scope without a key
+returns 400. Unkeyed requests remain separate intents and cannot be
+automatically retried safely. The CLI and browser mint one key per invocation and
+send it with the scope; retry code must reuse that key and immutable request. No
+client outbox is involved.
 
 ## Acceptance transaction
 

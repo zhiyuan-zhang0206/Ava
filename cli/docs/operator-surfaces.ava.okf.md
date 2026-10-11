@@ -31,7 +31,7 @@ tags:
   gateway accepts the action. A 409 conflict is an error, including an absent
   notice, an action-kind mismatch, or an already-resolved answer/dismissal.
   Bare reads of resolved notices retain the gateway's successful response.
-  Resolution remains a keyless single attempt.
+  Resolution is one keyed attempt (`principal-v1`) with a fresh key per invocation.
 - `ava memory init`: explicitly provisions the memory-pool checkout and
   plugin-owned templates. Branch validation runs here, never during converge or
   start.

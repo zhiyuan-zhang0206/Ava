@@ -38,7 +38,6 @@ def test_sdk_inherits_idempotency_from_contracts() -> None:
     guarded_contract = contracts.contract_for("POST", "/api/keyed/v1/agents")
     assert guarded_contract is not None
     assert guarded_contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY
-    assert not guarded_contract.legacy_keyed_retry
     reconcile_contract = contracts.contract_for("POST", "/api/agents/7/messages/reconcile")
     assert reconcile_contract is not None
     assert reconcile_contract.idempotency is Idempotency.IDEMPOTENT
@@ -95,8 +94,7 @@ def test_contracts_have_no_unknown_semantics() -> None:
         ("POST", "/api/keyed/v1/agents/7/notices/11/resolve"),
     ],
 )
-def test_guarded_notice_contract_excludes_legacy_retry(method: str, path: str) -> None:
+def test_guarded_notice_routes_are_keyed(method: str, path: str) -> None:
     contract = contracts.contract_for(method, path)
     assert contract is not None
     assert contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY
-    assert not contract.legacy_keyed_retry

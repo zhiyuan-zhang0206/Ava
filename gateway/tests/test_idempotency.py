@@ -20,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.agents import AgentStatus
+from base.api_contracts.idempotency import keyed_headers
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
@@ -65,14 +66,14 @@ def test_reconcile_endpoint_finds_the_durable_inbound(client: TestClient, agent_
     sent = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": "reconcile me", "source": "user"},
-        headers={"Idempotency-Key": "key-reconcile"},
+        headers=keyed_headers("key-reconcile"),
     )
     assert sent.status_code == 201, sent.text
 
     receipt = client.post(
         f"/api/agents/{agent_id}/messages/reconcile",
         json={"content": "reconcile me", "source": "user"},
-        headers={"Idempotency-Key": "key-reconcile"},
+        headers=keyed_headers("key-reconcile"),
     )
 
     assert receipt.status_code == 200, receipt.text
@@ -110,7 +111,7 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
     sent = client.post(
         f"/api/agents/{agent_id}/messages",
         json=body,
-        headers={"Idempotency-Key": "key-multimodal-reconcile"},
+        headers=keyed_headers("key-multimodal-reconcile"),
     )
     assert sent.status_code == 201, sent.text
     image.unlink()
@@ -122,7 +123,7 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
     retried = client.post(
         f"/api/agents/{agent_id}/messages",
         json=body,
-        headers={"Idempotency-Key": "key-multimodal-reconcile"},
+        headers=keyed_headers("key-multimodal-reconcile"),
     )
     assert retried.status_code == 201, retried.text
     assert retried.json()["inbound_id"] == sent.json()["inbound_id"]
@@ -130,7 +131,7 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
     receipt = client.post(
         f"/api/agents/{agent_id}/messages/reconcile",
         json=body,
-        headers={"Idempotency-Key": "key-multimodal-reconcile"},
+        headers=keyed_headers("key-multimodal-reconcile"),
     )
     assert receipt.status_code == 200, receipt.text
     assert receipt.json()["inbound_id"] == sent.json()["inbound_id"]
@@ -176,13 +177,13 @@ def test_reconcile_heals_crash_after_commit_before_resurrect(
         client.post(
             f"/api/agents/{agent_id}/messages",
             json={"content": "survive crash", "source": "user"},
-            headers={"Idempotency-Key": "key-crash-heal"},
+            headers=keyed_headers("key-crash-heal"),
         )
 
     receipt = client.post(
         f"/api/agents/{agent_id}/messages/reconcile",
         json={"content": "survive crash", "source": "user"},
-        headers={"Idempotency-Key": "key-crash-heal"},
+        headers=keyed_headers("key-crash-heal"),
     )
     assert receipt.status_code == 200, receipt.text
     assert receipt.json()["status"] == "idling"
@@ -240,7 +241,7 @@ def test_postcommit_error_response_preserves_receipt_and_same_key_recovery(
         # observes the HTTP error body instead of re-raising server exceptions.
         observer = TestClient(app, raise_server_exceptions=False)
         try:
-            failed = observer.post(path, json=body, headers={"Idempotency-Key": key})
+            failed = observer.post(path, json=body, headers=keyed_headers(key))
             assert failed.status_code == 500, failed.text
             error = failed.json()
             assert error["committed"] is True
@@ -269,10 +270,10 @@ def test_postcommit_error_response_preserves_receipt_and_same_key_recovery(
         return AgentStatus.IDLING
 
     monkeypatch.setattr(lifecycle, "resurrect_if_terminated", heal_once)
-    healed = client.post(path + "/reconcile", json=body, headers={"Idempotency-Key": key})
+    healed = client.post(path + "/reconcile", json=body, headers=keyed_headers(key))
     assert healed.status_code == 200, healed.text
     assert healed.json()["inbound_id"] == error["inbound_id"]
-    repeated = client.post(path, json=body, headers={"Idempotency-Key": key})
+    repeated = client.post(path, json=body, headers=keyed_headers(key))
     assert repeated.status_code == 201, repeated.text
     assert repeated.json()["inbound_id"] == error["inbound_id"]
     with db_conn.cursor() as cur:
@@ -308,7 +309,7 @@ def test_large_message_response_waits_for_live_publish(
     response = client.post(
         f"/api/agents/{agent_id}/messages",
         json={"content": content, "source": "user"},
-        headers={"Idempotency-Key": "large-awaited-live"},
+        headers=keyed_headers("large-awaited-live"),
     )
     assert response.status_code == 201, response.text
     assert published == [response.json()["inbound_id"]]

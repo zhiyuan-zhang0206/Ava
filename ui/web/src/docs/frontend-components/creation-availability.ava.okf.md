@@ -59,4 +59,4 @@ A launch-failure reason is still represented by the roster's launch-failed badge
 A structured create 502 selects its committed `agent_id` and refreshes
 roster/detail instead of inviting another create.
 
-Creation HTTP calls send one operation key. Spawn/fork mutations hold it in their variables; fork placement and prompt are resolved before mutation admission. Explicit API callers can reuse a key with an unchanged body. A new action mints another key. This does not enable automatic ambiguous retries, capability negotiation, or a browser outbox.
+Creation HTTP calls send one operation key with the `principal-v1` scope. Spawn/fork mutations hold it in their variables; fork placement and prompt are resolved before mutation admission. Explicit API callers can reuse a key with an unchanged body. A new action mints another key. This does not enable automatic ambiguous retries or a browser outbox.
