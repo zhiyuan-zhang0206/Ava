@@ -55,7 +55,9 @@ primitive from chat models, not a kind of chat model.
 - `DecisionBinding` is the provider-facing protocol: `async decide(state, questions) ->
   DecisionResult(decisions, input_tokens)`. The token count is the provider's billed input,
   used for the usage row. `build(ctx)` receives `DecisionBuildContext(model, spec, timeout,
-  transport)` and fails at once, through `require_key`, when the key is missing.
+  transport)` and fails at once, through `require_key`, when the key is missing; `decide()`
+  re-raises that as `DecisionKeyMissingError` so callers can catch it without catching every
+  `RuntimeError`.
 
 ## Calling it (`base/lm/catalog/decide/call.py`)
 
@@ -80,7 +82,8 @@ own that, because they know which part of a document matters.
 ## Fail-fast rules
 
 Before any request: an unknown id (`UnknownDecisionModelError`), malformed inputs
-(`ValueError`/`TypeError`), a missing key (`RuntimeError` from `require_key`), and an
+(`ValueError`/`TypeError`), a missing key (`DecisionKeyMissingError`, wrapping the `require_key` message and
+raised `from` its `RuntimeError`), and an
 estimated input above `context_window` or `max_request_tokens`
 (`DecisionInputTooLargeError`). The estimate (`estimate_tokens`) counts four ASCII
 characters per token and one token per other character; the provider enforces the real

@@ -13,6 +13,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.call import decide
 from base.lm.catalog.decide.types import (
     Choice,
+    DecisionKeyMissingError,
     DecisionRequestError,
     DecisionResponseError,
     Score,
@@ -133,7 +134,7 @@ async def test_missing_key_fails_before_any_request(monkeypatch: pytest.MonkeyPa
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     server = _Server(httpx.Response(200, json=_body()))
 
-    with pytest.raises(RuntimeError, match="TYPESAFE_API_KEY not set"):
+    with pytest.raises(DecisionKeyMissingError, match="TYPESAFE_API_KEY not set"):
         await _decide(build_model_catalog(), server)
     assert server.requests == []
 

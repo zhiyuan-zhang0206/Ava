@@ -13,6 +13,7 @@ from base.lm.catalog.decide.types import (
     Choice,
     Decision,
     DecisionInputTooLargeError,
+    DecisionKeyMissingError,
     DecisionModelSpec,
     DecisionResponseError,
     Score,
@@ -108,9 +109,25 @@ async def test_missing_api_key_fails_through_require_key(monkeypatch: pytest.Mon
         return binding
 
     catalog = catalog_with(binding, build=build)  # pyright: ignore[reportArgumentType]
-    with pytest.raises(RuntimeError, match="FAKE_API_KEY not set"):
+    with pytest.raises(DecisionKeyMissingError, match="FAKE_API_KEY not set") as excinfo:
         await decide(MODEL, "hello", _QUESTIONS, catalog=catalog, usage_kind="test")
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+    assert not isinstance(excinfo.value.__cause__, DecisionKeyMissingError)
     assert binding.calls == []
+
+
+async def test_a_build_failure_with_the_key_present_propagates_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAKE_API_KEY", "present")
+
+    def build(_ctx: object) -> FakeBinding:
+        raise RuntimeError("real bug in build")
+
+    catalog = catalog_with(FakeBinding(_good()), build=build)  # pyright: ignore[reportArgumentType]
+    with pytest.raises(RuntimeError, match="real bug in build") as excinfo:
+        await decide(MODEL, "hello", _QUESTIONS, catalog=catalog, usage_kind="test")
+    assert not isinstance(excinfo.value, DecisionKeyMissingError)
 
 
 def _bad(mutate: dict[str, Decision]) -> dict[str, Decision]:
