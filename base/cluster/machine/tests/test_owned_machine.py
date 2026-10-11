@@ -13,26 +13,16 @@ from base.config import ConfigBoot
 
 
 def test_machine_value_and_pipeline_type_imports_do_not_load_settings(tmp_path: Path) -> None:
-    code = """
-import importlib.abc
-import sys
-sys.path.insert(0, sys.argv[1])
-
-class SettingsForbidden(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname == "base.config" or fullname.startswith("base.config."):
-            raise AssertionError("value imports must not load settings")
-        return None
-
-sys.meta_path.insert(0, SettingsForbidden())
-from base.cluster.machine import MachineIdentity
-from base.telemetry import EventPipeline
-assert "base.config" not in sys.modules
-"""
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env["AVA_HOME"] = str(tmp_path)
-    result = subprocess.run(  # noqa: S603 — fixed interpreter and code, isolated temporary home
-        [sys.executable, "-I", "-c", code, str(Path(__file__).resolve().parents[4])],
+    result = subprocess.run(  # noqa: S603 — fixed interpreter and child script, isolated temporary home
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("_import_child.py")),
+            "machine_value_imports",
+            str(Path(__file__).resolve().parents[4]),
+        ],
         env=env,
         capture_output=True,
         text=True,
