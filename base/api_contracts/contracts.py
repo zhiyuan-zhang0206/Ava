@@ -485,6 +485,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/timeline/retained"): RouteContract(
         note="read-only retained boundary window, independent of the live checkpoint head"
     ),
+    # ── gateway/agents/reply_suggestion/router.py ───────────────────────────────────
+    ("POST", "/api/agents/{agent_id}/reply-suggestion"): RouteContract(
+        note="read-only draft: a decision gate and a chat model call, writing only llm_usage; completed results are cached per agent message",
+    ),
     # ── gateway/routers/insights.py (proxy of services/derived/insights/run_timeline) ──
     ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
         note="read-only: the understanding tree and the layer-0 message units in a window",

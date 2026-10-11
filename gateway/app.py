@@ -87,6 +87,8 @@ from gateway.agents.history import timeline as timeline_router
 from gateway.agents.history import understanding as agents_understanding_router
 from gateway.agents.history.configuration import timeline_policy, understanding_policy
 from gateway.agents.notice_operations import router as guarded_notices_router
+from gateway.agents.reply_suggestion import router as reply_suggestion_router
+from gateway.agents.reply_suggestion.configuration import reply_suggestion_service
 from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.alerts import router as alerts_router
 from gateway.cluster import alert_classes as alert_classes_router
@@ -182,6 +184,12 @@ def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
     app.state.upload_locks = uploads_router.AgentUploadLocks()
     app.state.timeline_policy = timeline_policy(config)
     app.state.understanding_policy = understanding_policy(config, app.state.config_authority)
+    app.state.reply_suggestions = reply_suggestion_service(
+        config,
+        db=app.state.db,
+        catalog=app.state.catalog,
+        rendering=app.state.timeline_policy.rendering,
+    )
     app.state.memory_search_gate = memory_router.build_search_gate(
         config.view.services.memory_search_max_concurrency
     )
@@ -605,6 +613,7 @@ app.include_router(computer_traces_router.router)
 app.include_router(inspect_router.router)
 app.include_router(shell_router.router)
 app.include_router(timeline_router.router)
+app.include_router(reply_suggestion_router.router)
 app.include_router(system_router.router)
 app.include_router(pages_router.router)
 app.include_router(notices_router.router)

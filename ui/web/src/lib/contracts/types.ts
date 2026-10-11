@@ -189,6 +189,7 @@ export type RestartAgentResponse = Schemas["RestartAgentResponse"];
 export type ResurrectAgentResponse = Schemas["ResurrectAgentResponse"];
 
 export type TokenUsageResponse = Schemas["TokenUsageResponse"];
+export type ReplySuggestionResponse = Schemas["ReplySuggestionResponse"];
 
 export type ContextBreakdownResponse = Schemas["ContextBreakdownResponse"];
 export type ContextCategory = Schemas["ContextCategory"];
@@ -865,6 +866,10 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "behavior.confirm_terminate": true,
   "behavior.confirm_restart": true,
   "behavior.confirm_force_kill": true,
+  // Draft a reply into the empty composer after the agent's turn ends (grey ghost
+  // text, accepted with the right arrow). Default ON (user ruling 2026-10-11): it is a
+  // static-placement hint inside the input the user is already looking at.
+  "behavior.replySuggestions": true,
   // Sticky spawn-composer picker defaults. null = "no override" (use the cluster
   // default model / no preset / provider-default effort).
   "behavior.spawn_model": null,

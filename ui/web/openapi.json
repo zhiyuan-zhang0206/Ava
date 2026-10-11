@@ -2487,6 +2487,46 @@
         }
       }
     },
+    "/api/agents/{agent_id}/reply-suggestion": {
+      "post": {
+        "summary": "Post Reply Suggestion",
+        "description": "Draft the reply the user is likely to send to the agent's last message.\n\n200 with `suggestion` null and a `reason` for every way there is nothing to show: the\nagent is mid-turn, its last message is not waiting for the user, or the gate or draft\nmodel failed (logged as a warning). 404 for an unknown agent; 503 when the conversation\ncannot be read. The work stops when the client disconnects.",
+        "operationId": "post_reply_suggestion_api_agents__agent_id__reply_suggestion_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplySuggestionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/system": {
       "get": {
         "summary": "Get System Broadcast",
@@ -15512,6 +15552,45 @@
         ],
         "title": "ReferenceTps",
         "description": "Vendor-published output speed, preserving its qualifier and conditions."
+      },
+      "ReplySuggestionResponse": {
+        "properties": {
+          "suggestion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestion"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "disabled",
+                  "agent_not_idle",
+                  "no_agent_text",
+                  "not_awaiting_reply",
+                  "gate_failed",
+                  "generation_failed",
+                  "invalid_generation",
+                  "client_disconnected"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "title": "ReplySuggestionResponse",
+        "description": "A drafted reply, or the reason there is none.\n\n`suggestion` is set exactly when `reason` is None. Every non-error outcome is a 200: a\nmissing suggestion is an ordinary result, never a failure of the request."
       },
       "ResolveNoticeIn": {
         "properties": {

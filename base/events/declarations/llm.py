@@ -193,4 +193,17 @@ EVENTS: dict[str, EventSpec] = {
     "llm_retry": telemetry_event(
         "llm_retry", "LLM retry sequence completion", payload=LlmRetry, tier="observation"
     ),
+    # reply suggestion (gateway/agents/reply_suggestion)
+    "reply_suggestion_gate": telemetry_event(
+        "reply_suggestion_gate", "reply suggestion gate probability", tier="noise"
+    ),
+    "reply_suggestion_gate_failed": telemetry_event(
+        "reply_suggestion_gate_failed", "reply suggestion gate call failed", tier="anomaly"
+    ),
+    "reply_suggestion_draft_failed": telemetry_event(
+        "reply_suggestion_draft_failed", "reply suggestion draft call failed", tier="anomaly"
+    ),
+    "reply_suggestion_draft_rejected": telemetry_event(
+        "reply_suggestion_draft_rejected", "reply suggestion draft empty or too long", tier="noise"
+    ),
 }

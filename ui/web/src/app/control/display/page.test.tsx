@@ -58,6 +58,15 @@ beforeEach(() => {
   vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [], nav: [], stats: [] });
 });
 
+async function replySuggestionsToggle(): Promise<HTMLButtonElement> {
+  const label = await screen.findByText("Reply suggestions");
+  const toggle = label.parentElement?.parentElement?.parentElement?.querySelector<HTMLButtonElement>(
+    '[role="switch"]',
+  );
+  if (!toggle) throw new Error("reply suggestions toggle not found");
+  return toggle;
+}
+
 describe("DisplaySettingsPage", () => {
   it("offers All compact history and persists -1 in the settings cache", async () => {
     vi.mocked(api.putSetting).mockResolvedValue({
@@ -96,6 +105,29 @@ describe("DisplaySettingsPage", () => {
     expect(screen.getByText("Confirm before terminate")).toBeTruthy();
     expect(screen.getByText("Confirm before restart")).toBeTruthy();
     expect(screen.getByText("Confirm before force kill")).toBeTruthy();
+  });
+
+  it("reply suggestions are on by default and the toggle persists the opt-out", async () => {
+    vi.mocked(api.putSetting).mockResolvedValue({
+      key: "behavior.replySuggestions", value: false, updated_at: "2026-10-11T00:00:00Z",
+    });
+    renderPage();
+
+    const toggle = await replySuggestionsToggle();
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(api.putSetting).toHaveBeenCalledWith("behavior.replySuggestions", false));
+  });
+
+  it("shows reply suggestions off when the stored value is false", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({
+      settings: [{ key: "behavior.replySuggestions", value: false, updated_at: "2026-10-11T00:00:00Z" }],
+    });
+    renderPage();
+
+    const toggle = await replySuggestionsToggle();
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
   });
 
   it("treats a malformed show-terminated setting as opt-out", async () => {

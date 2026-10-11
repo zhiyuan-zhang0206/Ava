@@ -59,6 +59,7 @@ import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import type { AgentRow, ContentBlock } from "@/lib/contracts/types";
 import { useAgents } from "@/lib/agents/use-agents";
 import { usePendingMessages, withoutTimelineDuplicates } from "@/lib/agents/use-pending-messages";
+import { useReplySuggestion } from "@/lib/composer/use-reply-suggestion";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { timelineMaxWidthCss } from "@/lib/timeline/timeline-width";
 import { useUserSettings } from "@/lib/state/use-user-settings";
@@ -258,7 +259,7 @@ function HomeContent({
   // Timeline content-column width — user-adjustable fraction of the viewport
   // (display.timeline_width_ratio, default 0.4). The composer gets the same
   // width (see lib/timeline-width.ts).
-  const { settings: userSettings } = useUserSettings();
+  const { settings: userSettings, isLoading: userSettingsLoading } = useUserSettings();
   // Task #805 (user ruling): the timeline-width ratio is a DESKTOP concept.
   // Below the md breakpoint (phones — same 768px boundary the sidebar uses
   // for its overlay drawer) the timeline and composer are FULL-WIDTH and the
@@ -410,6 +411,16 @@ function HomeContent({
   const agentBusy = turnActive || activeAgent?.status === "running";
   const composerMode: "disabled" | "idle" | "busy" =
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";
+  // The drafted reply shown as the composer's ghost text. The hook owns it (one
+  // writer); the setting must be loaded first so a stored "off" is never raced by the
+  // default "on".
+  const replySuggestion = useReplySuggestion({
+    agentId: activeId,
+    status: activeAgent?.status,
+    busy: agentBusy,
+    items,
+    enabled: !userSettingsLoading && userSettings["behavior.replySuggestions"] === true,
+  });
 
   return (
     <section className={cn("relative", FLEX, MIN_H_0, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN)}>
@@ -483,6 +494,7 @@ function HomeContent({
               contextPending={contextPending}
               agentId={activeId}
               agentTerminated={activeAgent?.status === "terminated"}
+              suggestion={replySuggestion}
               details={<ContentToggle />}
             >
               <UploadButton
