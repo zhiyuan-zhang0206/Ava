@@ -4390,25 +4390,28 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-hosted-boot-recovery-deferred: replaces services/agent_runner/agent_host/boot_defer.py consecutive-boot streak ledger + ALERT_AFTER_BOOTS=3 escalation to hosted_boot_recovery_stalled (event renamed hosted_boot_recovery_deferred, emitted every deferred boot; consecutive-ness is approximated by a 24h count) ──
-      - uid: ava-ops-hosted-boot-recovery-deferred
-        title: "Hosted boot recovery deferred repeatedly"
+      # ── ava-ops-lifecycle-pointer-stuck: the hourly TTL-reaper scan found a lifecycle command nothing will settle on its own (a force-terminate whose original host died before observing it, or a torn done pointer); every resurrect of the agent defers until an operator settles it ──
+      - uid: ava-ops-lifecycle-pointer-stuck
+        title: "Lifecycle pointer stuck"
         condition: D
         for: 0s
         noDataState: OK
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-hosted-boot-recovery-deferred
-          metric: hosted_boot_recovery_deferred
+          ruleUID: ava-ops-lifecycle-pointer-stuck
+          metric: lifecycle_pointer_stuck
           team: ava-ops
         annotations:
-          summary: "hosted boot recovery deferred for agent {{ $labels.agent_id }} on {{ $values.C }} boots in 24h"
+          summary: "{{ $values.C }} agent lifecycle pointer(s) stuck on an unsettled command"
           description: >-
-            Retained exec request evidence is not clearing on its own: the agent host deferred the agent's
-            hosted-force recovery on three or more boots within 24 hours (one boot can be a race, two an
-            unlucky restart cadence). The event line carries the evidence and the disposition command hint.
-            The instance resolves 24 hours after the last deferral.
+            The hourly stuck-lifecycle-pointer scan found agents_meta.lifecycle_command_id pointing at a
+            command that nothing will settle on its own: a force-terminate applied more than an hour ago
+            and never observed (its original host crashed first, or its machine was decommissioned), or a
+            command sitting at done with the pointer alive. Resurrecting the named agents is refused
+            ("outstanding hosted lifecycle command has not settled") until an operator settles the command
+            and clears the pointer by hand. The event line carries the count and sample agent ids. The
+            instance resolves two hours after the last scan that still found one.
         data:
           - refId: A
             datasourceUid: loki
@@ -4420,13 +4423,13 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum by (agent_id) (count_over_time({service_name="unknown_service",
-                event_name="hosted_boot_recovery_deferred"} | json | cluster=".ava" | category="telemetry"
-                [24h]))
+                sum(count_over_time({service_name="unknown_service",
+                event_name="lifecycle_pointer_stuck"} | json | cluster=".ava" | category="telemetry"
+                [2h]))
               instant: true
               queryType: instant
             relativeTimeRange:
-              from: 86400
+              from: 7200
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -4452,7 +4455,7 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [2]
+                    params: [0]
                   operator:
                     type: and
                   query:

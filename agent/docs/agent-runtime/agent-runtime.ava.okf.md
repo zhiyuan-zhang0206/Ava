@@ -72,13 +72,8 @@ context for compaction and to END for idle or lifecycle control. Routing uses
   only when the same locked row proves its exact host process has exited and
   its managed resource set is empty and unfrozen. A living host, another machine,
   unknown process identity or unclosed resources retain the admission fences.
-  A legacy NULL-resource row has no stored process to prove: it is admitted
-  early only through the evidence-gated proposal (renewal silence ≥
-  `LEGACY_HOST_ADOPTION_SILENCE_S`, no live same-home agent-host daemon, no
-  live exec child of the agent — `base/agents/incarnation/host_process_evidence.py`), re-pinned
-  to the exact row state under the row lock and recorded as a
-  `hosted_legacy_adoption` audit event. NULL evidence alone never authorizes
-  takeover.
+  A legacy NULL-resource row has no stored process to prove: it waits for its
+  lease to expire like any other row of a host that cannot be proven gone.
 - `services/agent_runner/agent_host/db_recovery.py` retains the original turn during a database
   or checkpoint failure. A 5s exact-owner probe precedes repair stages with
   independent 30s budgets: flush retained checkpoint writes, reconcile claimed

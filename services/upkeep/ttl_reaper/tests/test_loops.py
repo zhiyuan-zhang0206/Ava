@@ -162,14 +162,14 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
 def test_a_phase_is_claimed_once_per_interval(
     db_conn: psycopg.Connection, pool: ConnectionPool
 ) -> None:
-    assert cadence.claim_due(pool, cadence.TORN_POINTER_SCAN, 3600.0) is True
-    assert cadence.claim_due(pool, cadence.TORN_POINTER_SCAN, 3600.0) is False
+    assert cadence.claim_due(pool, cadence.STUCK_POINTER_SCAN, 3600.0) is True
+    assert cadence.claim_due(pool, cadence.STUCK_POINTER_SCAN, 3600.0) is False
     # Each phase keeps its own clock.
-    assert cadence.claim_due(pool, cadence.ABSENT_FENCE_SETTLE, 3600.0) is True
+    assert cadence.claim_due(pool, cadence.FIRE_LOG_PRUNE, 3600.0) is True
 
-    _backdate(db_conn, cadence.TORN_POINTER_SCAN, 3601.0)
-    assert cadence.claim_due(pool, cadence.TORN_POINTER_SCAN, 3600.0) is True
-    assert cadence.claim_due(pool, cadence.TORN_POINTER_SCAN, 3600.0) is False
+    _backdate(db_conn, cadence.STUCK_POINTER_SCAN, 3601.0)
+    assert cadence.claim_due(pool, cadence.STUCK_POINTER_SCAN, 3600.0) is True
+    assert cadence.claim_due(pool, cadence.STUCK_POINTER_SCAN, 3600.0) is False
 
 
 def test_a_claim_survives_a_restart(
@@ -191,23 +191,18 @@ def test_a_claim_survives_a_restart(
 
 
 def _count_slow_phases(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
-    calls = {"prune": 0, "torn": 0, "settle": 0}
+    calls = {"prune": 0, "stuck": 0}
 
     def prune(_pool: object) -> int:
         calls["prune"] += 1
         return 0
 
-    def torn(_pool: object) -> int:
-        calls["torn"] += 1
+    def stuck(_pool: object) -> int:
+        calls["stuck"] += 1
         return 0
 
-    def settle(_pool: object, *, batch: int) -> list[int]:
-        calls["settle"] += 1
-        return []
-
     monkeypatch.setattr(sweep, "_prune_schedule_fire_log_blocking", prune)
-    monkeypatch.setattr(sweep, "_scan_torn_lifecycle_pointers_blocking", torn)
-    monkeypatch.setattr(sweep, "settle_absent_machine_fences", settle)
+    monkeypatch.setattr(sweep, "_scan_stuck_lifecycle_pointers_blocking", stuck)
     return calls
 
 
@@ -222,14 +217,13 @@ async def test_slow_phases_run_once_per_cadence_not_once_per_round(
 
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
-    assert calls == {"prune": 1, "torn": 1, "settle": 1}
+    assert calls == {"prune": 1, "stuck": 1}
 
-    # Two hours on: the hourly phases are due again, the daily prune is not.
-    _backdate(db_conn, cadence.TORN_POINTER_SCAN, 7200.0)
-    _backdate(db_conn, cadence.ABSENT_FENCE_SETTLE, 7200.0)
+    # Two hours on: the hourly phase is due again, the daily prune is not.
+    _backdate(db_conn, cadence.STUCK_POINTER_SCAN, 7200.0)
     _backdate(db_conn, cadence.FIRE_LOG_PRUNE, 7200.0)
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
-    assert calls == {"prune": 1, "torn": 2, "settle": 2}
+    assert calls == {"prune": 1, "stuck": 2}
 
 
 async def test_a_restarted_sweep_does_not_rerun_phases_it_already_ran(
@@ -237,11 +231,11 @@ async def test_a_restarted_sweep_does_not_rerun_phases_it_already_ran(
 ) -> None:
     calls = _count_slow_phases(monkeypatch)
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
-    assert calls == {"prune": 1, "torn": 1, "settle": 1}
+    assert calls == {"prune": 1, "stuck": 1}
 
     # A new process: nothing in memory, the clocks are the table's.
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
-    assert calls == {"prune": 1, "torn": 1, "settle": 1}
+    assert calls == {"prune": 1, "stuck": 1}
 
 
 # --- the remote round --------------------------------------------------------

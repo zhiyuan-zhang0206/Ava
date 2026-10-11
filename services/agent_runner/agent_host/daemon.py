@@ -67,8 +67,6 @@ from ava.sdk_surface.process_context import process_clients
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
 from base.agents.impersonation.terminal_notices import run_notice_delivery
-from base.agents.incarnation.exec_request_evidence import disposition_hint
-from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import MachineIdentity
@@ -96,7 +94,6 @@ from base.sessions.helper_chain_guard import parent_chain_intact
 from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from .dispatcher import InboundWakeDispatcher, TurnScheduler
 from .exec_memory_guard import run_memory_guard_forever
-from .force_termination import kill_terminating_agent_shells
 from .health_routes import cancel_turn_route, stats_route
 from .host import AgentHost
 from .lifecycle.configuration import (
@@ -443,34 +440,13 @@ async def _build_checkpointer(
     return checkpointer
 
 
-async def _recover_hosted_forces_at_boot(
-    control_pool: AsyncConnectionPool[psycopg.AsyncConnection], machine: str
-) -> None:
-    """Recover only resource-free predecessor forces before scheduling starts."""
-    recovered, deferred = await recover_orphaned_hosted_forces(
-        control_pool, machine, kill_shell_sessions=kill_terminating_agent_shells
-    )
-    logger.info("hosted boot recovery: observed {n} orphaned force(s)", n=len(recovered))
-    for agent_id, evidence in deferred.items():
-        logger.warning(
-            "hosted boot recovery deferred for agent {agent_id}: retained exec request "
-            "evidence [{evidence}] is not clearing on its own. {hint}",
-            event="hosted_boot_recovery_deferred",
-            agent_id=agent_id,
-            evidence="; ".join(entry.describe() for entry in evidence),
-            hint=disposition_hint(agent_id),
-        )
-
-
 async def _open_host_pools(
     workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-    machine: str,
 ) -> None:
-    """Open both client pools, then recover before the scheduler can run."""
+    """Open both client pools before the scheduler can run."""
     await workload_pool.open()
     await control_pool.open()
-    await _recover_hosted_forces_at_boot(control_pool, machine)
 
 
 async def _close_joined_host_pools(
@@ -610,7 +586,7 @@ async def run(
         init_process_scope(machine=machine, home=home)
         land_cluster_extensions(db)
         local_machine = machine.name()
-        await _open_host_pools(workload_pool, control_pool, local_machine)
+        await _open_host_pools(workload_pool, control_pool)
         if clients is None:
             clients = process_clients(database=lambda: db, config=config, machine=machine)
         from agent.extensions import load_extensions

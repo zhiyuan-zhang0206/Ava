@@ -63,8 +63,8 @@ SIGNALS: dict[str, Signal] = {
     "ava-ops-im-feishu-owner-seed-failed": Signal(
         "im_feishu_owner_seed_failed", "ava-ops", "0s", "warning"
     ),
-    "ava-ops-hosted-boot-recovery-deferred": Signal(
-        "hosted_boot_recovery_deferred", "ava-ops-slow", "0s", "warning", 2
+    "ava-ops-lifecycle-pointer-stuck": Signal(
+        "lifecycle_pointer_stuck", "ava-ops-slow", "0s", "warning", 0
     ),
     # the #4217 gates (delivery grace, per-host cooldown, consecutive-round escalation)
     "ava-ops-delivery-stalled": Signal("delivery_stalled", "ava-ops", "1m", "warning"),

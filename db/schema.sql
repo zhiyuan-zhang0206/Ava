@@ -471,8 +471,8 @@ COMMENT ON COLUMN inbound_messages.source_assertion_match IS
 -- boot recovery (needs claimed) and live observation (needs a process identity) at
 -- once, deferring any resurrect forever. Deferred to COMMIT, so every legitimate
 -- writer (supersede / force / observe / hosted settle) passes: each clears the
--- pointer in the same transaction. The TTL reaper's hourly torn-pointer scan
--- (gateway/ttl_reaper.py, telemetry lifecycle_pointer_done_torn) is the detector
+-- pointer in the same transaction. The TTL reaper's hourly stuck-pointer scan
+-- (services/upkeep/ttl_reaper, telemetry lifecycle_pointer_stuck) is the detector
 -- for a bypass (a pointer later set onto an already-done row). Ships to existing
 -- clusters via a migration.
 CREATE OR REPLACE FUNCTION reject_inbound_done_with_lifecycle_pointer() RETURNS trigger AS $$

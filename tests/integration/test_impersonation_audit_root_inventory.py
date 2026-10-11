@@ -20,7 +20,6 @@ _INVENTORY: dict[str, str] = {
     "agent/ownership/corpse_reap.py::reap_crash_corpses": "ineligible",
     "agent/hooks/compact.py::auto_compact_for_llm": "ineligible",
     "agent/ownership/hosted.py::admit_hosted_runtime": "ineligible",
-    "agent/ownership/hosted.py::_record_legacy_adoption": "ineligible",
     "agent/ownership/hosted.py::settle_hosted_runtime": "ineligible",
     "ava/self.py::compact": "local",
     "ava/skills/__init__.py::_record_skill_invoked": "local",
