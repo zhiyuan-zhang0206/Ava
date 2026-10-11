@@ -5,8 +5,7 @@ event the projection missed (the database did not answer, or the event reached
 `telemetry_events` through the mirror replay or a backfill) is still in `telemetry_events`. Each
 maintenance pass scans the last seven days of the supported event families, keeps the rows whose
 observation is missing, and writes them through the same reduction the live projection uses
-(`observe_row`), so a recovered row and a live one are the same observation. The frozen archive
-owns the timestamps up to its last row, so rows at or before `ARCHIVE_FREEZE_AT` are left alone.
+(`observe_row`), so a recovered row and a live one are the same observation.
 A scan means the table was traversed, not that upstream collection was lossless. `node_exit`
 rows are not stored in `telemetry_events`, so activity observations come from the live
 projection only and are not recoverable here.
@@ -20,7 +19,6 @@ from typing import Any
 
 from psycopg import Connection
 
-from base.telemetry.loki_index_labels import ARCHIVE_FREEZE_AT
 from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
 from base.telemetry.metrics.observed_metrics import (
     MetricObservation,
@@ -41,7 +39,7 @@ _UNSIGNED_UID = (
 _MISSING = f"""
     SELECT t.event_uid, t.ts, t.agent_id, t.category, t.event_name, t.attributes, {_UNSIGNED_UID}
     FROM telemetry_events t
-    WHERE t.ts >= %s AND t.ts < %s AND t.ts > %s AND t.agent_id IS NOT NULL
+    WHERE t.ts >= %s AND t.ts < %s AND t.agent_id IS NOT NULL
       AND t.event_name = ANY(%s)
       AND EXISTS (SELECT 1 FROM agents a WHERE a.id = t.agent_id)
       AND NOT EXISTS (SELECT 1 FROM agent_metric_observations o WHERE o.event_id = {_UNSIGNED_UID})
@@ -67,7 +65,6 @@ def recover_observations(conn: Connection[Any], *, now: datetime | None = None) 
             (
                 now - _WINDOW,
                 now,
-                ARCHIVE_FREEZE_AT,
                 _EVENT_NAMES,
                 cursor_ts,
                 cursor_uid,

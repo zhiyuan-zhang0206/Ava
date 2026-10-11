@@ -106,7 +106,6 @@ def test_wal_overwrite_prevention_accepts_what_wal_g_reads_as_true(
         ("oss://bucket/", "bucket root"),
         ("oss://bucket/ava-logical/x/", "ava-logical/"),
         ("oss://bucket/ava-pitr-scratch/walg/", "ava-pitr-scratch/"),
-        ("oss://bucket/ava-wsl-cutover-20260901/", "ava-wsl-cutover-20260901/"),
     ],
 )
 def test_the_prefix_cannot_overlap_another_backup_namespace(

@@ -90,13 +90,9 @@ from base.telemetry import audit_events, build_pipeline
 
 from ..permissions_helper import client as helper
 from ..permissions_helper.client import PermissionsHelperError
-
-# Re-export of the shared OCR module object (test compat: the suite patches
-# mcp_daemon.ocr_mod attributes, and every OCR caller sees the same object).
 from .ax_ids import AxSession
 from .config import ComputerUseConfig
 from .execute import _TOOLS, _execute_tool, _mcp_result, _priority
-from .execute import ocr_mod as ocr_mod
 from .protocol import Request, Response
 from .session import ScreenSession
 from .task_sessions import TaskSessionTracker

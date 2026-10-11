@@ -22,7 +22,7 @@ from base.config import ConfigBoot
 from base.daemon.health import Liveness
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
-from services.derived.memory_indexer import daemon
+from services.derived.memory_indexer import chunking, daemon
 from services.derived.memory_indexer.backends.base import content_hash
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.tests.store_backend import StoreBackend
@@ -148,7 +148,7 @@ def test_split_note_extracts_description_and_body() -> None:
         "---\ntype: Memory\ndescription: A note about the user's health\n"
         "---\n\n# Health\n\nbody content"
     )
-    desc, body = daemon._split_note(content)
+    desc, body = chunking._split_note(content)
     assert desc == "A note about the user's health"
     assert "# Health" in body
     assert "description" not in body
@@ -156,26 +156,26 @@ def test_split_note_extracts_description_and_body() -> None:
 
 def test_split_note_no_frontmatter_returns_full_body() -> None:
     content = "# Just a heading\n\nNo YAML."
-    desc, body = daemon._split_note(content)
+    desc, body = chunking._split_note(content)
     assert desc is None
     assert body == content
 
 
 def test_split_note_blank_description_is_none() -> None:
-    desc, body = daemon._split_note("---\ndescription: \n---\n\nbody")
+    desc, body = chunking._split_note("---\ndescription: \n---\n\nbody")
     assert desc is None
     assert body == "\nbody"  # the shared parser keeps the blank line after the fence
 
 
 def test_chunk_body_short_text_single_chunk() -> None:
-    assert daemon._chunk_body("short body") == ["short body"]
-    assert daemon._chunk_body("  \n\n  ") == []
+    assert chunking._chunk_body("short body") == ["short body"]
+    assert chunking._chunk_body("  \n\n  ") == []
 
 
 def test_chunk_body_splits_at_paragraph_boundaries() -> None:
     paras = [f"paragraph-{i} " + "word " * 80 for i in range(6)]  # 412 chars each
     body = "\n\n".join(paras)
-    chunks = daemon._chunk_body(body, max_chars=1800, overlap_chars=200)
+    chunks = chunking._chunk_body(body, max_chars=1800, overlap_chars=200)
     assert len(chunks) == 2
     assert all(len(c) <= 1800 for c in chunks)
     assert chunks[0].startswith("paragraph-0")
@@ -187,7 +187,7 @@ def test_chunk_body_splits_at_paragraph_boundaries() -> None:
 def test_chunk_body_overlap_carries_trailing_paragraphs() -> None:
     paras = [f"paragraph-{i} " + "word " * 80 for i in range(6)]
     body = "\n\n".join(paras)
-    chunks = daemon._chunk_body(body, max_chars=1400, overlap_chars=600)
+    chunks = chunking._chunk_body(body, max_chars=1400, overlap_chars=600)
     # the previous chunk's tail paragraph re-opens the next chunk
     assert chunks[1].startswith("paragraph-2")
     assert "paragraph-2" in chunks[0]
@@ -195,7 +195,7 @@ def test_chunk_body_overlap_carries_trailing_paragraphs() -> None:
 
 def test_chunk_body_hard_splits_oversized_paragraph() -> None:
     para = "x" * 3000
-    chunks = daemon._chunk_body(para, max_chars=1000, overlap_chars=100)
+    chunks = chunking._chunk_body(para, max_chars=1000, overlap_chars=100)
     assert chunks == ["x" * 1000, "x" * 1000, "x" * 1000, "x" * 300]
 
 
@@ -203,13 +203,15 @@ def test_file_rows_desc_plus_body_chunks() -> None:
     content = "---\ntype: Memory\ndescription: hand off to 402\n---\n\n" + "\n\n".join(
         f"paragraph-{i} " + "word " * 80 for i in range(6)
     )
-    rows = daemon._file_rows(content)
+    rows = chunking._file_rows(content)
     assert rows[0] == ("desc", 0, "hand off to 402")
     assert [k for k, _, _ in rows] == ["desc", "body", "body"]
 
 
 def test_file_rows_no_frontmatter_no_desc() -> None:
-    assert daemon._file_rows("# heading\n\nshort body") == [("body", 0, "# heading\n\nshort body")]
+    assert chunking._file_rows("# heading\n\nshort body") == [
+        ("body", 0, "# heading\n\nshort body")
+    ]
 
 
 def test_process_paths_indexes_desc_and_body_chunks(

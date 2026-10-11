@@ -38,7 +38,7 @@ authenticated response permits proxying the app. A gateway or app transport
 failure renders Service unavailable; Gate does not guess whether the cause is a
 transition, a service, or the host. Gate keeps no update state: a release
 transition stops Gate with the rest of root, so no listener exists to describe
-it, and a `$AVA_HOME/deploy-state.json` left by the retired updater is ignored.
+it.
 The login and unavailable pages are dependency-free static assets loaded at
 boot. Next.js navigation request headers and response security headers cross
 the proxy. Normal root startup loads the candidate code and static assets.

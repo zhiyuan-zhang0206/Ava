@@ -368,7 +368,7 @@ def _page_session_owner(pid: int, shell_pids: dict[int, tuple[int, str]]) -> tup
 
 
 def _kill_pid(pid: int) -> None:
-    """Terminate one positively identified detached legacy page server."""
+    """Terminate one positively identified detached page server."""
     try:
         proc = psutil.Process(pid)
     except psutil.Error:
@@ -392,7 +392,7 @@ def _reclaim_occupants(
     occupants: dict[int, tuple[int, str | None]],
     shell_pids: dict[int, tuple[int, str]],
 ) -> None:
-    """Kill detached legacy/orphan servers while preserving live page shells."""
+    """Kill detached/orphan servers while preserving live page shells."""
     wanted_ports = {row.port for row in rows}
     own_home = str(ava_home())
     for port, (pid, home) in occupants.items():

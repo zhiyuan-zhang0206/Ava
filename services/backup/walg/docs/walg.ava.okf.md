@@ -30,8 +30,7 @@ proves it are [[walg-restore.ava.okf.md|WAL-G restore and recovery drill]].
   copied into `.env`. The key is host-scoped, writable (`ava config unset` always
   removes it) and never sent to other machines.
 - **Validation without echo** (`config.py`): required keys, a bucket prefix that
-  names a path and cannot sit under `ava-logical/`, `ava-pitr-scratch/` or
-  `ava-wsl-cutover-*`, a bare `OSS_REGION` (`cn-shanghai`, never the endpoint's `oss-` form), owner-only files, a 32-byte lowercase-hex key. Errors name
+  names a path and cannot sit under `ava-logical/` or `ava-pitr-scratch/`, a bare `OSS_REGION` (`cn-shanghai`, never the endpoint's `oss-` form), owner-only files, a 32-byte lowercase-hex key. Errors name
   keys and paths, never values.
 - **Key fingerprint pin** (`config.py`): the first load writes the key's truncated
   SHA-256 to `$AVA_HOME/backups/walg/key-id` (0600); a later key file that differs

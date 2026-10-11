@@ -57,7 +57,7 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up.
    `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h), or
    IDLING owners older than
    `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_IDLING_THRESHOLD_SECONDS` (default 2h),
-   to `done` (age from `claimed_at`, falling back to `created_at`). Hosted
+   to `done` (age from `claimed_at`). Hosted
    idling agents may never boot again to reconcile their completed claims;
    running owners remain untouched. The same cadence completes the
    stale pending `terminate` / `system_note` / `restart_completed` rows of

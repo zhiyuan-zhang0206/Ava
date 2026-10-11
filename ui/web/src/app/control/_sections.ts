@@ -106,9 +106,8 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
 // leads — "how is the cluster right now" is the most common reason to open it —
 // followed by Ops (the Grafana dashboard link).
 // The cluster Restart / Update actions ride the Status section header (see
-// status/page.tsx), so "watch health → act" stays one glance. Status now has
-// Services + Gateway; Resources was retired 2026-08-24 in favor of Grafana's
-// "Host & data plane" row, and gateway daemons were merged into Gateway.
+// status/page.tsx), so "watch health → act" stays one glance. Status has
+// Services + Gateway.
 export const INSIGHTS_SECTIONS: ControlSectionDef[] = [
   {
     id: "status",

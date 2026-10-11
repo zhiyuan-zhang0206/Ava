@@ -214,15 +214,12 @@ def _insert_claimed_row(
     db: psycopg.Connection,
     agent_id: int,
     *,
-    claim_age_s: float | None,
+    claim_age_s: float,
     created_age_s: float | None = None,
 ) -> int:
     """Insert a 'claimed' chat inbound, backdating claimed_at (and optionally
-    created_at) by the given ages. claimed_at NULL when claim_age_s is None —
-    the pre-2026-08-02 shape (claimed before the column existed)."""
-    created_age_s = (
-        claim_age_s + 60 if created_age_s is None and claim_age_s is not None else created_age_s
-    )
+    created_at) by the given ages."""
+    created_age_s = claim_age_s + 60 if created_age_s is None else created_age_s
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages "

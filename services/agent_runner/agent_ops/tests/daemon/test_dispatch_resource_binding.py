@@ -13,6 +13,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
+from ops.cluster import operations as cluster_ops
 from services.agent_runner.agent_ops import daemon
 
 
@@ -57,7 +58,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
             paused=False,
         )
 
-    monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
+    monkeypatch.setattr(cluster_ops, "cluster_status_op", _status)
 
     status, result = await daemon._dispatch(
         "status_probe",

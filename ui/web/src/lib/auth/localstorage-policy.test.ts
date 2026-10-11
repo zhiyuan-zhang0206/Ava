@@ -32,8 +32,7 @@ const AUTOSAVE_ALLOWLIST = new Set<string>([
   "components/run-timeline/run-timeline-workspace.tsx", // ava.run-timeline.split (run-timeline details panel width)
 ]);
 
-// The complete set of ava-namespaced storage keys allowed to remain in source
-// (outside the migration module, which reads + removes the legacy keys).
+// The complete set of ava-namespaced storage keys allowed in source.
 const ALLOWED_KEYS = new Set<string>([
   "ava.fleet.mobileTab",
   "ava.active.agent_id",

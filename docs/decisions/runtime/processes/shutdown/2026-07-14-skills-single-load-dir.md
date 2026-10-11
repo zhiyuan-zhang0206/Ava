@@ -43,7 +43,7 @@ never loads.
   repo/plugin skill's name shadows the source (warn), because overwriting
   would destroy user content — the one deliberate deviation from the design's
   "repo wins on the same path".
-- **Untracked dirs (e.g. legacy `auto-review`, `wechat-ocr`) are not
+- **Untracked dirs (e.g. legacy `auto-review`) are not
   auto-registered** — converge warns and points at `ava skill register`;
   preserves the pre-change behavior (they did not load before either).
 

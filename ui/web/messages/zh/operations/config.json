@@ -9,7 +9,6 @@
   "notSet": "— 未设置 —",
   "loadingModels": "加载中…",
   "perAgent": "按 agent",
-  "deprecated": "已弃用",
   "editOnCluster": "（在 Cluster 视图编辑）",
   "newValue": "新值",
   "saveFailed": "保存失败：{error}",

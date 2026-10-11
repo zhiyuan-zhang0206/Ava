@@ -17,7 +17,7 @@
 // hidden period refreshes the selected snapshot through the shared reconcile;
 // hidden pages do not poll.
 //
-// Token count has migrated from local useState to Zustand store.tokenUsage.
+// Token count lives in Zustand store.tokenUsage.
 
 "use client";
 

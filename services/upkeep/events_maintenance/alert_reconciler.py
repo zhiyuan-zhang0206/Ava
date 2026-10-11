@@ -93,8 +93,7 @@ def reconcile_open_grafana_alerts(
 
     Every row belongs to Grafana's evaluator (the webhook is the only writer),
     so a row Grafana no longer reports firing is closed whatever `source` it
-    carries: that also ends a row a retired in-process writer left open. Rows
-    touched after the snapshot began are excluded, closing the race where a new
+    carries. Rows touched after the snapshot began are excluded, closing the race where a new
     firing webhook lands after Grafana produced the response but before this
     UPDATE.
     """

@@ -324,8 +324,8 @@ async def _embed_async(
 class GeminiEmbeddingProvider:
     """`EmbeddingProvider` for Gemini Embedding 2 (text mode).
 
-    Preserves the endpoint, payload, auth, per-site network retry policies,
-    dim and shape validation of the legacy `embedder` module. The service
+    Owns the endpoint, payload, auth, per-site network retry policies,
+    dim and shape validation. The service
     root supplies the catalog used by accounting; unknown setup, request
     and accounting failures propagate to that operation owner.
     """

@@ -19,6 +19,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 
 from .. import mcp_daemon as daemon_mod
+from .. import ocr as ocr_mod
 from .. import ocr_text as ocr_text_mod
 from .. import screen as screen_mod
 from ..errors import ComputerUseError
@@ -350,7 +351,7 @@ async def test_snapshot_include_ocr_adds_text_boxes(
         lambda _agent_id: "/tmp/snap-ocr-test.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        daemon_mod.ocr_mod,
+        ocr_mod,
         "ocr_image",
         lambda _path: [{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}],  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -374,9 +375,9 @@ async def test_snapshot_include_ocr_failure_degrades(
     )
 
     def _boom(path: str) -> list[dict]:
-        raise daemon_mod.ocr_mod.OcrError("swiftc missing")
+        raise ocr_mod.OcrError("swiftc missing")
 
-    monkeypatch.setattr(daemon_mod.ocr_mod, "ocr_image", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ocr_mod, "ocr_image", _boom)  # pyright: ignore[reportUnknownArgumentType]
     d = _daemon(database_gate=database_gate)
     result = await _ok_result(d, "snapshot", {"include_ocr": True})
     assert result["ocr"] == []
@@ -401,7 +402,7 @@ async def test_snapshot_without_include_ocr_skips_ocr(
         called.append(path)
         return []
 
-    monkeypatch.setattr(daemon_mod.ocr_mod, "ocr_image", _ocr)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ocr_mod, "ocr_image", _ocr)  # pyright: ignore[reportUnknownArgumentType]
     d = _daemon(database_gate=database_gate)
     result = await _ok_result(d, "snapshot", {})
     assert called == []
@@ -423,7 +424,7 @@ class FakeOcr:
     def __call__(self, path: str) -> list[dict[str, float | str]]:
         self.calls += 1
         if self.error is not None:
-            raise daemon_mod.ocr_mod.OcrError(self.error)
+            raise ocr_mod.OcrError(self.error)
         return self.boxes
 
 
@@ -441,7 +442,7 @@ _OCR_BOXES: list[dict[str, float | str]] = [
 @pytest.fixture
 def fake_ocr(monkeypatch: pytest.MonkeyPatch) -> FakeOcr:
     stub = FakeOcr(_OCR_BOXES)
-    monkeypatch.setattr(daemon_mod.ocr_mod, "ocr_image", stub)
+    monkeypatch.setattr(ocr_mod, "ocr_image", stub)
     return stub
 
 

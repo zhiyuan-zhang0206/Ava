@@ -55,7 +55,7 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     host._bus = MagicMock()
     host._checkpointer = cast(Any, MemorySaver())
     monkeypatch.setattr(
-        "services.agent_runner.agent_host.host._read_stored_config",
+        "services.agent_runner.agent_host.host.read_stored_config",
         AsyncMock(
             return_value=_StoredConfig(
                 machine="local", status="idling", config_overlay=None, birth_config=None

@@ -15,6 +15,8 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
+from ops import host_config, inventory
+from ops.cluster import operations as cluster_ops
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_daemon import _stub_pool
 from services.agent_runner.agent_ops.tests.test_daemon import (
@@ -43,7 +45,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
 
         return InventoryReadResult(machine="runner", plugins={}, mcp_servers={})
 
-    monkeypatch.setattr(daemon.inventory, "inventory_read_op", _wedged)
+    monkeypatch.setattr(inventory, "inventory_read_op", _wedged)
 
     class _Status:
         def model_dump(self: object, *, mode: str) -> dict[str, bool]:
@@ -53,7 +55,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     def _status(_db: Database, _pool: object, *, image: LoadedCommit) -> _Status:
         return _Status()
 
-    monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
+    monkeypatch.setattr(cluster_ops, "cluster_status_op", _status)
 
     stuck = asyncio.ensure_future(
         daemon._dispatch(
@@ -124,8 +126,8 @@ async def test_two_config_writes_cannot_interleave(
         inside -= 1
         return _Result()
 
-    monkeypatch.setattr(daemon.host_config, "config_write_op", _slow_write)
-    monkeypatch.setattr(daemon.inventory, "inventory_write_op", _slow_write)
+    monkeypatch.setattr(host_config, "config_write_op", _slow_write)
+    monkeypatch.setattr(inventory, "inventory_write_op", _slow_write)
 
     await asyncio.gather(
         daemon._dispatch(
@@ -190,7 +192,7 @@ async def test_config_write_op_receives_actor_and_trace(
         return _Result()
 
     dispatch_pool: ConnectionPool = _stub_pool()
-    monkeypatch.setattr(daemon.host_config, "config_write_op", _capture)
+    monkeypatch.setattr(host_config, "config_write_op", _capture)
     status, _ = await daemon._dispatch(
         "config_write",
         {"overrides": {}, "actor": "user_session:administrator", "trace_id": "trace-9"},
@@ -232,7 +234,7 @@ async def test_config_audit_read_op_receives_last(
         return _Result()
 
     dispatch_pool: ConnectionPool = _stub_pool()
-    monkeypatch.setattr(daemon.host_config, "config_audit_read_op", _capture)
+    monkeypatch.setattr(host_config, "config_audit_read_op", _capture)
     status, _ = await daemon._dispatch(
         "config_audit_read",
         {"last": 7},
@@ -305,7 +307,7 @@ async def test_op_arms_do_not_run_on_the_default_executor(
 
         return _R()
 
-    monkeypatch.setattr(daemon.host_config, "config_read_op", _note_thread)
+    monkeypatch.setattr(host_config, "config_read_op", _note_thread)
 
     await daemon._dispatch(
         "config_read",

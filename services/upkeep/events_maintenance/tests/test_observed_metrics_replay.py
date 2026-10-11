@@ -7,7 +7,6 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.telemetry.loki_index_labels import ARCHIVE_FREEZE_AT
 from base.telemetry.metrics.observed_metrics import observe_row, write_observations
 from services.upkeep.events_maintenance import observed_metrics as replay
 
@@ -93,11 +92,10 @@ def test_the_signed_event_uid_maps_to_the_unsigned_observation_identity(
     assert stored is not None and int(stored[0]) == _stream_id(-5)
 
 
-def test_archive_owned_unknown_agent_and_malformed_rows_are_skipped_without_blocking_the_rest(
+def test_unknown_agent_and_malformed_rows_are_skipped_without_blocking_the_rest(
     db_conn: psycopg.Connection,
 ) -> None:
     agent = _agent(db_conn)
-    _record(db_conn, agent, uid=10, ts=ARCHIVE_FREEZE_AT - timedelta(seconds=1))
     _record(db_conn, None, uid=11)
     _record(db_conn, agent + 9999, uid=12)
     _record(db_conn, agent, uid=13, attributes={"cost_usd": "not a price"})

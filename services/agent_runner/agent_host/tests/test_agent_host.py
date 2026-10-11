@@ -79,7 +79,7 @@ def host_plugin() -> dict[str, BaseModel]:
 
 
 class _Row:
-    """One `agents_meta` row as `_read_stored_config` selects it."""
+    """One `agents_meta` row as `read_stored_config` selects it."""
 
     def __init__(
         self,

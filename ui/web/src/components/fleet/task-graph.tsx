@@ -49,8 +49,7 @@ import { TaskKanban } from "./task-kanban";
 // The status set is the backend's (base/agents/tasks/status.py::TaskStatus, mirrored
 // in lib/types.ts): in_progress / done / cancelled.
 export const STATUS_FILL: Record<TaskStatus, string> = {
-  // The old 'open' color — 'open' was dropped (tasks are born in_progress)
-  // and the graph no longer separates the two shades (user ruling 2026-08-29).
+  // Tasks are born in_progress; the graph draws one shade for them.
   in_progress: "text-slate-400",
   done: "text-emerald-500",
   cancelled: "text-destructive",
