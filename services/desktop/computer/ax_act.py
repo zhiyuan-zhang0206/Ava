@@ -151,19 +151,22 @@ def _attempt(table: AxIdTable, request: AxRequest) -> AxActResult | None:
     if raw is None:
         return None
     if request.action is AxAction.PERFORM_ACTION:
-        result = helper.ax_act(table.app, raw, request.action, native_action=request.native_action)
+        result = helper.ax_act(
+            table.app, raw, request.action, pid=table.pid, native_action=request.native_action
+        )
     elif request.action is AxAction.SELECT_TEXT:
         result = helper.ax_act(
             table.app,
             raw,
             request.action,
+            pid=table.pid,
             text=request.text,
             prefix=request.prefix,
             suffix=request.suffix,
             selection_type=request.selection_type,
         )
     else:
-        result = helper.ax_act(table.app, raw, request.action, value=request.value)
+        result = helper.ax_act(table.app, raw, request.action, pid=table.pid, value=request.value)
     return None if result.get("stale") else result
 
 
@@ -181,6 +184,7 @@ def ax_act_tool(
         "ax_act_v2" if action in (AxAction.PERFORM_ACTION, AxAction.SELECT_TEXT) else "ax_act_v1"
     )
     require_helper_support(capability, "ax_act")
+    require_helper_support("ax_target_v1", "ax_act")
     result = _attempt(table, request)
     if result is None:
         raise ComputerUseError(

@@ -18,7 +18,9 @@ import pytest
 from .. import client
 
 
-def roundtrip(kwargs: dict[str, Any], response: dict[str, Any]) -> tuple[dict[str, Any], Any]:
+def roundtrip(
+    kwargs: dict[str, Any], response: dict[str, Any], *, tree: bool = False
+) -> tuple[dict[str, Any], Any]:
     requests: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="ava-ax-wire-", dir="/tmp") as directory:
         path = Path(directory) / "helper.sock"
@@ -35,7 +37,11 @@ def roundtrip(kwargs: dict[str, Any], response: dict[str, Any]) -> tuple[dict[st
             worker = threading.Thread(target=serve, daemon=True)
             worker.start()
             try:
-                result = client.ax_act("Mail", 7, sock_path=path, **kwargs)
+                result = (
+                    client.ax_tree(sock_path=path, **kwargs)
+                    if tree
+                    else client.ax_act("Mail", 7, sock_path=path, **kwargs)
+                )
             finally:
                 worker.join(timeout=3)
                 assert not worker.is_alive(), "test helper server did not finish"
@@ -92,3 +98,15 @@ def test_ax_extended_helper_failure_surfaces_without_echoing_selection_payload()
             {"ok": False, "error": "text selection is ambiguous; add prefix or suffix"},
         )
     assert "private-needle" not in str(error.value) and "private-context" not in str(error.value)
+
+
+@pytest.mark.parametrize("target", [{"pid": 9001}, {"bundle_id": "test.editor"}])
+def test_explicit_tree_target_crosses_socket_without_an_app_name(target: dict[str, Any]) -> None:
+    request, _ = roundtrip({"target": target}, {"ok": True, "result": {}}, tree=True)
+    assert "app" not in request and "target" not in request
+    assert {key: request[key] for key in target} == target
+
+
+def test_action_pid_crosses_socket_with_observed_display_metadata() -> None:
+    request, _ = roundtrip({"action": "press", "pid": 9001}, {"ok": True, "result": {}})
+    assert request["app"] == "Mail" and request["pid"] == 9001

@@ -53,6 +53,7 @@ class FakeAxApp:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.acted: list[tuple[str, str, str | None]] = []
         self.caps = {"ax_tree_v1": True, "ax_act_v1": True, "ax_act_v2": True}
+        self.caps["ax_target_v1"] = True
         self.unanswered = False
         self.act_error: str | None = None
 
@@ -107,7 +108,7 @@ class FakeAxApp:
                 node["parent"] = raw_of[depth_first["parent"]]
             nodes.append(node)  # pyright: ignore[reportArgumentType]
         return {  # pyright: ignore[reportReturnType]
-            "app": app,
+            "app": app or "Mail",
             "pid": self.pid,
             "windows": 1,
             "framework": "",
@@ -253,6 +254,27 @@ def test_a_new_pid_or_app_starts_a_fresh_table() -> None:
 
 
 # ── ax_act ──────────────────────────────────────────────────────────────────
+
+
+async def test_actions_pin_the_pid_of_the_observed_tree(
+    daemon: ComputerMcpDaemon, app: FakeAxApp
+) -> None:
+    tree = await call(daemon, "ax_tree", {"app": "Mail"})
+    original_pid = app.pid
+    app.pid = original_pid + 1
+    await call(daemon, "ax_act", {"id": ids_in(tree["tree"])["Send"], "action": "press"})
+    assert app.calls[-1][1]["pid"] == original_pid
+
+
+async def test_pid_pinning_requires_helper_support_before_any_action(
+    daemon: ComputerMcpDaemon, app: FakeAxApp
+) -> None:
+    tree = await call(daemon, "ax_tree", {"app": "Mail"})
+    app.caps.pop("ax_target_v1")
+    app.calls.clear()
+    with pytest.raises(ComputerUseError, match="predates ax_act"):
+        await call(daemon, "ax_act", {"id": ids_in(tree["tree"])["Send"], "action": "press"})
+    assert app.calls == [] and app.acted == []
 
 
 async def test_press_acts_on_the_element_and_reports_its_center_in_physical_pixels(

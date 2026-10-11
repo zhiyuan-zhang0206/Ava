@@ -1226,14 +1226,28 @@ private func axPickWindow(_ axApp: AXUIElement) -> (window: AXUIElement?, count:
     return (nil, count)
 }
 
+/// Resolve an explicit process or one unambiguous legacy app selector.
+private func axSelectedRunningApp(_ req: [String: Any]) throws -> NSRunningApplication {
+    if req["pid"] != nil || req["bundle_id"] != nil {
+        guard req["app"] == nil else { throw OpError.bad("ax_tree takes exactly one of app or target") }
+        return try selectedRunningApp(req)
+    }
+    refreshAppKit()
+    guard let name = req["app"] as? String,
+          !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else { throw OpError.bad("ax_tree needs a nonempty app or explicit target") }
+    let matches = NSWorkspace.shared.runningApplications.filter {
+        !$0.isTerminated && ($0.localizedName == name || $0.bundleIdentifier == name)
+    }
+    guard matches.count == 1 else { throw OpError.bad("AX app is missing or ambiguous; select its pid") }
+    return matches[0]
+}
+
 /// Walk one window (or, with `scope`, the subtree under an id from the last
 /// walk) breadth-first and return the raw node list.
 func axTree(_ req: [String: Any]) throws -> [String: Any] {
-    refreshAppKit()
-    guard let appName = req["app"] as? String else { throw OpError.bad("ax_tree needs string app") }
-    guard let app = NSWorkspace.shared.runningApplications.first(where: {
-        $0.localizedName == appName || $0.bundleIdentifier == appName
-    }) else { throw OpError.bad("app not running: \(appName)") }
+    let app = try axSelectedRunningApp(req)
+    let appName = req["app"] as? String ?? app.localizedName ?? app.bundleIdentifier ?? String(app.processIdentifier)
     let maxNodes = max(1, min(Int(numericDouble(req["max_nodes"]) ?? 600), 2000))
     let maxDepth = max(1, min(Int(numericDouble(req["max_depth"]) ?? 14), 40))
     let budget = max(0.05, min((numericDouble(req["budget_ms"]) ?? 1500) / 1000, 10))
@@ -1430,9 +1444,10 @@ func axAct(_ req: [String: Any]) throws -> [String: Any] {
     guard let appName = req["app"] as? String, let action = req["action"] as? String,
           let rawID = numericDouble(req["id"]).map({ Int($0) })
     else { throw OpError.bad("ax_act needs string app, string action and numeric id") }
-    guard let app = NSWorkspace.shared.runningApplications.first(where: {
-        $0.localizedName == appName || $0.bundleIdentifier == appName
-    }) else { throw OpError.bad("app not running: \(appName)") }
+    // The observed PID wins over display metadata. A same-named process or
+    // reordered application inventory cannot redirect an element action.
+    let app = try req["pid"] != nil
+        ? selectedRunningApp(["pid": req["pid"]!]) : axSelectedRunningApp(["app": appName])
     let timeout = Float(max(0.1, min((numericDouble(req["timeout_ms"]) ?? 2000) / 1000, 10)))
     let stale: [String: Any] = ["stale": true, "completed": false]
     guard let entry = axElementTable[rawID] else { return stale }
@@ -2092,7 +2107,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         switch method {
         case "ping":
             result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true,
-                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "native_input_v1": true,
+                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "ax_target_v1": true, "native_input_v1": true,
                       "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
         case "file_list": result = try fileList(req)

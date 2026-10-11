@@ -104,7 +104,7 @@ class FakeAxHelper:
         }
 
     def ping(self, **kw: Any) -> dict[str, Any]:
-        return {"pong": True, "ax_tree_v1": True}
+        return {"pong": True, "ax_tree_v1": True, "ax_target_v1": True}
 
     def frontmost_app(self, **kw: Any) -> dict[str, Any]:
         return {"app": "Mail"}

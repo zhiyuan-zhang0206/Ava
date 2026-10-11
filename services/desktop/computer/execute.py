@@ -579,22 +579,7 @@ _TOOLS: list[dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "target": {
-                    "oneOf": [
-                        {
-                            "type": "object",
-                            "properties": {"pid": {"type": "integer", "minimum": 1}},
-                            "required": ["pid"],
-                            "additionalProperties": False,
-                        },
-                        {
-                            "type": "object",
-                            "properties": {"bundle_id": {"type": "string", "minLength": 1}},
-                            "required": ["bundle_id"],
-                            "additionalProperties": False,
-                        },
-                    ]
-                }
+                "target": AppTarget.schema(),
             },
             "required": ["target"],
         },
