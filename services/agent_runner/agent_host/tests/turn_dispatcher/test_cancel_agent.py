@@ -300,15 +300,14 @@ class TestPendingScan:
         assert scheduler.woken == [23]
         assert scheduler.cancelled == []
 
-    async def test_scan_defers_through_the_stop_leg_and_runs_from_the_start_leg(
+    async def test_scan_defers_through_the_stop_window_and_runs_after_it(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Stop leg leaves rows untouched; start leg scans even while held
-        because pub/sub has no replay."""
+        """The stop window leaves rows untouched; the scan runs once it closes."""
         from base.deploy.maintenance import admission
 
-        state = {"in_stop_leg": True}
-        monkeypatch.setattr(admission, "in_stop_leg", lambda: state["in_stop_leg"])
+        state = {"quiesced": True}
+        monkeypatch.setattr(admission, "quiesced", lambda: state["quiesced"])
         scanner_calls: list[int] = []
         scheduler = _ScanScheduler()
 
@@ -324,7 +323,7 @@ class TestPendingScan:
         assert scanner_calls == []
         assert scheduler.woken == []
 
-        state["in_stop_leg"] = False
+        state["quiesced"] = False
         await disp.scan_once()
         assert scheduler.woken == [23]
 

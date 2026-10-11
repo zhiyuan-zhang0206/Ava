@@ -332,13 +332,7 @@ def _release_self_heal_pause() -> None:
     if (
         held is not None
         and held.maintenance is not None
-        and held.maintenance.phase
-        in (
-            MaintenancePhase.STOPPING,
-            MaintenancePhase.STOPPED,
-            MaintenancePhase.STARTING,
-            MaintenancePhase.READY,
-        )
+        and held.maintenance.phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED)
     ):
         print("  · services partially stopped; holding agents until ava start passes readiness")
         return
