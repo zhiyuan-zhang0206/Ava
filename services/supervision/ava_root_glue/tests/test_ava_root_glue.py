@@ -156,7 +156,7 @@ async def test_drill_wiring_verifies_claims(tmp_path: Path) -> None:
         await monitor.run_round()
         health = cast("dict[str, dict[str, object]]", monitor.health_snapshot())
         assert health["light-b"]["last_verdict"] == "down"
-        assert health["light-b"]["consecutive_failures"] == 0
+        assert health["light-b"]["restart_attempts"] == 0
     finally:
         await context.supervisor.shutdown()
 
@@ -261,7 +261,7 @@ async def test_glue_uses_shared_readiness_tiers_for_native_startup(
         ):
             assert budget - 5 < cast(float, health[name]["startup_remaining_s"]) <= budget
             assert health[name]["last_verdict"] == "down"
-            assert health[name]["consecutive_failures"] == 0
+            assert health[name]["restart_attempts"] == 0
     finally:
         await context.supervisor.shutdown()
 
