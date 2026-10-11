@@ -197,3 +197,20 @@ def test_requesting_a_private_fixture_name_is_a_private_use(make_repo: RepoFacto
     )
     [found] = diagnostics(root, "private-name")
     assert found.path == "t/test_a.py"
+
+
+def test_an_underscore_fixture_works_through_autouse_and_in_its_own_file(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {
+            "conftest.py": (
+                "import pytest\n\n@pytest.fixture(autouse=True)\ndef _quiet():\n    return 1\n"
+            ),
+            "t/test_a.py": (
+                "import pytest\n\n@pytest.fixture\ndef _local():\n    return 1\n\n"
+                "def test_a(_local):\n    pass\n"
+            ),
+        }
+    )
+    assert verdict(root) == set()

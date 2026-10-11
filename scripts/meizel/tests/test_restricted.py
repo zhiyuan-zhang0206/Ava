@@ -86,7 +86,7 @@ def test_python_dash_c_with_an_unreadable_source_cannot_be_shown_static(
     [
         "from unittest import mock\nmock.patch('lib.m.x')\n",
         "from unittest.mock import patch\n\n@patch('lib.m.x')\ndef test_a(m): ...\n",
-        "import unittest.mock\nunittest.mock.patch.dict('os.environ', {})\n",
+        "import unittest.mock\nunittest.mock.patch.dict('lib.m.TABLE', {})\n",
         "from unittest.mock import patch\npatch.object('lib.m', 'x')\n",
         "def test_a(monkeypatch: pytest.MonkeyPatch):\n    monkeypatch.setattr('lib.m.x', 1)\n",
         "def test_a(monkeypatch: pytest.MonkeyPatch):\n    monkeypatch.delattr('lib.m.x')\n",
@@ -143,3 +143,60 @@ def test_loads_must_name_python_files_and_tracked_directories(make_repo: RepoFac
 def test_a_non_literal_pytest_plugins_is_restricted(make_repo: RepoFactory) -> None:
     files = {**LIB, "conftest.py": "names = ['lib.m']\npytest_plugins = names\n"}
     assert [d.line for d in diagnostics(make_repo(files), "restricted-python")] == [2]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from unittest import mock\nmock.patch('os.getcwd')\n",
+        "from unittest.mock import patch\n\n@patch('json.dumps')\ndef test_a(m): ...\n",
+        "import unittest.mock\nunittest.mock.patch.dict('os.environ', {})\n",
+        "def test_a(monkeypatch):\n    monkeypatch.setattr('subprocess.run', 1)\n",
+    ],
+)
+def test_string_patch_targets_outside_the_repository_are_fine(
+    make_repo: RepoFactory, source: str
+) -> None:
+    assert restricted(make_repo, source) == []
+
+
+def test_a_string_patch_target_that_cannot_be_read_is_restricted(make_repo: RepoFactory) -> None:
+    source = "from unittest import mock\n\ndef f(target):\n    return mock.patch(target)\n"
+    assert restricted(make_repo, source) == [4]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import sys\nsys.modules['lib.m'] = object()\n",
+        "import sys\ndel sys.modules['lib']\n",
+        "import sys\nsys.modules.pop('lib.m', None)\n",
+        "import sys\nsys.modules.setdefault('lib', object())\n",
+        "import sys\nsys.modules.update({'lib.m': object()})\n",
+        "import sys\nsys.modules.update(lib=object())\n",
+        "from sys import modules\nmodules['lib.m']\n",
+        "import sys\n\ndef test_a(monkeypatch):\n    monkeypatch.setitem(sys.modules, 'lib.m', 1)\n",
+        "import sys\n\ndef test_a(monkeypatch):\n    monkeypatch.delitem(sys.modules, 'lib')\n",
+        "import sys\nfrom unittest import mock\nmock.patch.dict(sys.modules, {'lib.m': 1})\n",
+        "from unittest import mock\nmock.patch.dict('sys.modules', {'lib': 1})\n",
+        "import sys\nfrom unittest import mock\nmock.patch.dict(sys.modules, lib=1)\n",
+    ],
+)
+def test_faking_a_first_party_module_through_sys_modules_is_restricted(
+    make_repo: RepoFactory, source: str
+) -> None:
+    assert restricted(make_repo, source), source
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import sys\nsys.modules['json'] = object()\n",
+        "import sys\nsys.modules.pop('yaml', None)\n",
+        "import sys\n\ndef test_a(monkeypatch):\n    monkeypatch.setitem(sys.modules, 'numpy', 1)\n",
+        "import sys\nfrom unittest import mock\nmock.patch.dict(sys.modules, {'yaml': 1})\n",
+        "import sys\nclass Other:\n    modules = {}\nOther.modules['lib.m'] = 1\n",
+    ],
+)
+def test_sys_modules_use_for_other_names_is_fine(make_repo: RepoFactory, source: str) -> None:
+    assert restricted(make_repo, source) == []
