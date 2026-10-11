@@ -38,7 +38,6 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from base.cluster import get_record, port_free
-from base.config import settings
 from base.deploy.git.gitenv import git_env
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.proc import run_bounded
@@ -139,8 +138,9 @@ def _data_plane_warnings(ctx: ConvergeCtx) -> list[str]:
     nothing to probe. See the module docstring for the role-aware skip."""
     if ctx.roles is None:
         return []  # unit not configured yet — no URLs to probe
-    pg_url = settings.data_plane.db_url
-    redis_url = settings.data_plane.redis_url
+    config = ctx.read_config().view
+    pg_url = config.data_plane.db_url
+    redis_url = config.data_plane.redis_url
     if not pg_url or not redis_url:
         return []
 
