@@ -124,7 +124,14 @@ def test_pooler_birth_change_prevents_reload(
     )
     monkeypatch.setattr(ownership, "require_listener", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(pooler, "_write_config", lambda **_kw: False)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-    monkeypatch.setattr(base_pooler, "pgbouncer_public_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+
+    def listener_reachable(
+        _listen_port: int, _role: str, _cluster_secret: str, *, machine: MachineIdentity
+    ) -> bool:
+        assert machine is command_machine
+        return True
+
+    monkeypatch.setattr(base_pooler, "pgbouncer_public_listener_reachable", listener_reachable)
     monkeypatch.setattr(
         pooler,
         "psutil",

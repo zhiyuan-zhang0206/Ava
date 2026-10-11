@@ -14,7 +14,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
@@ -39,10 +39,15 @@ def _memory_inputs() -> MemorySearchInputs:
 
 
 @pytest.fixture(autouse=True)
-def _app_db(monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog) -> None:
-    # Only the app lifespan sets app.state.db; ASGITransport tests never run it.
+def _app_db(
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    machine_identity: MachineIdentity,
+) -> None:
+    # ASGITransport tests skip the lifespan; supply their existing root's inputs.
     monkeypatch.setattr(app.state, "db", object(), raising=False)
     monkeypatch.setattr(app.state, "catalog", model_catalog, raising=False)
+    monkeypatch.setattr(app.state, "machine", machine_identity, raising=False)
     monkeypatch.setattr(app.state, "memory_search_inputs", _memory_inputs(), raising=False)
 
 

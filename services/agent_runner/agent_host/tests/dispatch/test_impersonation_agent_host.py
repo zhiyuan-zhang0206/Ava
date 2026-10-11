@@ -11,7 +11,9 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
+from base.cluster.machine import MachineIdentity
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _session(status: str = "active", **values: Any) -> dict[str, Any]:
@@ -38,13 +40,16 @@ def _session(status: str = "active", **values: Any) -> dict[str, Any]:
 
 async def test_held_host_wake_returns_before_runtime_or_slot(
     monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.native_process.turn_identity import HostedTurnResources
     from services.agent_runner.agent_host.host import AgentHost
     from services.agent_runner.agent_host.runtime import _StoredConfig
 
     host = object.__new__(AgentHost)
-    host._machine = "local"
+    machine_identity.set(name="local")
+    host._machine_identity = machine_identity
+    host._machine = machine_identity.name()
     host._owner = uuid4()
     host.turn_progress = TurnProgress()
     host.relays = RelaySupervision()
@@ -85,11 +90,16 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     settlement.assert_awaited_once()
 
 
-async def test_held_host_refuses_unaccepted_control_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_held_host_refuses_unaccepted_control_batch(
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
+) -> None:
     from services.agent_runner.agent_host.host import AgentHost
 
     host = object.__new__(AgentHost)
-    host._machine = "local"
+    machine_identity.set(name="local")
+    host._machine_identity = machine_identity
+    host._machine = machine_identity.name()
     host._owner = uuid4()
     host.turn_progress = TurnProgress()
     host.relays = RelaySupervision()
@@ -119,13 +129,16 @@ async def test_held_host_refuses_unaccepted_control_batch(monkeypatch: pytest.Mo
 
 async def test_held_controls_supervise_the_active_lease_relay(
     monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The claim gate never runs during an active lease; the held-controls pass
     must carry the relay supervision (task #2634)."""
     from services.agent_runner.agent_host.host import AgentHost
 
     host = object.__new__(AgentHost)
-    host._machine = "local"
+    machine_identity.set(name="local")
+    host._machine_identity = machine_identity
+    host._machine = machine_identity.name()
     host._owner = uuid4()
     host.turn_progress = TurnProgress()
     host.relays = RelaySupervision()
@@ -150,7 +163,13 @@ async def test_held_controls_supervise_the_active_lease_relay(
     monkeypatch.setattr("services.agent_runner.agent_host.host.settle_hosted_runtime", AsyncMock())
     await host._run_held_controls(42, "idling", resources=None)
     supervise.assert_awaited_once_with(
-        host._db, host._bus, session, 42, host.relays, incarnation=owner
+        host._db,
+        host._bus,
+        session,
+        42,
+        host.relays,
+        incarnation=owner,
+        read_local_machine=machine_identity.name,
     )
 
 
