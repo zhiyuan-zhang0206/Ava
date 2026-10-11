@@ -330,21 +330,13 @@ def test_bucket_messages_works_without_agent_graph() -> None:
     500-ing every GET /context-breakdown in prod (the in-process tests above
     stayed green only because they pre-import agent.graph). Run the call in a
     fresh interpreter to reproduce the gateway's import state."""
-    code = (
-        "import sys\n"
-        "from langchain_core.messages import HumanMessage\n"
-        "from base.agents.history.context_breakdown import bucket_messages\n"
-        "from agent.messages import COMPACT_SUMMARY_HEADER\n"
-        "from base.agents.history.message_tokens import MessageTokens\n"
-        "buckets = bucket_messages("
-        "[HumanMessage(content=f'{COMPACT_SUMMARY_HEADER}\\n\\nbody')],"
-        " [MessageTokens(7, None, 'exact')])\n"
-        "assert list(buckets) == ['compact_summary'], buckets\n"
-        "assert 'agent.graph' not in sys.modules, 'breakdown must not import agent.graph'\n"
-    )
     repo_root = Path(__file__).resolve().parents[4]
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-c", code], capture_output=True, text=True, cwd=repo_root, check=False
+        [sys.executable, str(Path(__file__).with_name("child_bucket_messages.py"))],
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr
 

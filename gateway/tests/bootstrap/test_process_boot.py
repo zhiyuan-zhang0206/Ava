@@ -117,23 +117,14 @@ def test_gateway_first_load_image_does_not_follow_a_checkout_move(tmp_path: Path
     env = dict(os.environ)
     env["AVA_HOME"] = str(tmp_path / "home")
     env["AVA_CONFIG_FETCH"] = "skip"
-    script = r"""
-import json, subprocess, sys
-from pathlib import Path
-sys.path[:0] = [sys.argv[1], sys.argv[2]]
-from gateway.cluster.process_boot import LOADED_IMAGE
-from base.native_process.code_version import CodeVersion
-root = Path(sys.argv[1])
-first = LOADED_IMAGE.sha
-(root / "moved").write_text("new checkout")
-subprocess.run(["git", "-C", str(root), "add", "."], check=True)
-subprocess.run(["git", "-C", str(root), "-c", "user.name=entry-proof", "-c", "user.email=proof@example.invalid", "commit", "-qm", "second"], check=True)
-from gateway.cluster.process_boot import LOADED_IMAGE as repeated
-current = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
-print(json.dumps({"first": first, "after": repeated.sha, "same": repeated is LOADED_IMAGE, "current": current, "version": CodeVersion(LOADED_IMAGE).get()}))
-"""
     result = proc.run_bounded(
-        [sys.executable, "-c", script, str(source), str(Path(__file__).resolve().parents[3])],
+        [
+            sys.executable,
+            str(Path(__file__).with_name("child_gateway_scenarios.py")),
+            "checkout_move",
+            str(source),
+            str(Path(__file__).resolve().parents[3]),
+        ],
         env=env,
         capture_output=True,
         text=True,

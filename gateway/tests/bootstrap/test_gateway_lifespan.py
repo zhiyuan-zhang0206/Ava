@@ -1,7 +1,6 @@
 """Gateway lifespan joins its own flushers before closing their database pools."""
 
 import asyncio
-import importlib
 from collections.abc import Callable
 from contextlib import AsyncExitStack
 from typing import Any
@@ -11,6 +10,7 @@ import pytest
 from fastapi import FastAPI
 
 from base.cluster.machine import MachineIdentity
+from gateway import app as gateway_app
 from tests.fixtures.gateway_config import gateway_test_process
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -19,7 +19,6 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 def flusher_tasks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> asyncio.Queue[asyncio.Task[Any]]:
-    gateway_app = importlib.import_module("gateway.app")
     started: asyncio.Queue[asyncio.Task[Any]] = asyncio.Queue()
 
     async def flush(*_args: object) -> None:
@@ -49,7 +48,6 @@ async def test_overlapping_lifespans_join_their_original_flushers(
     machine_identity: MachineIdentity,
 ) -> None:
     del db_conn  # Provision the native, isolated database for the real lifespan.
-    gateway_app = importlib.import_module("gateway.app")
     app = FastAPI()
     with gateway_test_process(app, machine=machine_identity) as process:
         async with asyncio.timeout(5), AsyncExitStack() as cleanup:
@@ -87,7 +85,6 @@ async def test_client_close_failure_still_joins_flushers_before_pool_close(
     machine_identity: MachineIdentity,
 ) -> None:
     del db_conn
-    gateway_app = importlib.import_module("gateway.app")
     app = FastAPI()
     failure = RuntimeError("proxy client close failed")
     close_checks: list[bool] = []
