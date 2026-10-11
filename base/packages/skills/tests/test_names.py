@@ -101,11 +101,11 @@ def test_identity_verify_accepts_fold_equal_pair() -> None:
 
 
 def test_identity_verify_raises_on_mismatch() -> None:
-    """A directory `wechat-ocr` and a frontmatter name `wechat` are two
+    """A directory `page-ocr` and a frontmatter name `page` are two
     different skills — the state that used to load under a name that was not
     its own (#980 / #1702 family)."""
     with pytest.raises(SkillIdentityMismatch):
-        SkillIdentity.from_dir("wechat-ocr").verify(SkillIdentity.from_frontmatter("wechat"))
+        SkillIdentity.from_dir("page-ocr").verify(SkillIdentity.from_frontmatter("page"))
 
 
 def test_identity_equality_and_hash_are_by_key() -> None:

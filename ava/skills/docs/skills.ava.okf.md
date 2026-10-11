@@ -58,8 +58,8 @@ display `identifier()` joins the same segments with `:`
 `display_name` outbound, `find` where a name has to become a real directory or
 registry key. Every dash/underscore comparison in the system routes through it,
 which is why a legacy underscore directory (a hand-installed
-`~/.ava/skills/wechat_ocr/`) still loads, still answers to
-`ava.skills.wechat_ocr`, and still displays as `wechat-ocr`. Two directories
+`~/.ava/skills/page_ocr/`) still loads, still answers to
+`ava.skills.page_ocr`, and still displays as `page-ocr`. Two directories
 that fold together are refused outright (`SkillNameCollision`) rather than one
 silently winning.
 
