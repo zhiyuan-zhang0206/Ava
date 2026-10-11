@@ -3,8 +3,7 @@
 The real Postgres runs with an archive command that never returns (`sleep`, a stand-in for
 a wal-g stuck on a blackholed network). A fast shutdown cannot finish while the archiver
 waits on it; the data-plane stop must end it with an immediate shutdown inside its budget,
-kill the archive command it left behind, and say so, without failing the stop (a failure
-would trigger the compensating `ava start`).
+kill the archive command it left behind, and say so, without failing the stop.
 """
 
 from __future__ import annotations

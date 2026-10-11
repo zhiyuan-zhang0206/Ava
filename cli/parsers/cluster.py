@@ -47,7 +47,6 @@ def _h_cluster_health_probe(args: argparse.Namespace) -> int:
     from cli.commands.cluster.health import cmd_health_probe
 
     return cmd_health_probe(
-        check_crash_loops=args.crash_loop_check,
         check_schema=args.schema_check,
     )
 
@@ -196,15 +195,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         help="[cluster] assess cluster health (exit 0=healthy, 1=unhealthy); designed as a cron job payload",
     )
     # task #4092 cli-default inventory: monitoring contract — this verb is a
-    # cron payload invoked bare; its defaults (both checks on; the agent floor
+    # cron payload invoked bare; its defaults (the schema check on; the agent floor
     # from AVA_HEALTH_PROBE_AGENT_MIN) are what "healthy" means out of the box.
-    cluster_health_probe_p.add_argument(
-        "--no-crash-loop-check",
-        action="store_false",
-        dest="crash_loop_check",
-        default=True,
-        help="disable the crash-loop detection check (default: enabled)",
-    )
     cluster_health_probe_p.add_argument(
         "--no-schema-check",
         action="store_false",

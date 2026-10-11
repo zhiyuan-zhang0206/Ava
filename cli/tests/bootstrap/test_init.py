@@ -186,7 +186,6 @@ _START_ONLY_FLAGS = [
     ["--only-service", "gateway"],
     ["--disable-service", "frontend"],
     ["--all-services"],
-    ["--persist-services"],
 ]
 
 

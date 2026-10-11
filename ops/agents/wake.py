@@ -13,7 +13,6 @@ from base.agents import (
     AgentStatus,
     MachinePaused,
     ResurrectAlreadyAlive,
-    ResurrectBudgetExhausted,
 )
 from base.agents.incarnation.lifecycle_acceptance import (
     LIFECYCLE_RELEASE,
@@ -22,7 +21,6 @@ from base.agents.incarnation.lifecycle_acceptance import (
 )
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
 from base.cluster.machine import machine_name
-from base.config import field_alias, get_field, settings
 from base.db import Database, fetch_one, publish_inbound_wake
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
@@ -163,26 +161,6 @@ def _resurrect_event_target(resurrected_by: str) -> int | None:
         return None
 
 
-def _auto_resurrect_max_attempts() -> int:
-    """Read the recovery budget after the gateway's runner-alias projection.
-
-    Gateway processes omit runner-only aliases from their environment, while
-    local hosted resurrection still runs this transaction in-process. The
-    cluster `.env` remains the configuration authority in that profile.
-    """
-    from base.host.env.runtime_config import read_env_aliases
-
-    raw = read_env_aliases().get(field_alias("auto_resurrect_max_attempts"))
-    if raw is not None:
-        return int(raw)
-    budget = get_field("auto_resurrect_max_attempts")
-    if budget is not None:
-        return int(budget)
-    if settings.has_domain("daemon"):
-        return settings.daemon.auto_resurrect_max_attempts
-    raise RuntimeError("auto-resurrect budget has no configured daemon domain")
-
-
 def _prepare_resurrect_attempt(
     db: Database,
     bus: EventBus,
@@ -231,17 +209,6 @@ def _prepare_resurrect_attempt(
             resources=row[8],
             unowned_termination=unowned_termination,
         )
-        if resurrected_by == "system":
-            cur.execute(
-                "SELECT count(*) FROM inbound_messages "
-                "WHERE agent_id = %s AND kind = 'resurrect' AND status = 'pending'",
-                (agent_id,),
-            )
-            pending_resurrects = int(fetch_one(cur, "resurrect: count pending lifecycle rows")[0])
-            if pending_resurrects >= _auto_resurrect_max_attempts():
-                raise ResurrectBudgetExhausted(
-                    f"agent {agent_id} has exhausted its auto-resurrect budget"
-                )
         # The resurrection inbound is inserted before the settlement check so
         # its id can fence the new incarnation's epoch: every earlier unapplied
         # lifecycle command is settled as superseded right here (issue #2158),

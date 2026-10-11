@@ -36,7 +36,6 @@ def test_health_probe_dispatch_preserves_observation_options(
     assert args.func(args) == 1
     assert received == [
         {
-            "check_crash_loops": True,
             "check_schema": False,
         }
     ]
@@ -45,7 +44,6 @@ def test_health_probe_dispatch_preserves_observation_options(
 @pytest.mark.parametrize(
     ("flag", "destination"),
     [
-        ("crash-loop-check", "crash_loop_check"),
         ("schema-check", "schema_check"),
     ],
 )

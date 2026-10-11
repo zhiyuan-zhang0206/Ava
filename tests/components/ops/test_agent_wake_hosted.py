@@ -427,30 +427,34 @@ def test_reaped_crash_row_keeps_the_failed_restart_fence(
     assert _row(db_conn, aid)[0] == "terminated"
 
 
-def test_reaped_crash_row_keeps_the_auto_resurrect_budget(
+def test_system_resurrect_is_not_capped_by_unconsumed_resurrect_rows(
     db_conn: psycopg.Connection,
+    wakes: list[tuple[int, str]],
     database: Database,
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
 ) -> None:
-    """The relaxed fence is not a budget bypass: an exhausted auto-resurrect
-    budget refuses even a reaper-marked leftover."""
-    from base.agents import ResurrectBudgetExhausted
+    """There is no attempt budget: a new message still resurrects a terminated
+    agent however many earlier resurrect rows were never consumed."""
     from base.db import insert_inbound_message
 
-    aid, trigger = _reaped_crash_park(
-        db_conn, config_authority=config_authority, model_catalog=model_catalog
+    aid = _park(
+        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
     )
-    for _ in range(wake._auto_resurrect_max_attempts()):
+    for _ in range(5):
         insert_inbound_message(
             db_conn, aid, "", "system", kind="resurrect", bus=event_bus, database=database
         )
+    trigger = insert_inbound_message(
+        db_conn, aid, "continue", "user", bus=event_bus, database=database
+    )
 
-    with pytest.raises(ResurrectBudgetExhausted):
-        _guarded_resurrect(aid, trigger)
-    assert _row(db_conn, aid)[0] == "terminated"
+    _guarded_resurrect(aid, trigger)
+
+    assert _row(db_conn, aid) == ("idling", None)
+    assert wakes == [(aid, "0")]
 
 
 def test_manual_resurrect_stays_exempt_from_the_gates(
