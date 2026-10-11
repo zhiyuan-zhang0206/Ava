@@ -460,15 +460,12 @@ def test_alias_metadata_rejects_ambiguous_declarations(
 
 
 def test_declaration_projection_works_without_a_runtime_settings_image(tmp_path: Path) -> None:
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 -- fixed argv, this interpreter runs the child script
         [
             sys.executable,
             "-I",
-            "-c",
-            "import sys; from base.host.env.audit import _load_alias_metadata; "
-            "metadata = _load_alias_metadata(); assert metadata['AVA_DB_URL'][1] is True; "
-            "assert 'base.config._full' not in sys.modules; "
-            "assert 'base.config.admin.metadata' not in sys.modules",
+            str(Path(__file__).with_name("_env_import_child.py")),
+            "declaration_projection",
         ],
         cwd=tmp_path,
         env={

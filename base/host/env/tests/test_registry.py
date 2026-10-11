@@ -305,11 +305,11 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
     module``. A fresh subprocess with no pre-imported `base.config`
     reproduces that boot order.
     """
-    result = subprocess.run(  # fixed argv, repo code, no shell
+    result = subprocess.run(  # noqa: S603 -- fixed argv, this interpreter runs the child script
         [
             sys.executable,
-            "-c",
-            "import base.host.env.registry; import base.config; print('ok')",
+            str(Path(__file__).with_name("_env_import_child.py")),
+            "registry_imports_first",
         ],
         cwd=Path(__file__).resolve().parents[4],  # repo root
         capture_output=True,
