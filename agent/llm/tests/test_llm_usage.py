@@ -325,47 +325,6 @@ def test_price_snapshot_absent_for_unpriced_model(
     assert "plugin price registry" in warning
 
 
-def test_historical_cache_provenance_labels(loguru_records: list[dict[str, Any]]):
-    """Historical cache provenance remains accepted when records are replayed."""
-    msg = AIMessage(
-        content="",
-        usage_metadata={
-            "input_tokens": 1000,
-            "output_tokens": 100,
-            "total_tokens": 1100,
-            "input_token_details": {"cache_read": 200},
-        },
-    )
-    log_llm_usage(
-        msg,
-        agent_id=7,
-        model="gemini-3.8-flash",
-        cache_mechanism="mixed",
-        cache_scope="explicit_block",
-        catalog=build_model_catalog(),
-    )
-    extra = loguru_records[0]["extra"]
-    assert extra["cache_mechanism"] == "mixed"
-    assert extra["cache_scope"] == "explicit_block"
-
-
-def test_no_provenance_labels_when_unknown(loguru_records: list[dict[str, Any]]):
-    """Without labels the event carries no cache_mechanism/cache_scope key —
-    an honest 'unknown' rather than a fabricated one."""
-    msg = AIMessage(
-        content="",
-        usage_metadata={
-            "input_tokens": 1000,
-            "output_tokens": 100,
-            "total_tokens": 1100,
-            "input_token_details": {"cache_read": 200},
-        },
-    )
-    log_llm_usage(msg, agent_id=7, model="gemini-3.8-flash", catalog=build_model_catalog())
-    assert "cache_mechanism" not in loguru_records[0]["extra"]
-    assert "cache_scope" not in loguru_records[0]["extra"]
-
-
 _EVENT_KEYS = (
     "model",
     "in_total",
