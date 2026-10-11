@@ -36,7 +36,7 @@ _NOTE_FORMAT = """A note is a .md file: a YAML frontmatter block, then the body.
 
     The note text.
 
-Your agent id is `ava.self.AGENT_ID` and your machine name is `ava.self.SELF_MACHINE_NAME`.
+Your agent id is `ava.self.AGENT_ID` and your machine name is `ava.self.MACHINE_SPEC.name`.
 `type`, `ava_agent`, `description` and exactly one `type/<kind>` tag are required; the kind is one
 of user, feedback, project, reference, env, role. Put a value in double quotes when it contains
 ": " or " #". Keep a note under 8000 characters and on one topic. Search for an existing note
