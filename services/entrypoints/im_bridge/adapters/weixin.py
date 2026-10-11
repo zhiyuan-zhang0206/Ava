@@ -5,7 +5,7 @@ under ``$AVA_HOME/state/im_bridge``) for inbound, ``ilink/bot/sendmessage``
 (2000-char segmentation) for outbound. Every outbound message echoes the
 peer's cached ``context_token`` (disk-backed), which iLink requires for session
 continuity. Credentials come from the QR login CLI
-(``python -m services.entrypoints.im_bridge.adapters.weixin --login``) and persist to
+(``python -m services.entrypoints.im_bridge.adapters.weixin_login --login``) and persist to
 ``$AVA_HOME/state/im_bridge/weixin_account.json`` (chmod 600). Unconfigured,
 ``start()`` logs its "unconfigured, skip" message and returns — the daemon keeps serving
 other channels. Error hygiene: nothing from an httpx exception (which can
@@ -15,7 +15,6 @@ bot token.
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import base64
 import contextlib
@@ -55,14 +54,12 @@ from services.entrypoints.im_bridge.ingress.types import (
     ProviderSource,
     StalePollBindingError,
 )
-from services.entrypoints.im_bridge.outbound.types import (
-    OutboundAdapterKind,
-    OutboundChunk,
-    PreparedOutboundSend,
-)
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
     IMAdapter,
+    OutboundAdapterKind,
+    OutboundChunk,
+    PreparedOutboundSend,
     RetryableTransportError,
     SendNotStartedError,
     SendOutcomeUncertainError,
@@ -217,7 +214,7 @@ def _headers(token: str) -> dict[str, str]:
     }
 
 
-def _get_headers() -> dict[str, str]:
+def get_headers() -> dict[str, str]:
     """Headers for iLink GET endpoints (the QR flow is pre-auth)."""
     return {
         "iLink-App-Id": ILINK_APP_ID,
@@ -252,10 +249,10 @@ def _extract_text(item_list: list[dict[str, Any]]) -> str:
     """First text item; falls back to Weixin's own voice transcription."""
     for item in item_list:
         if item.get("type") == ITEM_TEXT:
-            return _get_str(item.get("text_item"), "text")
+            return get_str(item.get("text_item"), "text")
     for item in item_list:
         if item.get("type") == ITEM_VOICE:
-            voice_text = _get_str(item.get("voice_item"), "text")
+            voice_text = get_str(item.get("voice_item"), "text")
             if voice_text:
                 return f"[voice transcript] {voice_text}"
     return ""
@@ -328,7 +325,7 @@ def _safe_id(value: str, keep: int = 8) -> str:
     return value if len(value) <= keep else f"{value[:keep]}…"
 
 
-def _get_str(data: dict[str, Any] | None, key: str) -> str:
+def get_str(data: dict[str, Any] | None, key: str) -> str:
     """A string field from a possibly-missing dict ("" when absent)."""
     if data is None:
         return ""
@@ -740,29 +737,5 @@ class WeixinAdapter(IMAdapter):
         return cast(dict[str, Any], result)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """CLI entry: ``python -m services.entrypoints.im_bridge.adapters.weixin --login``."""
-    parser = argparse.ArgumentParser(
-        prog="python -m services.entrypoints.im_bridge.adapters.weixin",
-        description="Weixin iLink adapter helper (login / debug)",
-    )
-    parser.add_argument(
-        "--login",
-        action="store_true",
-        help="Interactive QR login; credentials are written to $AVA_HOME/state/im_bridge/weixin_account.json",
-    )
-    args = parser.parse_args(argv)
-    if args.login:
-        from services.entrypoints.im_bridge.adapters.weixin_login import qr_login
-
-        creds = asyncio.run(qr_login())
-        return 0 if creds else 1
-    parser.print_help()
-    return 1
-
-
 # The daemon's _load_adapters looks up this name on every adapter module.
 ADAPTER_CLASS = WeixinAdapter
-
-if __name__ == "__main__":
-    raise SystemExit(main())
