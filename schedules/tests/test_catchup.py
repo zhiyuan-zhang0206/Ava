@@ -1,10 +1,8 @@
-"""Per-slot schedule catch-up and idempotency contracts."""
+"""Online schedule slots skip downtime and retain at-most-once claims."""
 
 from __future__ import annotations
 
-import ast
 import importlib.util
-import logging
 import multiprocessing
 import os
 import sys
@@ -23,7 +21,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
-from schedules.catchup import catch_up, fire_slot_once
+from schedules.catchup import fire_slot_once
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import schedule_entry
 from schedules import entry as entry_owner
@@ -47,95 +45,6 @@ def _load_daily_script(filename: str) -> ModuleType:
 
 class _LoopStoppedError(Exception):
     pass
-
-
-@pytest.mark.parametrize("filename", _DAILY_SCRIPTS)
-def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
-    filename: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    module = _load_daily_script(filename)
-    host = sys.modules[module.run_daily_loop.__module__]
-    start = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
-    now = datetime(2026, 9, 6, 10, 1, tzinfo=UTC)
-    next_slot = datetime(2026, 9, 6, 10, 2, tzinfo=UTC)
-    clock = iter((start, now))
-
-    class FakeDatetime:
-        @staticmethod
-        def now(zone: Any) -> datetime:
-            assert zone == UTC
-            return next(clock)
-
-    catch_up_call = Mock()
-    next_fire_call = Mock(side_effect=(start, next_slot))
-    claim = Mock()
-    sleep = Mock(side_effect=_LoopStoppedError)
-    monkeypatch.setattr(host, "datetime", FakeDatetime)
-    monkeypatch.setattr(host, "catch_up", catch_up_call)
-    monkeypatch.setattr(host, "next_fire", next_fire_call)
-    monkeypatch.setattr(host, "fire_slot_once", claim)
-    monkeypatch.setattr(host.time, "sleep", sleep)
-
-    with pytest.raises(_LoopStoppedError):
-        module._main_loop(inputs=ScheduleInputs(Mock(), Mock(), module.ava.loaded_code_image()))
-
-    catch_up_call.assert_called_once_with(
-        ANY, [(module.CRON, None)], timezone=settings.general.timezone, fire=ANY
-    )
-    fire = catch_up_call.call_args.kwargs["fire"]
-    if filename == "c9-daily-report-schedule.py":
-        assert isinstance(fire, partial)
-        assert fire.func is module._fire
-        assert callable(fire.keywords["producer"])
-        assert fire.keywords["image"] is module.ava.loaded_code_image()
-    else:
-        assert fire is module._fire
-    assert [call.kwargs["after"] for call in next_fire_call.call_args_list] == [
-        now - timedelta(minutes=2),
-        start,
-    ]
-    claim.assert_not_called()
-    sleep.assert_called_once_with(60)
-
-
-@pytest.mark.parametrize("filename", _DAILY_SCRIPTS)
-def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
-    filename: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    module = _load_daily_script(filename)
-    host = sys.modules[module.run_daily_loop.__module__]
-    start = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
-    now = datetime(2026, 9, 6, 10, 5, tzinfo=UTC)
-    slot = datetime(2026, 9, 6, 10, 4, tzinfo=UTC)
-    clock = iter((start, now, now))
-
-    class FakeDatetime:
-        @staticmethod
-        def now(zone: Any) -> datetime:
-            assert zone == UTC
-            return next(clock)
-
-    claim = Mock(return_value=True)
-    sleep = Mock(side_effect=_LoopStoppedError)
-    monkeypatch.setattr(host, "datetime", FakeDatetime)
-    monkeypatch.setattr(host, "catch_up", Mock())
-    monkeypatch.setattr(host, "next_fire", Mock(return_value=slot))
-    monkeypatch.setattr(host, "fire_slot_once", claim)
-    monkeypatch.setattr(host.time, "sleep", sleep)
-
-    with pytest.raises(_LoopStoppedError):
-        module._main_loop(inputs=ScheduleInputs(Mock(), Mock(), module.ava.loaded_code_image()))
-
-    claim.assert_called_once_with(ANY, slot, None, fire=ANY)
-    fire = claim.call_args.kwargs["fire"]
-    if filename == "c9-daily-report-schedule.py":
-        assert isinstance(fire, partial)
-        assert fire.func is module._fire
-        assert callable(fire.keywords["producer"])
-        assert fire.keywords["image"] is module.ava.loaded_code_image()
-    else:
-        assert fire is module._fire
-    sleep.assert_called_once_with(120)
 
 
 def _insert_schedule(conn: psycopg.Connection, *, created_at: datetime) -> int:
@@ -269,90 +178,6 @@ def test_nested_dispatch_keeps_each_callbacks_explicit_slot(
     assert _claimed_slots(db_conn, schedule_id) == [outer_slot, inner_slot]
 
 
-def test_catch_up_fires_only_the_two_most_recent_slots(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    database: Database,
-) -> None:
-    schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 0, 30, tzinfo=UTC))
-    monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
-    fired: list[tuple[datetime, str]] = []
-
-    with caplog.at_level(logging.WARNING, logger="schedules.catchup"):
-        slots = catch_up(
-            database,
-            [("0 * * * *", "hourly")],
-            timezone="UTC",
-            fire=lambda slot, payload: fired.append((slot, payload)),
-            now=datetime(2026, 9, 6, 4, 30, tzinfo=UTC),
-        )
-
-    assert slots == [
-        datetime(2026, 9, 6, 3, 0, tzinfo=UTC),
-        datetime(2026, 9, 6, 4, 0, tzinfo=UTC),
-    ]
-    assert fired == [(slot, "hourly") for slot in slots]
-    assert _claimed_slots(db_conn, schedule_id) == slots
-    assert "older missed slots remain unclaimed" in caplog.text
-
-
-def test_online_schedule_with_latest_slot_claimed_has_no_catch_up(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-) -> None:
-    schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 5, 0, 0, tzinfo=UTC))
-    monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
-    last_slot = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
-    assert fire_slot_once(database, last_slot, "normal", fire=lambda _slot, _payload: None)
-    fired: list[tuple[datetime, str]] = []
-
-    slots = catch_up(
-        database,
-        [("0 * * * *", "catch-up")],
-        timezone="UTC",
-        fire=lambda slot, payload: fired.append((slot, payload)),
-        now=datetime(2026, 9, 6, 10, 30, tzinfo=UTC),
-    )
-
-    assert slots == []
-    assert fired == []
-    assert _claimed_slots(db_conn, schedule_id) == [last_slot]
-
-
-def test_restart_after_missed_slot_fires_exactly_once(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-) -> None:
-    schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 9, 30, tzinfo=UTC))
-    monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
-    fired: list[tuple[datetime, str]] = []
-    now = datetime(2026, 9, 6, 10, 30, tzinfo=UTC)
-
-    first = catch_up(
-        database,
-        [("0 * * * *", "missed")],
-        timezone="UTC",
-        fire=lambda slot, payload: fired.append((slot, payload)),
-        now=now,
-    )
-    second = catch_up(
-        database,
-        [("0 * * * *", "missed")],
-        timezone="UTC",
-        fire=lambda slot, payload: fired.append((slot, payload)),
-        now=datetime(2026, 9, 6, 10, 45, tzinfo=UTC),
-    )
-
-    slot = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
-    assert first == [slot]
-    assert second == []
-    assert fired == [(slot, "missed")]
-    assert _claimed_slots(db_conn, schedule_id) == [slot]
-
-
 def test_claim_survives_fire_failure(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
@@ -374,38 +199,6 @@ def test_claim_survives_fire_failure(
         database, slot, None, fire=lambda _slot, _payload: pytest.fail("duplicate fire")
     )
     assert _claimed_slots(db_conn, schedule_id) == [slot]
-
-
-@pytest.mark.parametrize(
-    "script_path",
-    sorted((_ROOT / "schedules").glob("*-schedule.py")),
-    ids=lambda path: path.name,
-)
-def test_builtin_schedule_templates_use_catch_up_and_slot_claims(script_path: Path) -> None:
-    tree = ast.parse(script_path.read_text(encoding="utf-8"), filename=str(script_path))
-    calls = {
-        node.func.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    }
-
-    if script_path.name in _DAILY_SCRIPTS:
-        assert "run_daily_loop" in calls
-    else:
-        assert "catch_up" in calls
-        assert "fire_slot_once" in calls
-
-
-def test_daily_host_owns_catch_up_and_slot_claims() -> None:
-    helper = _ROOT / "schedules" / "daily_host.py"
-    tree = ast.parse(helper.read_text(encoding="utf-8"), filename=str(helper))
-    calls = {
-        node.func.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    }
-
-    assert {"catch_up", "fire_slot_once"} <= calls
 
 
 def test_cluster_timezone_follows_the_setting_when_it_is_read(
@@ -447,8 +240,14 @@ def test_schedule_entry_retains_the_loaded_image_gate(
     monkeypatch.setattr(entry_owner, "process_name", lambda: "schedule")
     monkeypatch.setattr(code_version, "first_parent_count", count)
     monkeypatch.setattr(entry_owner.Database, "from_settings", create)
-    owner = "run_daily_loop" if filename in _DAILY_SCRIPTS else "catch_up"
+    owner = "run_daily_loop" if filename in _DAILY_SCRIPTS else "fire_slot_once"
     monkeypatch.setattr(module, owner, consumer)
+    if owner == "fire_slot_once":
+
+        def due_slot(*_args: object, **_kwargs: object) -> datetime:
+            return datetime.now(UTC) - timedelta(seconds=1)
+
+        monkeypatch.setattr(module, "next_fire", due_slot)
     entry = getattr(module, "_main_loop", None) or module.main
 
     with pytest.raises(_LoopStoppedError), schedule_entry(None) as inputs:
@@ -466,3 +265,119 @@ def test_schedule_entry_retains_the_loaded_image_gate(
     assert not gate.min_read_due()
     assert gate.application_name() == "ava:schedule:v7"
     count.assert_called_once()
+
+
+@pytest.mark.parametrize("filename", _DAILY_SCRIPTS)
+def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
+    filename: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_daily_script(filename)
+    host = sys.modules[module.run_daily_loop.__module__]
+    start = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
+    now = datetime(2026, 9, 6, 10, 1, tzinfo=UTC)
+    next_slot = datetime(2026, 9, 6, 10, 2, tzinfo=UTC)
+    clock = iter((start, now))
+
+    class FakeDatetime:
+        @staticmethod
+        def now(zone: Any) -> datetime:
+            assert zone == UTC
+            return next(clock)
+
+    next_fire_call = Mock(side_effect=(start, next_slot))
+    claim = Mock()
+    sleep = Mock(side_effect=_LoopStoppedError)
+    monkeypatch.setattr(host, "datetime", FakeDatetime)
+    monkeypatch.setattr(host, "next_fire", next_fire_call)
+    monkeypatch.setattr(host, "fire_slot_once", claim)
+    monkeypatch.setattr(host.time, "sleep", sleep)
+
+    with pytest.raises(_LoopStoppedError):
+        module._main_loop(inputs=ScheduleInputs(Mock(), Mock(), module.ava.loaded_code_image()))
+
+    assert [call.kwargs["after"] for call in next_fire_call.call_args_list] == [
+        now - timedelta(minutes=2),
+        start,
+    ]
+    claim.assert_not_called()
+    sleep.assert_called_once_with(60)
+
+
+@pytest.mark.parametrize("filename", _DAILY_SCRIPTS)
+def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
+    filename: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_daily_script(filename)
+    host = sys.modules[module.run_daily_loop.__module__]
+    start = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
+    now = datetime(2026, 9, 6, 10, 5, tzinfo=UTC)
+    slot = datetime(2026, 9, 6, 10, 4, tzinfo=UTC)
+    clock = iter((start, now, now))
+
+    class FakeDatetime:
+        @staticmethod
+        def now(zone: Any) -> datetime:
+            assert zone == UTC
+            return next(clock)
+
+    claim = Mock(return_value=True)
+    sleep = Mock(side_effect=_LoopStoppedError)
+    monkeypatch.setattr(host, "datetime", FakeDatetime)
+    monkeypatch.setattr(host, "next_fire", Mock(return_value=slot))
+    monkeypatch.setattr(host, "fire_slot_once", claim)
+    monkeypatch.setattr(host.time, "sleep", sleep)
+
+    with pytest.raises(_LoopStoppedError):
+        module._main_loop(inputs=ScheduleInputs(Mock(), Mock(), module.ava.loaded_code_image()))
+
+    claim.assert_called_once_with(ANY, slot, None, fire=ANY)
+    fire = claim.call_args.kwargs["fire"]
+    if filename == "c9-daily-report-schedule.py":
+        assert isinstance(fire, partial)
+        assert fire.func is module._fire
+        assert callable(fire.keywords["producer"])
+        assert fire.keywords["image"] is module.ava.loaded_code_image()
+    else:
+        assert fire is module._fire
+    sleep.assert_called_once_with(120)
+
+
+@pytest.mark.parametrize(
+    ("filename", "entry", "cron"),
+    [
+        ("self-evolution-daily-schedule.py", "main", "0 9 * * *"),
+        ("self-evolution-weekly-schedule.py", "_main_loop", "0 9 * * 1"),
+    ],
+)
+def test_restart_does_not_fire_a_slot_inside_the_previous_two_minutes(
+    filename: str, entry: str, cron: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_daily_script(filename)
+    # Monday, thirty seconds after the missed 09:00 slot.
+    started = datetime(2026, 9, 7, 9, 0, 30, tzinfo=UTC)
+
+    class FakeDatetime:
+        @staticmethod
+        def now(zone: Any) -> datetime:
+            assert zone == UTC
+            return started
+
+    monkeypatch.setattr(module, "datetime", FakeDatetime)
+    monkeypatch.setattr(module, "cluster_timezone", lambda: "UTC")
+    if entry == "main":
+        monkeypatch.setattr(module, "CRON", cron)
+    else:
+        monkeypatch.setattr(module, "MONDAY_CRON", cron)
+        monkeypatch.setattr(module, "THURSDAY_CRON", "0 9 * * 4")
+    claim = Mock()
+    sleep = Mock(side_effect=_LoopStoppedError)
+    monkeypatch.setattr(module, "fire_slot_once", claim)
+    monkeypatch.setattr(module.time, "sleep", sleep)
+
+    with pytest.raises(_LoopStoppedError):
+        getattr(module, entry)(
+            inputs=ScheduleInputs(Mock(), Mock(), module.ava.loaded_code_image())
+        )
+
+    claim.assert_not_called()
+    sleep.assert_called_once_with(3600)

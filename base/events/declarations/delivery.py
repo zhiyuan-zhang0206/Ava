@@ -14,14 +14,6 @@ class DeliveryStalled(TypedDict):
     age_s: float
 
 
-class DeliveryPoisoned(TypedDict):
-    """`delivery_poisoned` payload — delivery watchdog dispatch guard."""
-
-    inbound_id: int
-    dispatch_count: int
-    age_s: float
-
-
 EVENTS: dict[str, EventSpec] = {
     "delivery_stalled": telemetry_event(
         "delivery_stalled",
@@ -30,12 +22,5 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site="services/wake/delivery_watchdog/daemon.py:_alert_stalled",
         persist=True,
-    ),
-    "delivery_poisoned": telemetry_event(
-        "delivery_poisoned",
-        "delivery backlog — permanently-failing inbound poisoned (dispatch cap reached)",
-        payload=DeliveryPoisoned,
-        tier="anomaly",
-        site="services/wake/delivery_watchdog/dispatch_guard.py:_alert_poisoned",
     ),
 }

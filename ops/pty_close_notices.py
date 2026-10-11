@@ -27,24 +27,14 @@ idempotent per (machine, agent_id, session_id, shell-birth): the
 `api_idempotency` claim row and the inbound insert commit in one transaction,
 so a notice written twice is delivered once.
 
-A pty-sessions service that died uncleanly (a crash, a SIGKILL, a reboot)
-closes its sessions to no one, so the next service start sweeps its ledger
-(`services.agent_runner.pty_sessions.ledger.sweep`) and hands the busy sessions it closed to
-a one-shot child, ``python -m ops.pty_close_notices``, which writes their
-notices under `CRASH_REASON` with this module's `main`. The service itself
-stays database-free; the child is profile-less, so it dials as an operator
-process. A child that never gets to write loses nothing: the service stages
-the batch on disk first (`close_notices_path()`), the child removes the file
-only after every notice of it is written, and whatever stays staged is
-re-sent by the next service start — on the same idempotency keys, so a notice
-that already committed is skipped, never delivered twice.
+Crash sweeps log locally. They neither stage notices nor replay a previous
+start's journal. Existing staged files remain available for inspection.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -57,17 +47,10 @@ from psycopg import sql
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.cluster.machine import machine_name
 from base.db import Database, insert_inbound_message_in_transaction, publish_inbound_wake
-from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.atomic_io import write_text_atomic
 from base.log import logger
-from base.log.sinks import add_sink
-from base.native_process.code_version import CodeVersion
-from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.ownership import OwnedProcess, shown_name
 from base.sessions.pty import closure
-from base.sessions.pty.paths import close_notices_path
-from base.telemetry import process_name
 from ops.cluster_status import AGENT_SHELL_RE
 from ops.rpc_schemas import OpStatus
 
@@ -231,7 +214,6 @@ def notices_for(
 
 
 # The staged file's shape: a versioned envelope, like the ledger's.
-_PENDING_VERSION = 1
 
 
 def read_pending(path: Path) -> list[ClosureNotice]:
@@ -260,17 +242,6 @@ def read_pending(path: Path) -> list[ClosureNotice]:
         return []
 
 
-def write_pending(path: Path, notices: Sequence[ClosureNotice]) -> None:
-    """Publish the waiting notices through one atomic replace (owner-only)."""
-    payload = {"version": _PENDING_VERSION, "notices": [notice.as_dict() for notice in notices]}
-    write_text_atomic(path, json.dumps(payload), mode=0o600, sync_file=False)
-
-
-def clear_pending(path: Path) -> None:
-    """Drop the staged file once every notice in it is written."""
-    path.unlink(missing_ok=True)
-
-
 def _one_per_key(notices: Sequence[ClosureNotice]) -> list[ClosureNotice]:
     """One notice per dedup key, the first occurrence winning.
 
@@ -285,21 +256,6 @@ def _one_per_key(notices: Sequence[ClosureNotice]) -> list[ClosureNotice]:
             seen.add(notice.dedup_key())
             unique.append(notice)
     return unique
-
-
-def stage_crash_notices(swept: closure.Outcome, path: Path) -> list[ClosureNotice]:
-    """Stage the sweep's closure notices beside any already waiting; return the whole batch.
-
-    The service calls this before its one-shot child runs: everything the child
-    must write is on disk first, so a child cut short by the time limit — or
-    one a database that answers nothing fails — loses the batch to the next
-    start instead. What was already staged stays first (a re-sent notice keeps
-    its earlier record); an empty batch leaves the file untouched.
-    """
-    staged = _one_per_key((*read_pending(path), *notices_for(swept.closed, reason=CRASH_REASON)))
-    if staged:
-        write_pending(path, staged)
-    return staged
 
 
 def _content(notice: ClosureNotice) -> str:
@@ -450,64 +406,3 @@ def write_notices(
         # finds no listener — it costs a best-effort publish either way.
         publish_inbound_wake(db, bus, notice.agent_id, str(inbound_id))
     return []
-
-
-def main() -> int:
-    """Write the closure notices the service staged; the one-shot child of the pty-sessions service.
-
-    Reads `run/pty-close-notices.json` (`stage_crash_notices` puts the sweep's
-    notices there before this process starts), writes them all in one
-    transaction over one short connection, and removes the file only once
-    every notice of it is written. A database it cannot reach leaves the file
-    for the next service start to re-send, on the same keys; every failure is
-    logged at ERROR with its count and returned as exit 1.
-    """
-    try:
-        path = close_notices_path()
-        notices = read_pending(path)
-    except Exception as exc:
-        logger.error("[pty-close-notices] crash notices not read: {}: {}", type(exc).__name__, exc)
-        return 1
-    if not notices:
-        return 0
-    try:
-        image = LoadedCommit.capture()
-        version = CodeVersion(image)
-        gate = ProcessDbGate(version=version.get, process=process_name(), exempt=False)
-        failed = write_notices(
-            Database.from_settings(gate=gate), EventBus.from_settings(), notices, direct=False
-        )
-    except Exception as exc:  # no database settings: a failed child, not a service failure
-        logger.error(
-            "[pty-close-notices] {} closure notice(s) not written: {}: {}",
-            len(notices),
-            type(exc).__name__,
-            exc,
-        )
-        return 1
-    if failed:
-        logger.error(
-            "[pty-close-notices] {} closure notice(s) not written and stay staged for the "
-            "next pty-sessions start to re-send",
-            len(notices),
-        )
-        return 1
-    try:
-        clear_pending(path)
-    except OSError as exc:
-        logger.error(
-            "[pty-close-notices] {} closure notice(s) written but the staged file could not "
-            "be removed ({exc}); the next start re-sends them — each is idempotent",
-            len(notices),
-            exc=exc,
-        )
-        return 0
-    logger.info("[pty-close-notices] wrote {} closure notice(s)", len(notices))
-    return 0
-
-
-if __name__ == "__main__":
-    add_sink(
-        sys.stderr, format="{time:HH:mm:ss.SSS} {level: <5} {message}", level="INFO", colorize=False
-    )
-    raise SystemExit(main())

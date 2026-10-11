@@ -6,9 +6,7 @@ env alias so the .env surface is unchanged. Aggregated by base/config.
 
 from __future__ import annotations
 
-import json
-
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from base.config.base import EnvSettings
 from base.config.domains.daemon.delivery_watchdog_fields import (
@@ -511,23 +509,3 @@ class DaemonSettings(
             "remote_writable": True,
         },
     )
-
-    @field_validator("delivery_watchdog_dispatch_backoff_steps_s", mode="before")
-    @classmethod
-    def _parse_delivery_watchdog_dispatch_backoff_steps(cls, value: object) -> object:
-        """Accept either a JSON array or a comma-separated environment value."""
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                return [float(step.strip()) for step in value.split(",") if step.strip()]
-        return value
-
-    @field_validator("delivery_watchdog_dispatch_backoff_steps_s")
-    @classmethod
-    def _validate_delivery_watchdog_dispatch_backoff_steps(cls, value: list[float]) -> list[float]:
-        if not value:
-            raise ValueError("delivery watchdog dispatch backoff steps must not be empty")
-        if any(step <= 0 for step in value):
-            raise ValueError("delivery watchdog dispatch backoff steps must all be positive")
-        return value

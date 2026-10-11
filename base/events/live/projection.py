@@ -131,7 +131,7 @@ class CompactStarted(_Base):
     basis (transport arrival can lag a degraded link). `mode` names the
     trigger class: `request` = an explicitly enqueued compact_request (the
     UI/API Compact action), `auto` = framework-initiated without a request
-    (the before_llm threshold hook or the overflow circuit-breaker rescue).
+    (the before_llm context threshold hook).
     The agent-authored `ava.self.compact` path is not a forced compaction —
     it keeps emitting `CompactRequest` / `CompactDone` only, without a
     ticking block."""

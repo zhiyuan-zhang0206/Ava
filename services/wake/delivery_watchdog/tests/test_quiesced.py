@@ -13,25 +13,20 @@ from psycopg_pool import ConnectionPool
 
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
-from base.events.live.bus import EventBus
 from services.wake.delivery_watchdog import daemon
 
-_Loop = Callable[[ConnectionPool, LoopProgress, ProcessDbGate], Coroutine[Any, Any, None]]
+_Loop = Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]]
 
 _LOOPS: dict[str, _Loop] = {
-    "scan": lambda pool, progress, database_gate: daemon._scan_loop(
-        pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), progress
-    ),
+    "scan": daemon._scan_loop,
 }
 
 
 @pytest.mark.parametrize("quiesced", [True, False])
 @pytest.mark.parametrize("name", list(_LOOPS))
 async def test_a_quiesced_unit_borrows_no_connection(
-    monkeypatch: pytest.MonkeyPatch, name: str, quiesced: bool, *, database_gate: ProcessDbGate
+    monkeypatch: pytest.MonkeyPatch, name: str, quiesced: bool
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
 
@@ -40,9 +35,7 @@ async def test_a_quiesced_unit_borrows_no_connection(
 
     monkeypatch.setattr(round_loop, "sleep_with_progress", short_sleep)
     pool = MagicMock()
-    task = asyncio.create_task(
-        _LOOPS[name](cast("ConnectionPool", pool), LoopProgress("t", 60.0), database_gate)
-    )
+    task = asyncio.create_task(_LOOPS[name](cast("ConnectionPool", pool), LoopProgress("t", 60.0)))
     try:
         await asyncio.sleep(0.2)
     finally:

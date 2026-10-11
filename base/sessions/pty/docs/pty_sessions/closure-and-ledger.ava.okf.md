@@ -38,22 +38,15 @@ The instance lock prevents a second start from sweeping a live service's
 sessions. Decision:
 [PTY best-effort closure](../../../../../docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md).
 
-## Crash notices
+## Crash diagnostics
 
-The service holds no database. After a start-time sweep it stages the busy
-sessions' notices on disk (`run/pty-close-notices.json`) and gives them to a
-one-shot child, `python -m ops.pty_close_notices`
-(`services/agent_runner/pty_sessions/crash_notices.py`), from a task beside the serving loop
-with a thirty-second limit; the child writes the whole batch in one transaction,
-under `CRASH_REASON`, and removes the file. A batch the child does not finish —
-the limit cut it short, or the database answered nothing — loses nothing: it
-stays staged, is reported at ERROR with its count, and the next start re-sends
-it on the same idempotency keys. A database that cannot be reached is still
-never a failed or delayed start. A stop that finds no service closes from the
-ledger and writes the same notices itself. Delivery is idempotent on machine,
-agent, session and shell birth, and a terminated owner is dropped.
-Decisions: `docs/decisions/agents/messages/2026-10-04-pty-crash-notices.md`,
-`docs/decisions/agents/messages/2026-10-04-pty-crash-notices-staged-retry.md`.
+The database-free service records start-time sweep outcomes in local logs.
+It does not stage owner notices or replay a previous start's journal. Existing
+`run/pty-close-notices.json` files remain untouched and can be inspected with
+`ops.pty_close_notices.read_pending`; no automatic sender consumes them.
+Explicit operator stops still make one best-effort notification attempt for
+known closed busy shells. Those writes retain same-key dedup and never wake a
+terminated owner.
 
 ## Dependencies
 

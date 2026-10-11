@@ -19,6 +19,7 @@ from agent.state import AgentState, BaseAgentState
 from base.agents.context import AvaContext
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.invocation.native_work import (
     NativeWorkContinuation,
@@ -35,8 +36,9 @@ async def test_checkpoint_failure_after_subprocess_does_not_replay_on_fresh_wake
     database: Database,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database_gate: ProcessDbGate,
 ) -> None:
-    incarnation, _ = await managed_work(db_conn, aops_pool)
+    incarnation, _ = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     effect = tmp_path / "effects.txt"
     fresh_input = True
     save_failure = False

@@ -12802,7 +12802,7 @@
           "errors"
         ],
         "title": "LlmBucket",
-        "description": "One bucket's LLM call profile. Latency percentiles are over rows that\ncarry `latency_ms` (pre-instrumentation rows are NULL and ignored);\n`tps` = Σ(in+out+reasoning) tokens / Σ latency seconds (NULL when no\nlatency data). `errors` counts llm_provider_error / stream_stalled_retry /\nllm_turn_aborted events."
+        "description": "One bucket's LLM call profile. Latency percentiles are over rows that\ncarry `latency_ms` (pre-instrumentation rows are NULL and ignored);\n`tps` = Σ(in+out+reasoning) tokens / Σ latency seconds (NULL when no\nlatency data). `errors` counts llm_provider_error and llm_turn_aborted events."
       },
       "LlmReport": {
         "properties": {

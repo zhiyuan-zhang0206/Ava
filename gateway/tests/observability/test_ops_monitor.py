@@ -148,7 +148,7 @@ def _seed_llm_bucket(db: psycopg.Connection) -> int:
     # a row with no numeric latency counts as a call but not toward the latency figures
     _add(db, event="llm_usage", payload={"in_total": 1}, ts=inside)
     _add(db, event="llm_provider_error", ts=inside)
-    _add(db, event="stream_stalled_retry", ts=inside)
+    _add(db, event="llm_provider_error", ts=inside)
     db.commit()
     return i
 

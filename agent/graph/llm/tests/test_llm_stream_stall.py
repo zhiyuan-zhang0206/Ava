@@ -20,8 +20,6 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 from unittest.mock import MagicMock
 
-import httpx2
-import openai
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -30,7 +28,10 @@ from langgraph.runtime import Runtime
 from agent.graph.llm._retry import Attempt
 from agent.graph.llm._stream import _consume_llm, _consume_stream_with_stall_timeout
 from agent.graph.llm.node import llm_attempt
-from agent.graph.llm_errors import LlmLedger, LLMRetryBudgetExceededError, LLMStreamStallPairError
+from agent.graph.llm_errors import (
+    LlmLedger,
+    LLMStreamStallTimeoutError,
+)
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
@@ -42,9 +43,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
-from base.lm.registry import ModelSpec
 from base.native_process.turn_identity import HostedTurnResources
-from tests.fixtures.model_catalog import AddModels
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
@@ -108,13 +107,12 @@ async def test_stall_at_ttft_raises_with_ttft_marker(
         yield  # type: ignore[unreachable]
 
     monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.05)
-    monkeypatch.setattr("base.config.settings.lm.llm_non_streaming_fallback_timeout_seconds", 0.05)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _hang_immediately()
 
     # Non-streaming fallback runs under the SAME key/value as the stream
     # segment (task #3884) and also stalls — the two adjacent stalls must
-    # surface as LLMStreamStallPairError (the delayed-schedule marker), not a
+    # surface as LLMStreamStallTimeoutError (the delayed-schedule marker), not a
     # bare TimeoutError.
     async def _ainvoke_also_stalls(*args, **kwargs):
         await asyncio.sleep(3600)  # only the fallback's own bound can cut this
@@ -122,7 +120,7 @@ async def test_stall_at_ttft_raises_with_ttft_marker(
     fake_llm.ainvoke = _ainvoke_also_stalls
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
+    with pytest.raises(LLMStreamStallTimeoutError, match="stream stalled"):
         await _one_try(
             state,
             _make_runtime(
@@ -154,7 +152,6 @@ async def test_stall_mid_stream_raises_with_chunk_count(
 
     monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 10.0)
     monkeypatch.setattr("base.config.settings.lm.llm_stream_inter_chunk_timeout_seconds", 0.05)
-    monkeypatch.setattr("base.config.settings.lm.llm_non_streaming_fallback_timeout_seconds", 0.05)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _stream_then_hang()
 
@@ -165,7 +162,7 @@ async def test_stall_mid_stream_raises_with_chunk_count(
     fake_llm.ainvoke = _ainvoke_also_stalls
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
+    with pytest.raises(LLMStreamStallTimeoutError, match="stream stalled"):
         await _one_try(
             state,
             _make_runtime(
@@ -221,7 +218,7 @@ async def test_normal_stream_completes_no_stall_timeout(
     assert result is not None
 
 
-async def test_total_timeout_falls_back_while_chunks_keep_arriving(
+async def test_total_timeout_ends_the_original_request_while_chunks_keep_arriving(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
 ) -> None:
@@ -258,22 +255,21 @@ async def test_total_timeout_falls_back_while_chunks_keep_arriving(
     fake_llm.ainvoke = _fallback
     chunks: list[AIMessageChunk] = []
 
-    await _consume_llm(
-        fake_llm,
-        [],
-        chunks=chunks,
-        handler=MagicMock(),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        catalog=model_catalog,
-    )
+    with pytest.raises(LLMStreamStallTimeoutError, match="total duration"):
+        await _consume_llm(
+            fake_llm,
+            [],
+            chunks=chunks,
+            handler=MagicMock(),
+            agent=AgentSlices.resolve(
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            ),
+            catalog=model_catalog,
+        )
 
-    assert fallback_called
-    assert streamed_chunks <= 20
-    assert [cast(str, chunk.content) for chunk in chunks] == [  # pyright: ignore[reportUnknownMemberType]
-        "fallback"
-    ]
+    assert not fallback_called
+    assert streamed_chunks == 3
+    assert len(chunks) == 2
 
 
 async def test_stream_below_total_timeout_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -337,221 +333,6 @@ async def test_none_disables_stream_total_timeout(monkeypatch: pytest.MonkeyPatc
 # per episode, then crashed; a pair now costs ~2x the bound and schedules a
 # delayed retry).
 # ---------------------------------------------------------------------------
-
-
-async def test_stall_pair_fallback_runs_under_the_stream_segment_bound(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-) -> None:
-    """The post-stall fallback is bounded by the SAME key/value as its stream
-    segment — a hanging fallback with a tiny segment bound must be cut at that
-    bound, not at the 600s fallback ceiling."""
-    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.1)
-    monkeypatch.setattr(settings.lm, "llm_non_streaming_fallback_timeout_seconds", 600.0)
-
-    async def _hang_immediately() -> AsyncIterator[AIMessageChunk]:
-        await asyncio.Future()
-        yield  # type: ignore[unreachable]
-
-    async def _fallback_also_hangs(*args: object, **kwargs: object) -> AIMessage:
-        await asyncio.Future()
-        raise AssertionError("unreachable")
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _hang_immediately()
-    fake_llm.ainvoke = _fallback_also_hangs
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-
-    started = time.monotonic()
-    with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
-        await _one_try(
-            state,
-            _make_runtime(
-                hosted_resources=hosted_resources,
-                llm=fake_llm,
-                model_catalog=model_catalog,
-                database_gate=database_gate,
-            ),
-        )
-    elapsed = time.monotonic() - started
-    # ~2 x 0.1s; the 600s fallback ceiling would make this test hang for 20min.
-    assert elapsed < 5.0
-
-
-class _FakeOverloadedError(openai.RateLimitError):
-    """A provider error carrying `engine_overloaded_error` in its SDK body."""
-
-    def __init__(self) -> None:
-        response = httpx2.Response(429, request=httpx2.Request("POST", "https://audit.invalid"))
-        super().__init__(
-            "engine overloaded",
-            response=response,
-            body={"error": {"type": "engine_overloaded_error"}},
-        )
-
-
-async def test_overload_fallback_timeout_is_not_a_stall_pair(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-) -> None:
-    """The pair contract covers stalls only: an overload-triggered fallback
-    that times out keeps its own (long) ceiling and propagates as the plain
-    TimeoutError — never mislabelled as two adjacent stalls."""
-    monkeypatch.setattr(settings.lm, "llm_non_streaming_fallback_timeout_seconds", 0.05)
-
-    async def _stream_raises_overload() -> AsyncIterator[AIMessageChunk]:
-        raise _FakeOverloadedError
-        yield  # type: ignore[unreachable]
-
-    async def _fallback_hangs(*args: object, **kwargs: object) -> AIMessage:
-        await asyncio.Future()
-        raise AssertionError("unreachable")
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _stream_raises_overload()
-    fake_llm.ainvoke = _fallback_hangs
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-
-    with pytest.raises(TimeoutError) as exc_info:
-        await _one_try(
-            state,
-            _make_runtime(
-                hosted_resources=hosted_resources,
-                llm=fake_llm,
-                model_catalog=model_catalog,
-                database_gate=database_gate,
-            ),
-        )
-    assert not isinstance(exc_info.value, LLMStreamStallPairError)
-
-
-async def test_stall_events_carry_provider_health_fields(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records,
-    add_models: AddModels,
-    *,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-) -> None:
-    """The stall + pair events carry vendor/model/stage (the 09-14/15 wave was
-    100% api.deepseek.com yet nothing in the telemetry said so) plus the
-    segment's elapsed time — the fields LogQL and the OTLP histogram key on."""
-    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.05)
-    monkeypatch.setattr(settings.lm, "llm_non_streaming_fallback_timeout_seconds", 0.05)
-
-    async def _hang_immediately() -> AsyncIterator[AIMessageChunk]:
-        await asyncio.Future()
-        yield  # type: ignore[unreachable]
-
-    async def _fallback_also_hangs(*args: object, **kwargs: object) -> AIMessage:
-        await asyncio.Future()
-        raise AssertionError("unreachable")
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _hang_immediately()
-    fake_llm.ainvoke = _fallback_also_hangs
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-
-    # This synthetic provider now crosses the LLM node's compaction gate too;
-    # declare its context budget instead of depending on an installed plugin.
-    model_catalog = add_models(
-        model_catalog, {"deepseek-v4-flash": ModelSpec(provider="deepseek", context_window=128_000)}
-    )
-    original = settings.lm.llm_model
-    try:
-        settings.lm.llm_model = "deepseek-v4-flash"
-        with pytest.raises(LLMStreamStallPairError):
-            await _one_try(
-                state,
-                _make_runtime(
-                    hosted_resources=hosted_resources,
-                    llm=fake_llm,
-                    model_catalog=model_catalog,
-                    database_gate=database_gate,
-                ),
-            )
-    finally:
-        settings.lm.llm_model = original
-
-    stalls = [r for r in loguru_records if r["extra"].get("event") == "stream_stalled_retry"]  # pyright: ignore[reportUnknownMemberType]
-    assert len(stalls) == 1  # pyright: ignore[reportUnknownArgumentType]
-    stall_extra = stalls[0]["extra"]
-    assert stall_extra["vendor"] == "deepseek"
-    assert stall_extra["model"] == "deepseek-v4-flash"
-    assert stall_extra["stage"] == "ttft"
-    assert stall_extra["elapsed_s"] >= 0.0
-
-    pairs = [r for r in loguru_records if r["extra"].get("event") == "stream_stall_pair_terminated"]  # pyright: ignore[reportUnknownMemberType]
-    assert len(pairs) == 1  # pyright: ignore[reportUnknownArgumentType]
-    pair_extra = pairs[0]["extra"]
-    assert pair_extra["vendor"] == "deepseek"
-    assert pair_extra["stage"] == "ttft"
-    assert pair_extra["timeout_s"] == pytest.approx(0.05)
-
-
-async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    *,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-) -> None:
-    """The transient wall-clock budget must not end a delayed stall sequence at
-    node entry (its own streak bounds it); without an active streak the same
-    elapsed time still raises LLMRetryBudgetExceededError as before."""
-
-    async def _normal_stream() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="ok",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _normal_stream()
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-
-    spent = settings.lm.llm_retry_max_total_seconds + 5.0
-    ledger = LlmLedger()
-    ledger.record_stall_pair_streak("7", 1)
-    result = await _one_try(
-        state,
-        _make_runtime(
-            hosted_resources=hosted_resources,
-            llm=fake_llm,
-            model_catalog=model_catalog,
-            database_gate=database_gate,
-        ),
-        attempt=2,
-        started_ago=spent,
-        ledger=ledger,
-    )
-    assert result is not None
-    ledger.reset_stall_pair_streak("7")
-
-    # Control: no active streak -> the same elapsed time trips the budget.
-    with pytest.raises(LLMRetryBudgetExceededError):
-        await _one_try(
-            state,
-            _make_runtime(
-                hosted_resources=hosted_resources,
-                llm=fake_llm,
-                model_catalog=model_catalog,
-                database_gate=database_gate,
-            ),
-            attempt=2,
-            started_ago=spent,
-        )
 
 
 _STREAM_BOUNDS = {

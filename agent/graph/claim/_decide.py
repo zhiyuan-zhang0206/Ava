@@ -24,23 +24,18 @@ from agent.graph.claim._batch import _defer_chats_to_pending
 from agent.graph.claim._dispatch import _BatchState
 from agent.graph.claim._routing import ClaimGoto, _Routing
 from agent.hooks.compact import (
-    CompactionFailedError,
     build_compact_transition,
-    conversation_messages,
-    emergency_compact_summary,
     emit_compaction_monitoring,
     stamp_compact_boundary,
 )
 from agent.hooks.compact_anchor import closing_of
-from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
+from agent.hooks.compact_events import emit_compact_finished
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
-from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from base.agents.context import AvaContext
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
-from base.events.live.projection import CompactDone, CompactionMode, CompactionStatus
-from base.log import logger
+from base.events.live.projection import CompactDone, CompactionStatus
 
 
 @dataclass(frozen=True)
@@ -101,42 +96,6 @@ def _cancel_outcome(ctx: AvaContext, agent_id: int, st: _BatchState) -> _Outcome
             goto=CLAIM,
         )
     )
-
-
-async def _force_circuit_compact(
-    ctx: AvaContext, state: _state.AgentState, agent_id: int, st: _BatchState
-) -> None:
-    """Overflow self-rescue: compact on this wake instead of the doomed LLM call."""
-    # The heartbeat circuit breaker is open with reason=context_overflow: the
-    # provider permanently rejected the last LLM call because the context
-    # exceeds the window. Every wake routes here instead of into the doomed
-    # call — a real compaction first, then the no-LLM minimal fallback when
-    # the compaction request itself is rejected (emergency_compact_summary).
-    # The result flows into the compact path below (transition, checkpoint
-    # trim, chat deferral, version bump) exactly like a /compact.
-    assert ctx.llm is not None, "circuit-breaker compact requires ctx.llm"  # noqa: S101
-    logger.warning(
-        "circuit breaker open (context_overflow) — forcing compaction on "
-        "this wake instead of the doomed LLM call",
-        event="circuit_breaker_compact",
-        agent_id=agent_id,
-    )
-    compact_run_id = emit_compact_started(ctx.event_publisher, agent_id, mode=CompactionMode.AUTO)
-    try:
-        summary = await emergency_compact_summary(
-            state.messages,
-            ctx.llm,
-            ctx.require_agent(),
-            catalog=ctx.require_catalog(),
-        )
-    except CompactionFailedError:
-        # Transient failures exhausted — the fallback rescue did not
-        # happen either; close the live block before the turn aborts.
-        emit_compact_finished(
-            ctx.event_publisher, agent_id, compact_run_id, status=CompactionStatus.FAILURE
-        )
-        raise
-    st.compact_payload = (summary, AvaMsgType.COMPACT_REQUEST.value, compact_run_id)
 
 
 async def _compact_outcome(
@@ -270,18 +229,6 @@ def _idle_restart_gate(
     )
 
 
-def _circuit_overflow(state: _state.AgentState, st: _BatchState) -> bool:
-    """The heartbeat breaker is open with context_overflow and nothing else claims the wake."""
-    return (
-        st.compact_payload is None
-        and st.next_goto == BEFORE_LLM
-        and not st.cancelled
-        and state.circuit.open
-        and state.circuit.reason == CIRCUIT_REASON_CONTEXT_OVERFLOW
-        and bool(conversation_messages(state.messages))
-    )
-
-
 async def decide(
     ctx: AvaContext,
     state: _state.AgentState,
@@ -315,9 +262,6 @@ async def decide(
                 goto=CLAIM,
             )
         )
-
-    if _circuit_overflow(state, st):
-        await _force_circuit_compact(ctx, state, agent_id, st)
 
     if st.compact_payload is not None:
         return await _compact_outcome(ctx, state, agent_id, st)

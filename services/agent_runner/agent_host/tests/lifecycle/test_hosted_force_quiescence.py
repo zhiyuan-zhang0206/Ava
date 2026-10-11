@@ -106,6 +106,33 @@ async def _assert_pending_force(
     conn.commit()
 
 
+async def _cancel_live_force(
+    conn: psycopg.Connection,
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    command: int,
+    chat: int,
+    scheduler: TurnScheduler,
+    host: AgentHost,
+    payload: bytes,
+    *,
+    thread_held: bool,
+    database_gate: ProcessDbGate,
+) -> None:
+    """Observe live work before cancellation; a held thread also fences after it."""
+    # Prove the fence while work is live, before cancellation can finish the child.
+    await _assert_pending_force(conn, pool, agent_id, command, chat, database_gate=database_gate)
+    status, response, _ = await cancel_turn_route(scheduler, host)(payload)
+    assert status == 200
+    if not json.loads(response)["cancelled"]:
+        assert agent_id in scheduler.active_agents
+        if thread_held:
+            # The uninterruptible thread is still held by the unreleased latch.
+            await _assert_pending_force(
+                conn, pool, agent_id, command, chat, database_gate=database_gate
+            )
+
+
 async def _prove_successor_ignores_old_cancel(
     conn: psycopg.Connection,
     pool: AsyncConnectionPool,
@@ -229,13 +256,18 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
             )
         chat = _insert(db_conn, agent_id)
         payload = json.dumps({"agent_id": agent_id, "command_id": command}).encode()
-        status, response, _ = await cancel_turn_route(scheduler, host)(payload)
-        assert status == 200
-        if not json.loads(response)["cancelled"]:
-            assert agent_id in scheduler.active_agents
-            await _assert_pending_force(
-                db_conn, aops_pool, agent_id, command, chat, database_gate=database_gate
-            )
+        await _cancel_live_force(
+            db_conn,
+            aops_pool,
+            agent_id,
+            command,
+            chat,
+            scheduler,
+            host,
+            payload,
+            thread_held=work_kind == "thread",
+            database_gate=database_gate,
+        )
         release.set()
         release_file.touch()
         async with asyncio.timeout(10):

@@ -68,11 +68,13 @@ def _cwd_is_inside_checkout(cwd: Path, checkout_root: Path) -> bool:
 
 
 def _default_editable_guard() -> tuple[str, ...]:
-    """Repair this interpreter's poisoned editable install, or no-op outside a venv."""
+    """Inspect the interpreter source before user code; never repair it here."""
     source_root = editable_install.current_interpreter_source_root()
     if source_root is None:
         return ()
-    return editable_install.guard_editable_install(source_root)
+    return editable_install.editable_install_violations(
+        source_root, allowed_roots=(Path.home() / "Ava",)
+    )
 
 
 def _editable_guard_failure(
@@ -84,47 +86,18 @@ def _editable_guard_failure(
     except Exception as exc:
         return _ExecCrashed(
             output=(
-                f"exec editable-install guard could not repair the interpreter: {exc}\n\n"
+                f"exec editable-install guard could not inspect the interpreter: {exc}\n\n"
                 "Do not retry this execute_code call. Report the error to the operator."
             ),
             exc=exc,
         )
     if not violations:
         return None
-    source_root = editable_install.current_interpreter_source_root()
-    remaining: tuple[str, ...] = ()
-    if source_root is not None:
-        try:
-            remaining = editable_install.editable_install_violations(
-                source_root,
-                allowed_roots=(Path.home() / "Ava",),
-            )
-        except Exception as exc:
-            return _ExecCrashed(
-                output=(
-                    f"exec editable-install guard could not recheck the interpreter: {exc}\n\n"
-                    "Do not retry this execute_code call. Report the error to the operator."
-                ),
-                exc=exc,
-            )
-    if remaining:
-        output = (
-            "exec editable install was poisoned, but automatic repair left unresolved records and "
-            "no child was started. Do not retry this execute_code call. The remaining problems need "
-            "operator recovery: run ava converge on this host.\n\n"
-            "Polluted records:\n"
-            + "\n".join(f"- {violation}" for violation in violations)
-            + "\n\nRemaining records:\n"
-            + "\n".join(f"- {violation}" for violation in remaining)
-        )
-        return _ExecCrashed(
-            output=output,
-            exc=ExecChildError("exec_editable_install_poisoned", output, None),
-        )
     output = (
-        "exec editable install was poisoned, auto-repaired, and no child was started. "
-        "Retry this execute_code call.\n\n"
-        "Polluted records:\n" + "\n".join(f"- {violation}" for violation in violations)
+        "exec editable install is invalid and no child was started. "
+        "Do not retry this execute_code call. Ask the operator to run ava converge "
+        "on this host and inspect the source records before starting new work.\n\n"
+        "Invalid records:\n" + "\n".join(f"- {violation}" for violation in violations)
     )
     return _ExecCrashed(
         output=output,

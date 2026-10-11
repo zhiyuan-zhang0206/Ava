@@ -76,7 +76,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `resurrect` | terminated agent woken | business | — | events |
 | `hosted_legacy_adoption` | a hosted successor replaced a legacy NULL-resource owner before lease expiry on machine-local evidence (dead predecessor probe set) | business | — | events |
 | `compact` | agent context compacted | business | — | events |
-| `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue) | business | — | events |
+| `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped background model re-fires until the cause is corrected | business | — | events |
 | `exit` | agent process exited | business | — | events |
 | `label_change` | agent label changed | business | — | events |
 | `skill_invoked` | skill invoked by an agent | business | — | events |
@@ -130,7 +130,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `last_msg` | last-message check | noise | — | — | events | — |
 | `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to | — | events | — |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events | ✓ |
-| `delivery_poisoned` | delivery backlog — permanently-failing inbound poisoned (dispatch cap reached) | anomaly | inbound_id, dispatch_count, age_s | — | events | — |
 | `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | events | ✓ |
 | `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events | ✓ |
 | `exec_envelope` | exec envelope transfer cost (size + serialize time) — request snapshot / result delta | observation | envelope, op, size_bytes, serialize_ms | — | events | — |
@@ -147,7 +146,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `syntax_fix` | syntax repair executed | noise | fixes | — | events | ✓ |
 | `editable_pth_repaired` | poisoned editable-install pointer repaired to the prod source root | anomaly | — | — | events | — |
 | `editable_direct_url_repaired` | poisoned editable-install direct_url repaired to the prod source root | anomaly | — | — | events | — |
-| `exec_editable_install_poisoned` | poisoned editable install repaired before an exec child spawn | anomaly | — | — | events | — |
 | `inspect_metrics_coverage_gap` | inspector statistics read shows a live recorder gap (turns without durations inside the collection era); re-emitted on every read while it holds | anomaly | family, condition, availability | — | events | — |
 | `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value | — | events | — |
 | `sse_drop` | SSE event dropped | anomaly | kind, n | — | events | ✓ |
@@ -228,9 +226,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `recovery_breaker_halt` | recovery circuit breaker tripped — consecutive permanent provider rejections halted every automatic recovery path until a turn succeeds (task #3617) | anomaly | — | — | events | — |
 | `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events | — |
 | `llm_provider_error` | LLM provider failure | anomaly | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | events | ✓ |
-| `stream_stalled_retry` | stream stalled, retried (vendor/model/stage/elapsed_s carry the provider-health dimension; elapsed_s also maps to an OTLP histogram) | anomaly | vendor, model, stage, elapsed_s | LLM_ERROR | events | ✓ |
-| `stream_stall_pair_terminated` | two adjacent stream stalls (stream segment + non-streaming fallback) terminated the call early; retried on the delayed stall schedule | anomaly | vendor, model, stage, timeout_s | — | events | ✓ |
-| `stream_overloaded_retry` | stream overloaded, retried | anomaly | — | LLM_ERROR | events | ✓ |
 | `thinking_block_sanitized` | thinking block sanitized | noise | — | — | events | — |
 | `llm_cancelled` | LLM call cancelled | anomaly | — | — | events | — |
 | `compaction_completed` | applied context compaction size reduction and completed count | noise | compact_kind, compactions, history_chars, summary_chars, summary_history_ratio | — | events | — |
@@ -239,9 +234,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `compact_reminder` | compact reminder | noise | — | — | events | — |
 | `circuit_breaker_open` | heartbeat circuit breaker opened | noise | — | — | events | — |
 | `circuit_breaker_closed` | heartbeat circuit breaker closed | noise | — | — | events | — |
-| `circuit_breaker_compact` | forced overflow compact fired by the open breaker | noise | — | — | events | — |
 | `heartbeat_circuit_open` | heartbeat consumed while the breaker is open | noise | — | — | events | — |
-| `emergency_compact` | emergency compaction (overflow self-rescue) | noise | — | — | events | — |
 | `compact_boundary_stamp` | compact boundary stamp failed (segment anchor not recorded) | noise | — | — | events | — |
 | `silent_idle` | silent idle cost-boundary verdict | noise | output_tokens, cumulative_output_tokens, estimated_cost_usd, halted | — | events | — |
 | `llm_retry` | LLM retry sequence completion | observation | outcome, duration_seconds | — | events | — |

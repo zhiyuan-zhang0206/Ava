@@ -99,21 +99,6 @@ def test_compaction_completion_payload_exposes_ratio_and_frequency() -> None:
     )
 
 
-def test_stall_wave_mitigation_event_contract() -> None:
-    """Task #3884: the stall-retry event carries the provider-health payload
-    (vendor/model/stage/elapsed_s) and pair terminations register as an
-    anomaly-tier telemetry event of their own; task #3908 declares the pair's
-    typed payload too (vendor/model/stage/timeout_s)."""
-    assert payload_keys("stream_stalled_retry") == ("vendor", "model", "stage", "elapsed_s")
-    assert payload_keys("stream_stall_pair_terminated") == (
-        "vendor",
-        "model",
-        "stage",
-        "timeout_s",
-    )
-    assert tier_for("stream_stall_pair_terminated", "telemetry", "warning") == "anomaly"
-
-
 def test_recovery_drill_failed_payload() -> None:
     """A failed drill names its proof type without placing failure detail in labels."""
     from base.events.contract import payload_keys
@@ -134,15 +119,12 @@ def test_node_enter_is_file_destination() -> None:
     assert EVENTS["node_enter"].destination == "file"
 
 
-def test_llm_error_family_is_the_grafana_four() -> None:
-    """The LLM error family is one declaration; the pre-registry hand copies
-    drifted (the retired ops_series/ops_rollup had 3, the Grafana panel had 4)."""
+def test_llm_error_family_covers_provider_failures_and_turn_aborts() -> None:
+    """The current LLM error family comes from its shared declaration."""
     fam = family_events(LLM_ERROR_FAMILY)
     assert fam == (
         "llm_turn_aborted",
         "llm_provider_error",
-        "stream_stalled_retry",
-        "stream_overloaded_retry",
     )
 
 

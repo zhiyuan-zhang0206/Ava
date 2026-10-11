@@ -160,10 +160,4 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site="base/deploy/release/editable_install.py:repair_editable_direct_url",
     ),
-    "exec_editable_install_poisoned": telemetry_event(
-        "exec_editable_install_poisoned",
-        "poisoned editable install repaired before an exec child spawn",
-        tier="anomaly",
-        site="base/deploy/release/editable_install.py:guard_editable_install",
-    ),
 }
