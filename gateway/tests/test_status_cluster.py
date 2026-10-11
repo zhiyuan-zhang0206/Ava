@@ -8,6 +8,7 @@ that async fan-out path and only validate the SystemStatus.cluster data pipeline
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +53,7 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     pause with a file."""
     flag = tmp_path / "cluster_paused"
 
-    def paused(_db: Database, *, local_machine: MachineIdentity) -> bool:
+    def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
         return flag.exists()
 
     monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", paused)

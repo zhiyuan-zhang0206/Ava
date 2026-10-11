@@ -9,6 +9,7 @@ posture remains a status projection.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import cast
 
 import base.deploy.state.host_deploy_state
@@ -26,7 +27,7 @@ def is_paused(
     db: Database,
     state: base.deploy.state.host_deploy_state.HostDeployState | object | None = _UNSET,
     *,
-    local_machine: MachineIdentity,
+    machine_name: Callable[[], str],
 ) -> bool:
     """Whether this host is paused — the `host_deploy_state.posture` row written
     by the gateway's pause fan-out (R1, Task #1021).
@@ -38,7 +39,7 @@ def is_paused(
     """
     if state is _UNSET:
         try:
-            resolved_state = base.deploy.state.host_deploy_state.read(db, local_machine.name())
+            resolved_state = base.deploy.state.host_deploy_state.read(db, machine_name())
         except Exception:
             _log.warning(
                 "[cluster] is_paused: host_deploy_state read failed; reading as not paused",

@@ -85,13 +85,12 @@ def test_is_paused_judges_a_pre_read_state_without_another_db_read(
 
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _unexpected_read)
 
-    assert (
-        cluster_pause.is_paused(database, _state("paused"), local_machine=machine_identity) is True
-    )
-    assert (
-        cluster_pause.is_paused(database, _state("idle"), local_machine=machine_identity) is False
-    )
-    assert cluster_pause.is_paused(database, None, local_machine=machine_identity) is False
+    def _no_name() -> str:
+        raise AssertionError("is_paused resolved the name for a pre-read state")
+
+    assert cluster_pause.is_paused(database, _state("paused"), machine_name=_no_name) is True
+    assert cluster_pause.is_paused(database, _state("idle"), machine_name=_no_name) is False
+    assert cluster_pause.is_paused(database, None, machine_name=_no_name) is False
 
 
 def test_is_paused_without_an_argument_still_reads_fresh(
@@ -107,7 +106,7 @@ def test_is_paused_without_an_argument_still_reads_fresh(
 
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read)
 
-    assert cluster_pause.is_paused(database, local_machine=machine_identity) is True
+    assert cluster_pause.is_paused(database, machine_name=machine_identity.name) is True
     assert reads == 1
 
 

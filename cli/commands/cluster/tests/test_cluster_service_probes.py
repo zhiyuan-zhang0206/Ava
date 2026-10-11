@@ -49,7 +49,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
-    def fake_services_for_roles_annotated(
+    def fake_services_for_capabilities_annotated(
         _roles: object, *, machine: MachineIdentity
     ) -> tuple[tuple[ServiceSpec, str | None], ...]:
         assert isinstance(machine, MachineIdentity)
@@ -61,9 +61,8 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
         )
 
     monkeypatch.setattr(
-        _repo_commands,
-        "_services_for_roles_annotated",
-        fake_services_for_roles_annotated,
+        "ops.spec.services_for_capabilities_annotated",
+        fake_services_for_capabilities_annotated,
     )
 
     def _probe(spec: ServiceSpec) -> _probe_commands.ServiceProbe:
@@ -210,17 +209,16 @@ def test_service_probes_carry_the_failing_fact(
     )
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
-    def fake_services_for_roles_annotated(
+    def fake_services_for_capabilities_annotated(
         _roles: object, *, machine: MachineIdentity
     ) -> tuple[tuple[ServiceSpec, str | None], ...]:
         assert isinstance(machine, MachineIdentity)
         return ((spec, None),)
 
     monkeypatch.setattr(
-        _repo_commands,
-        "_services_for_roles_annotated",
-        fake_services_for_roles_annotated,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    )  # pyright: ignore[reportUnknownArgumentType]
+        "ops.spec.services_for_capabilities_annotated",
+        fake_services_for_capabilities_annotated,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    )
     monkeypatch.setattr(
         _probe_commands,
         "probe_service",
@@ -282,7 +280,7 @@ def test_service_probes_respect_durable_service_intent(
         return _probe_commands.ServiceProbe(True, "owned", "ready")
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr(_repo_commands, "_services_for_roles_annotated", roster)
+    monkeypatch.setattr("ops.spec.services_for_capabilities_annotated", roster)
     monkeypatch.setattr(_probe_commands, "probe_service", probe)
     monkeypatch.setattr(
         service_selection,

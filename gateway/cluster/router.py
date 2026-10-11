@@ -52,7 +52,7 @@ def _local_snapshot_blocking(
     paused flag (file), orchestration liveness (session probe) and the
     prod-source HEAD (git rev-parse) are all child-process / disk reads that
     must not run on the event loop."""
-    paused = cluster_is_paused(db, local_machine=local_machine)
+    paused = cluster_is_paused(db, machine_name=local_machine.name)
     return ClusterStatus(
         machine_name=local_machine.name(),
         serve_gateway=("gateway" in local_machine.role()),

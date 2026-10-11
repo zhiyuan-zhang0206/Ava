@@ -7,6 +7,7 @@ backends are recorded, while local drain uses the private test database.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -70,15 +71,15 @@ def fake_flag(
         return flag.exists()
 
     def _snapshot_paused(
-        _db: object, _state: object = None, *, local_machine: MachineIdentity
+        _db: object, _state: object = None, *, machine_name: Callable[[], str]
     ) -> bool:
-        assert local_machine is machine_identity
+        assert machine_name == machine_identity.name
         return flag.exists()
 
     monkeypatch.setattr("gateway.app._cluster_is_paused", _paused)
 
-    def paused(_db: Database, *, local_machine: MachineIdentity) -> bool:
-        assert local_machine is machine_identity
+    def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
+        assert machine_name == machine_identity.name
         return flag.exists()
 
     monkeypatch.setattr("gateway.cluster.router.cluster_is_paused", paused)
@@ -296,7 +297,7 @@ class TestPauseAgents:
         assert current.maintenance.phase == MaintenancePhase.DRAINED
         with TestClient(app) as client:
             assert client.get("/api/agents").status_code == 200
-        assert not cluster_pause.is_paused(database, local_machine=machine_identity)
+        assert not cluster_pause.is_paused(database, machine_name=machine_identity.name)
         assert pause_backend.killed == []
         assert pause_backend.has_session("ava-test-agent-host")
 
@@ -335,11 +336,11 @@ class TestUnpauseLocalCluster:
 
         agent_pause.pause_agents(database, event_bus, local_machine=machine_identity)
         set_posture(database, "paused", machine=machine_identity.name())
-        assert cluster_pause.is_paused(database, local_machine=machine_identity)
+        assert cluster_pause.is_paused(database, machine_name=machine_identity.name)
 
         cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
 
-        assert not cluster_pause.is_paused(database, local_machine=machine_identity)
+        assert not cluster_pause.is_paused(database, machine_name=machine_identity.name)
         assert not admission.held()
         assert pause_backend.spawned == pause_backend.killed == []
 
@@ -353,7 +354,7 @@ class TestUnpauseLocalCluster:
     ) -> None:
         cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
         cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
-        assert not cluster_pause.is_paused(database, local_machine=machine_identity)
+        assert not cluster_pause.is_paused(database, machine_name=machine_identity.name)
         assert pause_backend.spawned == pause_backend.killed == []
 
 
