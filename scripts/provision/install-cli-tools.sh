@@ -18,7 +18,7 @@
 # installed later via `sudo apt-get install ...`.
 
 set -euo pipefail
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/provision/_lib.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
 # The complete tool set, keyed by the binary each package provides (Debian
 # renames fd-find -> fdfind and bat -> batcat). A host that already carries

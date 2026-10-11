@@ -55,7 +55,7 @@ WORK = f"{CONTAINER_HOME}/verify"
 
 # What the Dockerfile copies into the build; the image tag hashes exactly these.
 CONTEXT_FILES = ("scripts/verify/Dockerfile", "scripts/verify/Dockerfile.dockerignore")
-CONTEXT_TREES = ("scripts/provision", "scripts/install-cli-tools.sh")
+CONTEXT_TREES = ("scripts/provision",)
 
 PREPARE_SOURCE = """
 set -euo pipefail
