@@ -40,7 +40,6 @@ class CompactContinuation:
 
     command: CompactCommand
     result: PreparedSummary | None
-    generation_failed: bool = False
 
 
 async def _settle_without_generation(
@@ -113,33 +112,29 @@ async def _generate_original(
     async with async_write_transaction(pool) as conn:
         await activate_work(conn, command.execution)
     ctx = replace(ctx, native_work=command.execution)
-    try:
-        async with subscribe_interrupt(
-            pool,
-            incarnation.agent_id,
-            incarnation=ctx.original_incarnation,
-            work=ctx.native_work,
-            resources=ctx.hosted_resources,
-        ) as interrupted:
-            summary = await interruptible_model(
-                generate_summary(
-                    list(state.messages),
-                    model,
-                    ctx.require_agent(),
-                    catalog=ctx.require_catalog(),
-                ),
-                interrupted,
-            )
-        continuation.result = PreparedSummary(
-            attempt_id=command.attempt_id,
-            summary=summary,
-            message_id=uuid4(),
-            created_at=datetime.now(UTC),
-            closing=closing_of(summary),
+    async with subscribe_interrupt(
+        pool,
+        incarnation.agent_id,
+        incarnation=ctx.original_incarnation,
+        work=ctx.native_work,
+        resources=ctx.hosted_resources,
+    ) as interrupted:
+        summary = await interruptible_model(
+            generate_summary(
+                list(state.messages),
+                model,
+                ctx.require_agent(),
+                catalog=ctx.require_catalog(),
+            ),
+            interrupted,
         )
-    except BaseException:
-        continuation.generation_failed = True
-        raise
+    continuation.result = PreparedSummary(
+        attempt_id=command.attempt_id,
+        summary=summary,
+        message_id=uuid4(),
+        created_at=datetime.now(UTC),
+        closing=closing_of(summary),
+    )
     return True
 
 

@@ -59,9 +59,7 @@ async def apply_prepared(
     incarnation: RuntimeIncarnation,
     ctx: AvaContext,
 ) -> bool:
-    """Intermediate reset is resumed without wiping/re-generating the result again."""
-    if await acknowledge(pool, saver, command, incarnation, resources=ctx.hosted_resources):
-        return True
+    """Apply the stored result of the attempt this call just claimed, then prove the cold head."""
     if not await authorize(pool, command, incarnation):
         return False
     marker = marker_for(command)
@@ -71,38 +69,34 @@ async def apply_prepared(
     if cold is None or command.result is None:
         raise CompactHeldError("compact source or durable result is absent")
     values = cold.checkpoint["channel_values"]
-    existing = values.get("native_compact")
-    if existing is None or type(marker).model_validate(existing) != marker:
-        compact = CompactState.model_validate(values.get("compact", {}))
-        if compact.version != command.acceptance.target.segment_version:
-            raise CompactHeldError("compact segment changed after original application permit")
-        result = command.result
-        update = build_compact_transition(
-            result.summary,
-            resume=END,
-            summary_kwargs={
-                "id": str(result.message_id),
-                "additional_kwargs": {
-                    "ava_msg_type": AvaMsgType.COMPACT_REQUEST.value,
-                    "ava_created_at": result.created_at.isoformat(),
-                    "ava_compact_id": str(command.acceptance.command_id),
-                },
+    compact = CompactState.model_validate(values.get("compact", {}))
+    if compact.version != command.acceptance.target.segment_version:
+        raise CompactHeldError("compact segment changed after original application permit")
+    result = command.result
+    update = build_compact_transition(
+        result.summary,
+        resume=END,
+        summary_kwargs={
+            "id": str(result.message_id),
+            "additional_kwargs": {
+                "ava_msg_type": AvaMsgType.COMPACT_REQUEST.value,
+                "ava_created_at": result.created_at.isoformat(),
+                "ava_compact_id": str(command.acceptance.command_id),
             },
-        )
-        update.update(
-            {
-                "native_compact": marker,
-                "native_work": command.execution,
-                "native_cancel": None,
-                "compact": compact.next_segment(),
-                "halted": True,
-                "turn_active": False,
-                "turn_idle": True,
-            }
-        )
-        await graph.aupdate_state(
-            config, Command(update=update, goto=INIT_CONTEXT), as_node="claim"
-        )
+        },
+    )
+    update.update(
+        {
+            "native_compact": marker,
+            "native_work": command.execution,
+            "native_cancel": None,
+            "compact": compact.next_segment(),
+            "halted": True,
+            "turn_active": False,
+            "turn_idle": True,
+        }
+    )
+    await graph.aupdate_state(config, Command(update=update, goto=INIT_CONTEXT), as_node="claim")
     # The shared INIT_CONTEXT owner materializes only the parked summary and
     # standing head; END prevents ordinary claim/model work before cold ACK.
     await graph.ainvoke(None, config=config, context=ctx)  # pyright: ignore[reportUnknownMemberType]

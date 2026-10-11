@@ -14,12 +14,10 @@ future version" — once per type per process start; a future langgraph blocks
 unregistered types outright.
 """
 
-# (module, name) pairs. `agent.state`'s five nested sub-states are the only
-# framework channel values serialized as pydantic-v2 ext objects today; the
-# dynamic `AgentState` subclass name is registered defensively (the state
-# object itself is not a channel value, but naming it costs nothing and
-# survives a future format change). Keep in sync with `agent/state.py` —
-# `agent.state.checkpoint_msgpack_allowlist` starts from this set.
+# (module, name) pairs. The nested sub-states of `agent.state_channels` are the
+# only framework channel values serialized as pydantic-v2 ext objects today.
+# Keep in sync with `agent/state.py` — `agent.state.checkpoint_msgpack_allowlist`
+# starts from this set.
 STATIC_CHECKPOINT_MSGPACK_TYPES: frozenset[tuple[str, str]] = frozenset(
     {
         ("base.agents.compaction.models", "CompactMarker"),
@@ -27,19 +25,6 @@ STATIC_CHECKPOINT_MSGPACK_TYPES: frozenset[tuple[str, str]] = frozenset(
         ("base.agents.compaction.models", "CompactTarget"),
         ("base.agents.incarnation.native_work_models", "NativeWorkTarget"),
         ("base.agents.incarnation.native_work_models", "NativeCancelMarker"),
-        # Legacy pairs: checkpoints written before the issue #156 split carry
-        # `("agent.state", ...)` envelopes; `agent.state` re-exports the models
-        # from `agent.state_channels`, so these must stay for old checkpoints to
-        # keep deserializing.
-        ("agent.state", "AttachState"),
-        ("agent.state", "AttachEntry"),
-        ("agent.state", "CompactState"),
-        ("agent.state", "MemoryState"),
-        ("agent.state", "ContextReset"),
-        ("agent.state", "CapabilitiesState"),
-        ("agent.state", "CircuitState"),
-        ("agent.state", "AgentState"),
-        # Current pairs: freshly-written checkpoints carry the real module.
         ("agent.state_channels", "AttachState"),
         ("agent.state_channels", "AttachEntry"),
         ("agent.state_channels", "CompactState"),

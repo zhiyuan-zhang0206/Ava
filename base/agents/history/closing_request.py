@@ -5,8 +5,8 @@ segment's whole conversation plus one instruction message; the provider reports 
 request's `input_tokens`. It is the only request that sees the segment's tail (the messages
 after its last AIMessage), so it anchors the tail's token counts. The compaction stamps it into
 the boundary checkpoint's metadata (`mark_compact_boundary`) and the history read hands it back
-per segment (`FullHistory.segment_closings`). An agent-written summary, or the no-LLM fallback,
-makes no such call and leaves no anchor.
+per segment (`FullHistory.segment_closings`). An agent-written summary makes no such call and
+leaves no anchor.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ class ClosingRequest:
     @classmethod
     def from_metadata(cls, raw: object) -> ClosingRequest | None:
         """The anchor stored in a boundary's metadata; None when the compaction left none
-        (every boundary written before the anchor existed, and every no-LLM compaction)."""
+        (an agent-written summary makes no closing call)."""
         if not isinstance(raw, dict):
             return None
         data: dict[str, Any] = raw  # pyright: ignore[reportUnknownVariableType]

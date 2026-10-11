@@ -26,10 +26,10 @@ The dead-page recovery writes and notifications live in the package-private
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 from weakref import WeakValueDictionary
 
@@ -38,10 +38,8 @@ from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMet
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.constants import PUSH
-from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
-from agent.hooks.repair import dangling_tool_pairing_repairs
 from agent.startup._page_reconcile import (
     _PAGE_RECOVERY_MIN_INTERVAL_S as _PAGE_RECOVERY_MIN_INTERVAL_S,
 )
@@ -411,45 +409,6 @@ async def consume_claimed_inbounds(
             agent_id=agent_id,
             consumed=consumed,
         )
-
-
-async def repair_dangling_tool_use_at_startup(
-    graph: CompiledStateGraph[Any, Any, Any, Any],
-    agent_id: int,
-) -> None:
-    """Repair dangling tool_use/tool_result pairing left by a hard-cancelled
-    previous process, before the graph loop begins.
-
-    Runs before graph.ainvoke — i.e. before the claim node can feed the
-    history to an LLM (a pending compact_request's summarization call) or
-    append inbounds behind the dangling tail. Scans the whole committed
-    history, not just the tail: an earlier boot can have buried a dangling
-    tool_use mid-history when the consolidating checkpoint `aput` failed at
-    shutdown and the dangling AIMessage rode in as a pending write after this
-    repair already ran (agents 236/238, 2026-07-13). It also drops a
-    tool_result whose carrying tool_use was lost (agent 5333, 2026-08-31).
-    Pending-write shapes are invisible to `aget_state` here; the before_llm
-    hook twin (`agent/hooks/repair.py`) covers them once the graph materializes
-    the write.
-    """
-    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
-    snapshot = await graph.aget_state(config)
-    repairs = dangling_tool_pairing_repairs(
-        snapshot.values.get("messages", []),
-        pending_notes=snapshot.values.get("pending_exec_notes", []),
-    )
-    if not repairs:
-        return
-    await graph.aupdate_state(config, {"messages": repairs, "pending_exec_notes": []})
-    checkpointer = cast(AsyncPostgresSaver, graph.checkpointer)  # pyright: ignore[reportUnknownMemberType]
-    flush = getattr(checkpointer, "_ava_nstep_flush", None)
-    if flush is not None:
-        await cast(Callable[[str], Awaitable[None]], flush)(str(agent_id))
-    logger.warning(
-        "repaired dangling tool_use/tool_result pairing from a hard-cancelled previous process",
-        event="dangling_tool_pairing_repaired",
-        agent_id=agent_id,
-    )
 
 
 async def notify_desktop_permissions_at_startup() -> None:

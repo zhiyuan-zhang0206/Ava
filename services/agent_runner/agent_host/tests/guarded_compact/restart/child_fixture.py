@@ -9,7 +9,6 @@ from typing import Any
 from uuid import uuid4
 
 import psycopg
-from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
 from base.agents.incarnation.resources import ResourceBirth
@@ -60,28 +59,3 @@ def prepare_agent(db_conn: psycopg.Connection) -> int:
     )
     db_conn.commit()
     return agent
-
-
-async def kill_at_boundary(
-    child: subprocess.Popen[str],
-    client: TestClient,
-    path: str,
-    headers: dict[str, str],
-    stage: str,
-) -> tuple[Any, Any, Any]:
-    target = await read_child(child)
-    accepted = client.post(path + "/compact-history", json=target, headers=headers)
-    assert accepted.status_code == 202, accepted.text
-    assert child.stdin is not None
-    child.stdin.write("compact\n")
-    child.stdin.flush()
-    boundary = await read_child(child)
-    assert boundary == {"stage": stage, "provider_calls": 1}
-    active = client.get(path + "/native-work", headers=headers)
-    assert active.status_code == 200, active.text
-    cancelled = client.post(path + "/cancel-work", json=active.json(), headers=headers)
-    assert cancelled.status_code == 200, cancelled.text
-    child.kill()
-    await asyncio.wait_for(asyncio.to_thread(child.wait), 10)
-    assert child.returncode is not None and child.returncode < 0
-    return accepted, active, cancelled

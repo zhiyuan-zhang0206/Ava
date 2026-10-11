@@ -75,49 +75,6 @@ def test_allowlist_round_trip_is_silent(state, caplog) -> None:
     assert _warning_messages(caplog) == []  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_legacy_checkpoint_envelopes_still_resolve() -> None:
-    """Issue #156 compatibility lock: a checkpoint written BEFORE the split
-    carries ext envelopes naming `("agent.state", "<Name>")`. The serializer
-    resolves them by module attribute lookup, and `agent.state` re-exports the
-    models from `agent.state_channels` — so the legacy envelope must revive to
-    the CURRENT class, not to a raw dict or None.
-
-    Simulated with a dynamic subclass whose `__module__` is the legacy value
-    (the envelope writes `__class__.__module__`), round-tripped through the
-    allowlist serde."""
-    serde = _allowlist_serde()
-    cases = [
-        (AttachEntry, lambda c: c(path="/example/render.png", label=None)),
-        (AttachState, lambda c: c(pending=[AttachEntry(path="/example/render.png", label=None)])),
-        (CompactState, lambda c: c(version=2)),
-        (MemoryState, lambda c: c(injected_paths={"a.md"})),
-        (ContextReset, lambda c: c(resume="claim")),
-        (CapabilitiesState, lambda c: c(indexed={"x"})),
-    ]
-    for real_cls, make in cases:
-        legacy_cls = type(real_cls.__name__, (real_cls,), {"__module__": "agent.state"})
-        restored = serde.loads_typed(serde.dumps_typed(make(legacy_cls)))
-        # Revives to the real (state_channels) class via the agent.state re-export.
-        assert type(restored) is real_cls
-        assert restored == make(real_cls)
-
-
-def test_legacy_allowlist_entries_stay_present() -> None:
-    """The legacy `("agent.state", ...)` pairs must remain allowlisted — old
-    checkpoints carry those names and would warn (then block) without them."""
-    allow = checkpoint_msgpack_allowlist()
-    for name in (
-        "AttachState",
-        "AttachEntry",
-        "CompactState",
-        "MemoryState",
-        "ContextReset",
-        "CapabilitiesState",
-    ):
-        assert ("agent.state", name) in allow
-        assert ("agent.state_channels", name) in allow
-
-
 def test_default_permissive_serde_warns_for_same_types(
     caplog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -182,14 +139,29 @@ def test_allowlist_omits_plugin_state_classes_not_passed() -> None:
 
 def test_allowlist_static_entries_always_present() -> None:
     allow = checkpoint_msgpack_allowlist()
-    assert ("agent.state", "CompactState") in allow
-    assert ("agent.state", "AttachState") in allow
-    assert ("agent.state", "AttachEntry") in allow
-    assert ("agent.state", "MemoryState") in allow
-    assert ("agent.state", "ContextReset") in allow
-    assert ("agent.state", "CapabilitiesState") in allow
-    # dynamic AgentState subclass name (belt & suspenders; not a channel value today)
-    assert ("agent.state", "AgentState") in allow
+    for name in (
+        "CompactState",
+        "AttachState",
+        "AttachEntry",
+        "MemoryState",
+        "ContextReset",
+        "CapabilitiesState",
+    ):
+        assert ("agent.state_channels", name) in allow
+
+
+def test_pre_split_agent_state_envelopes_are_blocked() -> None:
+    """A checkpoint naming `("agent.state", ...)` predates the channel split: it is not revived.
+
+    Simulated with a subclass whose `__module__` is the pre-split value (the
+    envelope writes `__class__.__module__`); the allowlist serde blocks it and
+    hands back the raw dict instead of the channel model.
+    """
+    serde = _allowlist_serde()
+    pre_split = type("CompactState", (CompactState,), {"__module__": "agent.state"})
+    restored = serde.loads_typed(serde.dumps_typed(pre_split(version=2)))
+    assert type(restored) is dict
+    assert not {pair for pair in checkpoint_msgpack_allowlist() if pair[0] == "agent.state"}
 
 
 def test_static_allowlist_covers_all_nested_substates() -> None:

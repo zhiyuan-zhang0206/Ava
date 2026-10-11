@@ -13,8 +13,7 @@ class SummaryText(str):
 
     `closing` is that call as a `ClosingRequest` (its provider input tokens, model and the
     instruction's size), what `stamp_compact_boundary` writes into the boundary checkpoint so the
-    sealed segment's tail can be priced. A plain `str` summary (agent-written, the no-LLM
-    fallback) has none. It is a `str` so every consumer of the summary text is unchanged.
+    sealed segment's tail can be priced. A plain `str` summary (agent-written) has none. It is a `str` so every consumer of the summary text is unchanged.
     """
 
     closing: ClosingRequest | None

@@ -75,14 +75,10 @@ from pydantic.fields import FieldInfo
 
 from agent.messages.guard import guarded_add_messages, guarded_delta_reducer
 
-# The five nested sub-state channel models live in agent/state_channels
-# (issue #156 — this module sat at the 800-line ceiling). They are RE-EXPORTED
-# here, never re-defined: LangGraph checkpoints written before the split carry
-# ("agent.state", "<Name>") ext envelopes, and the serializer resolves them by
-# module attribute lookup — so old checkpoints keep deserializing only while
-# these names stay importable from agent.state. New checkpoints carry
-# ("agent.state_channels", "<Name>") and are allowlisted in
-# base/agents/history/checkpoint_serde.py alongside the legacy pairs.
+# The nested sub-state channel models live in agent/state_channels (issue #156 —
+# this module sat at the 800-line ceiling) and are re-exported here for importers.
+# Checkpoints carry ("agent.state_channels", "<Name>") ext envelopes, allowlisted
+# in base/agents/history/checkpoint_serde.py.
 from agent.state_channels import AttachEntry as _AttachEntry
 from agent.state_channels import (
     AttachState,

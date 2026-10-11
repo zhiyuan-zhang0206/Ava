@@ -1,12 +1,11 @@
-"""Offline actual hosted source/generation stopped by SIGKILL at a durable boundary."""
+"""Offline actual hosted compact child that parks after its original restart settles."""
 
 import asyncio
 import json
 import os
 import sys
-from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from typing import Any, Protocol, cast
+from typing import Any
 
 import psycopg
 import pytest
@@ -20,14 +19,9 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import process_name
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.invocation.compact import apply as compact_apply
 from services.agent_runner.agent_host.invocation.compact import execute as compact_execute
 from services.agent_runner.agent_host.invocation.compact import lifecycle as compact_lifecycle
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel, make_host
-
-
-class _GraphInvocation(Protocol):
-    ainvoke: Callable[..., Awaitable[Any]]
 
 
 async def park(stage: str, model: SummaryModel) -> None:
@@ -63,45 +57,6 @@ def install(
 
         patch.setattr(driver, "settle_original_restart", after_close)
         patch.setattr(source, "settle_original_restart", after_close)
-    elif stage == "prepared":
-        original = compact_execute.save_result
-
-        async def save(*args: Any, **kwargs: Any) -> Any:
-            result = await original(*args, **kwargs)
-            await park(stage, model)
-            return result
-
-        patch.setattr(compact_execute, "save_result", save)
-    elif stage == "applying":
-        authorize = compact_apply.authorize
-
-        async def permit(*args: Any, **kwargs: Any) -> bool:
-            result = await authorize(*args, **kwargs)
-            assert result
-            await park(stage, model)
-            return result
-
-        patch.setattr(compact_apply, "authorize", permit)
-    elif stage == "reset":
-        graph_type = type(host._graph)
-        invoke = cast(_GraphInvocation, graph_type).ainvoke
-
-        async def partial_reset(graph: Any, *args: Any, **kwargs: Any) -> Any:
-            await compact_apply.flush_checkpoint(host._checkpointer, agent)
-            await park(stage, model)
-            return await invoke(graph, *args, **kwargs)
-
-        # Admission copies the compiled graph through LangGraph's public API;
-        # intercept the actual receiver rather than one discarded instance.
-        patch.setattr(graph_type, "ainvoke", partial_reset)
-    elif stage in ("applied", "short"):
-        close = compact_execute.close_terminal
-
-        async def terminal(*args: Any, **kwargs: Any) -> bool:
-            await park(stage, model)
-            return await close(*args, **kwargs)
-
-        patch.setattr(compact_execute, "close_terminal", terminal)
     else:
         raise ValueError("unknown actual child compact boundary")
 
@@ -110,9 +65,7 @@ async def main(*, database_gate: ProcessDbGate) -> None:
     agent = int(os.environ["AVA_TEST_COMPACT_AGENT"])
     stage = os.environ["AVA_TEST_COMPACT_STAGE"]
     patch = pytest.MonkeyPatch()
-    model = SummaryModel(
-        responses=["short" if stage == "short" else "Original child summary. " * 100]
-    )
+    model = SummaryModel(responses=["Original child summary. " * 100])
     ava.ensure_plugins_loaded()
     installation = installed()
     assert installation is not None

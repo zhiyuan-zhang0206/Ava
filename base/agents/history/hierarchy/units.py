@@ -274,23 +274,21 @@ def inbound_type(source: str | None) -> str:
 def _inbound_content(msg: BaseMessage) -> str:
     """An inbound's content without its envelope header, cut where the writer recorded
     the content to start (`ava_inbound_body_start`; the sender is the unit's source).
-
-    Legacy boundary: inbounds written before that field existed carry no offset, and the
-    header is not parsed out of their text; they show whole, header included. Every new
-    inbound records the offset, so this branch only ever sees historical messages."""
+    Every inbound records the offset; a message without it raises `ValueError`."""
     start = read_ava_kwargs(msg).get("ava_inbound_body_start")
-    return msg.text if start is None else msg.text[start:]
+    if start is None:
+        raise ValueError("inbound message lacks ava_inbound_body_start")
+    return msg.text[start:]
 
 
 def _result_body(msg: ToolMessage) -> str:
     """A tool result's output without its envelope header, cut where the writer recorded
-    the body to start (`ava_exec_body_start`).
-
-    Legacy boundary: results written before that field existed carry no offset, and the
-    header is not parsed out of their text; they show whole, header line included. Every
-    new exec result records the offset, so this branch only ever sees historical messages."""
+    the body to start (`ava_exec_body_start`). Every exec result records the offset; a
+    message without it raises `ValueError`."""
     start = read_ava_kwargs(msg).get("ava_exec_body_start")
-    return msg.text if start is None else msg.text[start:]
+    if start is None:
+        raise ValueError("exec result lacks ava_exec_body_start")
+    return msg.text[start:]
 
 
 def _output_part(messages: Sequence[BaseMessage], unit: MessageUnit) -> str | None:
@@ -355,8 +353,8 @@ def catalog_line(unit: MessageUnit, messages: Sequence[BaseMessage]) -> str:
 # - **call**: the tool call, an instant at the end of the stream;
 # - **output**: the execution, from the end of the stream to the tool result.
 #
-# When the AIMessage also carries text and its reasoning time is recorded (`ava_reasoning_ms_by_block`,
-# or the legacy `ava_reasoning_ms`), the thinking block ends after that time and the text block takes
+# When the AIMessage also carries text and its reasoning time is recorded (`ava_reasoning_ms_by_block`),
+# the thinking block ends after that time and the text block takes
 # the rest of the stream; without the record the text is an instant at the end, like the call. A turn
 # that is only text spans its stream. Inbound messages and notes are their own blocks, as units.
 # Blocks without a time are not produced (legacy messages carry none).
@@ -389,8 +387,7 @@ def _reasoning_ms(msg: AIMessage) -> int | None:
     by_block = kwargs.get("ava_reasoning_ms_by_block")
     if isinstance(by_block, dict) and by_block:
         return sum(int(ms) for ms in cast("dict[str, int]", by_block).values())
-    legacy = kwargs.get("ava_reasoning_ms")
-    return int(legacy) if isinstance(legacy, int | float) else None
+    return None
 
 
 def _call_preview(msg: AIMessage) -> str:

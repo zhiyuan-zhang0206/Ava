@@ -20,9 +20,9 @@ its own** under that key, recorded at
 `coding-session-owners/<key digest>/<generation>.json` beside the host cluster
 registry, so several sessions can share a workspace. All transitions under one
 key take the key's one lock (`<key digest>.lock`); distinct workspaces keep
-independent locks. The single-slot record the earlier layout kept at
-`<key digest>.json` is still read, so a launch can reclaim what it left behind;
-a live one is left running.
+independent locks. A launch reclaims only the dead generations recorded under its own
+key; a record at any other path, such as a pre-generation `<key digest>.json`, is
+neither read nor removed.
 
 Each record carries an opaque generation, owner agent, launch phase, full PTY
 handle, expiry, numeric and full supervisor handle, task/work file paths (both
