@@ -60,12 +60,12 @@ as an ordinary blocking failure. Those land in `undelivered`, never
 path (no failure fence), and certification still requires the applied
 restart, so a drain never certifies an un-flushed tail. Other failures block.
 
-Phases are `preparing → draining → drained → stopping → stopped → starting →
-ready`, owned by `state.MaintenancePhase`. Journal decoding restores this enum
-and rejects unknown values; the certified drain subset is shared by receipt
-classification and the quiesced admission gate. `ava stop` / `ava restart` walk the first five, and no command enters
-`starting` or `ready` any more (they remain in the journal vocabulary so an
-older journal still decodes). A failed prepare/drain/stop keeps the hold. Ordinary
+Phases are `preparing → draining → drained → stopping → stopped`, owned by
+`state.MaintenancePhase`; `ava stop` / `ava restart` walk all five. Journal
+decoding restores this enum and rejects unknown values; the certified drain
+subset is shared by receipt classification and the quiesced admission gate.
+There is no start phase: `ava start` authorizes bring-up against the `stopped`
+(or earlier) hold and releases it after readiness. A failed prepare/drain/stop keeps the hold. Ordinary
 `ava start` authorizes the existing operation for bring-up and resumes after
 readiness. `authorized_start` returns the operation snapshot; nested calls pass
 it explicitly and verify the journal holder and acquisition time. It grants
@@ -98,7 +98,7 @@ and exits; `data_plane/maintenance_stop` saves Redis before its verified shutdow
 roster, retaining desired configuration and data. None of these local checks
 proves that every remote or unregistered writer has stopped.
 
-During a stopped/starting hold, gateway `GET /api/health` remains a control-plane
+During a stopped hold, gateway `GET /api/health` remains a control-plane
 identity and real database probe. It remains public and reports database
 failure as degraded; it does not certify business admission. Ops `status_probe`
 also stays reachable and remains counted through completion. Its existing
