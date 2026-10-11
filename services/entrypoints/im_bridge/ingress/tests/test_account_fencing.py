@@ -157,7 +157,6 @@ async def test_epoch_replacement_between_preflight_and_effect_is_rejected_in_sql
             WeixinIngressStore(native_weixin.pool).initialize,
             "https://provider.example",
             "replacement",
-            None,
         )
     finally:
         release.set()

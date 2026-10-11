@@ -289,12 +289,6 @@ class IMBridgeCore(SpawnMenuMixin):
             return
         remaining: list[_OutboxEntry] = []
         for entry in entries:
-            if entry.channel == "weixin":
-                _log.warning(
-                    "im_bridge: legacy Weixin journal held reason=unbound_provider_account"
-                )
-                remaining.append(entry)
-                continue
             try:
                 await self.gateway.send_message(
                     entry.agent_id,
