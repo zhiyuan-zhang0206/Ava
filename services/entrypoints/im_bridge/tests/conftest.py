@@ -7,12 +7,12 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
-from services.entrypoints.im_bridge.outbound.types import (
+from services.entrypoints.im_bridge.types import (
+    IMAdapter,
     OutboundAdapterKind,
     OutboundChunk,
     PreparedOutboundSend,
 )
-from services.entrypoints.im_bridge.types import IMAdapter
 from tests.fixtures.model_catalog import add_bindings as add_bindings
 from tests.fixtures.model_catalog import add_models as add_models
 from tests.fixtures.model_catalog import model_catalog as model_catalog

@@ -18,18 +18,21 @@ from base.deploy.maintenance import admission
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound.types import (
     OutboundAccountMismatchError,
-    OutboundAdapterKind,
-    OutboundChunk,
     OutboundIdentityConflictError,
     OutboundIntent,
     OutboundSource,
     OutboundSourceKind,
     OutboundStatus,
-    PreparedOutboundSend,
     TimelineCandidate,
 )
 from services.entrypoints.im_bridge.outbound.worker import IMOutboxWorker
-from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
+from services.entrypoints.im_bridge.types import (
+    IMAdapter,
+    OutboundAdapterKind,
+    OutboundChunk,
+    PreparedOutboundSend,
+    SendNotStartedError,
+)
 
 
 @pytest.fixture
