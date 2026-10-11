@@ -462,10 +462,9 @@ repos:
         files: \.py$
 
       # Every UPDATE that writes agents_meta.status='terminated' must stamp
-      # termination_source in the SAME statement. A NULL source is permanently
-      # unresurrectable (CrashResurrectController's claim filters on it), so a
-      # write site that forgets leaves a corpse nothing can revive and silently
-      # strands its queued inbound work — no error, no log. AST-based, so it
+      # termination_source in the SAME statement. A NULL source means a
+      # pre-column legacy row, so a write site that forgets leaves a corpse
+      # with no recorded cause of death — no error, no log. AST-based, so it
       # catches the bind-parameter form (`SET status = %s` with
       # AgentStatus.TERMINATED in the params) that a grep misses; that is exactly
       # the form the boot-gate site slipped through in. The script self-filters to

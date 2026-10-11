@@ -393,9 +393,6 @@ def _restart_blocking(
 ) -> int | None:
     """Sync restart section — via to_thread. Returns the inbound id, or None
     when the agent is already terminated."""
-    from psycopg import sql
-
-    from base.agents.incarnation.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
     from base.db.transaction import write_transaction
     from base.packages.plugins.config_registration import (
         InvalidConfigOverlay,
@@ -414,14 +411,11 @@ def _restart_blocking(
 
     with write_transaction(db_pool) as conn:
         row = conn.execute(
-            sql.SQL("SELECT status,{} FROM agents_meta WHERE id=%s FOR UPDATE").format(
-                sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET)
-            ),
-            (agent_id,),
+            "SELECT status FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,)
         ).fetchone()
         if row is None:
             raise RuntimeError(f"agent {agent_id} does not exist")
-        if row[0] == "terminated" and row[1] is not True:
+        if row[0] == "terminated":
             return None
         payload: dict[str, object] | None = None
         if body.config_overlay:

@@ -141,8 +141,6 @@ class PtyService:
         self._tasks: asyncio.TaskGroup | None = None
         self._stop: asyncio.Event | None = None
         self._finished = False
-        # The start-time sweep result remains available for local diagnostics.
-        self.swept = closure.Outcome()
         self._methods: dict[str, Callable[[dict[str, Any]], dict[str, Any] | None]] = {
             "ping": self._ping,
             "has": self._has,

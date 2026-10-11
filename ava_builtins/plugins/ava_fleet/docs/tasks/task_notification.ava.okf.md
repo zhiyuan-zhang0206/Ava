@@ -39,7 +39,7 @@ The skip rules for the two legs are asymmetric — the new owner is always notif
 | `new_owner is None` | Defensive: only the root task has no owner, a normal transfer path won't hit this |
 | `new_owner == actor` (caller themselves) | No need to tell themselves they've taken over |
 
-A new owner that is already `terminated` is still sent — the queued assignment records `delivery_resurrect=true`; delivery recovery revives a terminated target automatically. This prevents tasks from becoming stranded when assigning to a terminated agent (the assignment notification and the task body are delivered together to the revived owner).
+A new owner that is already `terminated` is still sent — the queued assignment records `delivery_resurrect=true`, and the committing request makes one resurrect attempt for the target right after the commit. This prevents tasks from becoming stranded when assigning to a terminated agent (the assignment notification and the task body are delivered together to the revived owner). The attempt is not repeated by any background sweep.
 
 **Old owner leg** (whether to send "task left you"):
 
@@ -68,10 +68,11 @@ content, recipient and `delivery_resurrect` policy committed with it. Failed
 notification acceptance rolls the mutation back; failed post-commit telemetry,
 Redis hints or resurrection do not erase that accepted intent.
 
-The normal watchdog pending scan repairs live-owner wakes. Its terminated-owner
-recovery also selects internal task assignments marked `task_notification=true`
-and `delivery_resurrect=true`, linked to a task currently owned by that recipient.
-Informational previous-owner notes, update notes and reminders never resurrect.
+The normal watchdog pending scan repairs live-owner wakes. It never revives a
+terminated owner. Internal task assignments marked `task_notification=true` and
+`delivery_resurrect=true` request one resurrect attempt from the committing
+request; informational previous-owner notes, update notes and reminders never
+resurrect.
 
 Reassignment closes earlier pending assignment directions in the task transaction,
 with `delivery_result={outcome: superseded, reason: task_reassigned}`. This also
@@ -81,9 +82,9 @@ ownership fence through commit, refusing an in-flight stale notification.
 Already claimed notes retain normal inbound processing semantics; this queue
 cannot revoke an instruction an agent has already consumed.
 
-Existing force-termination, suppression, recovery-breaker, attempt cooldown and
-age limits still apply. Once the terminated-owner age deadline expires, the
-row is retained as `done` with
+Existing force-termination, suppression and recovery-breaker limits still apply.
+If the owner stays terminated, the row is retained as `done` once the
+terminated-owner age limit expires, with
 `delivery_result={outcome: failed, reason: resurrection_deadline_expired}` so an
 operator can inspect the accepted instruction and its final failure.
 

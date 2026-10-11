@@ -18,7 +18,6 @@ class NativeWorkPhase(StrEnum):
 class NativeCancelOutcome(StrEnum):
     ACCEPTED = "accepted"
     APPLIED = "applied"
-    RECOVERED_STOPPED = "recovered_stopped"
     UNCERTAIN = "uncertain"
 
 

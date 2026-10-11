@@ -22,17 +22,6 @@ from psycopg.types.json import Jsonb
 
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
-# Correlated against the unaliased agents_meta row. Selection is an optimization;
-# the same predicate also fences the final automatic resurrection UPDATE.
-FAILED_RESTART_FOR_CURRENT_TARGET: LiteralString = (
-    "EXISTS(SELECT 1 FROM inbound_messages failed WHERE failed.agent_id=agents_meta.id "
-    "AND failed.target_generation=agents_meta.runtime_generation "
-    "AND failed.target_owner=agents_meta.runtime_owner AND failed.kind='restart' "
-    "AND failed.status='done' AND failed.applied_at IS NOT NULL AND failed.observed_at IS NULL "
-    "AND failed.payload->'lifecycle_result'->>'outcome'='failed' "
-    "AND failed.payload->'lifecycle_result'->>'reason'='restart_deadline_expired')"
-)
-
 # System-family chats are notifications. Historical recovery markers do not
 # exempt them or revive a terminated owner. SQL and Python share this predicate.
 SYSTEM_NOTICE_SOURCE: LiteralString = "(m.source = 'system' OR starts_with(m.source, 'system:'))"
