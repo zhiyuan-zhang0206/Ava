@@ -61,7 +61,7 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 import ava
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever

@@ -18,7 +18,7 @@ class _FixtureConfig(BaseModel):
 def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> dict[str, BaseModel]:
     """The SDK reads its current installation's own config bindings."""
     import ava
-    from ava.sdk_surface.install import Installation
+    from ava.sdk_surface.installation import Installation
     from base.packages.plugins.extensions import EMPTY
 
     configs: dict[str, BaseModel] = {}

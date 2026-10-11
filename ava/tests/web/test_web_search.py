@@ -16,7 +16,7 @@ from pydantic import SecretStr
 
 import ava
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from ava.tests.web._web_helpers import _FakeResp
 from ava.web import SearchError, WebError
 from base.config import settings

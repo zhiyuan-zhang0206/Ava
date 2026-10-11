@@ -27,7 +27,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from tests.fixtures.pin_agent import exec_context
 
 # Fixed test identity — the child never dials a real DB/Redis here.

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 import ava
 from agent import state as state_module
 from ava import external
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority

@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
@@ -98,7 +98,7 @@ def load_installation(
     The shared graph is built once and cannot take a new registry. The host
     retains this installation's boot image until its normal process restart.
     """
-    from ava.sdk_surface.install import installed
+    from ava.sdk_surface.installation import installed
     from base.config import Settings
     from base.config.service_read import ConfigAuthority
     from base.lm.plugin_providers import build_model_catalog

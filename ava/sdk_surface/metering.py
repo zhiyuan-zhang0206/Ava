@@ -270,7 +270,7 @@ def uninstall(ledger: tuple[tuple[Any, str], ...]) -> None:
 
     ``ledger`` is the record ``install()`` returned — the ``(parent, attr)`` pairs it
     actually wrapped, in wrap order; the Installation carries it
-    (``install.installed().metered``), and the consumer-local SDK restore
+    (``installation.installed().metered``), and the consumer-local SDK restore
     (``tests/fixtures/unit/sdk.py``) passes that ledger. Direct callers own their
     returned ledger and restore it in their own ``finally``.
 

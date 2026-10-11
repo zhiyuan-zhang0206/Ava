@@ -8,8 +8,8 @@ load on their own (surface-only) boot (task #3633). The state class is in `_stat
 and the prompt sections in `_prompt_sections.py`; this module imports no `ava`, because
 its hooks run in the agent host and operate on the graph state they are handed.
 
-The surface reaches this plugin's state through `plugin.read_state` /
-`plugin.update_state`, which build the handle here at each call (a child upgrades
+The surface reaches this plugin's state through `_state_access.read_state` /
+`_state_access.update_state`, which build the handle here at each call (a child upgrades
 to this face before any state is injected — `agent/execution/child.py`; a stateful
 request never takes the surface-only path).
 """

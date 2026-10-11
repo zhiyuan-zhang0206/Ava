@@ -66,8 +66,9 @@ import inspect
 import sys
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
 from typing import Any
+
+from .installation import WrapLayer, installed
 
 
 class WrapError(Exception):
@@ -78,23 +79,6 @@ class WrapTargetError(WrapError):
     """`target` is not a dotted path of plain identifiers under `ava`, or it does
     not resolve to a callable. Wrapping a missing / non-callable member is a
     plugin bug — fail fast at registration rather than at first agent call."""
-
-
-@dataclass(frozen=True)
-class WrapLayer:
-    """One installed wrap layer, in registration order.
-
-    - target: dotted `ava` path, e.g. `"files.read"`.
-    - plugin: the plugin that declared it.
-    - wrapper: the author's `wrapper(inner, *args, **kwargs)` function — the
-      introspectable artifact (`wrapper.__module__` / source say who and what).
-    - chained: the closure actually installed on the namespace at this layer.
-    """
-
-    target: str
-    plugin: str
-    wrapper: Callable[..., Any]
-    chained: Callable[..., Any]
 
 
 def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
@@ -281,9 +265,7 @@ def apply_wrap(
 
 def _installed_layers() -> Mapping[str, tuple[WrapLayer, ...]]:
     """The current installation's wrap layers (empty when nothing is installed)."""
-    from . import install as _install
-
-    current = _install.installed()
+    current = installed()
     return {} if current is None else current.wrap_layers
 
 

@@ -342,9 +342,10 @@ def ensure_plugins_loaded(
         context = _bound_process_context()
     from .sdk_surface import install as _sdk_install
     from .sdk_surface import sdk_disable
+    from .sdk_surface.installation import installed
 
     _sdk_install.raise_load_failure()
-    installation = _sdk_install.installed()
+    installation = installed()
     if installation is not None and (surface or installation.faces):
         _bind_installed_catalog(context)
         return
@@ -456,11 +457,11 @@ def _bind_installed_catalog(context: AvaContext | None) -> None:
     """Complete a bound context only after its installation is actually ready."""
     if context is None:
         return
-    from .sdk_surface import install as _sdk_install
     from .sdk_surface import settings as _settings
+    from .sdk_surface.installation import installed
 
     # A loader still being imported deferred its work; it is not ready yet.
-    if _sdk_install.installed() is not None:
+    if installed() is not None:
         catalog = _settings.model_catalog()
         if context.catalog is not catalog:
             bind_context(_replace(context, catalog=catalog))
@@ -517,16 +518,17 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
     if name.startswith("_") or not _init_complete:
         return False
     from .sdk_surface import install as _sdk_install
+    from .sdk_surface.installation import installed
 
     _sdk_install.raise_load_failure()
-    if _sdk_install.installed() is not None or _sdk_install.load_attempted():
+    if installed() is not None or _sdk_install.load_attempted():
         return False
     from .sdk_surface import agent_identity
 
     if not agent_identity.is_launched_child():
         return False
     ensure_plugins_loaded()
-    return _sdk_install.installed() is not None
+    return installed() is not None
 
 
 # PEP 562 module-level `__getattr__`. Plugins set runtime attributes via

@@ -24,6 +24,7 @@ from agent.graph.prompt.system_prompt import (
     effective_sdk_expand,
 )
 from ava.sdk_surface import install, sdk_disable
+from ava.sdk_surface.installation import installed
 from base.config import FIELD_INFOS, AgentSettings, settings
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import AgentSlices
@@ -52,7 +53,7 @@ def _no_plugin_expansions() -> Iterator[None]:
     # Every case here reasons about the framework expand list alone; take any installed
     # plugin surface out so a leak from another test cannot prepend stray paths, and put it
     # back after. A test that needs a promotion installs its own.
-    prior = install.installed()
+    prior = installed()
     install.uninstall()
     yield
     install.uninstall()

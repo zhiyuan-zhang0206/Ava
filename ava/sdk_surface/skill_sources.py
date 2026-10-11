@@ -22,10 +22,10 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
-_SkillProvider = Callable[[], list[Path]]
+from .installation import SkillProvider, installed
 
 
-def add(provider: _SkillProvider) -> Callable[[], None]:
+def add(provider: SkillProvider) -> Callable[[], None]:
     """Mount `provider` on this process's skill-root providers; returns the undo.
 
     The install collects a plugin's declared `skill_sources` into the installation it
@@ -37,7 +37,7 @@ def add(provider: _SkillProvider) -> Callable[[], None]:
 
 
 @contextmanager
-def scoped(provider: _SkillProvider) -> Generator[None]:
+def scoped(provider: SkillProvider) -> Generator[None]:
     """Hold `provider` for the duration of a `with` block and take back only that one.
 
     For a framework caller that needs a request-scoped skill root (the ops runner's per-agent
@@ -53,9 +53,7 @@ def scoped(provider: _SkillProvider) -> Generator[None]:
 
 def roots() -> list[Path]:
     """Flatten every registered provider's roots into one list (scan order)."""
-    from . import install as _install
-
-    current = _install.installed()
+    current = installed()
     if current is None:
         return []
     out: list[Path] = []

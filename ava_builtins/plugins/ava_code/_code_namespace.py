@@ -7,15 +7,13 @@ from pathlib import Path
 
 from loguru import logger
 
+from . import _state_access
+
 __all_for_ava__ = ["get", "set"]
 
 
 def get() -> Path:
-    # The lazy import keeps `from . import _code_namespace` cycle-free (the binding
-    # happens after the namespace install of `plugin.py`'s declaration).
-    from . import plugin as _plugin
-
-    return Path(_plugin.read_state().cwd)
+    return Path(_state_access.read_state().cwd)
 
 
 def set(path: str | Path) -> None:
@@ -32,7 +30,6 @@ def set(path: str | Path) -> None:
 
     import ava.skills as _ava_skills
 
-    from . import plugin as _plugin
     from ._walk import project_skill_roots
 
     p = Path(path).expanduser()
@@ -44,13 +41,13 @@ def set(path: str | Path) -> None:
         raise FileNotFoundError(f"ava.cwd.set: path does not exist: {p}") from e
     if not _stat.S_ISDIR(st.st_mode):
         raise NotADirectoryError(f"ava.cwd.set: path is not a directory: {p}")
-    _plugin.update_state({"cwd": str(p)})
+    _state_access.update_state({"cwd": str(p)})
 
     # Set a cwd-note for the after-exec hook to inject as a system note.
     # Same-turn dedup: each call overwrites cwd_note; only the final
     # value is injected.  Project skills (if any) go through the separate
     # project_skills_note mechanism so they survive across compactions.
-    _plugin.update_state({"cwd_note": f"Working directory set to {p}"})
+    _state_access.update_state({"cwd_note": f"Working directory set to {p}"})
     try:
         loaded = _ava_skills.skills_in(project_skill_roots(p))
     except AttributeError:
@@ -68,6 +65,6 @@ def set(path: str | Path) -> None:
                 lines.append(f"  - {ident} (ava.skills.{target}) — {desc}")
                 lines.append(f"      {path_str}")
             summary = f"Skills available in this repo ({len(loaded)}):\n" + "\n".join(lines)
-            _plugin.update_state({"project_skills_note": summary})
+            _state_access.update_state({"project_skills_note": summary})
         else:
-            _plugin.update_state({"project_skills_note": None})
+            _state_access.update_state({"project_skills_note": None})

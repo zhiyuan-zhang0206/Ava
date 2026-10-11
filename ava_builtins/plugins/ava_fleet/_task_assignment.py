@@ -1,6 +1,6 @@
 """Atomic compound task and agent acceptance for the Fleet SDK."""
 
-from typing import Any
+from typing import Any, NamedTuple
 
 import ava.self
 from ava.gateway_client import transport
@@ -8,7 +8,17 @@ from ava.sdk_surface.agent_identity import require_lease_free_agent_id
 from base.agents.tasks.model import Task, validate_task_snapshot
 from base.agents.tasks.priority import validate_priority, validate_remind_interval_seconds
 
-from .task_registry import TaskAssignment
+
+class TaskAssignment(NamedTuple):
+    """The accepted task and the agent born to work on it.
+
+    Fields:
+        task: the task as accepted.
+        agent_id: id of the agent assigned to it.
+    """
+
+    task: Task
+    agent_id: int
 
 
 def create_and_assign_guarded(

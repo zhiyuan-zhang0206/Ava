@@ -490,7 +490,7 @@ def spawn_impl(
                 )
         if overlay:
             from ava.sdk_surface import settings as sdk_settings
-            from ava.sdk_surface.install import installed
+            from ava.sdk_surface.installation import installed
             from base.packages.plugins.config_registration import validate_config_overlay
 
             installation = installed()

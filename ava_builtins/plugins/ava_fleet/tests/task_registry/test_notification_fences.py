@@ -7,8 +7,8 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from ava_builtins.plugins.ava_fleet import task_registry
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import MachineIdentity
@@ -38,7 +38,7 @@ def test_reassigned_task_refuses_delayed_home_wake(
     machine_identity: MachineIdentity,
 ) -> None:
     """An in-flight selector/RPC cannot revive a recipient after reassignment."""
-    actor = _seed_agent(db_conn)
+    actor = seed_agent(db_conn)
     pin_agent(actor)
     owner = terminated(
         db_conn,
@@ -48,7 +48,7 @@ def test_reassigned_task_refuses_delayed_home_wake(
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    next_owner = _seed_agent(db_conn)
+    next_owner = seed_agent(db_conn)
     task = task_registry.create(
         "fenced", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
     )
@@ -81,9 +81,9 @@ def test_reassigned_task_refuses_delayed_home_wake(
 def test_assignment_deadline_has_inspectable_failure(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
-    actor = _seed_agent(db_conn)
+    actor = seed_agent(db_conn)
     pin_agent(actor)
-    owner = _seed_agent(db_conn, status="terminated")
+    owner = seed_agent(db_conn, status="terminated")
     task_registry.create(
         "expires", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
     )
@@ -108,9 +108,9 @@ def test_assignment_deadline_has_inspectable_failure(
 def test_reminder_policy_never_resurrects_terminated_owner(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
-    actor = _seed_agent(db_conn)
+    actor = seed_agent(db_conn)
     pin_agent(actor)
-    owner = _seed_agent(db_conn, status="terminated")
+    owner = seed_agent(db_conn, status="terminated")
     task = task_registry.create(
         "reminder", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
     )
