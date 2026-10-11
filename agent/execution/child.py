@@ -757,8 +757,13 @@ def _format_current_traceback(exc: BaseException) -> str:
     return "".join(traceback.format_exception(exc))
 
 
-if __name__ == "__main__":
+def run_as_entry() -> None:
+    """The `python -m agent.execution.child` body, also the gated owner entry's hand-off."""
     from base.log import prepare_process_logging
 
     prepare_process_logging()
     main()
+
+
+if __name__ == "__main__":
+    run_as_entry()

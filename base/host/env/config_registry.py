@@ -87,28 +87,50 @@ DOMAIN_MODELS: tuple[tuple[str, str, str | type[Any], str], ...] = (
 # domain can never drift out of the fail-fast check.
 DOMAIN_ATTRS = frozenset(attr for attr, _label, _model, _cap in DOMAIN_MODELS)
 
-# The sub-model classes are imported INSIDE the build (see module docstring):
-# importing them at module level would execute the `base.config` package while
-# this registry is still initializing, breaking the dotenv_boot pre-Settings
-# boot.
-MODEL_CLASSES = {
-    "LmSettings": "base.config.domains.lm",
-    "SandboxSettings": "base.config.domains.sandbox",
-    "AgentSettings": "base.config.domains.agent.settings",
-    "WebSettings": "base.config.domains.web",
-    "GatewaySettings": "base.config.domains.gateway",
-    "DaemonSettings": "base.config.domains.daemon.settings",
-    "AlertsSettings": "base.config.domains.observability.alerts",
-    "DataPlaneSettings": "base.config.domains.storage.data_plane",
-    "ServiceSettings": "base.config.domains.services.settings",
-    "ObservabilitySettings": "base.config.domains.observability.settings",
-    "DisplaySettings": "base.config.domains.display",
-    "PackagesSettings": "base.config.domains.packages",
-    "FeishuSettings": "base.config.domains.channels.feishu",
-    "TelegramSettings": "base.config.domains.channels.telegram",
-    "WalgSettings": "base.config.domains.storage.walg",
-    "GeneralSettings": "base.config.domains.general",
-}
+
+def model_classes() -> dict[str, type[Any]]:
+    """The sub-model class behind each `DOMAIN_MODELS` name.
+
+    The classes are imported INSIDE this function (see module docstring):
+    importing them at module level would execute the `base.config` package while
+    this registry is still initializing, breaking the dotenv_boot pre-Settings
+    boot.
+    """
+    from base.config.domains.agent.settings import AgentSettings
+    from base.config.domains.channels.feishu import FeishuSettings
+    from base.config.domains.channels.telegram import TelegramSettings
+    from base.config.domains.daemon.settings import DaemonSettings
+    from base.config.domains.display import DisplaySettings
+    from base.config.domains.gateway import GatewaySettings
+    from base.config.domains.general import GeneralSettings
+    from base.config.domains.lm import LmSettings
+    from base.config.domains.observability.alerts import AlertsSettings
+    from base.config.domains.observability.settings import ObservabilitySettings
+    from base.config.domains.packages import PackagesSettings
+    from base.config.domains.sandbox import SandboxSettings
+    from base.config.domains.services.settings import ServiceSettings
+    from base.config.domains.storage.data_plane import DataPlaneSettings
+    from base.config.domains.storage.walg import WalgSettings
+    from base.config.domains.web import WebSettings
+
+    return {
+        "LmSettings": LmSettings,
+        "SandboxSettings": SandboxSettings,
+        "AgentSettings": AgentSettings,
+        "WebSettings": WebSettings,
+        "GatewaySettings": GatewaySettings,
+        "DaemonSettings": DaemonSettings,
+        "AlertsSettings": AlertsSettings,
+        "DataPlaneSettings": DataPlaneSettings,
+        "ServiceSettings": ServiceSettings,
+        "ObservabilitySettings": ObservabilitySettings,
+        "DisplaySettings": DisplaySettings,
+        "PackagesSettings": PackagesSettings,
+        "FeishuSettings": FeishuSettings,
+        "TelegramSettings": TelegramSettings,
+        "WalgSettings": WalgSettings,
+        "GeneralSettings": GeneralSettings,
+    }
 
 
 @dataclass(frozen=True)
@@ -262,8 +284,6 @@ def _build_registry() -> dict[str, _FieldRef]:
     `scope` (which drives BOOTSTRAP_FIELDS + write routing) can never load, so
     the drift the lint guarded against is impossible rather than merely flagged.
     """
-    from importlib import import_module
-
     from base.config.base import EnvSettings
 
     reg: dict[str, _FieldRef] = {}
@@ -272,10 +292,7 @@ def _build_registry() -> dict[str, _FieldRef]:
             # Deferred import (see module docstring): the sub-model classes live
             # under the `base.config` package. Importing them only at build time
             # keeps this registry importable before Settings construction.
-            model = cast(
-                "type[EnvSettings]",
-                getattr(import_module(MODEL_CLASSES[model_name]), model_name),
-            )
+            model = cast("type[EnvSettings]", model_classes()[model_name])
         else:
             # A test-injected synthetic model class (config_lifecycle tests).
             model = model_name

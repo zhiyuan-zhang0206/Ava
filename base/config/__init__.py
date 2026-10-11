@@ -16,7 +16,7 @@ Layout: the sub-models live in `base/config/domains/` (grouped by owner:
 `agent`, `daemon`, `services`, `channels`, `storage`, `observability`, plus the
 single-module domains) and the write path (edit policy, candidate validation, panel
 metadata) in `base/config/admin/`. Grouping is by folder only: the registry stays
-the flat `DOMAIN_MODELS` / `MODEL_CLASSES` in `base/host/env/config_registry.py`, and a
+the flat `DOMAIN_MODELS` / `model_classes()` in `base/host/env/config_registry.py`, and a
 component's own config slice belongs in that component's package, not here.
 
 Precedence: env var > Field default. `$AVA_HOME/.env` is the single source of
@@ -386,10 +386,12 @@ def __getattr__(name: str) -> Any:
         # without the upgrade for the same repair-path reason as the field
         # faces above. Direct submodule import — `from base.config.admin import
         # metadata` would re-enter this `__getattr__` and upgrade.
-        import importlib
+        from base.config.admin.metadata import CONFIG_UNCHANGED_SENTINEL, ConfigFieldMeta
 
-        _metadata = importlib.import_module(f"{__name__}.admin.metadata")
-        return getattr(_metadata, name)
+        return {
+            "CONFIG_UNCHANGED_SENTINEL": CONFIG_UNCHANGED_SENTINEL,
+            "ConfigFieldMeta": ConfigFieldMeta,
+        }[name]
     if not _lite._maybe_upgrade(f"module attribute {name!r}"):
         raise AttributeError(_lite._build_window_message(f"module attribute {name!r}"))
     try:
