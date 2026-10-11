@@ -7,7 +7,6 @@ import inspect
 import json
 import subprocess
 import sys
-import textwrap
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -26,7 +25,6 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import boot, daemon
 from services.agent_runner.agent_ops.tests.test_daemon import (
-    _REPO,
     _fake_spawn_factory,
     _stub_pool,
 )
@@ -35,6 +33,8 @@ from services.agent_runner.agent_ops.tests.test_daemon import (
 )
 from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.unit.identity import machine_identity as machine_identity
+
+_CHILD = Path(__file__).resolve().parents[1] / "child_daemon_exit.py"
 
 
 @pytest.mark.asyncio
@@ -371,21 +371,12 @@ def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> Non
     returns — the price of skipping the interpreter teardown that a wedged arm
     hangs in (see `base.daemon.shutdown`). The contract it used to keep by re-raising is the
     same one asserted here, just observed from outside: logged, and rc != 0."""
-    script = textwrap.dedent(f"""
-        import sys
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.agent_runner.agent_ops import daemon
-
-        async def _boom(*, database, image, local_machine, config):
-            raise RuntimeError("db pool exploded mid-loop")
-
-        daemon.init_gateway_process = lambda **kw: None
-        daemon.install_graceful_shutdown = lambda *a, **kw: None
-        daemon._main = _boom
-        daemon.main()
-    """)
     done = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=False
+        [sys.executable, str(_CHILD), "crash"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
 
     assert done.returncode != 0
