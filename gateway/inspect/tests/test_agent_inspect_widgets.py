@@ -18,6 +18,7 @@ fail-soft skip of a broken inspector.py.
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -31,7 +32,7 @@ from fastapi.testclient import TestClient
 from base.db import Database
 from base.packages.plugins.data_registry import DeclaredFace, build_data_registry
 from base.packages.plugins.extensions import PluginContributions
-from base.packages.plugins.inspector import InspectWidgetSpec
+from base.packages.plugins.inspector import DuplicateInspectWidget, InspectWidgetSpec
 from gateway.inspect import _plugin_widgets
 from gateway.inspect.router import router
 
@@ -315,12 +316,24 @@ def _fixture_plugins_importable(
     request.addfinalizer(_forget)
 
 
-def _fixture_inspector(root: Path, plugin: str, source: str) -> Path:
+def _fixture_inspector(root: Path, plugin: str, source: str, *, widget_id: str) -> Path:
     """Write `<root>/<plugin>/inspector.py` (a package, so `ava_builtins.plugins.<plugin>.inspector`
     imports)."""
     plugin_dir = root / plugin
     plugin_dir.mkdir()
     (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
+    (plugin_dir / "ava-plugin.json").write_text(
+        json.dumps(
+            {
+                "apiVersion": 2,
+                "name": plugin,
+                "version": "1.0.0",
+                "engines": {"ava": ">=2026.10.1"},
+                "contributions": {"inspectWidgets": [widget_id]},
+            }
+        ),
+        encoding="utf-8",
+    )
     inspector_py = plugin_dir / "inspector.py"
     inspector_py.write_text(source, encoding="utf-8")
     return inspector_py
@@ -404,7 +417,10 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
 
     good = _shipped_fleet_module()
     bad = _fixture_inspector(
-        tmp_path, "fx_broken_plugin", "import _missing_for_the_test\n" + _widget_source("w")
+        tmp_path,
+        "fx_broken_plugin",
+        "import _missing_for_the_test\n" + _widget_source("w"),
+        widget_id="w",
     )
     monkeypatch.setattr(_plugin_widgets, "_enabled_inspector_modules", lambda: [bad, good])
 
@@ -453,6 +469,7 @@ def test_loader_skips_a_failing_inspector_and_recovers(
         tmp_path,
         "fx_drop_partial_insp",
         _widget_source("drop_partial_widget") + "raise RuntimeError('inspector boom')\n",
+        widget_id="drop_partial_widget",
     )
 
     assert _plugin_widgets._load_inspect_widgets([inspector_py]) == []  # must not raise
@@ -472,13 +489,21 @@ def test_loader_refuses_a_plugin_declaring_a_widget_id_twice(
     """A widget id repeated within one plugin refuses that plugin whole (none
     of its widgets serve); another plugin's widgets are untouched."""
     twice = _fixture_inspector(
-        tmp_path, "fx_twice", _widget_source("same") + "WIDGETS = (_W, _W)\n"
+        tmp_path,
+        "fx_twice",
+        _widget_source("same") + "WIDGETS = (_W, _W)\n",
+        widget_id="same",
     )
-    fine = _fixture_inspector(tmp_path, "fx_fine", _widget_source("fine"))
+    fine = _fixture_inspector(tmp_path, "fx_fine", _widget_source("fine"), widget_id="fine")
 
     specs = _plugin_widgets._load_inspect_widgets([twice, fine])
     assert [(s.plugin, s.id) for s in specs] == [("fx_fine", "fine")]
-    assert any("fx_twice" in r["message"] for r in loguru_records)
+    assert any(
+        "fx_twice" in r["message"]
+        and r["exception"] is not None
+        and isinstance(r["exception"].value, DuplicateInspectWidget)
+        for r in loguru_records
+    )
 
 
 def test_widget_plugin_comes_from_the_registry_entry() -> None:
