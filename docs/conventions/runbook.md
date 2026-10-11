@@ -573,7 +573,7 @@ runner first start unless the host sets an explicit health URL override.
 
 ### Transport encryption
 
-A secret-bearing cluster that serves the gateway or ops server on a non-loopback
+A cluster that serves the gateway or ops server on a non-loopback
 address MUST declare `AVA_TRANSPORT_ENCRYPTION`; every start checks the
 declaration and refuses to start when it is empty or unsupported. The accepted
 modes are:
@@ -586,7 +586,7 @@ modes are:
 - `overlay` — an encrypted private overlay network carries the complete path
   between the gateway, agent-runners, and client devices.
 
-Set the declaration in the cluster configuration before exposing a secret-bearing
+Set the declaration in the cluster configuration before exposing an
 listener. An empty declaration is valid only while every listener remains on
 loopback.
 

@@ -70,6 +70,7 @@ from tests.e2e.fakes.scenarios.parked_compact import (
     REPLY_3,
 )
 from tests.e2e.fixture_environment import E2EEnv
+from tests.fixtures.gateway_config import post_spawn
 
 
 def _timeline(gateway_url: str, agent_id: int) -> list[dict[str, Any]]:
@@ -134,7 +135,7 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(e2e_env: E2EE
 
     # Second agent the user switches to. Same scripted fake LLM — B is never
     # messaged, so its script turns are never consumed.
-    resp = httpx.post(f"{gateway_url}/api/agents", json={"spawner": "user"}, timeout=30.0)
+    resp = post_spawn(gateway_url, {"spawner": "user"}, timeout=30.0)
     resp.raise_for_status()
     agent_b = int(resp.json()["id"])
     try:

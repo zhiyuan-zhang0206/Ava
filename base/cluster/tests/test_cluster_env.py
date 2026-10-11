@@ -69,21 +69,20 @@ def test_derive_env_ports_and_urls(tmp_path: Path):
     assert env["AVA_EVENTS_CHANNEL"] == "ava:events"
 
 
-def test_derive_env_empty_secret_keeps_redis_authenticated(tmp_path: Path):
-    """A no-secret cluster's DB URL is the same credential-free endpoint (the
-    data plane authenticates with delivered generation logins), and Redis always
-    authenticates: its URL carries the runtime password and both Redis
-    credentials are persisted."""
+def test_derive_env_writes_the_secret_and_keeps_redis_authenticated(tmp_path: Path):
+    """The DB URL is the credential-free endpoint (the data plane authenticates with
+    delivered generation logins), and Redis always authenticates: its URL carries
+    the runtime password and both Redis credentials are persisted."""
     env = cluster.derive_env(
         _rec(tmp_path),
         base_db_url="postgresql://ava:p@localhost:5432/ava",
         base_redis_url="redis://localhost:6379/0",
-        cluster_secret="",
+        cluster_secret="the-secret",  # noqa: S106 — isolated test credential
         redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
         redis_password="runtime-value",  # noqa: S106 — isolated test credential
         pgbouncer_enabled=False,
     )
-    assert env["AVA_CLUSTER_SECRET"] == ""
+    assert env["AVA_CLUSTER_SECRET"] == "the-secret"  # noqa: S105 — test value
     assert "AVA_DB_ADMIN_PASSWORD" not in env
     assert env["AVA_DB_URL"] == "postgresql://ava@localhost:5432/ava"
     assert env["AVA_REDIS_URL"] == "redis://ava:runtime-value@localhost:6379/0"
@@ -96,10 +95,21 @@ def test_derive_env_empty_secret_keeps_redis_authenticated(tmp_path: Path):
     assert urlsplit(env["AVA_REDIS_URL"]).username == "ava"
 
 
+def test_derive_env_refuses_an_empty_cluster_secret(tmp_path: Path):
+    """Every cluster is born with a secret: there is no unauthenticated identity to derive."""
+    with pytest.raises(ValueError, match="requires a cluster secret"):
+        cluster.derive_env(
+            _rec(tmp_path),
+            base_db_url="postgresql://ava@localhost:5432/ava",
+            base_redis_url="redis://localhost:6379/0",
+            cluster_secret="",
+            redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
+            redis_password="runtime-value",  # noqa: S106 — isolated test credential
+        )
+
+
 @pytest.mark.parametrize("missing", ["redis_admin_password", "redis_password"])
-def test_derive_no_secret_env_refuses_missing_redis_credential(
-    tmp_path: Path, missing: str
-) -> None:
+def test_derive_env_refuses_missing_redis_credential(tmp_path: Path, missing: str) -> None:
     credentials = {"redis_admin_password": "admin-value", "redis_password": "runtime-value"}
     credentials[missing] = ""
     with pytest.raises(ValueError, match="Redis always authenticates"):
@@ -107,7 +117,7 @@ def test_derive_no_secret_env_refuses_missing_redis_credential(
             _rec(tmp_path),
             base_db_url="postgresql://ava@localhost:5432/ava",
             base_redis_url="redis://localhost:6379/0",
-            cluster_secret="",
+            cluster_secret="the-secret",  # noqa: S106 — isolated test credential
             redis_admin_password=credentials["redis_admin_password"],
             redis_password=credentials["redis_password"],
         )

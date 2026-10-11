@@ -122,8 +122,8 @@ first and ask "what changed that made it worth doing".
   identity or permissions system. A cluster secret authenticates SDK callers
   directly and browser users through an HttpOnly session cookie; an exact CORS
   allowlist and cookie-mutation `Origin` check constrain that ambient browser
-  credential. An empty secret remains the explicit single-box no-auth posture,
-  with loopback-only binding. This does not attempt to restrain an agent inside
+  credential. Every cluster has a secret; a box that declares no reachable
+  address (`AVA_MACHINE_HOST`) binds loopback only. This does not attempt to restrain an agent inside
   the boundary: the agent itself holds `execute_code` (= arbitrary bash + the
   full SDK), so any per-agent token available to its process could be read or
   bypassed. **Trigger** for distinct identities and permissions: onboarding
@@ -189,7 +189,7 @@ first and ask "what changed that made it worth doing".
 - **Bespoke spawn-wrapping endpoint per "AI does X for you" affordance**: a dedicated route whose
   only job is to assemble a prompt and forward it to spawn — `/api/presets/draft` was this, folded
   away (2026-07-30) in favor of composing the prompt client-side. The affordance is already
-  expressible with existing primitives: `POST /api/agents` plus the frontend composing a short
+  expressible with existing primitives: `POST /api/keyed/v1/agents` plus the frontend composing a short
   first-message prompt and navigating to the new agent's chat; the domain knowledge of *how* to do
   the task lives in a skill the prompt points at, not in a server-side prompt template. Trigger: a
   case needs machinery a plain composed prompt can't express — e.g. the `packages` / `schedules` /

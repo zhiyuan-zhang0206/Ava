@@ -54,9 +54,10 @@ def mobile_chromium_context(playwright_browser: Browser) -> Iterator[BrowserCont
         is_mobile=True,
         has_touch=True,
     )
-    # Deployed clusters with a cluster secret gate the frontend behind a
-    # session cookie. CI's local stack is unauthenticated; when targeting a
-    # real deployment, inject a valid session via
+    # Every cluster gates the frontend behind a session cookie. CI's local
+    # stack has no backend behind the frontend build (the specs stub `/api/*`,
+    # `/api/auth/check` included); when targeting a real deployment, inject a
+    # valid session via
     # `AVA_TEST_SESSION_COOKIE="ava_session=<token>"`.
     if _OVERRIDE_BASE_URL and os.environ.get("AVA_TEST_SESSION_COOKIE"):
         ctx.add_cookies(

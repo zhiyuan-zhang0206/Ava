@@ -35,12 +35,6 @@ class AgentRow(AgentSnapshot):
     """
 
 
-class NewThread(BaseModel):
-    """POST /api/agents response."""
-
-    id: int
-
-
 class LabelPatchRequest(BaseModel):
     """PATCH /api/agents/{id} body — manually set / reset agent label.
 

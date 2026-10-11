@@ -6,6 +6,8 @@ from __future__ import annotations
 import stat
 from pathlib import Path
 
+import pytest
+
 from base.cluster.authority.api import (
     publish_telemetry_token,
     read_telemetry_token,
@@ -29,12 +31,12 @@ def test_a_rotated_secret_replaces_the_token(tmp_path: Path) -> None:
     assert read_telemetry_token(tmp_path) == telemetry_token("new")
 
 
-def test_an_open_cluster_publishes_nothing_and_removes_a_stale_token(tmp_path: Path) -> None:
+def test_a_blank_secret_publishes_no_token_and_keeps_the_published_one(tmp_path: Path) -> None:
     publish_telemetry_token(tmp_path, "the-secret")
-    publish_telemetry_token(tmp_path, "")
+    with pytest.raises(ValueError, match="non-empty cluster secret"):
+        publish_telemetry_token(tmp_path, "")
 
-    assert read_telemetry_token(tmp_path) is None
-    assert not telemetry_token_path(tmp_path).exists()
+    assert read_telemetry_token(tmp_path) == telemetry_token("the-secret")
 
 
 def test_a_home_that_never_published_reads_none(tmp_path: Path) -> None:

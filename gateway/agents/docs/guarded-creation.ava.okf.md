@@ -33,21 +33,10 @@ original machine, can receive the existing launch wake. A deliberate launch
 retry, changed placement, admission, termination or deleted metadata returns
 the original historical acceptance without forwarding a launch. Replay never
 rotates an attempt, restores operator config or creates another first prompt.
-The retained snapshot has no target FK or automatic expiry.
-
-A guarded key created before snapshots were recorded fails with 409 when its
-metadata still identifies the key but the snapshot is unavailable. Current
-mutable metadata cannot prove the original attempt, so it is not backfilled or
-used as a launch fallback. Already deleted unsnapshotted historical identities
-remain unrecoverable; this change cannot reconstruct them.
-
-An older gateway has no route for this versioned POST and rejects it without
-creating an agent. A future strong client must keep the same path, key, and
-body for every attempt of one intent. It must never downgrade that intent to
-`POST /api/agents`: the legacy and guarded paths have distinct receipt
-namespaces, and an older gateway may ignore a key on the legacy path. A cached
-capability GET or observed generation cannot prove the backend serving a later
-write supports keyed admission.
+The retained snapshot has no target FK or automatic expiry. This is the only
+agent creation route: the browser, IM bridge, CLI, scripts, SDK and examples all
+use it, and every other creation entry (guarded drafts, the MCP tool and task
+assignment) records its birth through the same snapshot owner.
 
 The SDK requires a caller key for every creation or fork and always uses this
 path. The former `require_idempotency` mode flag has been removed. Forks use the
@@ -56,17 +45,6 @@ then checkpoint copying, the fork marker, first prompt, immutable receipt and
 audit commit together. Same-key replay reads the retained child first and does
 not resolve or copy a later source checkpoint. See the SDK owner at
 `ava/agents/docs/strong-creation.ava.okf.md`.
-
-Direct HTTP producers still using `POST /api/agents` have a distinct operation
-namespace. They must migrate as one intent rather than changing paths during a
-retry. Existing historical acceptance is not synthesized from mutable metadata.
-This repository change does not authorize deployment.
-
-A previous gateway that already exposes this versioned path can still use its
-older mutable launch projection. The path proves keyed admission support, not a
-cluster-wide immutable recovery capability. Operators must stop or drain those
-gateway generations before relying on original-attempt recovery; this change
-does not perform that rollout. Other HTTP and compound-creation entry cleanup remains tracked in #4473.
 
 Gateway MCP clients use `spawn_agent_guarded_v1` for retained original
 birth recovery. The versioned tool name admits each write on its serving

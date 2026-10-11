@@ -221,8 +221,7 @@ async def _dispatch_once(
         # short probe timeouts like the roster's 3s probe.
         # Present the gateway's machine API token so the runner's authenticated
         # /ops accepts the dial (a runner holds only its digest, never the human
-        # secret). The open posture (tests, unprovisioned checkout) sends no
-        # header at all rather than an illegal "Bearer " value.
+        # secret).
         headers = gateway_auth_headers()
         # Cluster-internal dials must never honor the host's system/env proxy:
         # private peers are not proxy-routable. This matches base/host/net/http_dial.py's

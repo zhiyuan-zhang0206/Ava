@@ -10,13 +10,15 @@ Design doc: see `docs/superpowers/specs/2026-05-07-e2e-happy-path-design.md`
 What is (and is not) covered, feature by feature, lives in [FEATURES.md](FEATURES.md).
 
 
-SDK creation and budget-handoff scenarios explicitly request the
-`authenticated_gateway` fixture. It gives their test HTTP clients and exec SDK
-children a fresh private bearer; the throwaway gateway verifies it through
-production authentication middleware. Runner/ops retain the direct-process
-harness's open posture because no root launcher or machine-token ledger exists.
-Other scenarios retain their existing gateway posture. Fixture credentials are
-function scoped and restored at teardown; no product admission bypass is added.
+The stack authenticates like a started cluster (`_credentials.py`). `_e2e_process_env`
+gives the e2e home a cluster secret and an active write generation in its private
+ledger (the one `ava start` births at first start). The gateway is delivered its
+gateway-class machine API token, the ops daemon and the agent host the runner-class
+token (agent children inherit it), so the gateway's authenticated `/ops` dials are
+accepted. The test process reaches the gateway with the human secret as a Bearer header
+(the autouse `gateway_client_credentials` fixture, scoped to the gateway's origin) and
+every browser context the suite creates logs in through `/api/auth/login` (`install_browser_login`), as a user's browser does. No product admission rule is
+bypassed.
 
 
 ## Running
@@ -115,7 +117,7 @@ multi-chunk.
 | `lifecycle/test_self_terminate.py` | `lifecycle_terminate` | `ava.self.terminate` → status='terminated' + inbound source='self' |
 | `lifecycle/test_self_restart.py` | `lifecycle_restart` | `ava.self.restart` → restarter respawn → new PID + status back to idling |
 | `lifecycle/test_self_resurrect.py` | `lifecycle_resurrect` | after `terminate`, `POST /resurrect` → fresh process + 'resurrect' inbound |
-| `lifecycle/test_fork_identity.py` | `fork_identity` | `POST /api/agents` fork_from=source+prompt → forked agent (new id) first claim batch contains [fork marker, prompt], reply `FORK_OK` proves context contains both |
+| `lifecycle/test_fork_identity.py` | `fork_identity` | `POST /api/keyed/v1/agents` fork_from=source+prompt → forked agent (new id) first claim batch contains [fork marker, prompt], reply `FORK_OK` proves context contains both |
 | `flow/test_message_flow.py` | `message_flow` | **Panoramic Case 1 (#1018)** — one user message → reasoning + code tool call + real exec + reply; REST timeline fan-out (reasoning/code/output/chat), reply rendered in browser via SSE, zero unrecognized-marker alarms + zero `[timeline] unrecognized` console warnings |
 | `flow/test_compact_flow.py` | `compact_flow` | **Panoramic Case 2 (#1018)** — native compact history fixture (not public manual admission) → Compaction LLM (script turn) → clean wipe → `inbound_compact_request` envelope renders, NO unrecognized-marker alarm (#1017 regression), agent replies post-compact |
 | `flow/test_error_recovery.py` | `error_recovery` | **Panoramic Case 3 (#1018)** — LLM raises FatalProviderError (no retry) → SSE `error` event → `[error]` marker in browser (NOT the unrecognized alarm), aborted turn commits no agent_chat, next message recovers normally |

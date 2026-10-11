@@ -61,9 +61,6 @@ def _gateway_session_params() -> tuple[str, str] | None:
     except GatewayApiTokenMissing as e:
         logger.error(f"[browser-mcp] gateway session injection disabled: {e}")
         return None
-    if not credential:
-        logger.warning("[browser-mcp] gateway session injection disabled: the cluster API is open")
-        return None
     return gateway_url, credential
 
 

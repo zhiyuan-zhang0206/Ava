@@ -23,6 +23,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from gateway.app import app
+from tests.fixtures.gateway_config import spawn_via_http
 from tests.fixtures.model_catalog import AddModels
 
 
@@ -128,7 +129,7 @@ class TestPut:
             saved = client.put("/api/config/default-model", json={"model": "deepseek-flash"})
             assert saved.status_code == 200, saved.text
             assert client.get("/api/models").json()["default"] == "deepseek-flash"
-            spawned = client.post("/api/agents", json={"config": {"reasoning_effort": "max"}})
+            spawned = spawn_via_http(client, {"config": {"reasoning_effort": "max"}})
         assert spawned.status_code == 201, spawned.text
         row = db_conn.execute(
             "SELECT config_overlay,birth_config FROM agents_meta WHERE id=%s",

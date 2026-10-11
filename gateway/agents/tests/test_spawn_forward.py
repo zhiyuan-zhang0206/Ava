@@ -26,6 +26,7 @@ from gateway.agents import router as app_module
 from gateway.app import app
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+from tests.fixtures.gateway_config import spawn_via_http
 
 
 @pytest.fixture
@@ -63,7 +64,7 @@ class TestRouting:
         monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
         monkeypatch.setattr(app_module.snapshot_module, "select_one", _unreadable)
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"machine": "local-test"})
+            resp = spawn_via_http(client, {"machine": "local-test"})
         assert resp.status_code == 201, resp.text
         body = resp.json()
         assert db_conn.execute("SELECT id FROM agents_meta WHERE id=%s", (body["id"],)).fetchone()
@@ -96,7 +97,7 @@ class TestRouting:
         )
         db_conn.commit()
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"machine": "local-test"})
+            resp = spawn_via_http(client, {"machine": "local-test"})
         assert resp.status_code == 201
         assert resp.json()["id"] == captured["body"].agent_id
         assert resp.json()["accepted"] is True
@@ -120,7 +121,7 @@ class TestRouting:
 
         monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={})
+            resp = spawn_via_http(client, {})
         assert resp.status_code == 201
         assert captured["target"] == "local-test"
 
@@ -148,7 +149,7 @@ class TestRouting:
 
         monkeypatch.setattr(app_module, "forward_spawn_to_remote", _should_not_forward)
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={})
+            resp = spawn_via_http(client, {})
         assert resp.status_code == 400
         body = resp.json()
         assert body["reason"] == "spawn_target_not_agent_runner"
@@ -181,7 +182,7 @@ class TestRouting:
 
         monkeypatch.setattr(app_module, "forward_spawn_to_remote", _should_not_forward)
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"machine": "paused-box"})
+            resp = spawn_via_http(client, {"machine": "paused-box"})
         assert resp.status_code == 409
         body = resp.json()
         assert body["reason"] == "machine_paused"
@@ -211,10 +212,7 @@ class TestRouting:
         )  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
-            resp = client.post(
-                "/api/agents",
-                json={"machine": "remote-mac", "spawner": "user"},
-            )
+            resp = spawn_via_http(client, {"machine": "remote-mac", "spawner": "user"})
         assert resp.status_code == 201
         assert resp.json()["id"] == captured["body"].agent_id
         assert resp.json()["accepted"] is True
@@ -251,7 +249,7 @@ class TestRouting:
         )  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"machine": "remote-mac"})
+            resp = spawn_via_http(client, {"machine": "remote-mac"})
         assert resp.status_code == 201
         assert captured["target"] == "remote-mac"
 
@@ -266,7 +264,7 @@ class TestRouting:
         body={detail, reason}. MachineNotRegistered.http_status=404.
         """
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"machine": "ghost-mac"})
+            resp = spawn_via_http(client, {"machine": "ghost-mac"})
         assert resp.status_code == 404
         body = resp.json()
         assert body["reason"] == "machine_not_registered"
@@ -289,7 +287,7 @@ class TestRouting:
         )  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"machine": "remote-mac"})
+            resp = spawn_via_http(client, {"machine": "remote-mac"})
         assert resp.status_code == 502
         assert resp.json()["reason"] == "agent_launch_failed"
         assert resp.json()["agent_id"] > 0
@@ -303,7 +301,7 @@ class TestRouting:
 
         monkeypatch.setattr(app_module, "forward_spawn_to_remote", _wrong_id)
         with TestClient(app) as client:
-            response = client.post("/api/agents", json={})
+            response = spawn_via_http(client, {})
         assert response.status_code == 502
         body = response.json()
         assert body["state"]["availability"]["reason"] == "launch_unreachable"

@@ -53,7 +53,13 @@ from psycopg import sql
 from base.agents import AgentStatus
 from base.config import settings
 from tests._containers import runner_projection
-from tests.e2e._authenticated_gateway import authenticated_gateway as authenticated_gateway
+from tests.e2e._credentials import (
+    current_credentials,
+    forget_credentials,
+    install_browser_login,
+    mint_credentials,
+)
+from tests.e2e._credentials import gateway_client_credentials as gateway_client_credentials
 from tests.e2e._ports import FRONTEND_PORT, FRONTEND_URL, GATEWAY_PORT, GATEWAY_SOCKET, GATEWAY_URL
 from tests.e2e._truncate import truncate_with_deadlock_retry
 from tests.e2e.fixture_environment import E2EEnv
@@ -66,6 +72,7 @@ from tests.e2e.process_support import (
     wait_for_port,
 )
 from tests.e2e.process_support import pty_sessions_proc as pty_sessions_proc
+from tests.fixtures.gateway_config import post_spawn
 
 # ---- module-level overrides (run after top-level conftest) ---------------------
 
@@ -215,9 +222,9 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     # from this body by AST and fails if the tuple falls behind it, so a key added to
     # the setup without a line here cannot merge.
     _env_keys = (
-        "AVA_AUTH_MIDDLEWARE_ENABLED",
         "AVA_CLUSTER_SECRET",
         "AVA_CONFIG_FETCH",
+        "AVA_DB_GENERATION",
         "AVA_EVENTS_CHANNEL",
         "AVA_HOME",
         "AVA_GATEWAY_CORS_ALLOWED_ORIGINS",
@@ -296,15 +303,13 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     os.environ["AVA_GATEWAY_CORS_ALLOWED_ORIGINS"] = (
         f"http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}"
     )
-    # auth_middleware_enabled is cluster-pinned: the env-authority pass drops
-    # an inherited value the unit .env does not declare (default True = 401 on
-    # every unauthenticated e2e call). Declare it so e2e runs auth-off.
-    os.environ["AVA_AUTH_MIDDLEWARE_ENABLED"] = "false"
-    # The prod default single box has no cluster secret: the API and /ops are
-    # open on loopback. With the suite's secret set, /ops accepts only a write
-    # generation's machine API tokens, which this direct-process stack (no
-    # root launcher, no ledger) never mints: a set secret refuses every spawn.
-    os.environ["AVA_CLUSTER_SECRET"] = ""
+    # The stack authenticates like a started cluster (`tests/e2e/_credentials.py`):
+    # a cluster secret declared in the home's `.env` (cluster-scope keys the unit .env
+    # does not declare are dropped by the env-authority pass), and an active write
+    # generation whose machine API tokens /ops accepts and each service is delivered.
+    credentials = mint_credentials(_AVA_HOME)
+    os.environ["AVA_CLUSTER_SECRET"] = credentials.secret
+    os.environ["AVA_DB_GENERATION"] = "0"
 
     env_lines = [
         f"{key}={os.environ[key]}"
@@ -331,6 +336,7 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
                 include_own=True, receipt_path=_LOG_DIR / f"cleanup-{_E2E_SUFFIX}.jsonl"
             )
         settings.data_plane.events_channel = prev_events
+        forget_credentials()
         for k, v in prev_env.items():
             if v is None:
                 os.environ.pop(k, None)
@@ -466,6 +472,7 @@ def playwright_runtime() -> Iterator[Playwright]:
 def playwright_browser(playwright_runtime: Playwright) -> Iterator[Browser]:
     headed = os.environ.get("HEADED") == "1"
     browser = playwright_runtime.chromium.launch(headless=not headed)
+    install_browser_login(browser)
     try:
         yield browser
     finally:
@@ -502,9 +509,7 @@ def scenario_env(_e2e_process_env: None, request: pytest.FixtureRequest) -> Iter
 
 
 @pytest.fixture
-def gateway_proc(
-    scenario_env: None, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
-) -> Iterator[str]:
+def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """gateway uvicorn (kernel-assigned port, see `_ports.py`)——inherits current os.environ (including AVA_LLM_OVERRIDE).
 
     function-scoped rather than session: each test restarts gateway to pick up new scenario env.
@@ -521,29 +526,23 @@ def gateway_proc(
     fixture_gate = _AVA_HOME / "e2e-serving"
     fixture_gate.unlink(missing_ok=True)
     generation = str(fixture_gate)
-    authenticated = "authenticated_gateway" in request.fixturenames
-    if authenticated:
-        request.getfixturevalue("authenticated_gateway")
     cmd = [
         sys.executable,
         "-m",
         "tests.e2e.process_support",
         generation,
         "uvicorn",
-        "tests.e2e._authenticated_gateway:create_app" if authenticated else "gateway.app:app",
+        "gateway.app:app",
         "--host",
         "127.0.0.1",
         "--fd",
         str(GATEWAY_SOCKET.fileno()),
     ]
-    if authenticated:
-        cmd.append("--factory")
     log_path = _LOG_DIR / f"gateway-{_E2E_SUFFIX}.log"
     env = os.environ.copy()
     # Construct the same gateway profile that production starts.
     env["AVA_PROCESS_PROFILE"] = "gateway"
-    # The authenticated factory overrides this inside its gateway process.
-    env["AVA_AUTH_MIDDLEWARE_ENABLED"] = "false"
+    env.update(current_credentials().service_env("gateway"))
     evidence_path = log_path.with_suffix(".listeners.json")
     evidence_path.write_text(json.dumps(listener_evidence(GATEWAY_PORT, "reserved-before-start")))
     with managed_proc(
@@ -626,6 +625,7 @@ def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None
     # `runner`-profile soak crash, 2026-08-30) dialing as a write generation's
     # runner login, the class login the root launcher delivers to agent hosts.
     env["AVA_PROCESS_PROFILE"] = "agent"
+    env.update(current_credentials().service_env("runner"))
     env["AVA_DB_URL"] = runner_projection()
     # Kernel-assigned per worker, avoiding a shared health port across tests.
     with socket.socket() as s:
@@ -651,7 +651,7 @@ def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None
 def ops_proc(gateway_proc: str) -> Iterator[None]:
     """services/agent_runner/agent_ops/daemon.py — the agent-runner ops server.
 
-    Spawn is HTTP-uniform: `POST /api/agents` creates the row on the gateway and
+    Spawn is HTTP-uniform: `POST /api/keyed/v1/agents` creates the row on the gateway and
     forwards the launch to this host's ops server over localhost (no in-process
     shortcut), which dispatches launch_agent_op. So the e2e single box must run
     the ops daemon (like a real `ava start`) AND have its machine registered
@@ -661,6 +661,7 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
     """
     env = os.environ.copy()
     env["AVA_PROCESS_PROFILE"] = "runner"
+    env.update(current_credentials().service_env("runner"))
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         ops_port = s.getsockname()[1]
@@ -689,7 +690,7 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
 @pytest.fixture
 def spawned_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> Iterator[int]:
     """Allocate an idle agent via the gateway; the host runs it when work arrives."""
-    resp = httpx.post(f"{GATEWAY_URL}/api/agents", json={"spawner": "user"}, timeout=30.0)
+    resp = post_spawn(GATEWAY_URL, {"spawner": "user"}, timeout=30.0)
     resp.raise_for_status()
     agent_id = int(resp.json()["id"])
 
@@ -740,8 +741,6 @@ def spawned_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> 
 
 @pytest.fixture
 def playwright_context(playwright_browser: Browser) -> Iterator[BrowserContext]:
-    # Browser scenarios use the open test gateway; SDK creation scenarios
-    # explicitly select the authenticated gateway fixture without a browser.
     ctx = playwright_browser.new_context(viewport={"width": 1280, "height": 800})
     try:
         yield ctx

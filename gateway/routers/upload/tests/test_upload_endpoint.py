@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from tests.fixtures.gateway_config import spawn_via_http
 
 
 @pytest.mark.asyncio
@@ -51,7 +52,7 @@ def _spawn_agent() -> int:
     # shared module-level app — which breaks under xdist worker sharding /
     # randomized order (same isolation class as #585).
     with TestClient(app) as client:
-        resp = client.post("/api/agents", json={})
+        resp = spawn_via_http(client, {})
         assert resp.status_code == 201
         return resp.json()["id"]
 

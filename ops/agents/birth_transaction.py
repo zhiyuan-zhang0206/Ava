@@ -38,8 +38,8 @@ class AgentBirth:
     birth_event: telemetry.Event | None
     prompt_event: telemetry.Event | None
 
-    def legacy_result(self) -> tuple[int, dict[str, object] | None, int | None, UUID]:
-        """Preserve the public create_agent_row result, including replay's absent prompt."""
+    def row_result(self) -> tuple[int, dict[str, object] | None, int | None, UUID]:
+        """The public create_agent_row result, including replay's absent prompt."""
         return self.agent_id, self.birth_config, self.prompt_inbound_id, self.launch_attempt_id
 
 
@@ -142,7 +142,7 @@ def _resolve_birth_overlay(
     authority: ConfigAuthority,
 ) -> tuple[dict[str, object] | None, dict[str, object]]:
     # THE spawn boundary is this INSERT — every spawn in the system funnels
-    # through it (SDK / frontend / scripts all POST /api/agents, which
+    # through it (SDK / frontend / scripts all POST /api/keyed/v1/agents, which
     # dispatches the launch to the target runner), so it is the one place
     # the frozen-field stamp is taken. A fork carries its parent's stamp over
     # verbatim: a fork is the same identity continuing, so it must not silently
@@ -235,16 +235,15 @@ def insert_agent_birth(
     fork_tail_skills: list[str] | None = None,
     creation_key: str | None = None,
     creation_request_hash: str | None = None,
-    immutable_creation_snapshot: bool = False,
 ) -> AgentBirth:
     """Write/replay the existing birth, first prompt, fork and audit in this transaction.
 
-    Caller owns commit/rollback and post-commit announcements. Replay returns
-    no new birth event, prompt event or prompt inbound id.
+    A keyed birth (`creation_key` with `creation_request_hash`) also retains its
+    immutable `agent_creation_snapshots` record in the same transaction. Caller
+    owns commit/rollback and post-commit announcements. Replay returns no new
+    birth event, prompt event or prompt inbound id.
     """
     validate_spawn_args(spawner, fork_from, fork_checkpoint, prompt, prompt_source)
-    if immutable_creation_snapshot and (creation_key is None or creation_request_hash is None):
-        raise ValueError("creation snapshot requires keyed identity")
     # The gateway creates the row for ANY target (the runner's ops server runs
     # as ava_runner and cannot INSERT agents); the launch op re-checks the
     # agent-runner capability on the target itself.
@@ -254,9 +253,7 @@ def insert_agent_birth(
     launch_attempt_id = uuid4()
     prompt_inbound_id: int | None = None
     prompt_event: telemetry.Event | None = None
-    existing = recover_birth(
-        conn, creation_key, creation_request_hash, immutable_snapshot=immutable_creation_snapshot
-    )
+    existing = recover_birth(conn, creation_key, creation_request_hash)
     if existing is not None:
         return AgentBirth(
             existing.agent_id, existing.birth_config, None, existing.launch_attempt_id, None, None
@@ -278,9 +275,8 @@ def insert_agent_birth(
     cur.execute(
         "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
         "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, preset_name, "
-        "last_launch_attempt_id, last_resurrect_inbound_id, creation_key, creation_request_hash, "
-        "incarnation_resources) "
-        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, %s, 0, %s, %s, %s)",
+        "last_launch_attempt_id, last_resurrect_inbound_id, incarnation_resources) "
+        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, %s, 0, %s)",
         (
             new_id,
             lineage_spawner,
@@ -292,8 +288,6 @@ def insert_agent_birth(
             json.dumps(birth_config, sort_keys=True),
             preset_name,
             launch_attempt_id,
-            creation_key,
-            creation_request_hash,
             Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")),
         ),
     )
@@ -304,9 +298,7 @@ def insert_agent_birth(
         prompt_inbound_id, prompt_event = insert_spawn_prompt_in_transaction(
             cur, new_id, prompt_content, prompt_source
         )
-    if immutable_creation_snapshot:
-        if creation_key is None or creation_request_hash is None:
-            raise ValueError("creation snapshot requires keyed identity")
+    if creation_key is not None and creation_request_hash is not None:
         record_creation_snapshot(
             conn,
             key=creation_key,

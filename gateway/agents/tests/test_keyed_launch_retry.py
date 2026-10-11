@@ -15,7 +15,7 @@ from gateway.agents import launch_retry
 from gateway.agents import router as birth_router
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 @pytest.fixture
@@ -27,7 +27,6 @@ def client(
     set_machine_identity(role="agent-runner", name="local-test")
     db_conn.execute("INSERT INTO machines(name) VALUES ('local-test') ON CONFLICT DO NOTHING")
     db_conn.commit()
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "retry-test-secret")
 
     async def born(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
@@ -43,8 +42,8 @@ def client(
 
 
 def birth(client: TestClient) -> tuple[int, str]:
-    result = client.post(
-        "/api/agents", json={"machine": "local-test", "prompt": "once", "prompt_source": "user"}
+    result = spawn_via_http(
+        client, {"machine": "local-test", "prompt": "once", "prompt_source": "user"}
     )
     assert result.status_code == 201, result.text
     agent_id = result.json()["id"]
@@ -297,15 +296,6 @@ def test_reconcile_holds_row_fence_until_publication(
         finally:
             release.set()
         assert pending.result(timeout=5).wake_published
-
-
-def test_unverified_principal_guard_when_auth_disabled(
-    client: TestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    agent_id, prior = birth(client)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
-    assert submit(client, agent_id, prior).status_code == 400
-    assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone() == (0,)
 
 
 def test_receipt_insert_and_pointer_rotation_roll_back_together(

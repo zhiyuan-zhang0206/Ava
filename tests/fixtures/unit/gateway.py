@@ -22,10 +22,10 @@ def gateway_unit(
     machine_role at each import site. db_conn gives the per-test TRUNCATE. For a
     specific machine_name, also take `set_machine_identity` and call it.
 
-    The cluster-secret auth middleware is disabled by the autouse `_clean_state`
-    (auth_middleware_enabled=false) so in-process endpoint tests don't need to
-    carry auth headers. Tests that specifically exercise the auth middleware
-    re-enable it via monkeypatch.
+    The client is authenticated: the autouse `_clean_state` gives every
+    `TestClient` over the gateway app the suite's cluster secret as its bearer
+    (`tests.fixtures.unit.gateway_auth`), so endpoint tests carry no auth headers.
+    Tests that exercise rejection drop it with `without_credentials(client)`.
     """
     from gateway import app as gateway_app
 
