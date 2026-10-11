@@ -28,7 +28,7 @@ from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
-from services.agent_runner.agent_ops import daemon, health
+from services.agent_runner.agent_ops import boot, daemon, health
 from services.agent_runner.agent_ops import maintenance as activity
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
@@ -431,7 +431,7 @@ async def test_op_invocations_dispatch_on_their_own_executor(
             image=ops_image,
             local_machine=machine_identity,
         )
-        daemon._shutdown_op_pool(first)
+        boot.shutdown_op_pool(first)
         second_result = await daemon._run_arm(
             "status_probe",
             {},

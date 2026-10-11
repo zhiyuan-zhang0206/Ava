@@ -13,6 +13,7 @@ from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import DbConfig, db_config_from_boot
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
@@ -49,6 +50,7 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
+    process_config: ConfigBoot,
     sha: str | None,
     failure: BaseException | None,
 ) -> None:
@@ -71,7 +73,10 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
         captures.append(image)
         return image
 
-    def from_settings(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> Database:
+    def build_database(
+        value: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+    ) -> Database:
+        assert value == db_config_from_boot(process_config)
         gates.append(gate)
         readers.append(local_host)
         return database
@@ -106,8 +111,8 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
         raise _ExitError(code)
 
     monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
-    monkeypatch.setattr(daemon.Database, "from_settings", from_settings)
-    monkeypatch.setattr(daemon, "ConfigBoot", snapshot_process_config)
+    monkeypatch.setattr(daemon, "Database", build_database)
+    monkeypatch.setattr(daemon, "ConfigBoot", lambda: process_config)
     monkeypatch.setattr(daemon, "build_pipeline", build_pipeline)
     monkeypatch.setattr(daemon, "init_gateway_process", init)
 

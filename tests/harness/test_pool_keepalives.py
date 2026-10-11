@@ -48,12 +48,13 @@ from psycopg_pool import ConnectionPool
 import base.log.process
 from base import db, telemetry
 from base.cluster.machine import MachineIdentity
-from base.config import settings
+from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.telemetry.delivery.receipts import DrainStatus
 from gateway.app import app
 from services.agent_runner.agent_ops import boot
 from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.unit.config_authority import config_authority as config_authority
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -220,13 +221,15 @@ def test_gateway_pool_carries_keepalives(machine_identity: MachineIdentity) -> N
         assert pool.max_size == 8
 
 
-def test_ops_daemon_pool_carries_keepalives(database: db.Database) -> None:
+def test_ops_daemon_pool_carries_keepalives(
+    database: db.Database, config_authority: ConfigAuthority
+) -> None:
     """`services/agent_runner/agent_ops/daemon.py`'s dispatch pool — the longest-lived process
     on an agent-runner, i.e. the box most likely to have slept."""
-    pool = boot.open_db_pool(database=lambda: database)
+    pool = boot.open_db_pool(database=lambda: database, authority=config_authority)
     try:
         _assert_pool_posture(pool, "services/agent_runner/agent_ops/boot.py:open_db_pool")
-        assert pool.max_size == max(2, settings.services.ops_concurrency + 2)
+        assert pool.max_size == max(2, config_authority.service_field_value("ops_concurrency") + 2)
         # Checkout-time dead-conn eviction (Task #1027): the ops daemon's
         # borrows are rare, so idle conns get server-closed; the check makes the
         # first dispatch of the day survive instead of dying on
