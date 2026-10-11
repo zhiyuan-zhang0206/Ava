@@ -58,19 +58,21 @@ def test_gateway_client_sends_cluster_secret_bearer(
     assert client.headers.get("Authorization") == "Bearer s3cr3t-token"
 
 
-def test_gateway_client_no_bearer_when_secret_unset(
+def test_gateway_client_without_any_credential_fails_instead_of_sending_none(
     monkeypatch: pytest.MonkeyPatch, client_config: ConfigBoot
 ) -> None:
-    """An empty cluster secret (tests / unprovisioned checkout) sends no auth
-    header — the gateway fails open in the same case, so the SDK must not send a
-    bogus `Bearer ` either."""
+    """The gateway always authenticates: a process holding neither a machine token nor
+    the cluster secret is told so, rather than sending an anonymous (or bogus
+    `Bearer `) request that would only come back 401."""
 
     client_config.set_field("cluster_secret", "")
+    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
 
     import ava.gateway_client.transport as gc
+    from base.cluster.machine import GatewayApiTokenMissing
 
-    client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
-    assert "Authorization" not in client.headers
+    with pytest.raises(GatewayApiTokenMissing):
+        gc._http()  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_gateway_client_in_an_agent_presents_the_delivered_token(

@@ -91,30 +91,24 @@ def test_fetch_gateway_cluster_status_sends_bearer(monkeypatch: pytest.MonkeyPat
     assert captured["headers"] == {"Authorization": "Bearer s3cr3t"}
 
 
-def test_fetch_gateway_cluster_status_no_bearer_when_secret_unset(
+def test_fetch_gateway_cluster_status_without_a_credential_raises_instead_of_dialing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Unprovisioned (no secret): send no auth header rather than a blank bearer."""
+    """The API always authenticates: no token and no secret is named, not sent as a blank bearer."""
     import httpx
 
+    from base.cluster.machine import GatewayApiTokenMissing
     from cli.commands.cluster.control import fetch_gateway_cluster_status
 
+    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    captured: dict[str, object] = {}
 
-    class _Resp:
-        def raise_for_status(self) -> None: ...
+    def _no_dial(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("an unauthenticated request must not be sent")
 
-        def json(self) -> dict[str, object]:
-            return {}
-
-    def _fake_get(url: str, *, timeout: float, headers: dict[str, str]) -> _Resp:
-        captured["headers"] = headers
-        return _Resp()
-
-    monkeypatch.setattr(httpx, "get", _fake_get)
-    fetch_gateway_cluster_status()
-    assert captured["headers"] == {}
+    monkeypatch.setattr(httpx, "get", _no_dial)
+    with pytest.raises(GatewayApiTokenMissing):
+        fetch_gateway_cluster_status()
 
 
 # ─── status ───────────────────────────────────────────────────────────────────

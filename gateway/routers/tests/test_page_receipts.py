@@ -24,7 +24,6 @@ BODY = {"name": "report", "port": 8801, "host": "127.0.0.1", "ttl_seconds": 60}
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     with TestClient(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
         yield value
 
@@ -70,15 +69,6 @@ def test_invalid_key_scope_has_no_effect(
     path = _close_path(agent) if close else _path(agent)
     assert client.post(path, json=body, headers=headers).status_code == 422
     assert db_conn.execute("SELECT count(*) FROM page_operation_receipts").fetchone() == (0,)
-    assert db_conn.execute("SELECT count(*) FROM agent_pages").fetchone() == (0,)
-
-
-def test_verified_principal_required(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    agent = _agent(db_conn)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
-    assert client.post(_path(agent), json=BODY, headers=HEADERS).status_code == 422
     assert db_conn.execute("SELECT count(*) FROM agent_pages").fetchone() == (0,)
 
 

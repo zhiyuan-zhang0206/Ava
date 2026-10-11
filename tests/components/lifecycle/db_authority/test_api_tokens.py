@@ -25,9 +25,9 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from base.cluster import authority
-from base.cluster.auth import bearer_header, cookie_name
+from base.cluster.auth import ClusterSecretMissingError, bearer_header, cookie_name
 from base.cluster.authority import api, ledger, unit
-from base.cluster.machine import MachineRole, gateway_auth_headers
+from base.cluster.machine import GatewayApiTokenMissing, MachineRole, gateway_auth_headers
 from base.config import settings
 from base.daemon.http_transport import start_daemon_http
 from cli.commands.data_plane import bringup
@@ -37,6 +37,7 @@ from gateway.http.auth.webhook import authenticate_webhook
 from ops.roster.service_spec import ServiceSpec, api_access
 from services.agent_runner.agent_ops import _boot as ops_boot
 from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.unit.gateway_auth import disable_default_gateway_credentials
 
 _HUMAN = "human-" + "h" * 40
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
@@ -58,7 +59,7 @@ def gateway(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seed_write_generation: Callable[[Path], Any]
 ) -> Path:
     """A gateway home with an active generation 0, as this process's home, with
-    its human secret set (an authenticated API)."""
+    its human secret set."""
     home = (tmp_path / "gateway").resolve()
     home.mkdir(mode=0o700)
     seed_write_generation(home)
@@ -68,7 +69,8 @@ def gateway(
     )
     monkeypatch.setenv("AVA_HOME", str(home))
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
-    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
+    # This module is about admission: its clients are anonymous until a test gives them a header.
+    disable_default_gateway_credentials(monkeypatch)
     return home
 
 
@@ -139,10 +141,15 @@ def test_gateway_api_admits_the_active_generation_and_the_human_secret(gateway: 
         assert client.get("/api/agents", headers=bearer_header(_HUMAN)).status_code == 200
 
 
-def test_an_open_api_ignores_bearers(gateway: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_blank_human_secret_admits_only_the_active_generation(
+    gateway: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
+    tokens = _tokens(gateway).api
     with gateway_test_client(config_app()) as client:
-        assert client.get("/api/agents").status_code == 200
+        assert client.get("/api/agents").status_code == 401
+        assert client.get("/api/agents", headers=bearer_header("")).status_code == 401
+        assert client.get("/api/agents", headers=bearer_header(tokens.runner)).status_code == 200
 
 
 def test_bootstrap_serves_a_runner_token_but_never_the_human_secret(gateway: Path) -> None:
@@ -397,7 +404,6 @@ def test_gateway_home_ops_accepts_its_generation_never_the_human_secret(gateway:
     tokens = _tokens(gateway).api
     acceptance = ops_boot._ops_acceptance()
     assert acceptance == frozenset(api.acceptance(gateway).values())
-    assert ops_boot._ops_bind_host(acceptance) == "0.0.0.0"  # noqa: S104
     for token, status in (
         (tokens.gateway, 200),
         (tokens.runner, 200),
@@ -412,22 +418,36 @@ def test_gateway_home_ops_accepts_its_generation_never_the_human_secret(gateway:
 
 
 def test_gateway_home_ops_fails_closed_while_no_generation_is_active(gateway: Path) -> None:
-    """Before a birth admits its generation none is active: a secret gateway home's
-    /ops then accepts no bearer at all, and still binds as an authenticated server.
-    It never falls back to the open, unauthenticated posture (None)."""
+    """Before a birth admits its generation none is active: a gateway home's /ops
+    then accepts no bearer at all. It never falls back to an open posture."""
     tokens = _tokens(gateway).api
     _unadmit(gateway)
     acceptance = ops_boot._ops_acceptance()
     assert acceptance == frozenset()
-    assert ops_boot._ops_bind_host(acceptance) == "0.0.0.0"  # noqa: S104
     for token in (tokens.gateway, tokens.runner, _HUMAN, None):
         assert asyncio.run(_ops_status(acceptance, token)) == 401
 
 
-def test_ops_posture_follows_the_api(gateway: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("reachable", "bind"),
+    [("localhost", "127.0.0.1"), ("10.0.0.5", "0.0.0.0")],  # noqa: S104
+)
+def test_ops_bind_follows_the_declared_reachable_address(
+    monkeypatch: pytest.MonkeyPatch, reachable: str, bind: str
+) -> None:
+    """The bearer is required either way; only a declared reachable address
+    (`AVA_MACHINE_HOST`) opens /ops beyond loopback, as it always has for a
+    cluster with a secret."""
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: reachable)
+    assert ops_boot._ops_bind_host() == bind
+
+
+def test_ops_without_a_secret_or_capability_refuses_to_serve(
+    gateway: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    assert ops_boot._ops_acceptance() is None
-    assert ops_boot._ops_bind_host(None) == "127.0.0.1"
+    with pytest.raises(ClusterSecretMissingError):
+        ops_boot._ops_acceptance()
     # A remote-managed plane keeps no generations: its gateway presents the human secret.
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
     monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: True))
@@ -486,37 +506,31 @@ def test_remote_unit_ops_accepts_its_generation_never_the_human_secret(
         assert asyncio.run(_ops_status(acceptance, token)) == status
 
 
-def test_an_open_clusters_bundle_carries_no_api_admission(gateway: Path, tmp_path: Path) -> None:
-    home = (tmp_path / "open-runner").resolve()
+def test_a_bundle_cannot_be_issued_without_the_human_secret(gateway: Path, tmp_path: Path) -> None:
+    """Every bundle carries the API admission, which derives its telemetry token from the
+    secret: there is no admission-less capability."""
+    home = (tmp_path / "no-secret-runner").resolve()
     home.mkdir(mode=0o700)
-    issued = unit.issue_bundle(
-        gateway,
-        unit=unit.UnitIdentity(machine="mini", home=str(home)),
-        endpoint=_ENDPOINT,
-        cluster_secret="",
-        ttl_s=600,
-    )
-    bundle = unit.open_bundle(issued.envelope, issued.transport_key)
-    assert bundle.capability.api is None
-    unit.install_bundle(
-        home, bundle, machine="mini", served_endpoint=_ENDPOINT, probe=lambda _dsn: None
-    )
-    assert unit.unit_api_delivery(home) == {}
-    assert unit.telemetry_bearer(home, "") is None
+    with pytest.raises(ValueError, match="non-empty cluster secret"):
+        unit.issue_bundle(
+            gateway,
+            unit=unit.UnitIdentity(machine="mini", home=str(home)),
+            endpoint=_ENDPOINT,
+            cluster_secret="",
+            ttl_s=600,
+        )
 
 
 # ── launch delivery and clients ─────────────────────────────────────────────
 
 
-def test_launch_delivers_the_class_token_only_while_authenticated(
+def test_launch_delivers_each_service_its_class_token(
     gateway: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tokens = _tokens(gateway).api
     monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: True)
     assert bringup.api_delivery("gateway") == {api.API_TOKEN_ENV: tokens.gateway}
     assert bringup.api_delivery("runner") == {api.API_TOKEN_ENV: tokens.runner}
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    assert bringup.api_delivery("runner") == {}
 
 
 def test_a_pure_runner_launch_delivers_its_capability_token(
@@ -567,14 +581,15 @@ def test_clients_present_the_delivered_token_first(monkeypatch: pytest.MonkeyPat
     assert gateway_auth_headers() == bearer_header("delivered-" + "t" * 32)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     monkeypatch.delitem(os.environ, api.API_TOKEN_ENV)
-    assert gateway_auth_headers() == {}
+    with pytest.raises(GatewayApiTokenMissing):
+        gateway_auth_headers()
 
 
 def test_the_telemetry_token_is_one_way_and_stable_per_secret() -> None:
     token = api.telemetry_token(_HUMAN)
     assert token == api.telemetry_token(_HUMAN) != api.telemetry_token(_HUMAN + "x")
     assert _HUMAN not in token and token != hashlib.sha256(_HUMAN.encode()).hexdigest()
-    with pytest.raises(ValueError, match="open cluster"):
+    with pytest.raises(ValueError, match="non-empty cluster secret"):
         api.telemetry_token("")
 
 

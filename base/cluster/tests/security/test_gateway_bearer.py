@@ -1,7 +1,7 @@
 """Which credential a process presents to the gateway API (`gateway_bearer`).
 
-An authenticated cluster delivers every agent host and runner service its write
-generation's machine API token. A process holding that token presents it; an
+The cluster API always authenticates: it delivers every agent host and runner service
+its write generation's machine API token. A process holding that token presents it; an
 operator or gateway-profile process without one presents the human secret it
 legitimately holds; an agent- or runner-profile process without one raises
 instead of silently presenting the human secret. A remote-managed data plane
@@ -60,12 +60,14 @@ def test_a_delivered_token_is_presented_before_the_secret(
 
 
 @pytest.mark.parametrize("profile", [None, "gateway", "agent", "runner"])
-def test_an_open_cluster_presents_nothing(
+def test_a_process_with_no_credential_fails_instead_of_presenting_nothing(
     monkeypatch: pytest.MonkeyPatch, profile: str | None
 ) -> None:
-    """No token and no secret (the single-box default): no header, whatever the profile."""
+    """No token and no secret: there is no open posture to send nothing to, whatever the
+    profile (a remote unit's agent or runner has the token or this launch defect)."""
     _process(monkeypatch, profile=profile, token=None, secret="")
-    assert gateway_auth_headers() == {}
+    with pytest.raises(machine.GatewayApiTokenMissing, match="AVA_API_TOKEN"):
+        gateway_auth_headers()
 
 
 @pytest.mark.parametrize("profile", [None, "gateway"])

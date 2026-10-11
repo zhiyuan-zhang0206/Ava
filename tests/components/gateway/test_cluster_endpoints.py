@@ -29,6 +29,7 @@ from gateway.events import telemetry_rows
 from gateway.http.auth.cors import cors_allowed_origins
 from ops import agent_pause, cluster_status
 from ops.cluster import pause as cluster_pause
+from tests.fixtures.unit.gateway_auth import without_credentials
 
 
 @pytest.fixture
@@ -134,7 +135,7 @@ class TestPauseMiddleware:
         reached the router instead of the pause short-circuit."""
         fake_flag.write_text("")
         with TestClient(app) as client:
-            r = client.post(
+            r = without_credentials(client).post(
                 "/api/alerts",
                 json={"status": "firing", "alerts": []},
             )

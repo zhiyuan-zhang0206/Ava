@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from base import config
 from base.cluster.auth import bearer_header
 from gateway.app import app
+from tests.fixtures.unit.gateway_auth import without_credentials
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -35,15 +36,13 @@ def test_okf_graph_returns_html_with_injected_data() -> None:
 
 def test_okf_graph_rejects_no_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     """Auth is the normal middleware — this route is not in the bypass list."""
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
-        resp = client.get("/api/okf/graph")
+        resp = without_credentials(client).get("/api/okf/graph")
     assert resp.status_code == 401
 
 
 def test_okf_graph_accepts_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
         resp = client.get("/api/okf/graph", headers=bearer_header(_SECRET))
