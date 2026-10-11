@@ -14,8 +14,8 @@ and coordinate validation. A `WindowTarget` pairs `pid` with `window_id`;
 native operations must resolve both against the live window server rather
 than substituting the frontmost app. An app selector is an exact display name
 or bundle identifier; an explicitly empty or malformed selector is an error.
-An `AppTarget` for explicit foreground activation instead selects exactly one
-`pid` or `bundle_id`. Native activation must reject missing or ambiguous apps
+An `AppTarget` selects exactly one `pid` or `bundle_id` for explicit AX
+observation or foreground activation. Native activation must reject missing or ambiguous apps
 and confirm the requested process became frontmost. It does not select a
 particular window; callers must capture a fresh observation after activation.
 
