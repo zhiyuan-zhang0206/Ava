@@ -73,13 +73,11 @@ def test_definition_inventory_can_inspect_disabled_entries_with_invalid_overlay(
     assert set(cfg_mod.load_mcp_config(include_disabled=True)) == {"fs", "github"}
 
 
-def test_sdk_servers_and_help_surface_the_overlay_error(_two_servers: Path) -> None:
+def test_sdk_servers_surfaces_the_overlay_error(_two_servers: Path) -> None:
     from ava import mcps
 
     (_two_servers / "mcp_enabled.json").write_text("{not json")
     with pytest.raises(McpEnabledConfigError):
         mcps.servers()
-    with pytest.raises(McpEnabledConfigError):
-        mcps.help()
     with pytest.raises(McpEnabledConfigError):
         _ = mcps.fs

@@ -14,7 +14,7 @@ tags:
 
 ava_fleet injects the `set_label` fleet member into `ava.self` (declared as an `SdkMember` in `plugins/ava_fleet/plugin.py`) — letting agents report their role to the fleet monitoring view and to their own agent-ID context note. The label that humans see for each agent when scanning the fleet view is provided by this member.
 
-> **Boundary**: The **core** members of `ava.self` (AGENT_ID / MACHINE_SPEC / SELF_MACHINE_NAME / pause_heartbeat / compact / restart / terminate) are provided by `ava/self.py` and remain even if fleet is disabled — see documentation at [[ava/docs/self.ava.okf.md|ava.self]]. Disabling fleet only removes the members below.
+> **Boundary**: The **core** members of `ava.self` (AGENT_ID / MACHINE_SPEC / pause_heartbeat / compact / restart / terminate) are provided by `ava/self.py` and remain even if fleet is disabled — see documentation at [[ava/docs/self.ava.okf.md|ava.self]]. Disabling fleet only removes the members below.
 
 ## API
 

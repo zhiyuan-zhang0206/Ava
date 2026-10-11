@@ -516,7 +516,7 @@ def test_actual_sdk_consumers_use_canonical_definition_proofs(source: str) -> No
 
 
 @pytest.mark.parametrize(
-    "member", ["memory.PATH", "self.AGENT_ID", "skills.read.missing", "mcps.missing"]
+    "member", ["memory.PATH", "self.AGENT_ID", "skills.missing", "mcps.missing"]
 )
 def test_actual_runtime_only_sdk_values_retain_unknown(member: str) -> None:
     root = Path(__file__).resolve().parents[3]

@@ -574,40 +574,6 @@ def test_dump_content_raises_on_unknown_block() -> None:
         mcps_mod._dump_content(_Unknown())
 
 
-# ─── help() ────────────────────────────────────────────────────────────────
-
-
-def test_help_prints_empty_message_when_no_servers(
-    fake_config: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    mcps_mod.help()
-    out = capsys.readouterr().out
-    assert "no MCP servers configured" in out
-
-
-def test_help_lists_each_configured_server(
-    fake_config: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    fake_config.write_text(
-        json.dumps(
-            {
-                "mcpServers": {
-                    "fs": {"command": "uvx", "args": ["mcp-server-filesystem", "/some/path"]},
-                    "chrome": {"command": "npx", "args": ["chrome-mcp@latest"]},
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    mcps_mod.help()
-    out = capsys.readouterr().out
-    assert "fs/" in out
-    assert "chrome/" in out
-    assert "uvx" in out
-    assert "npx" in out
-    assert "mcp-server-filesystem" in out
-
-
 # ─── _ServerProxy detail paths ────────────────────────────────────────────
 
 

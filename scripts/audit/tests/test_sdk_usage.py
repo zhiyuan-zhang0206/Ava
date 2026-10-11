@@ -29,7 +29,7 @@ def test_cumulative_selection_weights_calls_and_keeps_whole_modules() -> None:
         event(2, "shell.run", 2, 3),
         event(3, "files.read", 2),
         event(4, "agents.spawn"),
-        event(5, "skills.read", weight=100),
+        event(5, "mcps.servers", weight=100),
         event(6, "help", weight=100),
     ]
     data = report(events, START, END)

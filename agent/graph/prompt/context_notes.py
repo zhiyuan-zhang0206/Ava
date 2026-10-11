@@ -337,7 +337,8 @@ _FORK_TAIL_SKILLS_FRAMING = (
 
 
 def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], list[str]] | None:
-    """Read each resolved skill's SKILL.md into a `## ava.skills.<path>` section.
+    """Read each resolved skill's SKILL.md into a `## ava.skills.<path>` section,
+    spelled as the loadable attribute path (`ava.skills.target`).
 
     Returns ``(sections, injected_identifiers)``, or None when every skill is
     unreadable. Unreadable bodies warn + skip (same posture as the whole-note
@@ -358,7 +359,7 @@ def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], l
                 exc,
             )
             continue
-        sections.append(f"## ava.skills.{ava.skills.identifier(skill)}\n\n{body}")
+        sections.append(f"## ava.skills.{ava.skills.target(skill)}\n\n{body}")
         injected.append(ava.skills.identifier(skill))
     if not sections:
         return None

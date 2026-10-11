@@ -52,16 +52,25 @@ class _Render:
 _DEFAULT_RENDER = _Render()
 
 
-def help(
+def help(*targets: Any) -> None:
+    """Print documentation for one or more SDK targets, e.g. `ava.help(ava.shell)`.
+
+    With no targets, show the SDK overview. Members unavailable to your model
+    are hidden automatically."""
+    render(*targets)
+
+
+def render(
     *targets: Any,
     compact_classes: bool = False,
     hidden_members: frozenset[str] | None = None,
 ) -> None:
-    """Print documentation for one or more SDK targets, e.g. `ava.help(ava.shell)`.
+    """Framework-internal render entry behind `ava.help`; not part of the SDK.
 
-    With no targets, show the SDK overview. `compact_classes` shows class fields
+    The system prompt builder calls this with the render parameters that
+    `ava.help` deliberately does not take. `compact_classes` shows class fields
     without methods. `hidden_members` omits the named dotted SDK members; when
-    omitted, members unavailable to your model are hidden automatically."""
+    omitted, members unavailable to the model are hidden automatically."""
     import ava as _ava
 
     if hidden_members is None:
@@ -349,29 +358,18 @@ def _format_skill_child(name: str, child: Any) -> str:
     """Skill child: a Markdown heading at the child's own FQN depth (the same
     depth rule every other heading follows), description as the body below.
 
-    The heading spells the path in display form (`ava.skills.web-ai:deep-research`);
-    heading depth is computed from the loadable FQN so the segment count (not
-    the display separators) decides the level.
+    The heading spells the loadable path (`ava.skills.web_ai.deep_research`), so
+    it pastes straight into `ava.help(...)`; its segment count decides the level.
 
     The description is ``_description`` (frontmatter) when available, else the
     first line of ``__doc__`` (namespace nodes carry theirs there)."""
     fqn = getattr(child, "__name__", None) or name
-    heading = f"{'#' * _heading_depth(fqn)} {_display_skill_fqn(fqn)}"
+    heading = f"{'#' * _heading_depth(fqn)} {fqn}"
     desc = getattr(child, "_description", None)
     if not desc:
         doc = inspect.getdoc(child)
         desc = doc.split("\n")[0] if doc else ""
     return f"{heading}\n\n{desc}" if desc else heading
-
-
-def _display_skill_fqn(fqn: str) -> str:
-    """Render a skill FQN in display spelling: `-`/`:` for `_`/`.` past the
-    `ava.skills.` prefix (e.g. `ava.skills.web_ai.deep_research` ->
-    `ava.skills.web-ai:deep-research`). Non-skill FQNs pass through unchanged."""
-    prefix = "ava.skills."
-    if not fqn.startswith(prefix):
-        return fqn
-    return prefix + fqn[len(prefix) :].replace("_", "-").replace(".", ":")
 
 
 def _format_pep224_const(name: str, const: "_Constant") -> str:

@@ -325,7 +325,7 @@ def test_auto_promote_help_renders_root_skill(
     out = capsys.readouterr().out
     assert "### ava.skills.ava_fleet" in out
     assert "Fleet" in out  # root SKILL.md body
-    assert "#### ava.skills.ava-fleet:sub-skill\n\nA sub skill" in out  # child listed
+    assert "#### ava.skills.ava_fleet.sub_skill\n\nA sub skill" in out  # child listed
 
 
 # ─── dash/underscore projection ────────────────────────────────────────────

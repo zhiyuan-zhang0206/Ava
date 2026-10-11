@@ -697,7 +697,7 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
         )
     )
     try:
-        assert "# Capture test" in ava.skills.read("capture_test")
+        assert "# Capture test" in ava.files.read(str(tmp_path / "SKILL.md"))
         rows = history.entries(participant.lease_id, db_conn)
         audits = [row for row in rows if row["kind"] == "api_event"]
         assert _rows(db_conn, lease["id"], participant.source_key) == 1

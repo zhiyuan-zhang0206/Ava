@@ -178,7 +178,7 @@ async def _run(
 
 
 def _offered(update: dict[str, Any] | None) -> list[str]:
-    """Skill identifiers named by the note in `update`, in the order listed."""
+    """Skill paths named by the note in `update`, in the order listed."""
     assert update is not None
     (note,) = update["messages"]
     return [
@@ -329,7 +329,9 @@ async def test_a_flagged_description_is_not_a_candidate(skills_dir: Path) -> Non
     assert set(scorer.calls[0][1]) == {"alpha"}
 
 
-async def test_sub_skills_are_candidates_with_their_display_identifier(skills_dir: Path) -> None:
+async def test_sub_skills_are_scored_by_display_identifier_and_offered_by_loadable_path(
+    skills_dir: Path,
+) -> None:
     _install(skills_dir, "alpha")
     (skills_dir / "grp").mkdir()
     _install(skills_dir / "grp", "beta")
@@ -338,7 +340,7 @@ async def test_sub_skills_are_candidates_with_their_display_identifier(skills_di
     update = await _run(_state(_tail("user")), scorer)
 
     assert set(scorer.calls[0][1]) == {"alpha", "grp:beta"}
-    assert _offered(update) == ["grp:beta"]
+    assert _offered(update) == ["grp.beta"]  # the note spells the path `ava.help` takes
 
 
 async def test_no_candidates_means_no_call(three_skills: Path) -> None:
