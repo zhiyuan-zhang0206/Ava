@@ -27,6 +27,17 @@ from base.lm.plugin_providers import build_model_catalog
 def _plugin(unit_home: Path) -> None:
     plugin = unit_home / "plugins" / "exec_config_probe"
     plugin.mkdir(parents=True)
+    (plugin / "ava-plugin.json").write_text(
+        json.dumps(
+            {
+                "apiVersion": 2,
+                "name": "exec_config_probe",
+                "version": "1.0.0",
+                "engines": {"ava": ">=2026.10.1"},
+                "contributions": {"config": {"schema": "default_config.py"}},
+            }
+        )
+    )
     (plugin / "plugin.py").write_text("__description__ = 'Private configuration probe'\n")
     (plugin / "default_config.py").write_text(
         "from pydantic import BaseModel, Field\n"

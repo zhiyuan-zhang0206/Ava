@@ -39,6 +39,20 @@ def test_child_plugin_binding_failure_keeps_original_boot_error(
         "def contribute():\n"
         "    return PluginContributions(config=Config)\n"
     )
+    (plugin / "ava-plugin.json").write_text(
+        json.dumps(
+            {
+                "apiVersion": 2,
+                "name": "boot_failure",
+                "version": "1.0.0",
+                "engines": {"ava": ">=0.1.0"},
+                "contributions": {
+                    "sdkNamespaces": ["boot_failure"],
+                    "config": {"schema": "default_config.py"},
+                },
+            }
+        )
+    )
     image = home / "configs" / "boot_failure" / "config.json"
     image.parent.mkdir(parents=True)
     image.write_text('{"value": 1}')
