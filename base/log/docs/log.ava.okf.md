@@ -40,7 +40,7 @@ Every log line is also an **event** in the unified event stream (event-system de
 - `init_cli_process(name)` — CLI verbs that bring a unit up (`cli-<verb>`): gateway's sinks, no `service_started` row.
 - All are **idempotent** (`_init_done` process-level guard) — `logger.add` is not idempotent; repeated calls accumulate sinks until fd exhaustion (errno 24); watchdog reusing healthcheck every 60s would hit this, the guard blocks it.
 
-`add_postgres_sink(producer=..., machine_reader=...)` binds the root's actual writer at the existing eager logging startup point. The loguru adapter captures that same producer, while ordinary direct events share its concrete process binding. Startup rejects replacing another live writer; it never substitutes an unrelated database factory. Quiet SDK attachments retain their lazy factory without opening logging or a thread.
+`add_event_sink(producer=..., machine_reader=...)` binds the root's actual writer at the existing eager logging startup point. The loguru adapter captures that same producer, while ordinary direct events share its concrete process binding. Startup rejects replacing another live writer; it never substitutes an unrelated database factory. Quiet SDK attachments retain their lazy factory without opening logging or a thread.
 
 ### Three sink types
 stderr, a rotated JSONL file and the unified event pipeline, and how every sink is registered: [[sinks.ava.okf.md|log sinks]].

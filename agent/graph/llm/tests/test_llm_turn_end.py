@@ -4,7 +4,7 @@
 `logger.info` in the finally block emitted but didn't capture exc_info, so from the
 framework's perspective "why it failed" was completely invisible. Fix:
 `logger.opt(exception=True).warning(...)` on the ok=False path, together with
-`base.log.process._postgres_sink` automatically injecting traceback / exception_type /
+`base.log.process._event_sink` automatically injecting traceback / exception_type /
 exception_value into events.payload.
 
 Tests focus on the two branches of the finally block (ok=True / ok=False), without
@@ -63,7 +63,7 @@ async def test_turn_end_ok_false_record_carries_exception(
     model_catalog: ModelCatalog,
 ) -> None:
     """`_llm_node_impl` raises → finally uses logger.opt(exception=True) so that
-    record["exception"] is not None, allowing downstream _postgres_sink to inject the traceback."""
+    record["exception"] is not None, allowing downstream _event_sink to inject the traceback."""
 
     async def _boom(*_a, **_k):
         raise RuntimeError("simulated LLM timeout 39s")
@@ -87,7 +87,7 @@ async def test_turn_end_ok_false_record_carries_exception(
         rec["level"].name == "WARNING"  # pyright: ignore[reportUnknownMemberType]
     )  # ok=False goes through warning, distinct from ok=True info
     assert rec["exception"] is not None, (
-        "logger.opt(exception=True) must attach an exception object — _postgres_sink relies on it to inject traceback"
+        "logger.opt(exception=True) must attach an exception object — _event_sink relies on it to inject traceback"
     )
     assert rec["exception"].type is RuntimeError  # pyright: ignore[reportUnknownMemberType]
     assert "simulated LLM timeout" in str(rec["exception"].value)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

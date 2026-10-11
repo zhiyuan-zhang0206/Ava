@@ -220,10 +220,6 @@ PROVIDER = ProviderContribution(
             tuning=ModelTuning(reasoning_effort="medium"),
             media_types=frozenset({"image"}),
         ),
-        # Removed 2026-09-23 (task #4508): gpt-5.5 and gpt-5.4-mini
-        # were never selectable here (implicit spawnable=False) and have no
-        # live references. Historical prices remain in
-        # base/lm/pricing/pricing_catalog_archive.json.
     },
     pricing={
         "gpt-6-astra": PriceRates(

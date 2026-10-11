@@ -4125,7 +4125,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" | level=\"info\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" | level=\"info\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "runs"
@@ -4195,7 +4195,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" | level=\"info\" | attributes_body =~ \".*-> 0 kept.*\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" | level=\"info\" [5m]))",
+     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_body =~ \".*-> 0 kept.*\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" | level=\"info\" [5m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "empty %"
@@ -4273,7 +4273,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" | level=\"warning\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" [5m]))",
+     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" | level=\"warning\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" [5m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "anomaly %"
@@ -4334,7 +4334,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry|log\" | level=\"warning\" [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"recall_filter\"} | json | category=~\"telemetry\" | level=\"warning\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "failures"
@@ -4404,7 +4404,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry|log\" | level=\"info\" | attributes_search_ms!=\"\" | unwrap attributes_search_ms [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry|log\" | level=\"info\" | attributes_search_ms!=\"\" [5m]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" | unwrap attributes_search_ms [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" [5m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "avg search ms"
@@ -4474,7 +4474,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry|log\" | level=\"info\" | attributes_filter_ms!=\"\" | unwrap attributes_filter_ms [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry|log\" | level=\"info\" | attributes_filter_ms!=\"\" [5m]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_filter_ms!=\"\" | unwrap attributes_filter_ms [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_filter_ms!=\"\" [5m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "avg filter ms"
@@ -4557,7 +4557,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry|log\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry\" [5m])) / 5",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "fixes"
@@ -4618,7 +4618,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry|log\" [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "fixes"

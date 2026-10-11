@@ -44,7 +44,6 @@ def _record(label: str, agent_id: int = 1, **overrides: object) -> dict[str, obj
         "exec_failed": 0,
         "last_exec_failed": False,
         "compactions": 0,
-        "breached": False,
         "terminated": False,
         "label": label,
     }
@@ -215,13 +214,12 @@ def test_render_appends_summary_and_report_pointer_last(daily_scan: Any) -> None
     records = [
         _record("ok", agent_id=1),
         _record("fumbled", agent_id=2, corrections=["a", "b"], peer_feedback=["p"]),
-        _record("failed", agent_id=3, exec_failed=2, breached=True),
+        _record("failed", agent_id=3, exec_failed=2),
     ]
     out = ds.render(records, Path("d.jsonl"), 1, report_path=Path("d.report.txt"))
     lines = out.splitlines()
     assert lines[-2] == (
-        "summary: 3 runs (ok 1 / fumbled 1 / failed 1) | corrections 2 | peer 1 "
-        "| breached 1 | exec-fail runs 1"
+        "summary: 3 runs (ok 1 / fumbled 1 / failed 1) | corrections 2 | peer 1 | exec-fail runs 1"
     )
     assert lines[-1] == "full report: d.report.txt"
 
@@ -339,10 +337,9 @@ def test_compact_bad_line_pins_every_signal_token(daily_scan: Any) -> None:
         exec_failed=2,
         last_exec_failed=True,
         compactions=3,
-        breached=True,
         terminated=True,
         final_output="",
         turns=1,
     )
-    assert ds._compact_bad_line(all_signals) == "  #7 fumbled rep2 c1 pf1 ef2 last cp3 br term"
+    assert ds._compact_bad_line(all_signals) == "  #7 fumbled rep2 c1 pf1 ef2 last cp3 term"
     assert ds._compact_bad_line(_record("failed", agent_id=8)) == "  #8 failed -"

@@ -68,7 +68,7 @@ The standalone collection scripts construct one gate at startup and reuse the
 same handle for lifecycle rows and checkpoint transcripts.
 
 Compare `report["mean"]["overall"]` before vs after your edit. `rubric.py`
-scores two dimensions in [0, 1]: **completion** (output produced, no breach,
+scores two dimensions in [0, 1]: **completion** (output produced,
 clean exec) and **efficiency** (few tokens/turns, no exec failures, no
 compaction, no re-prompts); `overall` weights completion higher. Use only the
 verified mean — invalid replays are reported separately.

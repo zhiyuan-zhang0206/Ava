@@ -5,7 +5,7 @@ One JSON record per agent that was active in the window, written as JSONL to
 `$AVA_HOME/self_evolution/dataset/<week>.jsonl`. Each record is assembled from
 existing tables only (no new schema): the unified `events` stream —
 `category=telemetry/log` carries token / turn / exec signals, `category=audit`
-carries compaction, delivery breach, and the future
+carries compaction and the future
 `skill_invoked` hard signal), `inbound_messages` (the user's task prompt and
 any follow-up corrections), `agents_meta` (spawner, terminal status, final
 message), and the stored checkpoint (the full transcript reconstructed across

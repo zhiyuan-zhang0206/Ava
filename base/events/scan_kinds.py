@@ -9,10 +9,8 @@ Regenerates the raw material behind base/events/registry.md:
   (emit's `event_name` argument is positional / variable, not scanned).
 
   1. Static `event=` literals in production Python code (agent_events event names).
-  2. Static `label=` literals on logger calls (label fallback -> agent_events
-     event names; see base/log/__init__.py event resolution: event -> label -> "log").
-  3. `prepare_event_log` event_type values (category=audit event names).
-  4. SSE role discriminators in base/events/live/projection.py (real-time channel,
+  2. `prepare_event_log` event_type values (category=audit event names).
+  3. SSE role discriminators in base/events/live/projection.py (real-time channel,
      not persisted).
 
 Usage:
@@ -66,7 +64,6 @@ EXCLUDE_DIRS = {
 _ROOT_EXCLUDE_DIRS = {"deploy"}
 
 EVENT_RE = re.compile(r"""\bevent\s*=\s*["']([^"']+)["']""")
-LABEL_RE = re.compile(r"""\blabel\s*=\s*["']([^"']+)["']""")
 EVENT_TYPE_RE = re.compile(r"""event_type\s*=\s*["']([^"']+)["']""")
 SSE_ROLE_RE = re.compile(r'role: Literal\["([^"]+)"\]')
 
@@ -97,23 +94,21 @@ def walk_py(repo: Path) -> Iterator[tuple[str, list[str]]]:
         yield rel, lines
 
 
-def scan_code(repo: Path) -> tuple[Counter[str], Counter[str], Counter[str], Counter[str]]:
-    """Return (event_kinds, label_kinds, event_type_kinds, sse_roles)."""
+def scan_code(repo: Path) -> tuple[Counter[str], Counter[str], Counter[str]]:
+    """Return (event_kinds, event_type_kinds, sse_roles)."""
     event_kinds: Counter[str] = Counter()
-    label_kinds: Counter[str] = Counter()
     event_type_kinds: Counter[str] = Counter()
     sse_roles: Counter[str] = Counter()
     for _, lines in walk_py(repo):
         for line in lines:
             event_kinds.update(m.group(1) for m in EVENT_RE.finditer(line))
-            label_kinds.update(m.group(1) for m in LABEL_RE.finditer(line))
             event_type_kinds.update(m.group(1) for m in EVENT_TYPE_RE.finditer(line))
     # The live-event projection declares the SSE roles; a missing file is a moved
     # module this scanner must follow, not an empty role set.
     with (repo / "base" / "events" / "live" / "projection.py").open(encoding="utf-8") as f:
         for line in f:
             sse_roles.update(m.group(1) for m in SSE_ROLE_RE.finditer(line))
-    return event_kinds, label_kinds, event_type_kinds, sse_roles
+    return event_kinds, event_type_kinds, sse_roles
 
 
 # ── label-only loguru record calls (AST) ────────────────────────────────────
@@ -124,9 +119,8 @@ class LabelOnlyCall:
     """One loguru record call carrying `label=` and no `event=` in its chain.
 
     `label` is the literal value when the keyword argument is a plain string
-    constant; None marks a non-literal (dynamic) expression whose registeredness
-    cannot be proven statically — the label-only gate in
-    tests/contracts/test_lint_event_kinds.py fails that closed.
+    constant; None marks a non-literal (dynamic) expression. The label-only gate
+    in tests/contracts/test_lint_event_kinds.py rejects every finding.
     """
 
     path: str
@@ -151,9 +145,8 @@ def _logger_bindings(tree: ast.AST) -> tuple[set[str], set[str]]:
 
     Both `from base.log import logger` and `from loguru import logger` bind
     the same singleton: base.log configures its sinks on loguru's global
-    logger, so a record emitted through either spelling resolves
-    event -> label -> "log" identically — and an unregistered label raises in
-    the sink the same way.
+    logger, so a record emitted through either spelling derives its event
+    identically.
     """
     names: set[str] = set()
     modules: set[str] = set()
@@ -239,8 +232,8 @@ def find_label_only_calls(source: str, *, filename: str = "<string>") -> list[La
     """Every label-only loguru record call in one source string.
 
     "Label-only" means the merged chain keywords carry `label=` and no
-    `event=`: at runtime the sink resolves event -> label -> "log", so such a
-    call derives its event name from the label. Purely static; a non-literal
+    `event=`: at runtime the sink resolves event -> "log", so such a call logs
+    as a bare `log` event whatever its label says. Purely static; a non-literal
     label is reported with label=None (dynamic).
     """
     tree = ast.parse(source, filename=filename)
@@ -273,13 +266,10 @@ def main() -> int:
     ap.add_argument("--repo", default=str(Path.home() / "Ava"))
     args = ap.parse_args()
 
-    event_kinds, label_kinds, event_type_kinds, sse_roles = scan_code(Path(args.repo))
+    event_kinds, event_type_kinds, sse_roles = scan_code(Path(args.repo))
 
     print(f"===== agent_events event= literals (prod code): {len(event_kinds)} =====")
     for k, n in event_kinds.most_common():
-        print(f"  {n:4d}  {k}")
-    print(f"\n===== label= fallback literals (prod code): {len(label_kinds)} =====")
-    for k, n in label_kinds.most_common():
         print(f"  {n:4d}  {k}")
     print(f"\n===== event_log event_type literals (prod code): {len(event_type_kinds)} =====")
     for k, n in event_type_kinds.most_common():

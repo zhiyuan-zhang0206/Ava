@@ -207,14 +207,17 @@ def test_enforce_dir_cap_deletes_oldest_first(monkeypatch: pytest.MonkeyPatch, t
     from base.telemetry.tracing import _enforce_dir_cap
 
     monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
-    # 4 files of 1 MB each: spans-20260101-1 .. spans-20260104-1
-    for day in ("20260101", "20260102", "20260103", "20260104"):
-        (tmp_path / f"spans-{day}-1.jsonl").write_bytes(b"x" * (1024 * 1024))
+    # 4 files of 1 MB each: one rotated backup per day, 2026-01-01 .. 2026-01-04
+    for day in ("2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"):
+        (tmp_path / f"spans-{day}T00-00-00.000-size.jsonl").write_bytes(b"x" * (1024 * 1024))
 
     removed = _enforce_dir_cap(max_mb=2)  # cap 2 MB -> delete 2 oldest
     assert removed == 2
     remaining = sorted(p.name for p in tmp_path.glob("spans*.jsonl"))
-    assert remaining == ["spans-20260103-1.jsonl", "spans-20260104-1.jsonl"]
+    assert remaining == [
+        "spans-2026-01-03T00-00-00.000-size.jsonl",
+        "spans-2026-01-04T00-00-00.000-size.jsonl",
+    ]
 
 
 def test_enforce_dir_cap_noop_when_under_cap(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -222,7 +225,7 @@ def test_enforce_dir_cap_noop_when_under_cap(monkeypatch: pytest.MonkeyPatch, tm
     from base.telemetry.tracing import _enforce_dir_cap
 
     monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
-    (tmp_path / "spans-20260101-1.jsonl").write_bytes(b"x" * 10)
+    (tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl").write_bytes(b"x" * 10)
     assert _enforce_dir_cap(max_mb=100) == 0
     assert len(list(tmp_path.glob("spans*.jsonl"))) == 1
     assert _enforce_dir_cap(max_mb=0) == 0
@@ -235,15 +238,15 @@ def test_enforce_dir_cap_active_file_sorts_last(monkeypatch: pytest.MonkeyPatch,
     from base.telemetry.tracing import _enforce_dir_cap
 
     monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
-    (tmp_path / "spans-20260101-1.jsonl").write_bytes(b"x" * (1024 * 1024))
-    (tmp_path / "spans-2026-01-02T03-04-05.000.jsonl").write_bytes(b"x" * (1024 * 1024))
+    (tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl").write_bytes(b"x" * (1024 * 1024))
+    (tmp_path / "spans-2026-01-02T03-04-05.000-size.jsonl").write_bytes(b"x" * (1024 * 1024))
     active = tmp_path / "spans.jsonl"
     active.write_bytes(b"x" * (1024 * 1024))
 
     removed = _enforce_dir_cap(max_mb=2)
     assert removed == 1
     remaining = sorted(p.name for p in tmp_path.glob("spans*.jsonl"))
-    assert remaining == ["spans-2026-01-02T03-04-05.000.jsonl", "spans.jsonl"], (
+    assert remaining == ["spans-2026-01-02T03-04-05.000-size.jsonl", "spans.jsonl"], (
         "the active file must survive a cap prune"
     )
 
@@ -280,7 +283,7 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
     monkeypatch.setattr("base.config.settings.observability.trace_max_dir_mb", 2048)
     # Disk OVER the watermark: recording must be skipped...
     monkeypatch.setattr("base.telemetry.tracing._disk_usage", lambda: (0.99, 10 * 1024**3))
-    old = tmp_path / "spans-20200101-1.jsonl"
+    old = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"
     old.write_text("{}\n", encoding="utf-8")
     # Spy on the gzip and cap legs (the prune leg is exercised for real): all
     # three must be reached before the watermark guard returns. The cap spy
@@ -396,25 +399,6 @@ def test_initialize_skips_when_disk_over_watermark(monkeypatch: pytest.MonkeyPat
     assert attrs.get("free_gb") == 2.0  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_enforce_dir_cap_sorts_by_numeric_pid(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """Same-day files must sort by NUMERIC pid, not string: name order would
-    prune `...-1000` before `...-999`, deleting a newer file (audit 2026-08-08
-    P1 — the string order also made a co-located agent's actively-written
-    mirror a deletion target)."""
-    from base.telemetry.tracing import _enforce_dir_cap
-
-    monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
-    (tmp_path / "spans-20260101-999.jsonl").write_bytes(b"x" * (1024 * 1024))
-    (tmp_path / "spans-20260101-1000.jsonl").write_bytes(b"x" * (1024 * 1024))
-
-    removed = _enforce_dir_cap(max_mb=1)
-    assert removed == 1
-    remaining = sorted(p.name for p in tmp_path.glob("spans*.jsonl"))
-    assert remaining == ["spans-20260101-1000.jsonl"], (
-        "numeric pid order must delete the older pid-999 file, not pid-1000"
-    )
-
-
 def test_enforce_dir_cap_survives_peer_prune(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A file vanishing between glob and stat — a peer agent pruning the shared
     traces dir concurrently — must not raise out of the boot path (audit
@@ -425,8 +409,8 @@ def test_enforce_dir_cap_survives_peer_prune(monkeypatch: pytest.MonkeyPatch, tm
     from base.telemetry.tracing import _enforce_dir_cap
 
     monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
-    for day in ("20260101", "20260102", "20260103"):
-        (tmp_path / f"spans-{day}-1.jsonl").write_bytes(b"x" * (1024 * 1024))
+    for day in ("2026-01-01", "2026-01-02", "2026-01-03"):
+        (tmp_path / f"spans-{day}T00-00-00.000-size.jsonl").write_bytes(b"x" * (1024 * 1024))
 
     real_stat = Path.stat
     calls = {"n": 0}
@@ -443,4 +427,7 @@ def test_enforce_dir_cap_survives_peer_prune(monkeypatch: pytest.MonkeyPatch, tm
     remaining = sorted(p.name for p in tmp_path.glob("spans*.jsonl"))
     # the vanished file counted as 0 bytes; the sweep continued past it and
     # deleted the oldest surviving file
-    assert remaining == ["spans-20260102-1.jsonl", "spans-20260103-1.jsonl"]
+    assert remaining == [
+        "spans-2026-01-02T00-00-00.000-size.jsonl",
+        "spans-2026-01-03T00-00-00.000-size.jsonl",
+    ]
