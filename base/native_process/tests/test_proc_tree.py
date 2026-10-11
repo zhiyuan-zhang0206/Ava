@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import importlib
 import os
 import signal
 import subprocess
 import sys
+from typing import Any
 
 import psutil
 import pytest
@@ -127,7 +127,10 @@ def test_stable_create_time_ignores_a_simulated_clock_step(
     simulated step moves the public reading — the artifact a 2s tolerance
     cannot absorb — while the key stays identical.
     """
-    psosx = importlib.import_module("psutil._psosx")
+    from psutil import _psosx
+
+    psosx: Any = _psosx  # the macOS-only stub does not declare `INIT_BOOT_TIME`
+
     key_before = stable_create_time(psutil.Process())
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", psosx.INIT_BOOT_TIME + seconds)
     public_moved = psutil.Process().create_time()
@@ -147,7 +150,10 @@ def test_capture_and_verify_span_clock_epochs(
     One side stays unpatched on purpose: psutil's correction adds |diff| in
     either direction, so a -N patch models the same epoch as +N.
     """
-    psosx = importlib.import_module("psutil._psosx")
+    from psutil import _psosx
+
+    psosx: Any = _psosx  # the macOS-only stub does not declare `INIT_BOOT_TIME`
+
     base = psosx.INIT_BOOT_TIME
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + seconds)
     identity = OwnedProcess.capture(psutil.Process())

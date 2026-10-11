@@ -5,7 +5,6 @@ declaration atomically. A failure is reported through `load_report` and costs on
 (or that face).
 """
 
-import importlib
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -14,6 +13,10 @@ from typing import Any
 
 import pytest
 
+from ava_builtins.plugins.ava_fleet import inspector as fleet_inspector
+from ava_builtins.plugins.ava_fleet import metrics as fleet_metrics
+from ava_builtins.plugins.ava_memory import metrics as memory_metrics
+from ava_builtins.plugins.ava_syntax_fix import metrics as syntax_fix_metrics
 from base.packages.plugins import data_registry, load_report
 from base.packages.plugins.data_registry import (
     METRICS_KEY,
@@ -335,12 +338,18 @@ def test_a_refusal_is_reported_through_load_report(
 # ── the shipped plugins ───────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("plugin", ["ava_fleet", "ava_memory", "ava_syntax_fix"])
+_SHIPPED_METRICS = (
+    ("ava_fleet", fleet_metrics),
+    ("ava_memory", memory_metrics),
+    ("ava_syntax_fix", syntax_fix_metrics),
+)
+
+
+@pytest.mark.parametrize(("plugin", "module"), _SHIPPED_METRICS)
 def test_shipped_metrics_faces_declare_admitted_specs(
-    plugin: str, reported: list[tuple[str, BaseException]]
+    plugin: str, module: ModuleType, reported: list[tuple[str, BaseException]]
 ) -> None:
-    module_name = f"ava_builtins.plugins.{plugin}.metrics"
-    face = load_declaration(plugin, lambda: importlib.import_module(module_name))
+    face = load_declaration(plugin, lambda: module)
     assert face is not None
     declared = face.contributions.metrics
     assert declared
@@ -356,12 +365,7 @@ def test_shipped_metrics_faces_declare_admitted_specs(
 def test_shipped_metrics_faces_do_not_collide(
     reported: list[tuple[str, BaseException]],
 ) -> None:
-    faces = [
-        load_declaration(
-            plugin, lambda p=plugin: importlib.import_module(f"ava_builtins.plugins.{p}.metrics")
-        )
-        for plugin in ("ava_fleet", "ava_memory", "ava_syntax_fix")
-    ]
+    faces = [load_declaration(plugin, lambda m=module: m) for plugin, module in _SHIPPED_METRICS]
 
     _, refused = build_data_registry(faces)
 
@@ -372,9 +376,7 @@ def test_shipped_metrics_faces_do_not_collide(
 def test_the_fleet_inspector_face_declares_an_admitted_widget(
     reported: list[tuple[str, BaseException]],
 ) -> None:
-    face = load_declaration(
-        "ava_fleet", lambda: importlib.import_module("ava_builtins.plugins.ava_fleet.inspector")
-    )
+    face = load_declaration("ava_fleet", lambda: fleet_inspector)
     assert face is not None
     assert face.contributions.inspect_widgets
 

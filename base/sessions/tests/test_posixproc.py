@@ -15,6 +15,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import psutil
 import pytest
@@ -352,9 +353,10 @@ def test_session_record_spans_import_epochs(
     disagree with a reader from a different import epoch, so resolution
     refused a live session (the 2026-09-12 incident class).
     """
-    import importlib
+    from psutil import _psosx
 
-    psosx = importlib.import_module("psutil._psosx")
+    psosx: Any = _psosx  # the macOS-only stub does not declare `INIT_BOOT_TIME`
+
     base = psosx.INIT_BOOT_TIME
     name = "ava-test-agent-epoch-span"
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + 3600.0)

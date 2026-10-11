@@ -11,6 +11,7 @@ import json
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import ModuleType
 from uuid import uuid4
 
 import pytest
@@ -101,18 +102,17 @@ def test_only_enabled_plugins_are_imported(monkeypatch: pytest.MonkeyPatch):
         }
     )
 
-    import importlib.util
-
     from agent import extensions as _loader
+    from ava.sdk_surface import plugin_loader
 
     loaded: list[str] = []
-    real = importlib.util.spec_from_file_location
+    real = plugin_loader.load_plugin_module
 
-    def spy(name, location, **kw):
-        loaded.append(name)  # pyright: ignore[reportUnknownArgumentType]
-        return real(name, location, **kw)  # pyright: ignore[reportUnknownArgumentType]
+    def spy(plugin_py: Path, *, name: str, pkg: str, module: str = "plugin") -> ModuleType:
+        loaded.append(name)
+        return real(plugin_py, name=name, pkg=pkg, module=module)
 
-    monkeypatch.setattr(importlib.util, "spec_from_file_location", spy)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(plugin_loader, "load_plugin_module", spy)
 
     _loader.load_extensions()
 
@@ -135,18 +135,17 @@ def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
         }
     )
 
-    import importlib.util
-
     from agent import extensions as _loader
+    from ava.sdk_surface import plugin_loader
 
     loaded: list[str] = []
-    real = importlib.util.spec_from_file_location
+    real = plugin_loader.load_plugin_module
 
-    def spy(name, location, **kw):
-        loaded.append(name)  # pyright: ignore[reportUnknownArgumentType]
-        return real(name, location, **kw)  # pyright: ignore[reportUnknownArgumentType]
+    def spy(plugin_py: Path, *, name: str, pkg: str, module: str = "plugin") -> ModuleType:
+        loaded.append(name)
+        return real(plugin_py, name=name, pkg=pkg, module=module)
 
-    monkeypatch.setattr(importlib.util, "spec_from_file_location", spy)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(plugin_loader, "load_plugin_module", spy)
 
     _loader.load_extensions()
 

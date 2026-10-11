@@ -1,6 +1,7 @@
 """Unit tests for base.daemon.schedules.watcher — cron validation, next-fire, when
 normalization, and watcher script generation (pure string builders)."""
 
+import ast
 import datetime as dt
 from collections.abc import Callable
 
@@ -121,7 +122,7 @@ def test_build_at_script_has_wake_and_sleep() -> None:
     assert "_wake(_MESSAGE)" in script
     assert "time.sleep" in script
     assert "hi there" in script
-    compile(script, "<at-script>", "exec")  # must be valid Python
+    ast.parse(script, filename="<at-script>")  # must be valid Python
 
 
 def test_build_at_script_none_timezone_uses_host_wall_clock() -> None:
@@ -134,7 +135,7 @@ def test_build_at_script_none_timezone_uses_host_wall_clock() -> None:
     assert "ZoneInfo" not in script
     assert "_WHEN.astimezone().isoformat()" in script
     assert "_WHEN.astimezone(_TZ).isoformat()" not in script
-    compile(script, "<at-script>", "exec")  # must be valid Python
+    ast.parse(script, filename="<at-script>")  # must be valid Python
 
 
 def test_build_at_script_announcement_uses_cluster_zone() -> None:
@@ -150,7 +151,7 @@ def test_build_at_script_announcement_uses_cluster_zone() -> None:
     assert "_TZ = ZoneInfo('Asia/Shanghai')" in script
     assert "_WHEN.astimezone(_TZ).isoformat()" in script
     assert "astimezone().isoformat()" not in script  # no bare host-zone read
-    compile(script, "<at-script>", "exec")  # must be valid Python
+    ast.parse(script, filename="<at-script>")  # must be valid Python
 
 
 def test_build_cron_script_has_loop_and_wake() -> None:
@@ -159,7 +160,7 @@ def test_build_cron_script_has_loop_and_wake() -> None:
     assert "def _wake" in script
     assert "_wake(_MESSAGE)" in script
     assert "0 * * * *" in script
-    compile(script, "<cron-script>", "exec")
+    ast.parse(script, filename="<cron-script>")
 
 
 def test_cron_script_end_time_branch_does_not_wake() -> None:
@@ -468,7 +469,7 @@ def test_build_scripts_carry_wake_retry() -> None:
         assert "_WAKE_ATTEMPTS = 3" in script
         assert "_WAKE_BACKOFF_S = (10.0, 40.0)" in script
         assert "wake delivery failed" in script
-        compile(script, "<script>", "exec")
+        ast.parse(script, filename="<script>")
 
 
 def test_wake_retries_transient_failure_then_delivers(
