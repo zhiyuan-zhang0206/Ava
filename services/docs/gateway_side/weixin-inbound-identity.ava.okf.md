@@ -43,8 +43,10 @@ its unknown result or an atomic multi-command conversation.
 
 After restart, previously `claimed` commands become `uncertain` with the same
 attempt and `command_attempt_unresolved`; this says the outcome is unknown,
-not that its caller died. Retained, never-claimed sources recover their frozen
-route through the same poll loop. Business proof commits before best-effort
+not that its caller died. Retained sources that were never claimed did not
+start, so restart rejects them as `command_not_started_at_restart` instead of
+dispatching them late; this also releases the cursor checkpoint guard, and a
+redelivered source returns that rejected receipt. Business proof commits before best-effort
 human hints; hint failure never demotes acceptance. An unresolved attempt cannot
 be re-executed by replaying the source.
 
