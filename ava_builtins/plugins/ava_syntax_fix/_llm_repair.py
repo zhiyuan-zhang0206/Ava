@@ -96,8 +96,8 @@ async def _repair_once(llm: Any, messages: list[Any], *, catalog: ModelCatalog) 
         Exception
     ) as exc:  # best-effort: any failure degrades to surfacing the error to the agent
         logger.warning(
-            "[{label}] llm_repair unavailable: model={model} elapsed={elapsed:.1f}s err={err}",
-            label="syntax_fix",
+            "[syntax_fix] llm_repair unavailable: model={model} elapsed={elapsed:.1f}s err={err}",
+            event="syntax_fix",
             model=_REPAIR_MODEL,
             elapsed=time.monotonic() - started,
             err=f"{type(exc).__name__}: {exc}",
@@ -143,8 +143,8 @@ async def _llm_repair_syntax(code: str, rendered_error: str) -> str | None:
         Exception
     ) as exc:  # best-effort: any failure degrades to surfacing the error to the agent
         logger.warning(
-            "[{label}] llm_repair unavailable: {err}",
-            label="syntax_fix",
+            "[syntax_fix] llm_repair unavailable: {err}",
+            event="syntax_fix",
             err=f"{type(exc).__name__}: {exc}",
         )
         return None
@@ -155,8 +155,8 @@ async def _llm_repair_syntax(code: str, rendered_error: str) -> str | None:
     ]
     for attempt in range(1, _REPAIR_MAX_ATTEMPTS + 1):
         logger.debug(
-            "[{label}] llm_repair attempt {attempt}/{max_attempts}: model={model} code_lines={lines}",
-            label="syntax_fix",
+            "[syntax_fix] llm_repair attempt {attempt}/{max_attempts}: model={model} code_lines={lines}",
+            event="syntax_fix",
             attempt=attempt,
             max_attempts=_REPAIR_MAX_ATTEMPTS,
             model=_REPAIR_MODEL,

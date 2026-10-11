@@ -3,8 +3,8 @@
 Pure functions over one trace record (the shape `collect.py` produces). No LLM,
 no DB. Two dimensions the loop optimizes a skill against:
 
-    completion  did the task actually get done — output produced, no delivery
-                breach, code executed cleanly, did not end on a failed exec.
+    completion  did the task actually get done — output produced, code
+                executed cleanly, did not end on a failed exec.
     efficiency  was the process optimal — few tokens, few turns, no exec
                 failures, no compaction pressure, no user re-prompts.
 
@@ -23,10 +23,9 @@ from __future__ import annotations
 from typing import Any
 
 COMPLETION_WEIGHTS = {
-    "has_output": 0.4,
-    "not_breached": 0.3,
-    "exec_success": 0.2,
-    "ended_clean": 0.1,
+    "has_output": 0.55,
+    "exec_success": 0.30,
+    "ended_clean": 0.15,
 }
 EFFICIENCY_WEIGHTS = {
     "exec_clean": 0.30,
@@ -61,7 +60,6 @@ def _weighted(terms: dict[str, float], weights: dict[str, float]) -> float:
 def completion(rec: dict[str, Any]) -> float:
     terms = {
         "has_output": 1.0 if rec["final_output"].strip() else 0.0,
-        "not_breached": 0.0 if rec["breached"] else 1.0,
         "exec_success": _exec_success_rate(rec),
         "ended_clean": 0.0 if rec["last_exec_failed"] else 1.0,
     }

@@ -38,7 +38,7 @@ the empty-recall share, reported as its inverse framing (the hit-rate proxy).
 
 from base.events.contract import PASSIVE_RECALL_KEYS, RECALL_FILTER_KEYS
 from base.packages.plugins.extensions import PluginContributions
-from base.telemetry.metrics.logql import CATEGORY_WITH_LEGACY_LOG, event_count
+from base.telemetry.metrics.logql import CATEGORY_MATCH, event_count
 from base.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep
 
 # Attribute labels are derived from the payload-key contract (a renamed
@@ -51,7 +51,7 @@ _PASSIVE_RECALL_ATTR = {k: f"attributes_{k}" for k in PASSIVE_RECALL_KEYS}
 def _passive_recall_average_ms(field: str) -> str:
     """Average one recall leg's successful duration in a five-minute bucket."""
     attr = _PASSIVE_RECALL_ATTR[field]
-    successful = f'{CATEGORY_WITH_LEGACY_LOG} | level="info" | {attr}!=""'
+    successful = f'{CATEGORY_MATCH} | level="info" | {attr}!=""'
     numerator = (
         f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
         f"{successful} | unwrap {attr} [5m]))"
@@ -76,7 +76,7 @@ METRICS: tuple[MetricSpec, ...] = (
         unit="ops",
         panel="timeseries",
         query=event_count(
-            f'{CATEGORY_WITH_LEGACY_LOG} | level="info"', "5m", matchers="event_name={event_name}"
+            f'{CATEGORY_MATCH} | level="info"', "5m", matchers="event_name={event_name}"
         ),
         query_type="logql",
         target_names=["runs"],
@@ -133,7 +133,7 @@ METRICS: tuple[MetricSpec, ...] = (
         query=(
             f"100 * {
                 event_count(
-                    CATEGORY_WITH_LEGACY_LOG
+                    CATEGORY_MATCH
                     + ' | level="info" | '
                     + _RECALL_ATTR['body']
                     + ' =~ ".*-> 0 kept.*"',
@@ -141,7 +141,7 @@ METRICS: tuple[MetricSpec, ...] = (
                     matchers='event_name={event_name}',
                 )
             }"
-            f" / {event_count(CATEGORY_WITH_LEGACY_LOG + ' | level="info"', '5m', matchers='event_name={event_name}')}"
+            f" / {event_count(CATEGORY_MATCH + ' | level="info"', '5m', matchers='event_name={event_name}')}"
         ),
         query_type="logql",
         target_names=["empty %"],
@@ -166,8 +166,8 @@ METRICS: tuple[MetricSpec, ...] = (
             ThresholdStep(color="red", value=25.0),
         ],
         query=(
-            f"100 * {event_count(CATEGORY_WITH_LEGACY_LOG + ' | level="warning"', '5m', matchers='event_name={event_name}')}"
-            f" / {event_count(CATEGORY_WITH_LEGACY_LOG, '5m', matchers='event_name={event_name}')}"
+            f"100 * {event_count(CATEGORY_MATCH + ' | level="warning"', '5m', matchers='event_name={event_name}')}"
+            f" / {event_count(CATEGORY_MATCH, '5m', matchers='event_name={event_name}')}"
         ),
         query_type="logql",
         target_names=["anomaly %"],
@@ -188,7 +188,7 @@ METRICS: tuple[MetricSpec, ...] = (
         unit="short",
         panel="stat",
         query=event_count(
-            f'{CATEGORY_WITH_LEGACY_LOG} | level="warning"',
+            f'{CATEGORY_MATCH} | level="warning"',
             "$__range",
             matchers="event_name={event_name}",
         ),
@@ -211,7 +211,7 @@ METRICS: tuple[MetricSpec, ...] = (
         unit="ops",
         panel="timeseries",
         query=event_count(
-            f'{CATEGORY_WITH_LEGACY_LOG} | level="info" | {{{{agent_id}}}}',
+            f'{CATEGORY_MATCH} | level="info" | {{{{agent_id}}}}',
             "$__interval",
             matchers="event_name={event_name}",
         ),

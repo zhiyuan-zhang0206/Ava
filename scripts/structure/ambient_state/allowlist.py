@@ -53,7 +53,7 @@ SINK_FACADES: dict[str, str] = {
     ),
     "base/log/__init__.py": (
         "the loguru sink facade: import-time reset and extra binding of the loguru global, "
-        "the sample counter and the Postgres sink handle; read only by the log pipeline itself"
+        "the sample counter and the event-sink handle; read only by the log pipeline itself"
     ),
     "base/telemetry/emitter.py": (
         "the telemetry event pipeline: its state, failure counters and exit hook are written by "

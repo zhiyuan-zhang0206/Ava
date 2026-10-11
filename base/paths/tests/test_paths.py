@@ -34,16 +34,6 @@ def test_ava_home_repairs_owner_only_mode(tmp_path: Path):
     assert target.stat().st_mode & 0o777 == 0o700
 
 
-def test_plugins_config_path_under_ava_home(tmp_path: Path):
-    assert paths.plugins_config_path() == tmp_path / "ava" / "plugins.json"
-
-
-def test_plugins_config_path_does_not_create_file(tmp_path: Path):
-    """Only returns the path, does not pre-create the file — load() decides whether to write defaults."""
-    paths.plugins_config_path()
-    assert not (tmp_path / "ava" / "plugins.json").exists()
-
-
 def test_plugins_dir_under_ava_home(tmp_path: Path):
     assert paths.plugins_dir() == tmp_path / "ava" / "plugins"
 

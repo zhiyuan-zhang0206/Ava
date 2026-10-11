@@ -343,8 +343,8 @@ def _parse_model_price(model: str, entry_raw: dict[str, Any], schema_version: in
 class PriceBook:
     """Every price the process knows: the reviewed archive plus the plugins' declarations.
 
-    A plugin price replaces the archive entry of the same model id (the archive keeps the
-    chat-model ids for history and scheduled windows). Immutable once built; one belongs to
+    A plugin price replaces the archive entry of the same model id (the archive is the
+    reconciliation ledger the plugin declarations are checked against). Immutable once built; one belongs to
     each `base.lm.catalog.ModelCatalog`.
     """
 
