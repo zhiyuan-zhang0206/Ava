@@ -15,8 +15,7 @@ psql "$(.venv/bin/python -c 'from base.db import direct_db_url; print(direct_db_
 ```
 
 Pass that URL verbatim — it already carries whatever the cluster's auth needs
-(a no-secret cluster's loopback Postgres is `trust`; a secret'd one authenticates
-as its own role), plus a `hostaddr=` that a hand-rebuilt string would lose.
+(Postgres always authenticates, as the role of the delivered write generation), plus a `hostaddr=` that a hand-rebuilt string would lose.
 
 ## The checkpoint tables
 

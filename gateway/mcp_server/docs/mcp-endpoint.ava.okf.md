@@ -44,8 +44,8 @@ surface and result shapes are the ones external MCP clients drive.
   stored only as SHA-256 hashes in `mcp_clients`, and can be revoked through the
   `/api/mcp/clients` admin routes. A token outlives every write generation, so
   those routes admit only the human secret or a session it minted; a machine
-  token or a runner-minted session gets 403. A no-secret cluster
-  still requires an MCP client token; cluster cookies and secrets never count.
+  token or a runner-minted session gets 403. `/mcp` requires an MCP client
+  token; cluster cookies and secrets never count.
   The verified client row belongs to the HTTP request state. Framework-injected
   `Context` passes it explicitly to write-scope checks and business handlers;
   tool arguments and `clientInfo` never supply authority.
