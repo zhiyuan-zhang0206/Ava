@@ -103,7 +103,7 @@ def test_turn_and_node_exact_durations_preserve_missing_optional_fields() -> Non
 
 
 def test_only_the_registry_failure_names_count_as_exec_failures() -> None:
-    for name in ("exec_failed", "exec(timeout)", "exec_node_timeout"):
+    for name in ("exec_failed", "exec_timeout", "exec_node_timeout"):
         fact = metrics.observe_event(_event(name))
         assert fact is not None and (fact.exec_ok, fact.exec_failed) == (0, 1)
     ok = metrics.observe_event(_event("exec"))

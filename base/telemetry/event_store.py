@@ -7,7 +7,7 @@ stays the fallback: a batch that does not land is still in the mirror, which
 `services/upkeep/events_maintenance/telemetry_replay.py` replays by event id.
 
 Only events somebody reads out of this table are stored: `is_persisted` is the one judgment,
-and the live sink, the mirror replay and the backfill script all apply it, so a row the live
+and the live sink and the mirror replay both apply it, so a row the live
 path skipped is not brought back by a replay. The mirror and Loki keep every event.
 
 Failure is loud but never raises into the drain thread. The first failure and every 50th after
@@ -119,14 +119,10 @@ def insert_rows(conn: psycopg.Connection[Any], records: Sequence[dict[str, Any]]
     return max(cursor.rowcount, 0)
 
 
-def ensure_partitions(conn: psycopg.Connection[Any], *, months_back: int = 1) -> None:
-    """Create the partitions from `months_back` months ago through the coming months
-    (idempotent, SECURITY DEFINER). A backfill of older rows passes a larger `months_back`
-    first: a row outside every partition would land in the default one, and a month cannot be
-    created over rows that sit there."""
-    conn.execute(
-        "SELECT ensure_telemetry_event_partitions(%s, %s)", (PARTITION_MONTHS_AHEAD, months_back)
-    )
+def ensure_partitions(conn: psycopg.Connection[Any]) -> None:
+    """Create the partitions from last month through the coming months (idempotent,
+    SECURITY DEFINER)."""
+    conn.execute("SELECT ensure_telemetry_event_partitions(%s)", (PARTITION_MONTHS_AHEAD,))
 
 
 _lock = threading.Lock()
@@ -253,9 +249,7 @@ def set_enabled(*, enabled: bool) -> bool:
 
 
 def jsonl_rows(lines: Sequence[bytes]) -> list[dict[str, Any]]:
-    """Insert records for complete mirror lines, ids derived for rows written before they held one."""
-    from base.telemetry.emitter import event_id
-
+    """Insert records for complete mirror lines."""
     records: list[dict[str, Any]] = []
     for raw in lines:
         row = cast("dict[str, Any]", json.loads(raw))
@@ -263,8 +257,5 @@ def jsonl_rows(lines: Sequence[bytes]) -> list[dict[str, Any]]:
             row["event_name"], row["level"]
         ):
             continue
-        if "id" not in row:
-            stamp = datetime.fromisoformat(row["ts"])
-            row["id"] = event_id(raw.decode().rstrip("\r\n"), int(stamp.timestamp() * 1e9))
         records.append(stored_row(row, imported_from="jsonl"))
     return records

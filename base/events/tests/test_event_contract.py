@@ -198,8 +198,6 @@ _DECLARED_PAYLOAD_KEYS = {
         "unpriced",
         "usage_kind",
         "source",
-        "cache_mechanism",
-        "cache_scope",
     ),
     "sse_drop": ("kind", "n"),
     "spawn": ("machine", "fork_from", "fork_checkpoint"),
@@ -208,8 +206,6 @@ _DECLARED_PAYLOAD_KEYS = {
     "node_exit": ("count", "nodes"),
     "heartbeat_paused": ("duration_s",),
     "task_update": ("status",),
-    "process_exit": ("reason", "pid"),
-    "agent_boot_failed": ("model", "error_type", "error"),
     "recall_filter": ("body", "query_hmac_sha256", "picked_paths"),
     "passive_recall": ("search_ms", "filter_ms"),
     "hook_timing": ("hook_ms",),
@@ -263,19 +259,10 @@ def test_payload_keys_unknown_event_empty() -> None:
     assert payload_keys("no_such_event") == ()
 
 
-def test_registry_covers_all_whitelisted_historical_names() -> None:
-    """The parenthesized historical names (exec(timeout) etc.) stay registered
-    — they are migration targets with live rows."""
-    for name in ("exec(timeout)", "exec(failed)", "exec(cancelled)", "exec(thread-stuck)"):
-        assert name in EVENTS
-        assert EVENTS[name].category == "telemetry"
-
-
 def test_class_resolution_markers_are_telemetry_category() -> None:
     """Class-resolution transitions are telemetry so their state can be observed.
 
-    The resolved pair still declares the legacy target-event keys, while the
-    new class keys make Loki's immutable-state transition explicit.
+    The class keys make Loki's immutable-state transition explicit.
     """
     for name in ("warning_resolved", "error_resolved", "warning_reopened", "error_reopened"):
         spec = EVENTS[name]
@@ -283,8 +270,6 @@ def test_class_resolution_markers_are_telemetry_category() -> None:
         assert spec.destination == "events"
 
     assert payload_keys("warning_resolved") == (
-        "target_event_id",
-        "match",
         "resolved_by",
         "category",
         "level",
