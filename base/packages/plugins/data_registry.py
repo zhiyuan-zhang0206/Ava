@@ -7,7 +7,7 @@ with only its field filled). A process builds its registry from whichever of tho
 
 - `load_declaration(plugin, importer, gate)` runs one face fail-soft: an import that raises, a
   missing `contribute()`, a result that is not a `PluginContributions`, or an `ava-plugin.json` in the
-  plugin directory that disagrees with the declaration on the face's own key is reported
+  plugin directory that is missing or disagrees with the declaration on the face's own key is reported
   (`load_report`) and the plugin contributes nothing from that face. The manifest is checked here, while
   the plugin's tree exists (an unpacked installed plugin is deleted right after its import);
 - `build_data_registry(declared)` validates each declaration and admits it atomically — a spec that

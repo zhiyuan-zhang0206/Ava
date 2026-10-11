@@ -23,8 +23,8 @@ tasks #2915 / #3267).
 ## What packages declare
 
 `ava-plugin.json` (spec: [`plugin-spec-v2.md`](../extensions/plugin-spec-v2.md)) carries the
-package's compatibility claims. A skill package may carry the same manifest
-beside its `SKILL.md`; plugin bundles keep the plugin-level manifest as the
+package's compatibility claims. Every Ava plugin ships one; a skill package may carry the
+same manifest beside its `SKILL.md`; plugin bundles keep the plugin-level manifest as the
 single source of truth for their bundled skills.
 
 - **`engines.ava`** — a semver range (`>=A,<B`; either side unbounded),
@@ -62,9 +62,8 @@ dependency of this policy.
 `scripts/content_lint/lint_core_content_manifests.py` (CI job `core-content manifests`,
 pre-commit `lint-core-content-manifests`) keeps core content honest:
 
-- every manifest under `ava_builtins/` validates, its `engines` ranges admit
-  the repo's current derived version, and any `requires_commit` is an ancestor
-  of HEAD (a typo'd or future SHA is red);
+- every builtin plugin ships a manifest, every manifest under `ava_builtins/`
+  validates, its `engines` ranges admit the repo's current derived version, and
+  any `requires_commit` is an ancestor of HEAD (a typo'd or future SHA is red);
 - every other manifest in the tree is *audited* (report-only): its ranges are
-  judged against the derived version and the legacy pyproject version, so the
-  derived-version switch is visible per PR instead of surfacing as a surprise.
+  judged against the derived version.

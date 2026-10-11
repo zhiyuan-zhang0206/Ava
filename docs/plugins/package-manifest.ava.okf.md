@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Package Manifest (spec v2)
-description: The `ava-plugin.json` a package may ship — identity, dependencies, declared contribution surfaces, lifecycle shape — validated at install time by `base/packages/plugins/manifest.py`, with the console-contribution schema (`contributions.ui`) in `base/packages/plugins/ui_contributions.py`.
+description: The `ava-plugin.json` every plugin ships (and a skill or MCP package may) — identity, dependencies, declared contribution surfaces, lifecycle shape — validated at install time by `base/packages/plugins/manifest.py`, with the console-contribution schema (`contributions.ui`) in `base/packages/plugins/ui_contributions.py`.
 tags:
 - plugins
 ---
@@ -9,7 +9,9 @@ tags:
 # Package Manifest (spec v2)
 
 ## What It Declares
-Packages may ship an `ava-plugin.json` at their root declaring identity
+Every plugin (a directory with a `plugin.py`) ships an `ava-plugin.json` at its root, and
+`load_manifest` refuses one without it; bare skill and MCP packages may ship one
+(`load_optional_manifest`). It declares identity
 (name/version/`engines.ava` range, optional `requires_commit` pin), dependencies (`plugins` /
 `pythonPackages` / `hostCapabilities`), contribution surfaces, and lifecycle
 shape. Install paths validate it via `base/packages/plugins/manifest.py` (host-axis

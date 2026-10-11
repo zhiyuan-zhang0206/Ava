@@ -523,6 +523,18 @@ def _fixture_plugin(
     plugin_dir = root / name
     plugin_dir.mkdir()
     (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
+    (plugin_dir / "ava-plugin.json").write_text(
+        json.dumps(
+            {
+                "apiVersion": 2,
+                "name": name,
+                "version": "1.0.0",
+                "engines": {"ava": ">=2026.10.1"},
+                "contributions": {"metrics": [metric or f"{name}_one"]},
+            }
+        ),
+        encoding="utf-8",
+    )
     metrics_py = plugin_dir / "metrics.py"
     metrics_py.write_text(
         _fixture_metrics_source(metric or f"{name}_one", query, raises=raises), encoding="utf-8"
