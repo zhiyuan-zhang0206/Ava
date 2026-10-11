@@ -19,14 +19,21 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager, AsyncExitStack, suppress
-from typing import Any
-
-from anyio.from_thread import BlockingPortal, start_blocking_portal
+from typing import Any, Protocol
 
 from . import _remote
 from ._remote import _RemoteMCPClient, connect_remote
+
+
+class _Portal(Protocol):
+    """The slice of anyio's ``BlockingPortal`` the clients call.
+
+    Declared structurally so `import ava` does not load anyio before the first MCP call.
+    """
+
+    def call(self, func: Callable[[], Awaitable[Any]], /) -> Any: ...
 
 
 class McpClients:
@@ -35,8 +42,8 @@ class McpClients:
     def __init__(self, timeout_seconds: Callable[[], float]) -> None:
         self.timeout_seconds = timeout_seconds
         self._lock = threading.Lock()
-        self._portal_cm: AbstractContextManager[BlockingPortal] | None = None
-        self._portal: BlockingPortal | None = None
+        self._portal_cm: AbstractContextManager[_Portal] | None = None
+        self._portal: _Portal | None = None
         self.sessions: dict[str, Any] = {}  # server -> ClientSession (async-only)
         self.session_locks: dict[str, asyncio.Lock] = {}
         # Per-server transport stack, so a dead session can be closed individually for rebuild.
@@ -47,6 +54,10 @@ class McpClients:
         """Sync entry point: hand `coro` to the loop and wait for its result."""
         with self._lock:
             if self._portal is None:
+                from anyio.from_thread import (  # deferred: `import ava` must not load anyio
+                    start_blocking_portal,
+                )
+
                 self._portal_cm = start_blocking_portal()
                 self._portal = self._portal_cm.__enter__()
             portal = self._portal
