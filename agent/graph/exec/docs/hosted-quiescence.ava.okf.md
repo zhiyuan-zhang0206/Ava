@@ -73,7 +73,7 @@ receipt. Anything live or unattributable keeps recovery deferred.
 This does not establish hard-host-death recovery with active exec: independent
 POSIX children may survive and the parent's unreaped root pin may be lost, and
 host PID/birth, lease expiry, or owner UUID alone cannot prove managed-domain
-completion. Request and Windows gate leftovers are not age-pruned; normal exact
+completion. Request leftovers are not age-pruned; normal exact
 resource settlement removes them. The database settlement re-locks the exact
 target generation, owner, and command before clearing its active pointer.
 Persistent shell sessions deliberately retain their separate ownership and are

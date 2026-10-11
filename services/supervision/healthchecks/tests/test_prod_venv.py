@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 import venv
 from pathlib import Path
 from unittest.mock import Mock
@@ -67,7 +66,6 @@ def test_missing_python_does_not_spawn_a_diagnostic(monkeypatch: pytest.MonkeyPa
     run.assert_not_called()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="production venv healthcheck is POSIX-only")
 @pytest.mark.parametrize("damage", ["healthy", "missing", "hollow"])
 def test_real_isolated_import_detects_damage_without_writes(
     monkeypatch: pytest.MonkeyPatch,

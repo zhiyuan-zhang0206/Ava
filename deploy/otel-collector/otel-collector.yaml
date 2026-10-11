@@ -201,10 +201,9 @@ processors:
   # The infra pipeline's extra processors. host_metrics/postgresql/redis carry
   # no host identity of their own, so detection supplies host.name and the
   # transform puts both identities on every datapoint: `host` is the OS
-  # hostname (physical identity; the fleet's Windows box reports zzy-lenovo
-  # while its Ava name is win), and `machine_name` is the Ava roster identity
+  # hostname (physical identity), and `machine_name` is the Ava roster identity
   # baked from this unit at converge via $MACHINE_NAME (macmini / macbook-air /
-  # win / wsl). One label per meaning; dashboards and alert rules group by
+  # company-mini / ...). One label per meaning; dashboards and alert rules group by
   # `machine_name`. App metrics already carry `machine` / `agent_id`, and this
   # transform cannot touch them because it sits on the infra pipeline only.
   # Datapoint attributes are required: resource attributes land in

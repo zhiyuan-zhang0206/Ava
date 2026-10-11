@@ -8,6 +8,7 @@ import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import psycopg
 import pytest
@@ -38,7 +39,6 @@ class _FakeShellBackend:
         self.keys: list[tuple[str, tuple[str, ...]]] = []
         self.killed: list[str] = []
         self.new_result = True
-        self.supports_send = True
         self.send_error: Exception | None = None
 
     def has_session(self, name: str) -> bool:
@@ -53,8 +53,6 @@ class _FakeShellBackend:
         return self.new_result
 
     def send(self, name: str, text: str) -> None:
-        if not self.supports_send:
-            raise NotImplementedError
         if self.send_error is not None:
             raise self.send_error
         self.sent.append((name, text))
@@ -77,6 +75,12 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> _FakeShellBackend:
         psd,
         "_page_session_shell_pids",
         lambda _wanted, _live=None: {},  # pyright: ignore[reportUnknownArgumentType]
+    )
+    # The pty record scan mirrors the fake backend's session set.
+    monkeypatch.setattr(
+        psd,
+        "_live_session_records",
+        lambda: {name: SimpleNamespace(pid=12345) for name in fake.sessions},  # pyright: ignore[reportUnknownArgumentType]
     )
     return fake
 
@@ -188,8 +192,6 @@ def test_new_row_session_created_before_slow_housekeeping(
     housekeeping (the process scan) — serve()'s wait is one poll, not one
     full pass. The re-scan after creation must keep the new session alive
     through the rest of the pass (a stale scan would reap it as dead)."""
-    from types import SimpleNamespace
-
     agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     key = (agent_id, "fast-lane")
     _insert_page_row(db_conn, agent_id, key[1], 12030, tmp_path)
@@ -200,13 +202,8 @@ def test_new_row_session_created_before_slow_housekeeping(
         return {}
 
     monkeypatch.setattr(psd, "_page_server_occupants", _occupants)
-    # The pty record scan mirrors the fake backend's session set: the session
-    # created in the fast path must appear in the post-creation re-scan.
-    monkeypatch.setattr(
-        psd,
-        "_live_session_records",
-        lambda _b: {name: SimpleNamespace(pid=12345) for name in backend.sessions},  # pyright: ignore[reportUnknownArgumentType]
-    )
+    # The fixture's pty record scan mirrors the fake backend's session set: the
+    # session created in the fast path appears in the post-creation re-scan.
     orig_new = backend.new_session
 
     def _new(name: str, command: str, cwd: Path, *, env: dict[str, str], **_kw: object) -> bool:
@@ -237,8 +234,6 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
     """Managed-row liveness comes from the pass's in-process pty record scan,
     not the backend's per-name has_session — a subprocess round-trip (~0.25s)
     per row that stretched a pass to tens of seconds."""
-    from types import SimpleNamespace
-
     agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
     key = (agent_id, "scan-live")
     page_session = f"ava-agent-{agent_id}-shell-9-page-scan-live"
@@ -254,7 +249,7 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
     monkeypatch.setattr(
         psd,
         "_live_session_records",
-        lambda _b: {page_session: SimpleNamespace(pid=12345)},  # pyright: ignore[reportUnknownArgumentType]
+        lambda: {page_session: SimpleNamespace(pid=12345)},  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[str] = []
@@ -384,38 +379,6 @@ def test_wedged_session_relaunch_failure_kills_and_recreates_the_session(
     )
     assert set(managed) == {(agent_id, "wedged")}
     assert backoff == {}, "relaunch failure must not wedge the row in a backoff loop"
-
-
-def test_windows_style_backend_recreates_the_session_when_it_cannot_send(
-    sync_pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    backend: _FakeShellBackend,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
-    page_session = f"ava-agent-{agent_id}-shell-3-page-windows"
-    backend.sessions.add(page_session)
-    backend.supports_send = False
-    _insert_page_row(
-        db_conn,
-        agent_id,
-        "windows",
-        12015,
-        tmp_path,
-        token=secrets.token_hex(16),
-        session=page_session,
-    )
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(psd, "_probe_port", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    _reconcile(sync_pool, {}, {}, {})
-
-    assert backend.killed == [page_session]
-    assert [call[0] for call in backend.new_calls] == [page_session]
 
 
 def test_stale_server_in_its_page_session_replaces_that_session(

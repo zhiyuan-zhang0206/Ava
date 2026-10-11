@@ -15,7 +15,6 @@ from services.backup.artifact.names import DUMP_NAME_RE, REMOTE_ROOT, TS_FORMAT,
         ("ava-20260930T190000Z.dump.enc", "ava", "20260930T190000Z"),
         ("ava_main-20260930T190000Z.dump.enc", "ava_main", "20260930T190000Z"),
         ("my-db-20260930T190000Z.dump.enc", "my-db", "20260930T190000Z"),
-        ("ava-20260609T190000Z.dump.gz.enc", "ava", "20260609T190000Z"),
         ("ava-20260609T190000Z.dump", "ava", "20260609T190000Z"),
     ],
 )
@@ -31,7 +30,6 @@ def test_a_utc_stamped_dump_is_managed(name: str, db: str, stamp: str) -> None:
     [
         # Names no writer produces any more.
         "ava-20260827-030001.dump",  # pre-cutover wall-clock stamp, no offset
-        "ava-20260827-030001.dump.gz.enc",
         "ava-20260930T190000Z.pre-update.dump.enc",
         "ava-20260930T190000Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc",
         # Never a dump.

@@ -2,7 +2,6 @@
 
 import os
 import stat
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -63,10 +62,8 @@ class OwnerClosed(BaseModel):
     observed_at: datetime
 
 
-def validate_native_ready(
-    ready: OwnerReady, launcher_identity: ResourceProcess, context_path: Path
-) -> None:
-    """Bind actual owner Python, allowing only the native Windows venv redirector."""
+def validate_native_ready(ready: OwnerReady, launcher_identity: ResourceProcess) -> None:
+    """Bind the ready receipt to the exact launched owner Python."""
     owner, root = ready.allocation.owner_process, ready.allocation.root_process
     if owner is None or root is None:
         raise ValueError("ready receipt lacks owner/root identities")
@@ -79,23 +76,7 @@ def validate_native_ready(
     ):
         raise ValueError("ready owner or launcher native birth changed")
     if owner.pid != launcher_identity.pid:
-        arguments = [
-            "-I",
-            "-B",
-            "-X",
-            "utf8",
-            "-m",
-            "agent.execution.domain_owner",
-            "--context",
-            str(context_path),
-        ]
-        if (
-            sys.platform != "win32"
-            or actual.ppid() != launcher_identity.pid
-            or actual.cmdline()[1:] != arguments
-            or launcher.cmdline()[1:] != arguments
-        ):
-            raise ValueError("ready owner is not the exact launched Python/redirector")
+        raise ValueError("ready owner is not the exact launched Python")
     child = psutil.Process(root.pid)
     if not root.same_birth(ResourceProcess.capture(child)) or child.ppid() != owner.pid:
         raise ValueError("ready root is not the exact owner's direct child")

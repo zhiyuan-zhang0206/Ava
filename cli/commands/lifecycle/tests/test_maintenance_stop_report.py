@@ -42,7 +42,6 @@ from cli.commands.lifecycle.tests.stop_support import written as written
 from tests.components.agent.test_maintenance import WHEN
 
 pytestmark = [
-    pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract"),
     pytest.mark.usefixtures("written"),
 ]
 

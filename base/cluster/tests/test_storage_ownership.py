@@ -46,8 +46,6 @@ def test_postmaster_pidfile_cannot_supply_missing_native_receipt(pg_data: Path) 
 
 
 def _pg_receipt(data: Path, *, state: str = "captured") -> pg.Receipt:
-    if sys.platform == "win32":
-        pytest.skip("owned PostgreSQL is POSIX-only")
     info = data.stat()
     values = {
         "data": str(data.resolve()),

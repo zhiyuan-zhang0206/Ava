@@ -67,7 +67,6 @@ from base.db import Database
 from base.deploy.maintenance import admission
 from base.lm.plugin_providers import build_model_catalog
 from base.log import init_gateway_process
-from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import gateway_memory_dir
 from services.derived.memory_indexer import config as indexer_config
 from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
@@ -500,7 +499,6 @@ def _refresh_gateway_checkout() -> None:
         before = subprocess.check_output(  # noqa: S603 — argv is a static literal
             ["git", "-C", str(cwd), "rev-parse", "HEAD"],
             text=True,
-            creationflags=CREATE_NO_WINDOW,
         ).strip()
         head = pull_main()
     except Exception as exc:

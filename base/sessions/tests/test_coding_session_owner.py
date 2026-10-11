@@ -14,7 +14,6 @@ from typing import Any, cast
 
 import pytest
 
-from base.native_process.os_platform import is_windows
 from base.sessions import coding_session_owner as owner
 from base.sessions import coding_session_owner_record as record_codec
 
@@ -441,13 +440,9 @@ def test_a_legacy_single_slot_record_is_reclaimed_only_once_dead(
     assert legacy.exists() is alive
 
 
-_POSIX_ONLY = pytest.mark.skipif(
-    is_windows(), reason="the app-server socket is a POSIX unix socket"
-)
 _SOCKET_GENERATION = "be6a5e0a-f271-4301-ad6b-521673bf262f"
 
 
-@_POSIX_ONLY
 @pytest.mark.parametrize(("macos", "root"), [(True, ("private", "tmp")), (False, ("tmp",))])
 def test_socket_directory_selects_the_platform_at_call_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, macos: bool, root: tuple[str, ...]
@@ -470,7 +465,6 @@ def test_socket_directory_selects_the_platform_at_call_time(
     assert info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700
 
 
-@_POSIX_ONLY
 @pytest.mark.parametrize(("macos", "limit"), [(True, 104), (False, 108)])
 def test_socket_length_limit_selects_the_platform_at_call_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, macos: bool, limit: int
@@ -490,7 +484,6 @@ def test_socket_length_limit_selects_the_platform_at_call_time(
             assert len(os.fsencode(socket)) == size
 
 
-@_POSIX_ONLY
 def test_codex_app_server_socket_is_short_and_generation_scoped(tmp_path: Path) -> None:
     key = _key(tmp_path)
     generation = "be6a5e0a-f271-4301-ad6b-521673bf262f"
@@ -508,7 +501,6 @@ def test_codex_app_server_socket_is_short_and_generation_scoped(tmp_path: Path) 
     assert other != first
 
 
-@_POSIX_ONLY
 def test_a_long_cluster_home_still_gets_a_socket_under_the_kernel_limit(tmp_path: Path) -> None:
     """A home under a long directory path pushed <home>/run past sun_path."""
     long_home = tmp_path / ("a-directory-with-a-long-name-" * 4) / "home"
@@ -527,7 +519,6 @@ def test_a_long_cluster_home_still_gets_a_socket_under_the_kernel_limit(tmp_path
     assert info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700
 
 
-@_POSIX_ONLY
 def test_a_socket_dir_that_is_not_our_real_directory_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -542,7 +533,6 @@ def test_a_socket_dir_that_is_not_our_real_directory_is_refused(
         owner.codex_app_server_socket(_key(tmp_path), _SOCKET_GENERATION)
 
 
-@_POSIX_ONLY
 def test_a_socket_path_that_cannot_fit_fails_before_launch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

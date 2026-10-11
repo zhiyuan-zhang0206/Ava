@@ -354,11 +354,6 @@ def _bring_up_root(
     retained_children: list[subprocess.Popen[bytes]],
 ) -> dict[str, Any]:
     """Start through the required platform owner; never change ownership on failure."""
-    if sys.platform == "win32":
-        raise _RootDriverError(
-            "native Windows root supervision requires its transport and Job ownership "
-            "adapter; session service startup is no longer supported"
-        )
     if _helper_spawn_committed():
         if not _helper_wire_ok():
             raise _RootDriverError(
