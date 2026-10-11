@@ -131,20 +131,20 @@ def test_put_accepts_the_canonical_dash_spelling_of_a_legacy_row(unit_home: Path
     from gateway.extensions.schemas import SkillEnableUpdate
     from gateway.extensions.skills import update_skill_enabled
 
-    legacy = _mk_skill("wechat_ocr")
-    _register("wechat_ocr", origin="user", content_hash=tree_hash(legacy), enabled=True)
+    legacy = _mk_skill("page_ocr")
+    _register("page_ocr", origin="user", content_hash=tree_hash(legacy), enabled=True)
 
-    result = update_skill_enabled(SkillEnableUpdate(name="wechat-ocr", enabled=False))
+    result = update_skill_enabled(SkillEnableUpdate(name="page-ocr", enabled=False))
     # The response renders the canonical display spelling (dash), like the
     # GET panel — the row's own spelling is internal.
-    assert result.name == "wechat-ocr"
+    assert result.name == "page-ocr"
     assert result.enabled is False
     assert result.layer == "machine"  # the row was found, not treated as untracked
 
-    pkg = install_registry.get("wechat_ocr")
+    pkg = install_registry.get("page_ocr")
     assert pkg is not None and pkg.enabled is False
     # and no duplicate row was created under the dash spelling
-    assert [p.name for p in install_registry.load().packages] == ["wechat_ocr"]
+    assert [p.name for p in install_registry.load().packages] == ["page_ocr"]
 
 
 def test_get_renders_legacy_underscore_dirs_in_canonical_spelling(unit_home: Path) -> None:
