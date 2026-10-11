@@ -146,11 +146,10 @@ def core_metrics() -> list[MetricSpec]:
             time_basis="per_minute",
             description=(
                 "LLM failure signals per minute (5-minute buckets / 5): "
-                "llm_provider_error (provider rejection / classification error), "
-                "stream_stalled_retry (stalled stream retry), llm_turn_aborted "
-                "(turn aborted after retries exhausted), stream_overloaded_retry "
-                "(overload retry). The event_name field is spec metadata; the "
-                "query covers all 4 failure events (all telemetry)."
+                "llm_provider_error (provider rejection / classification error) "
+                "and llm_turn_aborted (turn aborted after retries exhausted). "
+                "The event_name field is spec metadata; the query covers both "
+                "failure events (all telemetry)."
             ),
             event_name="llm_usage",
             category="telemetry",
@@ -161,63 +160,13 @@ def core_metrics() -> list[MetricSpec]:
                 "category={category}", "5m", matchers='event_name="llm_provider_error"'
             ),
             targets=[
-                event_count(
-                    "category={category}", "5m", matchers='event_name="stream_stalled_retry"'
-                ),
                 event_count("category={category}", "5m", matchers='event_name="llm_turn_aborted"'),
-                event_count(
-                    "category={category}", "5m", matchers='event_name="stream_overloaded_retry"'
-                ),
             ],
-            target_names=["provider_error", "stalled_retry", "turn_aborted", "overloaded_retry"],
+            target_names=["provider_error", "turn_aborted"],
             output=["grafana", "inspector"],
             panel_id=22,
             section="LLM",
             order=6,
-        )
-    )
-
-    specs.append(
-        MetricSpec(
-            name="ava_obs_llm_stall_rate",
-            title="Provider stalls",
-            time_basis="per_minute",
-            description=(
-                "Provider stall health per minute (5-minute buckets / 5): "
-                "stream_stalled_retry counted by vendor — a stalled stream "
-                "segment (first-chunk / mid-stream gap / total-duration bound) "
-                "was retried; the vendor dimension is the provider-health read "
-                "added with the deepseek stall-wave mitigation (task #3884) — "
-                "plus stream_stall_pair_terminated (two adjacent stalls: the "
-                "stream segment and its non-streaming fallback both timed out, "
-                "so the call was terminated early for the delayed stall-retry "
-                "schedule). The pair event is deliberately outside "
-                "LLM_ERROR_FAMILY (it co-emits 1:1 with the adjacent stall, "
-                "which the family already counts) — this panel and the "
-                "ava-ops-llm-stall-pair rule are its display surface (task "
-                "#3948). event_name='stream_stalled_retry' + "
-                "'stream_stall_pair_terminated', category='telemetry'."
-            ),
-            event_name="stream_stalled_retry",
-            category="telemetry",
-            unit="short",
-            panel="timeseries",
-            query_type="logql",
-            query=(
-                'sum by (attributes_vendor) (count_over_time({service_name="unknown_service", '
-                "event_name={event_name}} | json | "
-                "category={category} [5m]))"
-            ),
-            targets=[
-                'sum(count_over_time({service_name="unknown_service", '
-                'event_name="stream_stall_pair_terminated"} | json | '
-                "category={category} [5m]))",
-            ],
-            target_names=["{{attributes_vendor}}", "stall pairs"],
-            output=["grafana"],
-            panel_id=53,
-            section="LLM",
-            order=8,
         )
     )
 
@@ -679,37 +628,33 @@ def core_metrics() -> list[MetricSpec]:
 
     # ── delivery health ──────────────────────────────────────────────────────────
 
-    for event_name, title, target_name, panel_id, order in (
-        ("delivery_stalled", "Delivery stalled", "stalled", 32, 2),
-        ("delivery_poisoned", "Delivery poisoned", "poisoned", 52, 3),
-    ):
-        specs.append(
-            MetricSpec(
-                name=f"ava_obs_{event_name}_count",
-                title=title,
-                time_basis="window",
-                description=(
-                    f"Windowed {event_name} total — a delivery-watchdog row signal "
-                    "(a raw window count, not a per-minute rate). "
-                    f"event_name='{event_name}', category='telemetry'."
-                ),
-                event_name=event_name,
-                category="telemetry",
-                unit="short",
-                panel="stat",
-                query_type="logql",
-                query=event_count(
-                    "category={category}", "$__range", matchers="event_name={event_name}"
-                ),
-                target_names=[target_name],
-                panel_id=panel_id,
-                section="Fleet",
-                order=order,
-                field_defaults={"color": {"mode": "palette-classic"}},
-                width=6,
-                output=["grafana"],
-            )
+    specs.append(
+        MetricSpec(
+            name="ava_obs_delivery_stalled_count",
+            title="Delivery stalled",
+            time_basis="window",
+            description=(
+                "Windowed delivery_stalled total — a delivery-watchdog row signal "
+                "(a raw window count, not a per-minute rate). "
+                "event_name='delivery_stalled', category='telemetry'."
+            ),
+            event_name="delivery_stalled",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query_type="logql",
+            query=event_count(
+                "category={category}", "$__range", matchers="event_name={event_name}"
+            ),
+            target_names=["stalled"],
+            panel_id=32,
+            section="Fleet",
+            order=2,
+            field_defaults={"color": {"mode": "palette-classic"}},
+            width=6,
+            output=["grafana"],
         )
+    )
 
     specs.append(
         MetricSpec(
