@@ -47,8 +47,7 @@ class AgentStats(BaseModel):
     excluded); duration fields are null when no duration evidence survives.
     The metadata declares retained historical histogram precision.
     `exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome
-    (exec_failed / exec(timeout) / exec_cancelled; the prefix regex also
-    counts legacy exec_thread_stuck rows for historical continuity)."""
+    (exec_failed / exec_timeout / exec_cancelled)."""
 
     model_config = ConfigDict(frozen=True)
 

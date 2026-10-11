@@ -21,21 +21,14 @@ class LlmUsage(TypedDict):
     Optional ``price_write_5m`` / ``price_write_1h`` and corresponding
     ``cache_write_5m`` / ``cache_write_1h`` preserve cache-creation subdivisions
     of total input and their TTL-specific USD per 1M rates.
-    All four are absent on rows written before the snapshot shipped, and on
-    calls of a model with no known price (a row never carries a null cost —
-    absent means unpriced).
+    All four are absent on calls of a model with no known price (a row never
+    carries a null cost — absent means unpriced).
 
     ``calls`` is the constant 1 — it exists so the OTLP mapping mints
     ``ava_llm_usage_calls_total`` (per-agent/per-model call counts come from a
     Counter, not from a histogram's count, which drops the agent_id key).
     ``unpriced`` is 1 exactly when the price snapshot is absent (so unpriced
-    call volume is countable in Prometheus); it is omitted on priced calls.
-
-    ``cache_mechanism`` / ``cache_scope`` are present only when the call site
-    knows the request's cache provenance (task #2660): the Gemini explicit
-    cache path labels ``mixed`` / ``explicit_block`` because the API reports
-    only the explicit block in ``cache_read``; absent keys mean unknown, never
-    fabricated."""
+    call volume is countable in Prometheus); it is omitted on priced calls."""
 
     model: str
     calls: int
@@ -56,8 +49,6 @@ class LlmUsage(TypedDict):
     unpriced: int | None
     usage_kind: str
     source: NotRequired[str]
-    cache_mechanism: NotRequired[str]
-    cache_scope: NotRequired[str]
 
 
 class TurnEnd(TypedDict):
