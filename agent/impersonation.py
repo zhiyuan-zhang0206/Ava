@@ -13,7 +13,7 @@ import secrets
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 import psutil
 from langchain_core.messages import HumanMessage
@@ -23,6 +23,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
+from agent import impersonation_handoff as _handoff
 from agent import impersonation_process as _relay_process
 from agent import state as _state
 from agent.nodes import BEFORE_LLM, END, NodeName
@@ -94,7 +95,6 @@ async def claim_gate(
     if session is None:
         return None
     if session["status"] == ImpersonationStatus.REQUESTED and session["automatic"]:
-        from agent.impersonation_handoff import start_update
         from base.agents.impersonation import accept
 
         assert incarnation is not None  # noqa: S101 — native_status requires it
@@ -111,7 +111,7 @@ async def claim_gate(
         )
         return Command(
             update={
-                **start_update(
+                **_handoff.start_update(
                     session,
                     introduced=state.impersonation_introduced,
                     notes=HandoffNotes(
@@ -192,14 +192,6 @@ def protect_native_hooks(
     return guarded
 
 
-async def flush_checkpoint(checkpointer: object, agent_id: int) -> None:
-    """Flush the optional buffered saver without probing dynamic attributes."""
-    attributes = getattr(checkpointer, "__dict__", {})
-    if "_ava_nstep_flush" in attributes:
-        flush = cast(Callable[[str], Awaitable[None]], attributes["_ava_nstep_flush"])
-        await flush(str(agent_id))
-
-
 async def _activate_accepted(
     graph: CompiledStateGraph[
         _state.BaseAgentState, AvaContext, _state.BaseAgentState, _state.BaseAgentState
@@ -220,9 +212,7 @@ async def _activate_accepted(
     # Continuations and managed exec resources must settle before activation.
     if not hosted_resources_settled(resources):
         raise RuntimeError("cannot activate impersonation with unresolved native exec resources")
-    from agent.impersonation_handoff import ensure_start_marker
-
-    await ensure_start_marker(graph, session, notes=notes)
+    await _handoff.ensure_start_marker(graph, session, notes=notes)
     # The bound relay must be live before the takeover stands. On failure
     # the lease is rolled back to 'rejected' with a loud reason and the
     # native agent resumes — no silent half-takeover.
@@ -265,7 +255,7 @@ async def _apply_plugin_deltas(
                 session["plugin_delta"][version - 1], graph.builder.state_schema
             )
             await graph.aupdate_state(config, {**delta, "impersonation_applied": expected})
-            await flush_checkpoint(graph.checkpointer, agent_id)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            await _handoff.flush_checkpoint(graph.checkpointer, agent_id)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             receipt = expected
         await asyncio.to_thread(mark_plugin_applied, db, session["id"], version, incarnation)
 
@@ -311,12 +301,11 @@ async def settle_checkpoint(
         return True
     await _apply_plugin_deltas(graph, db, session, agent_id, incarnation)
     if session["automatic"] and session["handoff_applied_at"] is None:
-        from agent.impersonation_handoff import deliver_handoff
         from base.agents.impersonation import aborted_detail
 
         # A supervisor-aborted lease (task #3998) carries its death cause as
         # "aborted: <detail>" in rejection_reason; the end note names it.
-        await deliver_handoff(
+        await _handoff.deliver_handoff(
             graph,
             db,
             bus,

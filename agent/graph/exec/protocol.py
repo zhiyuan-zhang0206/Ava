@@ -79,10 +79,11 @@ def _serde() -> Any:
     """
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-    from agent.state import checkpoint_msgpack_allowlist, process_state_classes
+    from agent.extensions.registry import loaded_state_classes
+    from agent.state import checkpoint_msgpack_allowlist
 
     return JsonPlusSerializer(
-        allowed_msgpack_modules=checkpoint_msgpack_allowlist(process_state_classes())
+        allowed_msgpack_modules=checkpoint_msgpack_allowlist(loaded_state_classes())
     )
 
 

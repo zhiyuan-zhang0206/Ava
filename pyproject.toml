@@ -393,10 +393,13 @@ ignore_imports = [
     # The hosted invocation driver shares the native takeover boundary: it
     # gates active leases and settles external state only after graph flush.
     "services.agent_runner.agent_host.host -> agent.impersonation",
+    "services.agent_runner.agent_host.host -> agent.impersonation_handoff",
     # Failure recovery preserves the same pre-settlement takeover preparation.
     "services.agent_runner.agent_host.invocation -> agent.impersonation",
+    "services.agent_runner.agent_host.invocation -> agent.impersonation_handoff",
     # The original native work boundary writes and flushes an attributed halt.
     "services.agent_runner.agent_host.invocation.native_work -> agent.impersonation",
+    "services.agent_runner.agent_host.invocation.native_work -> agent.impersonation_handoff",
     "services.agent_runner.agent_host.invocation.native_work -> agent.ownership.native_cancel",
     "services.agent_runner.agent_host.daemon -> agent.startup",
     "services.agent_runner.agent_host.host -> agent.startup",
@@ -409,7 +412,7 @@ ignore_imports = [
     # Guarded compact invocation reuses native summary/transition/init owners;
     # these exact dependencies do not expose the kernel to other services.
     "services.agent_runner.agent_host.invocation.compact.apply -> agent.hooks.compact",
-    "services.agent_runner.agent_host.invocation.compact.apply -> agent.impersonation",
+    "services.agent_runner.agent_host.invocation.compact.apply -> agent.impersonation_handoff",
     "services.agent_runner.agent_host.invocation.compact.apply -> agent.nodes",
     "services.agent_runner.agent_host.invocation.compact.apply -> agent.state",
     "services.agent_runner.agent_host.invocation.compact.checkpoint -> agent.hooks.compact",

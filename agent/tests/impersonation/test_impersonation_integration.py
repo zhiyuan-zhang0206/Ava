@@ -10,8 +10,9 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent import impersonation
-from agent.impersonation import flush_checkpoint, settle_checkpoint
+from agent import impersonation, impersonation_handoff
+from agent.impersonation import settle_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from agent.tests.impersonation.handoff_inputs import (
     assert_consent_tool_result_checkpointed,
     assert_end_note_and_handoff_document,
@@ -443,7 +444,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     async def failed_flush(*_: object) -> None:
         raise OSError("checkpoint temporarily unavailable")
 
-    monkeypatch.setattr(impersonation, "flush_checkpoint", failed_flush)
+    monkeypatch.setattr(impersonation_handoff, "flush_checkpoint", failed_flush)
     with pytest.raises(OSError, match="checkpoint temporarily"):
         await deliver_handoff(graph, database, event_bus, lease, owner, notes=handoff_notes())
     assert (
@@ -453,7 +454,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         is None
     )
     assert not calls
-    monkeypatch.setattr(impersonation, "flush_checkpoint", flush_checkpoint)
+    monkeypatch.setattr(impersonation_handoff, "flush_checkpoint", flush_checkpoint)
     await deliver_handoff(graph, database, event_bus, lease, owner, notes=handoff_notes())
     durable = await saver.aget_tuple(config)
     assert durable is not None

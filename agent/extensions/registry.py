@@ -26,7 +26,12 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from agent.extensions import FACE_MODULE, SURFACE_MODULE, _enabled_plugin_dirs, _pkg_of
+from agent.extensions._discovery import (
+    FACE_MODULE,
+    SURFACE_MODULE,
+    enabled_plugin_dirs,
+    pkg_of,
+)
 from base.packages.plugins import load_report
 from base.packages.plugins.config_face import CONFIG_FACE
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
@@ -35,7 +40,7 @@ from base.packages.plugins.manifest import load_manifest
 from base.telemetry import report_sink_failure
 
 SURFACE_FACES: tuple[str, ...] = (SURFACE_MODULE, CONFIG_FACE)
-# The dotted packages a plugin's modules load under (`agent.extensions._pkg_of`).
+# The dotted packages a plugin's modules load under (`agent.extensions._discovery.pkg_of`).
 _PLUGIN_PACKAGES = frozenset({"ava_builtins.plugins", "plugins"})
 ALL_FACES: tuple[str, ...] = (*SURFACE_FACES, FACE_MODULE)
 
@@ -71,12 +76,12 @@ def declarations(
     invalid.
     """
     found: list[tuple[str, Path, PluginContributions]] = []
-    for name, plugin_dir in _enabled_plugin_dirs(report):
+    for name, plugin_dir in enabled_plugin_dirs(report):
         merged: PluginContributions | None = None
         try:
             load_manifest(plugin_dir)
             for face in faces:
-                module = sys.modules.get(f"{_pkg_of(plugin_dir)}.{name}.{face}")
+                module = sys.modules.get(f"{pkg_of(plugin_dir)}.{name}.{face}")
                 contribute = getattr(module, "contribute", None)
                 if contribute is None:
                     continue

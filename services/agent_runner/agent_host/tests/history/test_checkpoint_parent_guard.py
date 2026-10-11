@@ -15,7 +15,7 @@ from psycopg import AsyncConnection, errors
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-from agent.impersonation import flush_checkpoint
+from agent.impersonation_handoff import flush_checkpoint
 from agent.messages.guard import guarded_delta_reducer
 from base.config import settings
 from services.agent_runner.agent_host.daemon import _build_checkpointer

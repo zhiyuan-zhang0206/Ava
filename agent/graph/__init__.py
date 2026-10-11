@@ -19,6 +19,7 @@ and standing context notes) and `recall/` (passive memory recall):
   - `llm/node.py`        — llm node (stream + cancel = discard partial turn)
   - `llm/_stream.py`     — llm streaming consumption (stall timeouts, non-stream fallback, cache retry)
   - `llm/_cancel.py`     — llm streaming-vs-cancel race (partial turn discard)
+  - `llm/goto.py`        — the node names the llm node may route to
   - `llm/_chunk.py`      — llm chunk assembly + final-message validation
   - `llm_errors.py`      — llm stream error taxonomy + failure ledger
   - `prompt/_base_prompt.py` — immutable base system prompt + lazily captured `ava` SDK overview
