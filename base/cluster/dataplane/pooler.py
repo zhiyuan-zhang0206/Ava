@@ -51,7 +51,7 @@ def admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0.
         return False
 
 
-def pgbouncer_public_listener_reachable(listen_port: int, role: str, cluster_secret: str) -> bool:
+def pgbouncer_public_listener_reachable(listen_port: int, role: str) -> bool:
     """True when the pooler listens on the address remote consumers actually dial.
 
     The loopback probe (`pgbouncer_listener_reachable`) proves "the pooler process
@@ -70,12 +70,12 @@ def pgbouncer_public_listener_reachable(listen_port: int, role: str, cluster_sec
     restarts. The exact reachable address and IPv4/IPv6 wildcard binds all cover
     the public front door. An empty table proves nothing and remains degraded.
 
-    A no-secret cluster's pooler binds loopback only by design (`bind_addrs`), so
-    there is no public listener to check — returns True without inspecting the
-    host or socket table. `role` remains in the stable probe signature shared by
+    A pooler whose reachable address is a loopback alias binds loopback only
+    (`bind_addrs`), so there is no public listener to check — returns True without
+    inspecting the socket table. `role` remains in the stable probe signature shared by
     the healthcheck and bring-up callers; socket inspection needs no credential."""
     del role
-    if port_preflight.bind_addrs(cluster_secret) == ["127.0.0.1"]:
+    if port_preflight.bind_addrs() == ["127.0.0.1"]:
         return True
     reachable = machine.reachable_host()
     addrs = port_preflight.listener_addrs(listen_port)
