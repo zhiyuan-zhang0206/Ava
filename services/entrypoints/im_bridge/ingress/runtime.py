@@ -1,4 +1,4 @@
-"""Weixin's existing adapter loop owns retained source recovery and first dispatch."""
+"""Weixin's existing adapter loop owns source retention and first dispatch."""
 
 import asyncio
 import json
@@ -37,10 +37,6 @@ class WeixinIngress:
         binding = await asyncio.to_thread(self.store.initialize, namespace, account_id)
         await asyncio.to_thread(self.store.recover_claims, binding)
         return binding
-
-    async def recover_retained(self, binding: PollBinding) -> None:
-        for receipt in await asyncio.to_thread(self.store.pending, binding):
-            await self.dispatch(binding, receipt)
 
     async def check_adapter(self, binding: PollBinding) -> str:
         if self.core.adapters.get("weixin") is not self.adapter:
@@ -128,11 +124,6 @@ class WeixinIngress:
         }
         previous = await asyncio.to_thread(self.store.lookup, binding, source, request)
         if previous is not None:
-            if (
-                previous.status == IngressStatus.RETAINED
-                and binding.state == IngressBindingState.ACTIVE
-            ):
-                return await self.dispatch(binding, previous)
             return previous
         if binding.state == IngressBindingState.DRAINING:
             return await asyncio.to_thread(
