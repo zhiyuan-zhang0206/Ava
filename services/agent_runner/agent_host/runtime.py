@@ -258,7 +258,8 @@ class TurnOutcome:
     rows.
     """
 
-    __slots__ = ("aborted", "crashed", "exited", "native_held", "truncated")
+    # A hosted failure report is awaited only after its own durable settlement.
+    __slots__ = ("aborted", "crashed", "exited", "failure_report", "native_held", "truncated")
 
     def __init__(
         self,
@@ -268,12 +269,14 @@ class TurnOutcome:
         aborted: bool = False,
         truncated: bool = False,
         native_held: bool = False,
+        failure_report: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.exited = exited
         self.crashed = crashed
         self.aborted = aborted
         self.truncated = truncated
         self.native_held = native_held
+        self.failure_report = failure_report
 
 
 async def cached_runtime(

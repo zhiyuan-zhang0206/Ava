@@ -26,7 +26,7 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
 from base.db import Database, insert_inbound_message
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, EventBusConfig
 from base.events.live.projection import Error
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.redis_client import open_async_redis
@@ -234,13 +234,14 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     redis = open_async_redis(settings.data_plane.redis_url)
     channel = f"{settings.data_plane.events_channel}:compact-proof:{agent}"
     publisher = AgentEventPublisher(redis, channel, agent_id=agent)
+    turn_bus = EventBus(EventBusConfig(settings.data_plane.redis_url, channel))
     ctx = AvaContext(
         ops_pool=aops_pool,
         event_publisher=publisher,
         llm=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
         db=Database.from_settings(),
-        bus=EventBus.from_settings(),
+        bus=turn_bus,
         catalog=build_model_catalog(),
         clock_factory=configured_policy().clock_factory,
     )
@@ -282,4 +283,5 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
         finally:
             await publisher.aclose()
             await redis.aclose()
+            await turn_bus.async_redis().aclose()
             await _close_host_with_original_failure(host, original_failure, provider_error)

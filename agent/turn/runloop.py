@@ -1,7 +1,7 @@
 """Shared graph invocation configuration and recoverable turn-error reporting."""
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from langchain_core.runnables import RunnableConfig
@@ -23,6 +23,7 @@ from agent.state_channels import (
     CircuitState,
 )
 from base.agents.context import AvaContext
+from base.events.live.bus import EventBus
 from base.events.live.projection import Error
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
@@ -47,30 +48,34 @@ def emit_error_event(
     reason: str | None = None,
     blocked: bool = False,
     recovery: str | None = None,
+    deferred: list[Error] | None = None,
 ) -> None:
     """Best-effort single Error event to the frontend SSE channel.
 
     A context built without a publisher (an embedding caller) has no channel, so the event
     is dropped; a failing emit is logged, never raised over the original exception.
+    Hosted failures defer the same typed payload until their durable settlement.
     """
     publisher = ctx.event_publisher
     if publisher is None:
         return
     try:
-        publisher.emit(
-            Error(
-                agent_id=agent_id,
-                content=content,
-                error_class=error_class,
-                provider=provider,
-                status=status,
-                reason=reason,
-                blocked=blocked,
-                recovery=recovery,
-            ).model_dump_json()
+        error = Error(
+            agent_id=agent_id,
+            content=content,
+            error_class=error_class,
+            provider=provider,
+            status=status,
+            reason=reason,
+            blocked=blocked,
+            recovery=recovery,
         )
+        if deferred is not None:
+            deferred.append(error)
+        else:
+            publisher.emit(error.model_dump_json())
     except Exception:
-        # This runs inside an error handler: a failure to report must not mask the original one.
+        # Reporting must not mask the original exception.
         logger.opt(exception=True).warning(
             "emitting the turn Error event for agent {} failed; the frontend does not see it",
             agent_id,
@@ -132,6 +137,7 @@ async def _record_permanent_reject_outcome(
     exc: FatalProviderError,
     reason: str,
     occurred_at: datetime | None,
+    deferred: list[Error] | None,
 ) -> None:
     """Count one permanent-class rejection; at the halt threshold trip the breaker.
 
@@ -228,6 +234,7 @@ async def _record_permanent_reject_outcome(
         reason=reason,
         blocked=True,
         recovery="Resolve the provider rejection, then send a new message.",
+        deferred=deferred,
     )
 
 
@@ -311,11 +318,12 @@ async def _apply_provider_failure(
     *,
     occurred_at: datetime | None,
     emit_reports: bool,
+    deferred: list[Error] | None,
 ) -> None:
     """Record a permanent rejection and open the heartbeat circuit breaker into `input_update`."""
     if emit_reports and ctx.ops_pool is not None and exc.error_class == "permanent":
         # Persist the halt even when the checkpoint circuit was already open.
-        await _record_permanent_reject_outcome(ctx, agent_id, exc, reason, occurred_at)
+        await _record_permanent_reject_outcome(ctx, agent_id, exc, reason, occurred_at, deferred)
     if await _breaker_already_open(circuit_reader, reason):
         # The breaker is still open for the same reason from an earlier
         # failed turn — re-opening is idempotent and re-emitting the open
@@ -342,6 +350,7 @@ async def _handle_fatal_llm_error(
     *,
     occurred_at: datetime | None = None,
     emit_reports: bool = True,
+    deferred: list[Error] | None = None,
 ) -> dict[str, object]:
     """Abort the turn, report the error, and wait for new input.
 
@@ -378,6 +387,7 @@ async def _handle_fatal_llm_error(
             reason=reason,
             blocked=is_blocked_provider_failure,
             recovery=_provider_recovery(reason) if reason is not None else None,
+            deferred=deferred,
         )
     # halted=True so the claim node actually waits for the next inbound
     # instead of re-entering the LLM with the same messages and hitting the
@@ -395,6 +405,7 @@ async def _handle_fatal_llm_error(
             circuit_reader,
             occurred_at=occurred_at,
             emit_reports=emit_reports,
+            deferred=deferred,
         )
     return input_update
 
@@ -420,6 +431,7 @@ class PendingTurnFailure:
     error: FatalLLMStreamError | FatalProviderError | CompactionFailedError
     prepared_update: dict[str, object] | None = None
     reports_started: bool = False
+    errors: list[Error] = field(default_factory=list[Error])
 
 
 async def settle_turn_failure(
@@ -430,7 +442,7 @@ async def settle_turn_failure(
     agent_id: int,
     pending: PendingTurnFailure,
 ) -> None:
-    """Prepare notifications once, then retry only the abort's durable writes."""
+    """Prepare the abort once; its host publishes errors after durable turn settlement."""
 
     async def read_circuit() -> CircuitState | None:
         snapshot = await graph.aget_state(config)
@@ -455,13 +467,41 @@ async def settle_turn_failure(
                 f"CompactionFailedError: {exc} The turn was aborted and conversation history "
                 "was preserved. Send a new message to continue, or request compaction again "
                 "after resolving the cause.",
+                deferred=pending.errors,
             )
             pending.prepared_update = {"halted": True}
         else:
             pending.prepared_update = await _handle_fatal_llm_error(
-                exc, ctx, agent_id, circuit_reader=read_circuit, emit_reports=emit_reports
+                exc,
+                ctx,
+                agent_id,
+                circuit_reader=read_circuit,
+                emit_reports=emit_reports,
+                deferred=pending.errors,
             )
     await graph.aupdate_state(config, pending.prepared_update)
     from agent.impersonation import flush_checkpoint
 
     await flush_checkpoint(checkpointer, agent_id)
+
+
+async def publish_turn_failure(pending: PendingTurnFailure, bus: EventBus) -> None:
+    """Deliver the prepared live projection after the host proves its fatal cutoff.
+
+    The invocation publisher has already drained and closed. This uses the same
+    owned bus and its finite best-effort transport without restarting a worker.
+    Consume the local reports before awaiting: a retry or cancellation must not
+    duplicate a notification whose transport outcome is unknown.
+    """
+    errors, pending.errors = pending.errors, []
+    for error in errors:
+        try:
+            delivered = await bus.publish_best_effort(
+                error.model_dump_json(), context="settled turn Error"
+            )
+            if delivered is None:
+                logger.warning("settled turn Error for agent {} was not delivered", error.agent_id)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "publishing the settled turn Error for agent {} failed", error.agent_id
+            )

@@ -55,6 +55,15 @@ context for compaction and to END for idle or lifecycle control. Routing uses
   no inbound work, including quiet idle agents. Normal admission fences remain;
   a halted empty-inbox claim returns idle without a model call. Unowned intent
   and crash-marked rows stay outside this ownership-recovery scan.
+- Expected fatal-turn Errors are prepared once with the halted checkpoint, but
+  their retry instructions are published only after the exact incarnation's
+  fatal cutoff and idling settlement commit. The invocation publisher has
+  already drained; the settlement owner awaits the same EventBus's bounded
+  publication without restarting it. An unproven cutoff or settlement withholds
+  the retry instructions and logs the failure. A transport failure remains
+  best-effort and observable; cancellation propagates. A repeated close does
+  not publish the same prepared reports again. Old claimed work is consumed,
+  never replayed; fresh user or peer chat remains subject to the existing gate.
 - `services/agent_runner/agent_host/daemon.py` joins background tasks, drains scheduled turns,
   stops ownership renewal, then releases settled ownership before closing pools.
   A background failure, including plugin-triggered `KeyboardInterrupt`, cannot
