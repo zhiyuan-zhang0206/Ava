@@ -22,6 +22,7 @@ class PingResult(TypedDict):
     ax_act_v2: NotRequired[bool]  # reported actions and exact text selection
     ax_target_v1: NotRequired[bool]  # explicit process selection and observed-PID actions
     native_input_v1: NotRequired[bool]  # buttons/counts/modifiers/atomic holds
+    corner_failsafe_v1: NotRequired[bool]  # input stops while the mouse is at the top-left corner
 
 
 class ScreencaptureResult(TypedDict):

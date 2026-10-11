@@ -770,6 +770,53 @@ func releaseModifiers(_ pairs: [(CGEvent, CGEvent)]) {
     for pair in pairs.reversed() { postInputEvent(pair.1) }
 }
 
+// MARK: - Corner fail-safe
+
+/// The user's stop gesture: the pointer parked at the top-left corner of the main display.
+/// Distinct from `OpError` so `dispatch` can tag the reply `error_code: "user_abort"`.
+struct UserAbort: Error {
+    /// Where the pointer was when the check saw it, in CG global coordinates.
+    let position: CGPoint
+}
+
+let userAbortMessage = "Stopped by the user: the mouse is parked at the top-left corner of the main " +
+    "display. No desktop action runs while it stays there. Do not retry; tell the user and ask " +
+    "how to proceed once they have moved the mouse away."
+
+/// Longest uninterrupted sleep inside a held press, so a parked pointer is noticed quickly.
+let failsafeSliceSeconds = 0.02
+
+/// Throws `UserAbort` while the live pointer is at the main display's top-left corner. Both
+/// points are CG global coordinates (origin top-left), so no AppKit flip is involved. The
+/// corner is the display's real origin with sub-point tolerance: a display to the up-left
+/// of the main one makes `x <= 0 && y <= 0` true across a whole quadrant. An unreadable
+/// pointer is an error, never "not in the corner".
+func cornerFailsafe() throws {
+    guard let position = CGEvent(source: nil)?.location
+    else { throw OpError.bad("could not read cursor position for the corner fail-safe") }
+    let corner = CGDisplayBounds(CGMainDisplayID()).origin
+    if abs(position.x - corner.x) < 1 && abs(position.y - corner.y) < 1 {
+        throw UserAbort(position: position)
+    }
+}
+
+/// Sleep `seconds` in short slices and re-check the corner after each, so a held press or a
+/// gap between clicks is interrupted. When `up` is the pending mouse release, a stop moves it
+/// to where the pointer is parked: releasing at the press point would complete the click, and
+/// releasing anywhere else would move the user's pointer. Cleanup posts bypass this check.
+func failsafeHold(_ seconds: Double, releasing up: CGEvent? = nil) throws {
+    var remaining = seconds
+    while remaining > 0 {
+        let slice = min(remaining, failsafeSliceSeconds)
+        Thread.sleep(forTimeInterval: slice)
+        remaining -= slice
+        do { try cornerFailsafe() } catch let abort as UserAbort {
+            up?.location = abort.position
+            throw abort
+        }
+    }
+}
+
 /// Post a synthetic mouse click at a global screen coordinate (move + down + up).
 /// Pass "double": true for a second click. Dispatch refuses it without the
 /// Accessibility grant instead of posting events macOS would silently drop.
@@ -799,17 +846,17 @@ func click(_ req: [String: Any]) throws -> [String: Any] {
          try inputMouseEvent(upKind, point, button, flags, count: Int64(index)))
     }
     let modifiers = try inputModifierPairs(flags)
-    func once(_ pair: (CGEvent, CGEvent)) {
+    func once(_ pair: (CGEvent, CGEvent)) throws {
         postInputEvent(pair.0)
         defer { postInputEvent(pair.1) }
-        if duration > 0 { Thread.sleep(forTimeInterval: duration) }
+        try failsafeHold(duration, releasing: pair.1)
     }
     pressModifiers(modifiers)
     defer { releaseModifiers(modifiers) }
     postInputEvent(move)
     for (index, pair) in pairs.enumerated() {
-        once(pair)
-        if index + 1 < pairs.count { Thread.sleep(forTimeInterval: 0.075) }
+        try once(pair)
+        if index + 1 < pairs.count { try failsafeHold(0.075) }
     }
     return ["clicked": ["x": x, "y": y], "double": count == 2, "button": name, "click_count": count]
 }
@@ -817,6 +864,7 @@ func click(_ req: [String: Any]) throws -> [String: Any] {
 /// A bounded straight-line drag. Prepare every event before pressing, so allocation
 /// failures cannot leave the button down. The release remains local to this call
 /// even if the requesting socket disconnects while the synchronous action runs.
+/// The corner fail-safe is checked before every movement; see `cornerFailsafe`.
 func drag(_ req: [String: Any]) throws -> [String: Any] {
     func coordinate(_ key: String) throws -> Double {
         guard let number = req[key] as? NSNumber,
@@ -846,9 +894,17 @@ func drag(_ req: [String: Any]) throws -> [String: Any] {
     move.post(tap: .cghidEventTap)
     down.post(tap: .cghidEventTap)
     defer { up.post(tap: .cghidEventTap) }
+    var last = CGPoint(x: sx, y: sy)
     for movement in movements {
         Thread.sleep(forTimeInterval: 0.01)
+        // A stop releases under the pointer; an unreadable pointer releases at the last
+        // point sent. Neither returns the pointer to the planned end.
+        do { try cornerFailsafe() } catch {
+            up.location = (error as? UserAbort)?.position ?? last
+            throw error
+        }
         movement.post(tap: .cghidEventTap)
+        last = movement.location
     }
     return ["start": ["x": sx, "y": sy], "end": ["x": ex, "y": ey]]
 }
@@ -885,7 +941,7 @@ func key(_ req: [String: Any]) throws -> [String: Any] {
     defer { releaseModifiers(modifiers) }
     postInputEvent(down)
     defer { postInputEvent(up) }
-    if duration > 0 { Thread.sleep(forTimeInterval: duration) }
+    try failsafeHold(duration)
     return ["key": code, "cmd": flags.contains(.maskCommand)]
 }
 
@@ -2098,16 +2154,22 @@ private let rootKeeper = RootKeeper()
 func dispatch(_ req: [String: Any]) -> [String: Any] {
     let id = req["id"]
     let method = req["method"] as? String ?? ""
+    // Methods that change desktop state; each is refused while the corner fail-safe holds.
+    let cornerFailsafeMethods: Set<String> = [
+        "click", "drag", "move", "focus_app", "type", "key", "scroll", "ax_act",
+    ]
     let axGatedMethods: Set<String> = ["click", "drag", "move", "focus_app", "type", "key", "scroll", "ax_window_info", "ax_tree", "ax_act"]
     if axGatedMethods.contains(method) && !axTrustedOrPrompt() {
         return ["id": id as Any, "ok": false, "error": axGrantError]
     }
     do {
+        // Observation stays available; only methods that change the desktop are stoppable.
+        if cornerFailsafeMethods.contains(method) { try cornerFailsafe() }
         let result: Any
         switch method {
         case "ping":
             result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true,
-                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "ax_target_v1": true, "native_input_v1": true,
+                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "ax_target_v1": true, "native_input_v1": true, "corner_failsafe_v1": true,
                       "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
         case "file_list": result = try fileList(req)
@@ -2154,6 +2216,8 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
             return ["id": id as Any, "ok": false, "error": "unknown method: \(method)"]
         }
         return ["id": id as Any, "ok": true, "result": result]
+    } catch is UserAbort {
+        return ["id": id as Any, "ok": false, "error": userAbortMessage, "error_code": "user_abort"]
     } catch let OpError.bad(msg) {
         return ["id": id as Any, "ok": false, "error": msg]
     } catch {
