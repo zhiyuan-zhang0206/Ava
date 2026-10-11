@@ -1,5 +1,5 @@
 """`services.entrypoints.im_bridge.notice_bridge` — fleet notices → Telegram owner chat
-(Task #884): polling cursor, filter, reply window, /notice command.
+(Task #884): acceptance polling, filter, reply window, /notice command.
 """
 
 from __future__ import annotations
@@ -135,6 +135,14 @@ def _notice(
     }
 
 
+def _accepted_ids() -> list[int]:
+    with test_im_bridge_core.TEST_POOL.connection() as conn:
+        rows = conn.execute(
+            "SELECT notice_id FROM im_bridge_notice_acceptances ORDER BY notice_id"
+        ).fetchall()
+    return [int(row[0]) for row in rows]
+
+
 def _bridge(
     tmp_path: Any,
     gateway: FakeGateway,
@@ -154,7 +162,7 @@ def _bridge(
     core.adapters["telegram"] = adapter  # type: ignore[assignment]
     bridge = NoticeBridge(core, core.config, db_pool=test_im_bridge_core.TEST_POOL)
 
-    def fake_feed(_after: int, limit: int | None = None) -> list[dict[str, Any]]:
+    def fake_feed(limit: int | None = None) -> list[dict[str, Any]]:
         with test_im_bridge_core.TEST_POOL.connection() as conn:
             ids = {
                 row[0]
@@ -164,7 +172,7 @@ def _bridge(
             }
         return [notice for notice in gateway.notices if notice["id"] not in ids][:limit]
 
-    monkeypatch.setattr(bridge, "_notices_after", fake_feed)
+    monkeypatch.setattr(bridge, "_unaccepted_notices", fake_feed)
 
     def fake_open(limit: int | None = None) -> list[dict[str, Any]]:
         return gateway.open_notices[:limit]
@@ -173,7 +181,7 @@ def _bridge(
     return bridge, adapter
 
 
-async def test_poll_pushes_new_notices_and_advances_cursor(
+async def test_poll_pushes_new_notices_and_accepts_each(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async with owned_tasks() as _owned_tasks:
@@ -186,7 +194,7 @@ async def test_poll_pushes_new_notices_and_advances_cursor(
             await bridge.core.outbound_worker.run_once()
         assert len(adapter.sent) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         assert "A" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
-        assert bridge._cursor == 2
+        assert _accepted_ids() == [1, 2]
         # with min_priority=P1: P3 FYI filtered, require_response always pushes
         bridge._filters = {"min_priority": "P1", "agent": None}
         gateway.notices = [
@@ -198,7 +206,7 @@ async def test_poll_pushes_new_notices_and_advances_cursor(
         assert (
             len(adapter.sent) == 3  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         )  # low filtered, decide pushed
-        assert bridge._cursor == 4
+        assert _accepted_ids() == [1, 2, 3, 4]
 
 
 async def test_filter_agent_restricts_pushes(
@@ -449,8 +457,7 @@ def _direct_bridge(
     adapter = FakeAdapter()
     core.adapters["telegram"] = adapter  # type: ignore[assignment]
     bridge = NoticeBridge(core, core.config, db_pool=pool)
-    bridge._legacy_cursor = 0
-    core.notice_bridge.poll_store.initialize_notice_poll(0)
+    core.notice_bridge.poll_store.initialize_notice_poll()
     return bridge, adapter, pool
 
 
@@ -484,16 +491,16 @@ def test_poll_reads_directly_from_db(
     from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
-    nid = _seed_notice(db_conn, agent_id, "direct db notice")
     bridge, adapter, pool = _direct_bridge(db_conn, tmp_path, monkeypatch)
+    nid = _seed_notice(db_conn, agent_id, "direct db notice")  # after the cutover is fixed
     try:
         asyncio.run(bridge.poll_once())
         asyncio.run(bridge.core.outbound_worker.run_once())
         assert len(adapter.sent) == 1  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         assert "direct db notice" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
-        assert bridge._cursor == nid, "cursor advanced past the new notice"
+        assert _accepted_ids() == [nid]
 
-        # Resolved notices stop being returned (cursor stays put).
+        # Resolved notices stop being returned.
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agent_notices SET resolved_at = now(), resolution = 'read' WHERE id = %s",
@@ -555,7 +562,7 @@ def test_list_queue_limit_follows_config(
         pool.close()
 
 
-def test_notices_after_caps_at_display_default(
+def test_unaccepted_notices_caps_at_display_default(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
@@ -569,13 +576,13 @@ def test_notices_after_caps_at_display_default(
     from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
-    for i in range(3):
-        _seed_notice(db_conn, agent_id, f"live item {i}")
     bridge, _adapter, pool = _direct_bridge(
         db_conn, tmp_path, monkeypatch, notices_open_default_limit=2
     )
+    for i in range(3):
+        _seed_notice(db_conn, agent_id, f"live item {i}")  # after the cutover is fixed
     try:
-        rows = bridge._notices_after(0)
+        rows = bridge._unaccepted_notices()
         assert len(rows) == 2
     finally:
         pool.close()
@@ -612,7 +619,7 @@ async def test_poll_accepts_before_uncertain_send_and_never_retries(
         flaky = _FlakyAdapter(fail_first=1)
         bridge.core.adapters["telegram"] = flaky  # type: ignore[assignment]
         await bridge.poll_once()
-        assert bridge._cursor == 3, "accepted means durable intent, not provider success"
+        assert _accepted_ids() == [1, 2, 3], "accepted means durable intent, not provider success"
         assert flaky.sent == []
         with pytest.raises(RuntimeError) as caught:
             await bridge.core.outbound_worker.run_once()
@@ -635,12 +642,12 @@ async def test_poll_accepts_before_uncertain_send_and_never_retries(
             ] == ["uncertain", "sent", "sent"]
 
 
-async def test_poll_holds_cursor_when_adapter_absent(
+async def test_poll_holds_acceptance_when_adapter_absent(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Regression (audit round 2, P1): with no telegram adapter registered,
-    the cursor used to advance past every notice every 3s — all notices
-    silently dropped. It must hold instead."""
+    every notice used to be consumed every 3s — all notices silently dropped.
+    Acceptance must hold instead."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
         gateway.notices = [_notice(1, "A")]
@@ -648,21 +655,7 @@ async def test_poll_holds_cursor_when_adapter_absent(
         bridge.core.adapters.pop("telegram")
 
         await bridge.poll_once()
-        assert bridge._cursor == 0
+        assert _accepted_ids() == []
         # still held on the second round (and no exception)
         await bridge.poll_once()
-        assert bridge._cursor == 0
-
-
-async def test_load_state_rejects_corrupt_cursor(
-    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Regression (audit round 2, P2): a corrupted notice_cursor.json
-    (non-int) used to be loaded verbatim, making every _notices_after SQL
-    parameter wrong — a permanent poll error loop. It must reset to 0."""
-    async with owned_tasks() as _owned_tasks:
-        state_dir = tmp_path / "state" / "im_bridge"
-        state_dir.mkdir(parents=True)
-        (state_dir / "notice_cursor.json").write_text('{"oops": true}')
-        bridge, _ = _bridge(tmp_path, FakeGateway(), monkeypatch, tasks=_owned_tasks)
-        assert bridge._cursor == 0
+        assert _accepted_ids() == []

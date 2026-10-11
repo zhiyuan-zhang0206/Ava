@@ -98,7 +98,6 @@ MAX_CONSECUTIVE_FAILURES = 3
 RETRY_DELAY_SECONDS = 2.0
 BACKOFF_DELAY_SECONDS = 30.0
 SESSION_EXPIRED_PAUSE_SECONDS = 600.0
-DEDUP_TTL_SECONDS = 300.0
 
 ITEM_TEXT = 1
 ITEM_VOICE = 3
@@ -366,7 +365,6 @@ class WeixinAdapter(IMAdapter):
         self._owns_client = client is None
         self._poll_task: asyncio.Task[None] | None = None
         self._running = False
-        self._seen: dict[str, float] = {}  # post-retention diagnostic cache only
         self._ingress: WeixinIngress | None = None
         self._binding: PollBinding | None = None
         self._ingress_init_lock = asyncio.Lock()
@@ -566,24 +564,12 @@ class WeixinAdapter(IMAdapter):
         text = _extract_text(item_list)
         receipt = await ingress.accept(binding, message, text)
         await ingress.recover_after_accept(binding, receipt)
-        # No pre-admission seen-set shortcut can suppress a failed/restarted source.
-        self._mark_seen(str(receipt.id))
         sender_id = receipt.source.sender_id
         context_token = message.get("context_token")
         if isinstance(context_token, str) and context_token:
             self._tokens.set(sender_id, context_token)
         self._mark_inbound(sender_id)
         return receipt
-
-    def _is_duplicate(self, key: str) -> bool:
-        stamp = self._seen.get(key)
-        return stamp is not None and time.monotonic() - stamp < DEDUP_TTL_SECONDS
-
-    def _mark_seen(self, key: str) -> None:
-        self._seen[key] = time.monotonic()
-        if len(self._seen) > 512:  # bound memory; prune expired entries
-            cutoff = time.monotonic() - DEDUP_TTL_SECONDS
-            self._seen = {k: t for k, t in self._seen.items() if t >= cutoff}
 
     async def outbound_account_id(self) -> str:
         if not self._configured or not self._account_id:
