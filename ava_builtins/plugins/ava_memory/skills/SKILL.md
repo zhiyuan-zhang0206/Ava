@@ -11,8 +11,9 @@ arbiter or steward role. Follow the role and scope supplied by the current task.
 
 ## Select the needed guide
 
-- For a query, use `ava.memory.search("<query>")` and read the matching note;
-  inspect the returned note's ownership. Another agent's role is context,
+- For a query, use `ava.memory.search("<query>")`; each match carries a relevance
+  `score` and the `chunk` that matched, so weigh a weak score before opening the
+  note, then read the matching note and inspect its ownership. Another agent's role is context,
   not your identity. Do not start maintenance merely to answer a query.
 - When recording user preferences or corrections, read
   [user-dimension maintenance](reference/user-dimension.md). Search first,

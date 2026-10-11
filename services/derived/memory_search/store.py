@@ -18,7 +18,7 @@ from zipfile import BadZipFile
 
 import numpy as np
 
-from services.derived.memory_indexer.backends.base import KIND_BODY, pk_of
+from services.derived.memory_indexer.backends.base import KIND_BODY, ChunkHit, pk_of
 
 _log = logging.getLogger("services.derived.memory_search.store")
 
@@ -308,13 +308,13 @@ class MemoryStore:
                 meta[path] = (mtime, hash_, fingerprint)
         return meta
 
-    def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]:
-        """Exact cosine top-k **paths**, aggregated over chunk rows.
+    def search_topk(self, query_vector: np.ndarray, k: int) -> list[ChunkHit]:
+        """Exact cosine top-k **files**, each with its best chunk row.
 
         One matrix product over every row (microseconds at pool scale), then
-        per path keep the best (maximum) cosine — most-similar-first.
-        Returns fewer than k
-        when the store has fewer distinct paths; empty when the store is empty.
+        per path keep the best (maximum) cosine row — most-similar-first.
+        Returns fewer than k when the store has fewer distinct paths; empty
+        when the store is empty.
         """
         query = query_vector.astype(np.float32).reshape(-1)
         if query.shape != (self._dim,):
@@ -322,15 +322,23 @@ class MemoryStore:
         if self._matrix.shape[0] == 0:
             return []
         q_norm = float(np.linalg.norm(query))
-        row_norms = np.linalg.norm(self._matrix, axis=1)
         if q_norm == 0.0:
-            return list(dict.fromkeys(self._paths))[:k]  # degenerate query: stable order
+            # Degenerate query: every similarity is 0; keep each path's first row, stable order.
+            first: dict[str, int] = {}
+            for row, path in enumerate(self._paths):
+                first.setdefault(path, row)
+            return [self._hit(row, 0.0) for row in list(first.values())[:k]]
+        row_norms = np.linalg.norm(self._matrix, axis=1)
         cos = self._matrix @ query / (row_norms * q_norm)
-        best: dict[str, float] = {}
-        for path, sim in zip(self._paths, cos, strict=True):
-            if path not in best or float(sim) > best[path]:
-                best[path] = float(sim)
-        return sorted(best, key=best.__getitem__, reverse=True)[:k]
+        best: dict[str, int] = {}
+        for row, path in enumerate(self._paths):
+            if path not in best or float(cos[row]) > float(cos[best[path]]):
+                best[path] = row
+        ranked = sorted(best.values(), key=lambda row: float(cos[row]), reverse=True)[:k]
+        return [self._hit(row, float(cos[row])) for row in ranked]
+
+    def _hit(self, row: int, score: float) -> ChunkHit:
+        return ChunkHit(self._paths[row], self._kinds[row], self._chunk_idx[row], score)
 
     @property
     def last_save_seconds(self) -> float | None:

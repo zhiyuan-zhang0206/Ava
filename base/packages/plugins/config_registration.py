@@ -480,9 +480,10 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "llm_stream_inter_chunk_timeout_seconds": _range_validator(gt=0),
     "llm_stream_total_timeout_seconds": _range_validator(gt=0),
     "llm_stream_ttft_timeout_seconds": _range_validator(gt=0),
-    "memory_recall_filter_timeout_seconds": _range_validator(gt=0),
     "memory_recall_deadline_seconds": _range_validator(gt=0),
     "skill_recall_deadline_seconds": _range_validator(gt=0),
+    # probabilities — [0, 1]
+    "memory_recall_inject_threshold": _range_validator(ge=0, le=1),
     # fractions — (0, 1]
     "auto_compact_fraction": _range_validator(gt=0, le=1),
     "compact_reminder_fraction": _range_validator(gt=0, le=1),
@@ -491,9 +492,7 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "auto_compact_ceiling_tokens": _range_validator(ge=0),
     "claude_thinking_budget_tokens": _range_validator(ge=0),
     "history_dump_keep": _range_validator(ge=0),
-    "memory_recall_filter_max_retries": _range_validator(ge=0),
-    "memory_recall_inject_k": _range_validator(ge=0),
-    "memory_recall_retrieve_k": _range_validator(ge=0),
+    "memory_recall_inject_max": _range_validator(ge=0),
     "skill_recall_max": _range_validator(ge=0),
 }
 
@@ -586,11 +585,10 @@ def validate_config_overlay(
     overlay names no decision-model field: an overlay that does fails here rather than
     being admitted unchecked."""
     validate_config_overlay_shape(overlay, configs)
-    for field in ("llm_model", "memory_recall_filter_model"):
-        if field in overlay:
-            error = _validate_model_membership(overlay[field], models)
-            if error is not None:
-                raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
+    if "llm_model" in overlay:
+        error = _validate_model_membership(overlay["llm_model"], models)
+        if error is not None:
+            raise InvalidConfigOverlay(f"overlay key 'llm_model' {error}")
     for field in _DECISION_MODEL_FIELDS:
         if field in overlay:
             if decision_models is None:

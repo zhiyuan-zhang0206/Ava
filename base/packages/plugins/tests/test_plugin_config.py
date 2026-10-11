@@ -457,13 +457,12 @@ def test_validate_config_overlay_does_not_range_check_plugin_fields(
     )
 
 
-@pytest.mark.parametrize("field", ["llm_model", "memory_recall_filter_model"])
+@pytest.mark.parametrize("field", ["llm_model"])
 def test_validate_config_overlay_unknown_model_field_raises(
     model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home, field: str
 ):
-    """Every model-name overlay field rejects an unregistered id (same failure
-    class as the llm_model incident — an unregistered memory filter model would
-    crash the agent in the before_llm hook via build_chat_model)."""
+    """Every model-name overlay field rejects an unregistered id (the llm_model incident:
+    an unregistered model id crashes the next boot at model build)."""
     with pytest.raises(InvalidConfigOverlay, match="not a registered model") as exc_info:
         validate_config_overlay(
             {field: "deepseek-v4-flash-vision"},
@@ -475,7 +474,7 @@ def test_validate_config_overlay_unknown_model_field_raises(
     assert field in str(exc_info.value)
 
 
-@pytest.mark.parametrize("field", ["llm_model", "memory_recall_filter_model"])
+@pytest.mark.parametrize("field", ["llm_model"])
 def test_validate_config_overlay_registered_model_field_passes(
     model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home, field: str
 ):
@@ -506,8 +505,6 @@ def test_validate_config_overlay_none_reasoning_effort_passes(
         ("llm_stream_total_timeout_seconds", float("inf")),
         ("llm_stream_inter_chunk_timeout_seconds", -1.0),
         ("llm_stream_inter_chunk_timeout_seconds", float("inf")),
-        ("memory_recall_filter_timeout_seconds", 0.0),
-        ("memory_recall_filter_timeout_seconds", float("nan")),
         ("memory_recall_deadline_seconds", 0.0),
         ("memory_recall_deadline_seconds", -1.0),
         ("memory_recall_deadline_seconds", float("nan")),
@@ -525,9 +522,11 @@ def test_validate_config_overlay_none_reasoning_effort_passes(
         ("auto_compact_ceiling_tokens", -1),
         ("claude_thinking_budget_tokens", -5),
         ("history_dump_keep", -1),
-        ("memory_recall_filter_max_retries", -3),
-        ("memory_recall_inject_k", -1),
-        ("memory_recall_retrieve_k", -1),
+        ("memory_recall_inject_max", -1),
+        # probabilities — must be in [0, 1]
+        ("memory_recall_inject_threshold", -0.1),
+        ("memory_recall_inject_threshold", 1.1),
+        ("memory_recall_inject_threshold", float("nan")),
     ],
 )
 def test_validate_config_overlay_out_of_range_rejected(
@@ -551,7 +550,9 @@ def test_validate_config_overlay_out_of_range_rejected(
         ("auto_compact_ceiling_tokens", 0),
         ("claude_thinking_budget_tokens", 0),
         ("history_dump_keep", 0),
-        ("memory_recall_filter_max_retries", 0),
+        ("memory_recall_inject_max", 0),
+        ("memory_recall_inject_threshold", 0.0),
+        ("memory_recall_inject_threshold", 1.0),
         ("llm_stream_ttft_timeout_seconds", None),  # unset sentinel
         ("llm_stream_ttft_timeout_seconds", 0.1),
         ("llm_stream_total_timeout_seconds", None),

@@ -45,6 +45,9 @@ from gateway.schemas.memory import (
     MemorySearchResponse,
     MemorySearchResultItem,
 )
+from services.derived.memory_indexer import rerank
+from services.derived.memory_indexer.backends.base import ChunkHit
+from services.derived.memory_indexer.embeddings.base import EmbeddingProvider
 
 router = APIRouter()
 
@@ -77,6 +80,8 @@ class MemorySearchInputs:
     api_key: Callable[[], str | None]
     acquire_timeout: Callable[[], float]
     deadline: Callable[[], float]
+    rerank_model: Callable[[], str]
+    rerank_candidates: Callable[[], int]
 
 
 def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
@@ -257,30 +262,6 @@ def _primary_tag(tags: list[str]) -> str:
     return tags[0] if tags else ""
 
 
-def _extract_meta(path: Path) -> tuple[str, list[str]]:
-    """The `description` and `tags` from a markdown file's YAML frontmatter.
-
-    Returns `("", [])` when the file is unreadable, has no frontmatter, or has
-    neither field — a note that says nothing about itself is surfaced as such
-    rather than guessed at from its title or body.
-
-    Both fields ride the one read the search response already pays for. They are
-    what a caller sees of a hit without opening it: the description says what the
-    note holds, and the `type/<x>` tag says how it is meant to be used — which is
-    what lets a filter be more careful with a user-profile note than with a
-    procedure.
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return "", []
-    note = parse_note(text, path.name)
-    if note is None:
-        return "", []
-    description = note.description.strip() if note.description else ""
-    return description, list(note.tags)
-
-
 async def _backend_topk(
     database: Database,
     query_vector: Any,
@@ -289,9 +270,9 @@ async def _backend_topk(
     dim: int,
     fingerprint: str,
     inputs: MemorySearchInputs,
-) -> list[str]:
+) -> list[ChunkHit]:
     """The storage half of a search: ask the configured backend for top-k
-    paths, every step handed an explicit deadline. `dim` + `fingerprint` are
+    files (each with its best chunk), every step handed an explicit deadline. `dim` + `fingerprint` are
     the embedding provider's vector space (see `embeddings.factory`) — the
     backend is constructed for it even though the read path never writes
     rows.
@@ -313,8 +294,13 @@ async def _backend_topk(
     dependencies=[Depends(deny_isolated_result_read)],
 )
 async def post_memory_search(request: Request, body: MemorySearchRequest) -> MemorySearchResponse:
-    """Semantic search the memory pool; return **relative** paths of the
-    top-k most-relevant markdown files.
+    """Search the memory pool; return the `k` notes most relevant to the query,
+    each with the chunk that matched and a relevance score.
+
+    Two stages. Vector search finds the best chunk of the closest
+    `memory_rerank_candidates` notes; a decision model then judges each chunk
+    against the query, and the response is ordered by the probability that the
+    chunk is relevant (`score`). No text is generated on this path.
 
     Paths are relative to memory pool root (settings.services.memory_root, e.g.
     `~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to
@@ -328,11 +314,10 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     (agent-runners run no gateway process).
 
     Raises:
-        IndexerUnavailable: embedder API / search backend unreachable, or the
-            search exceeded its deadline (wire 503)
+        IndexerUnavailable: embedder API / search backend unreachable, the
+            decision model failed, or the search exceeded its deadline (wire 503)
     """
     from services.derived.memory_indexer.embeddings import factory as _embedding_factory
-    from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
     inputs: MemorySearchInputs = request.app.state.memory_search_inputs
     provider = _embedding_factory.get_provider(
@@ -342,13 +327,14 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
         api_key_reader=inputs.api_key,
     )
 
-    # Both phases are native async I/O — httpx.AsyncClient for the embed,
-    # the backend's async client for the search — so a slow backend
-    # can never block the event loop (2026-08-03 freeze mechanism, see
-    # `build_search_gate` note). The semaphore still caps concurrency so
-    # a burst of searches cannot pile up in-flight embedding requests.
+    # Every phase is native async I/O — httpx.AsyncClient for the embed, the
+    # backend's async client for the search, the decision call for the rerank —
+    # so a slow dependency can never block the event loop (2026-08-03 freeze
+    # mechanism, see `build_search_gate` note). The semaphore caps concurrent
+    # query embeds and backend reads only; the rerank runs outside it, so a
+    # slow decision model cannot hold a permit.
     #
-    # The deadline wraps the semaphore acquires as well as the two phases: a
+    # The deadline wraps the semaphore acquires as well as the phases: a
     # request parked in acquire behind a stalled peer is just as stuck as one
     # parked in the backend, and only a bound that covers both guarantees the
     # permit comes back. Each acquire is separately bounded by
@@ -360,49 +346,72 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     deadline = inputs.deadline()
     try:
         async with asyncio.timeout(deadline):
-            try:
-                async with _bounded_semaphore(
-                    request.app.state.memory_search_gate, inputs.acquire_timeout()
-                ):
-                    query_vector = await provider.embed_query_async(body.query)
-            except IndexerUnavailable:
-                # The gate was busy (`_bounded_semaphore`'s fast-fail) — a
-                # modelled state, not a backend failure; do not re-wrap it.
-                raise
-            except EmbeddingAPIError as exc:
-                raise IndexerUnavailable(f"embed query failed: {exc}") from exc
-
-            try:
-                async with _bounded_semaphore(
-                    request.app.state.memory_search_gate, inputs.acquire_timeout()
-                ):
-                    abs_paths = await _backend_topk(
-                        request.app.state.db,
-                        query_vector,
-                        body.k,
-                        deadline,
-                        provider.dim,
-                        provider.fingerprint,
-                        inputs,
-                    )
-            except IndexerUnavailable:
-                raise
-            except Exception as exc:
-                raise IndexerUnavailable(f"memory search backend failed: {exc}") from exc
+            hits = await _vector_candidates(request, body, provider, inputs, deadline)
+            ranked = await rerank.rerank(
+                body.query,
+                hits,
+                purpose=body.purpose,
+                model=inputs.rerank_model(),
+                catalog=request.app.state.catalog,
+                k=body.k,
+                memory_root=gateway_memory_dir(),
+            )
     except TimeoutError as exc:
         raise IndexerUnavailable(f"memory search exceeded its {deadline:g}s deadline") from exc
+    return MemorySearchResponse(
+        results=[
+            MemorySearchResultItem(
+                path=item.path,
+                description=item.description,
+                tags=item.tags,
+                score=item.score,
+                chunk=item.chunk,
+            )
+            for item in ranked
+        ]
+    )
 
-    memory_root = gateway_memory_dir().resolve()
-    results: list[MemorySearchResultItem] = []
-    for p in abs_paths:
-        abs_p = Path(p).resolve()
-        try:
-            rel = str(abs_p.relative_to(memory_root))
-        except ValueError:
-            rel = p
-        description, tags = _extract_meta(abs_p)
-        results.append(MemorySearchResultItem(path=rel, description=description, tags=tags))
-    return MemorySearchResponse(results=results)
+
+async def _vector_candidates(
+    request: Request,
+    body: MemorySearchRequest,
+    provider: EmbeddingProvider,
+    inputs: MemorySearchInputs,
+    deadline: float,
+) -> list[ChunkHit]:
+    """The first stage: embed the query and read the closest notes' best chunks.
+
+    Asks for at least `body.k` notes so the second stage can always fill the
+    response, and for `memory_rerank_candidates` when that is more.
+    """
+    from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
+
+    gate = request.app.state.memory_search_gate
+    try:
+        async with _bounded_semaphore(gate, inputs.acquire_timeout()):
+            query_vector = await provider.embed_query_async(body.query)
+    except IndexerUnavailable:
+        # The gate was busy (`_bounded_semaphore`'s fast-fail) — a
+        # modelled state, not a backend failure; do not re-wrap it.
+        raise
+    except EmbeddingAPIError as exc:
+        raise IndexerUnavailable(f"embed query failed: {exc}") from exc
+
+    try:
+        async with _bounded_semaphore(gate, inputs.acquire_timeout()):
+            return await _backend_topk(
+                request.app.state.db,
+                query_vector,
+                max(body.k, inputs.rerank_candidates()),
+                deadline,
+                provider.dim,
+                provider.fingerprint,
+                inputs,
+            )
+    except IndexerUnavailable:
+        raise
+    except Exception as exc:
+        raise IndexerUnavailable(f"memory search backend failed: {exc}") from exc
 
 
 @router.post("/api/memory/refresh", response_model=MemoryRefreshResponse)

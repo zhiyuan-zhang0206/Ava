@@ -112,28 +112,18 @@ class HeartbeatBackoffReset(TypedDict):
     reason: str
 
 
-class RecallFilter(TypedDict, total=False):
-    """`recall_filter` payload — _memory_filter.py; `body` = verdict text.
-
-    Successful verdicts add a process-keyed ``query_hmac_sha256`` (never the
-    query text) and a bounded basename-only ``picked_paths`` sample. Failures
-    only have ``body`` because no verdict exists to retain.
-    """
-
-    body: str
-    query_hmac_sha256: str
-    picked_paths: list[str]
-
-
 class PassiveRecall(TypedDict, total=False):
     """`passive_recall` payload — memory_recall.py / ava_memory plugin.
 
-    The recall pass leg timings in milliseconds (the success path); the
-    defer / deadline-skip emissions carry no timing keys.
+    `body` is the human-readable line. The success path records the search
+    request's duration in milliseconds (it includes the gateway's ranking) and
+    how many notes were injected; the defer / deadline-skip emissions carry
+    only `body`.
     """
 
+    body: str
     search_ms: int
-    filter_ms: int
+    injected: int
 
 
 class SkillRecallScored(TypedDict, total=False):
@@ -312,13 +302,6 @@ EVENTS: dict[str, EventSpec] = {
     "trace": telemetry_event("trace", "otel span export", tier="noise"),
     "history_dump": telemetry_event(
         "history_dump", "pre-compact history dumped to workspace", tier="noise"
-    ),
-    "recall_filter": telemetry_event(
-        "recall_filter",
-        "memory recall filter",
-        payload=RecallFilter,
-        tier="noise",
-        persist=True,
     ),
     "passive_recall": telemetry_event(
         "passive_recall",

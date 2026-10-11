@@ -123,8 +123,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `checkpoint_write_failed` | checkpoint write failed | anomaly | — | — | events | — |
 | `trace` | otel span export | noise | — | — | events | — |
 | `history_dump` | pre-compact history dumped to workspace | noise | — | — | events | — |
-| `recall_filter` | memory recall filter | noise | body, query_hmac_sha256, picked_paths | — | events | ✓ |
-| `passive_recall` | passive memory recall | noise | search_ms, filter_ms | — | events | ✓ |
+| `passive_recall` | passive memory recall | noise | body, search_ms, injected | — | events | ✓ |
 | `skill_recall` | skill recall | noise | candidates, offered | — | events | ✓ |
 | `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events | — |
 | `last_msg` | last-message check | noise | — | — | events | — |

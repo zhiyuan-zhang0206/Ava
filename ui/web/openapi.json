@@ -6806,7 +6806,7 @@
     "/api/memory/search": {
       "post": {
         "summary": "Post Memory Search",
-        "description": "Semantic search the memory pool; return **relative** paths of the\ntop-k most-relevant markdown files.\n\nPaths are relative to memory pool root (settings.services.memory_root, e.g.\n`~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to\nreconstruct the absolute path. fs-neutral so gateway fs (e.g.\n/Users/x) and agent-runner fs (/home/y) being different still works.\n\nOnly the gateway hosts the search backend (numpy by default), so\nthis endpoint always runs on the gateway; agent-runner SDK calls reach this\nhandler via the gateway URL they were configured with (CF Tunnel /\nprivate network) and never enter via a local agent-runner gateway\n(agent-runners run no gateway process).\n\nRaises:\n    IndexerUnavailable: embedder API / search backend unreachable, or the\n        search exceeded its deadline (wire 503)",
+        "description": "Search the memory pool; return the `k` notes most relevant to the query,\neach with the chunk that matched and a relevance score.\n\nTwo stages. Vector search finds the best chunk of the closest\n`memory_rerank_candidates` notes; a decision model then judges each chunk\nagainst the query, and the response is ordered by the probability that the\nchunk is relevant (`score`). No text is generated on this path.\n\nPaths are relative to memory pool root (settings.services.memory_root, e.g.\n`~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to\nreconstruct the absolute path. fs-neutral so gateway fs (e.g.\n/Users/x) and agent-runner fs (/home/y) being different still works.\n\nOnly the gateway hosts the search backend (numpy by default), so\nthis endpoint always runs on the gateway; agent-runner SDK calls reach this\nhandler via the gateway URL they were configured with (CF Tunnel /\nprivate network) and never enter via a local agent-runner gateway\n(agent-runners run no gateway process).\n\nRaises:\n    IndexerUnavailable: embedder API / search backend unreachable, the\n        decision model failed, or the search exceeded its deadline (wire 503)",
         "operationId": "post_memory_search_api_memory_search_post",
         "requestBody": {
           "content": {
@@ -13672,13 +13672,23 @@
             "maximum": 100.0,
             "minimum": 1.0,
             "title": "K",
-            "description": "top-k result count",
+            "description": "result count",
             "default": 5
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "recall",
+              "search"
+            ],
+            "title": "Purpose",
+            "description": "why the query was issued: 'recall' (passive recall; the query is the recent conversation) or 'search' (an agent's own search); selects the relevance question"
           }
         },
         "type": "object",
         "required": [
-          "query"
+          "query",
+          "purpose"
         ],
         "title": "MemorySearchRequest",
         "description": "POST /api/memory/search request — semantic search query."
@@ -13698,7 +13708,7 @@
           "results"
         ],
         "title": "MemorySearchResponse",
-        "description": "POST /api/memory/search response — RELATIVE paths from memory pool root.\n\nCaller (SDK `ava.memory.search`) uses `ava.memory.PATH / p` to\nreconstruct absolute paths. fs-neutral makes mismatched gateway\n(e.g. /Users/x) and agent-runner (/home/y) filesystems work.\n\n`results` carries path, description and tags for each match."
+        "description": "POST /api/memory/search response — RELATIVE paths from memory pool root.\n\nCaller (SDK `ava.memory.search`) uses `ava.memory.PATH / p` to\nreconstruct absolute paths. fs-neutral makes mismatched gateway\n(e.g. /Users/x) and agent-runner (/home/y) filesystems work.\n\n`results` carries path, description, tags, score and matched chunk for each\nmatch, most relevant first."
       },
       "MemorySearchResultItem": {
         "properties": {
@@ -13720,14 +13730,28 @@
             "type": "array",
             "title": "Tags",
             "description": "frontmatter tags, including the note's `type/<x>`, or empty"
+          },
+          "score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "description": "probability that the matched chunk is relevant to the query"
+          },
+          "chunk": {
+            "type": "string",
+            "title": "Chunk",
+            "description": "text of the note's best-matching chunk (or its description line), as indexed"
           }
         },
         "type": "object",
         "required": [
-          "path"
+          "path",
+          "score",
+          "chunk"
         ],
         "title": "MemorySearchResultItem",
-        "description": "A single search result: file path + the frontmatter a caller can judge the\nhit by without opening it."
+        "description": "A single search result: file path, the chunk that matched, its relevance\nscore, and the frontmatter a caller can judge the hit by without opening it."
       },
       "MetricEvidence": {
         "properties": {

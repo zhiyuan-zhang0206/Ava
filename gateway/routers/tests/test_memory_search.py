@@ -17,6 +17,8 @@ from base.config import settings
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.routers.memory import MemorySearchInputs
+from services.derived.memory_indexer import rerank
+from services.derived.memory_indexer.backends.base import ChunkHit
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
 
@@ -33,7 +35,41 @@ def _memory_inputs() -> MemorySearchInputs:
         api_key=api_key,
         acquire_timeout=lambda: settings.services.memory_search_acquire_timeout_seconds,
         deadline=lambda: settings.services.memory_search_deadline_seconds,
+        rerank_model=lambda: settings.services.memory_rerank_model,
+        rerank_candidates=lambda: settings.services.memory_rerank_candidates,
     )
+
+
+def _hit(path: Path, idx: int = 0, kind: str = "body") -> ChunkHit:
+    return ChunkHit(str(path), kind, idx, 0.5)
+
+
+class _Judge:
+    """The decision model: probability by a marker in the question, default 0.5.
+
+    Records every call so tests can assert what the endpoint asked and with which model."""
+
+    def __init__(self) -> None:
+        self.rules: dict[str, float] = {}
+        self.calls: list[tuple[str, str, Any]] = []
+        self.failure: Exception | None = None
+
+    async def __call__(
+        self, model: str, state: str, question: Any, *, catalog: ModelCatalog
+    ) -> float:
+        del catalog
+        self.calls.append((model, state, question))
+        if self.failure is not None:
+            raise self.failure
+        return next((p for marker, p in self.rules.items() if marker in state), 0.5)
+
+
+@pytest.fixture(autouse=True)
+def judge(monkeypatch: pytest.MonkeyPatch) -> _Judge:
+    """Replace the decision call; the search endpoint is tested against its contract."""
+    fake = _Judge()
+    monkeypatch.setattr(rerank, "ask_relevance", fake)
+    return fake
 
 
 @pytest.fixture(autouse=True)
@@ -109,17 +145,16 @@ class TestPrimaryPath:
 
             async def search_topk_async(
                 self, _vec: object, _k: int, *, timeout: float
-            ) -> list[str]:
+            ) -> list[ChunkHit]:
                 assert timeout > 0  # the handler must hand the backend a real deadline
-                return [
-                    str(tmp_path / "notes" / "foo.md"),
-                    str(tmp_path / "bar.md"),
-                ]
+                return [_hit(tmp_path / "notes" / "foo.md"), _hit(tmp_path / "bar.md")]
 
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "test", "k": 5})
+            resp = client.post(
+                "/api/memory/search", json={"query": "test", "k": 5, "purpose": "search"}
+            )
         assert resp.status_code == 200
         # must be relative paths relative to memory_root — must not contain tmp_path prefix
         body = resp.json()
@@ -132,6 +167,8 @@ class TestPrimaryPath:
         # description is empty because stub files have no YAML frontmatter
         assert results[0]["description"] == ""
         assert results[1]["description"] == ""
+        # each result carries the matched chunk and its relevance score
+        assert [(item["chunk"], item["score"]) for item in results] == [("x", 0.5), ("y", 0.5)]
 
     def test_primary_returns_descriptions_from_frontmatter(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -173,18 +210,20 @@ title: No Description
 
             async def search_topk_async(
                 self, _vec: object, _k: int, *, timeout: float
-            ) -> list[str]:
+            ) -> list[ChunkHit]:
                 assert timeout > 0  # the handler must hand the backend a real deadline
                 return [
-                    str(tmp_path / "with_desc.md"),
-                    str(tmp_path / "no_desc.md"),
-                    str(tmp_path / "no_frontmatter.md"),
+                    _hit(tmp_path / "with_desc.md"),
+                    _hit(tmp_path / "no_desc.md"),
+                    _hit(tmp_path / "no_frontmatter.md"),
                 ]
 
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "test", "k": 3})
+            resp = client.post(
+                "/api/memory/search", json={"query": "test", "k": 3, "purpose": "search"}
+            )
         assert resp.status_code == 200
         body = resp.json()
         results = body["results"]
@@ -213,7 +252,9 @@ title: No Description
         _patch_provider(monkeypatch, _BoomProvider)
 
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "x", "k": 5})
+            resp = client.post(
+                "/api/memory/search", json={"query": "x", "k": 5, "purpose": "search"}
+            )
         assert resp.status_code == 503
         body = resp.json()
         assert body["reason"] == "indexer_unavailable"
@@ -231,7 +272,7 @@ title: No Description
 
         _patch_provider(monkeypatch, BrokenProvider)
         with TestClient(app) as client, pytest.raises(FileNotFoundError) as caught:
-            client.post("/api/memory/search", json={"query": "x", "k": 5})
+            client.post("/api/memory/search", json={"query": "x", "k": 5, "purpose": "search"})
         assert caught.value is failure
 
     def test_primary_backend_failure_raises_indexer_unavailable(
@@ -248,15 +289,141 @@ title: No Description
 
             async def search_topk_async(
                 self, _vec: object, _k: int, *, timeout: float
-            ) -> list[str]:
+            ) -> list[ChunkHit]:
                 raise RuntimeError("connection refused 19530")
 
         monkeypatch.setattr(_factory, "get_backend", _BoomBackend)
 
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "x", "k": 5})
+            resp = client.post(
+                "/api/memory/search", json={"query": "x", "k": 5, "purpose": "search"}
+            )
         assert resp.status_code == 503
         assert resp.json()["reason"] == "indexer_unavailable"
+
+
+class TestRerank:
+    """The second stage orders the vector candidates by the decision model's probability."""
+
+    def _backend(
+        self, monkeypatch: pytest.MonkeyPatch, hits: list[ChunkHit]
+    ) -> list[tuple[int, float]]:
+        import services.derived.memory_indexer.backends.factory as _factory
+
+        _patch_provider(monkeypatch, _StubProvider)
+        asked: list[tuple[int, float]] = []
+
+        class _FakeBackend:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            async def search_topk_async(
+                self, _vec: object, k: int, *, timeout: float
+            ) -> list[ChunkHit]:
+                asked.append((k, timeout))
+                return hits
+
+        monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
+        return asked
+
+    def _pool(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        import gateway.routers.memory as _gw_memory
+
+        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
+        for name in ("a", "b", "c"):
+            (tmp_path / f"{name}.md").write_text(
+                f"---\ntype: Memory\ndescription: about {name}\ntags:\n- type/reference\n---\n\npassage {name}\n",
+                encoding="utf-8",
+            )
+
+    def test_results_follow_the_decision_probability_not_vector_order(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: _Judge
+    ) -> None:
+        self._pool(monkeypatch, tmp_path)
+        self._backend(monkeypatch, [_hit(tmp_path / n) for n in ("a.md", "b.md", "c.md")])
+        judge.rules = {"passage a": 0.1, "passage b": 0.6, "passage c": 0.95}
+
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/memory/search", json={"query": "what about c", "k": 2, "purpose": "search"}
+            )
+
+        assert resp.status_code == 200
+        results = resp.json()["results"]
+        assert [(r["path"], r["score"]) for r in results] == [("c.md", 0.95), ("b.md", 0.6)]
+        assert results[0]["description"] == "about c"
+        assert results[0]["tags"] == ["type/reference"]
+        assert results[0]["chunk"] == "passage c"
+        # one decision request per candidate, on the configured model, about the query
+        assert len(judge.calls) == 3
+        assert {model for model, _, _ in judge.calls} == {settings.services.memory_rerank_model}
+        assert all("what about c" in state for _, state, _ in judge.calls)
+
+    def test_purpose_selects_the_relevance_question(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: _Judge
+    ) -> None:
+        self._pool(monkeypatch, tmp_path)
+        self._backend(monkeypatch, [_hit(tmp_path / "a.md")])
+        questions = {}
+        for purpose in ("recall", "search"):
+            judge.calls.clear()
+            with TestClient(app) as client:
+                resp = client.post(
+                    "/api/memory/search", json={"query": "q", "k": 1, "purpose": purpose}
+                )
+            assert resp.status_code == 200
+            questions[purpose] = judge.calls[0][2]
+        assert questions["recall"] != questions["search"]
+
+    def test_backend_is_asked_for_the_configured_candidate_count(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        self._pool(monkeypatch, tmp_path)
+        asked = self._backend(monkeypatch, [])
+        monkeypatch.setattr(settings.services, "memory_rerank_candidates", 40)
+
+        with TestClient(app) as client:
+            assert client.post(
+                "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
+            ).json() == {"results": []}
+            client.post("/api/memory/search", json={"query": "q", "k": 60, "purpose": "search"})
+        # at least k notes are always retrieved, even above the candidate count
+        assert [k for k, _timeout in asked] == [40, 60]
+
+    def test_stale_vector_hits_are_dropped_before_ranking(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: _Judge
+    ) -> None:
+        self._pool(monkeypatch, tmp_path)
+        self._backend(
+            monkeypatch,
+            [_hit(tmp_path / "gone.md"), _hit(tmp_path / "a.md", idx=9), _hit(tmp_path / "b.md")],
+        )
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
+            )
+        assert [r["path"] for r in resp.json()["results"]] == ["b.md"]
+        assert len(judge.calls) == 1
+
+    def test_decision_failure_is_a_clear_503_not_vector_order(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: _Judge
+    ) -> None:
+        from base.agents import IndexerUnavailable
+
+        self._pool(monkeypatch, tmp_path)
+        self._backend(monkeypatch, [_hit(tmp_path / "a.md")])
+        judge.failure = IndexerUnavailable("memory rerank failed (jev): upstream 503")
+
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
+            )
+
+        assert resp.status_code == 503
+        body = resp.json()
+        assert body["reason"] == "indexer_unavailable"
+        assert "memory rerank failed" in body["detail"]
+        assert "results" not in body
 
 
 class TestRequestValidation:
@@ -264,48 +431,37 @@ class TestRequestValidation:
 
     def test_empty_query_rejected(self) -> None:
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "", "k": 5})
+            resp = client.post(
+                "/api/memory/search", json={"query": "", "k": 5, "purpose": "search"}
+            )
+        assert resp.status_code == 422
+
+    @pytest.mark.parametrize(
+        "body", [{"query": "x", "k": 5}, {"query": "x", "k": 5, "purpose": "audit"}]
+    )
+    def test_missing_or_unknown_purpose_rejected(self, body: dict[str, Any]) -> None:
+        with TestClient(app) as client:
+            resp = client.post("/api/memory/search", json=body)
+        assert resp.status_code == 422
+
+    def test_blank_query_rejected(self) -> None:
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/memory/search", json={"query": "  \n ", "k": 5, "purpose": "search"}
+            )
         assert resp.status_code == 422
 
     def test_k_out_of_range_rejected(self) -> None:
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "x", "k": 0})
+            resp = client.post(
+                "/api/memory/search", json={"query": "x", "k": 0, "purpose": "search"}
+            )
         assert resp.status_code == 422
         with TestClient(app) as client:
-            resp = client.post("/api/memory/search", json={"query": "x", "k": 101})
+            resp = client.post(
+                "/api/memory/search", json={"query": "x", "k": 101, "purpose": "search"}
+            )
         assert resp.status_code == 422
-
-
-# ── graph grouping vs the type vocabulary ──
-
-
-# ── _extract_meta equivalence (audit #2448 Phase 2) ──
-
-
-def _legacy_extract_meta(path: Path) -> tuple[str, list[str]]:
-    """The pre-#2448 `memory._extract_meta` — reference implementation."""
-    import yaml as _yaml
-
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return "", []
-    if not text.startswith("---\n"):
-        return "", []
-    parts = text.split("---\n", 2)
-    if len(parts) < 3:
-        return "", []
-    try:
-        fm = _yaml.safe_load(parts[1])
-    except _yaml.YAMLError:
-        return "", []
-    if not isinstance(fm, dict):
-        return "", []
-    desc = fm.get("description")  # pyright: ignore[reportUnknownMemberType]
-    description = desc.strip() if isinstance(desc, str) and desc.strip() else ""
-    raw_tags = fm.get("tags")  # pyright: ignore[reportUnknownMemberType]
-    tags = [t for t in raw_tags if isinstance(t, str)] if isinstance(raw_tags, list) else []
-    return description, tags
 
 
 # --- a stalled backend must degrade the endpoint, not pin it ---
@@ -314,7 +470,7 @@ _SEARCH_PERMITS = 2  # the stub's per-test semaphore size (the knob is a setting
 _TEST_DEADLINE_S = 0.5
 
 
-async def _never_returns(*_args: object, **_kwargs: object) -> list[str]:
+async def _never_returns(*_args: object, **_kwargs: object) -> list[ChunkHit]:
     """A backend call that accepts the request and then never answers.
 
     Takes its arguments loosely on purpose: the point is the handler's
@@ -355,7 +511,7 @@ def _stub_search_backend(
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        async def search_topk_async(self, _v: object, _k: int, *, timeout: float) -> list[str]:
+        async def search_topk_async(self, _v: object, _k: int, *, timeout: float) -> list[ChunkHit]:
             return await search(_v, _k, timeout=timeout)
 
     _patch_provider(monkeypatch, _StubProvider)
@@ -371,7 +527,7 @@ def _asgi_client() -> httpx.AsyncClient:
 
 
 async def _search(client: httpx.AsyncClient) -> httpx.Response:
-    return await client.post("/api/memory/search", json={"query": "x", "k": 1})
+    return await client.post("/api/memory/search", json={"query": "x", "k": 1, "purpose": "search"})
 
 
 async def _assert_semaphore_locked(sem: asyncio.Semaphore, timeout_s: float = 5.0) -> None:
@@ -414,7 +570,9 @@ async def test_query_usage_failure_propagates_without_network_replay(
     )
     request = Request({"type": "http", "app": SimpleNamespace(state=state)})
     with pytest.raises(error_type) as caught:
-        await memory.post_memory_search(request, MemorySearchRequest(query="hello", k=1))
+        await memory.post_memory_search(
+            request, MemorySearchRequest(query="hello", k=1, purpose="search")
+        )
     assert caught.value is failure
     assert seen == [model_catalog]
     assert seen[0] is model_catalog

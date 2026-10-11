@@ -34,8 +34,8 @@ def owned_config_environment() -> Iterator[None]:
 
 
 @pytest.mark.usefixtures("owned_config_environment")
-def test_probe_up_when_search_answers_with_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "_post_search", Mock(return_value={"paths": []}))
+def test_probe_up_when_search_answers_with_hits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hc, "_post_search", Mock(return_value={"hits": []}))
     result = hc._probe()
     assert result.alive is True
     assert result.terminal is False
@@ -54,7 +54,7 @@ def test_probe_down_when_search_fails(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.usefixtures("owned_config_environment")
-def test_probe_down_when_payload_lacks_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_down_when_payload_lacks_hits(monkeypatch: pytest.MonkeyPatch) -> None:
     """A foreign process answering 200 on the port is not the search service."""
     monkeypatch.setattr(hc, "_post_search", Mock(return_value={"nope": 1}))
     assert hc._probe().alive is False
@@ -71,11 +71,11 @@ def test_search_probe_uses_metadata_without_constructing_provider(
     constructor = Mock(side_effect=AssertionError("health probes must not construct a provider"))
     monkeypatch.setattr(factory, "get_provider", constructor)
     response = Mock()
-    response.json.return_value = {"paths": []}
+    response.json.return_value = {"hits": []}
     post = Mock(return_value=response)
     monkeypatch.setattr(httpx, "post", post)
     assert hc._post_search("http://memory-search", embedding_name_reader=lambda: "gemini") == {
-        "paths": []
+        "hits": []
     }
     assert post.call_args.kwargs["json"] == {"vector": [0.0] * descriptor.dim, "k": 1}
     response.raise_for_status.assert_called_once_with()
@@ -96,6 +96,6 @@ def test_probe_reads_startup_configuration_without_redelivering_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     before = dict(os.environ)
-    monkeypatch.setattr(hc, "_post_search", Mock(return_value={"paths": []}))
+    monkeypatch.setattr(hc, "_post_search", Mock(return_value={"hits": []}))
     assert hc._probe().alive
     assert dict(os.environ) == before
