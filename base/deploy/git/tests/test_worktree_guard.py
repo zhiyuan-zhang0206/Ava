@@ -73,10 +73,10 @@ def test_live_process_cwd_anchor_reported(tmp_path: Path) -> None:
 def _case_alias(path: Path) -> Path | None:
     """A differently-cased spelling of `path` that resolves to it.
 
-    Exists only where the filesystem folds case (macOS APFS, WSL DrvFs);
+    Exists only where the filesystem folds case (macOS APFS);
     None on a case-sensitive filesystem. Flipping one letter at a time finds
     a foldable position even when the path crosses a case-sensitive mount
-    boundary (e.g. /mnt/c on WSL).
+    boundary.
     """
     text = str(path)
     for i, ch in enumerate(text):
@@ -104,7 +104,7 @@ def test_case_alias_spelling_finds_anchors(
     target.mkdir(parents=True)
     alias = _case_alias(target)
     if alias is None:
-        pytest.skip("requires a case-insensitive filesystem (macOS APFS, WSL DrvFs)")
+        pytest.skip("requires a case-insensitive filesystem (macOS APFS)")
 
     pty_session_cwd = target
     new("ava-case-alias", pty_session_cwd)

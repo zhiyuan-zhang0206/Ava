@@ -34,9 +34,7 @@ and this host's reachable address, never all interfaces. macOS Redis retains its
 loopback-only workaround and host-level `com.ava.redis-bridge` relay (task #1469).
 A no-secret cluster binds loopback only; no caller environment widens that posture.
 
-POSIX only (macOS brew / Linux postgres + redis-server). Windows has no native
-postgres/redis-server on PATH — a Windows per-cluster data plane is a follow-up;
-`ensure_cluster_storage` fails fast there rather than mis-starting.
+POSIX only (macOS brew / Linux postgres + redis-server).
 """
 
 from __future__ import annotations
@@ -71,7 +69,6 @@ from base.db.pg_admin import pg_admin_url as _base_pg_admin_url
 from base.db.pg_admin import pg_socket_dir
 from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
-from base.host.system.backend import get_backend
 from base.native_process.child_env import daemon_process_env, inherited_process_env
 from base.native_process.os_platform import is_macos
 from base.paths import ava_home
@@ -577,23 +574,6 @@ def ensure_cluster_storage(
         ValueError: a required credential is missing, before any native effect.
             Redis always needs its admin and runtime passwords. Postgres needs
             none: its administrator is the OS user over the owner-only socket."""
-    if not get_backend().supports_data_plane():
-        # Naming the supported topology, not the missing feature: this used to
-        # read as an unfinished TODO ("Follow-up: bundle or Docker-host ..."),
-        # which tells an operator nothing about what to do with the host in
-        # front of them. Windows is the only platform that lands here.
-        print(
-            "  ✗ this platform cannot host a per-cluster data plane (no native redis),\n"
-            "    so it cannot carry the `gateway` capability. Run the gateway on\n"
-            "    macOS/Linux — on Windows hardware, inside WSL2 — and join this host\n"
-            "    to it as an agent-runner:\n"
-            "      set AVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run:\n"
-            "      ava init --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> \\\n"
-            "                 --machine-host <this-host-private-ip> --db-capability <bundle>, then ava start\n"
-            "    What a gateway would additionally require: gateway/docs/windows-gateway.md",
-            file=sys.stderr,
-        )
-        return 1
     if not (redis_admin_password and redis_password):
         raise ValueError(
             "Redis always authenticates, but this home has no generated Redis credentials "

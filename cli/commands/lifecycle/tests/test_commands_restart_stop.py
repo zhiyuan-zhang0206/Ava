@@ -717,7 +717,7 @@ def test_cmd_stop_proceeds_when_announce_fails(
     """If the stopping announce can't reach the gateway, `ava stop` logs and still
     tears down — the announce is best-effort, never a blocker."""
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "wsl")
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "runner-a")
 
     def _boom(*_a, **_kw):
         raise RuntimeError("connection refused")

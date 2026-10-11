@@ -195,7 +195,7 @@ def test_restore_failure_message_names_the_base_and_the_capacity_knob(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A server killed mid-COPY must not surface as a bare exit code (the
-    2026-09-14 WSL failure: `pg_restore exited 1` plus a host-side dmesg signal).
+    2026-09-14 failure: `pg_restore exited 1` plus a host-side dmesg signal).
     The message carries the base, its free space, the stderr tail, and the
     override knob that moves the base."""
     base = tmp_path / "fallback"
@@ -218,31 +218,6 @@ def test_restore_failure_message_names_the_base_and_the_capacity_knob(
     assert "PQputCopyData: server closed the connection" in message
 
 
-def test_the_legacy_empty_secret_key_is_only_ever_an_explicit_choice(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The drill decrypts under the pinned passphrase unless the operator names
-    the legacy empty-secret key; the flag reaches decryption and nothing else."""
-    calls: list[tuple[Path | None, bool]] = []
-
-    def drill(
-        artifact: Path | None,
-        *,
-        database_for_url: Callable[[str], Database],
-        legacy_empty_secret: bool,
-    ) -> tuple[Any, float]:
-        calls.append((artifact, legacy_empty_secret))
-        report = restore_drill.RestoreReport(0, 0, 0, 0, 0, 0, "owner")
-        return report, 0.0
-
-    monkeypatch.setattr(restore_drill, "run_drill", drill)
-    artifact = tmp_path / "ava-20260901T030000Z.dump.enc"
-    restore_drill.main([str(artifact)])
-    restore_drill.main([str(artifact), "--legacy-empty-secret-passphrase"])
-    assert calls == [(artifact, False), (artifact, True)]
-    assert capsys.readouterr().out.count("restore drill passed") == 2
-
-
 def test_standalone_entry_captures_once_and_retains_gate_for_scratch_reads(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -258,7 +233,6 @@ def test_standalone_entry_captures_once_and_retains_gate_for_scratch_reads(
         artifact: Path | None,
         *,
         database_for_url: Callable[[str], Database],
-        legacy_empty_secret: bool,
     ) -> tuple[Any, float]:
         create.assert_not_called()
         database_for_url("postgresql://scratch.invalid/one")
@@ -278,3 +252,16 @@ def test_standalone_entry_captures_once_and_retains_gate_for_scratch_reads(
     assert calls[1].args[0].db_sslmode == "verify-full"
     assert calls[0].args[0].pgbouncer_enabled == calls[1].args[0].pgbouncer_enabled
     assert "restore drill passed" in capsys.readouterr().out
+
+
+def test_retired_passphrase_option_is_rejected_before_process_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    capture = Mock()
+    monkeypatch.setattr(LoadedCommit, "capture", capture)
+    with pytest.raises(SystemExit) as error:
+        restore_drill.main(["--legacy-empty-secret-passphrase"])
+    assert error.value.code == 2
+    capture.assert_not_called()

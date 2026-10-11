@@ -48,7 +48,7 @@ from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
-from base.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
+from base.sessions.backend import SessionBackend, get_shell_backend
 from base.sessions.page_session import page_session_name
 from base.sessions.pty import client as pty_client
 from base.sessions.record import SessionRecord
@@ -250,22 +250,10 @@ def _create_page_session(
 
 
 def _launch_in_session(backend: SessionBackend, handle: _ServerHandle, row: _PageRow) -> None:
-    """Relaunch a crashed server without replacing its POSIX shell session."""
+    """Relaunch a crashed server without replacing its shell session."""
     command = _server_command(row)
-    try:
-        backend.send(handle.session_name, command)
-        backend.send_keys(handle.session_name, "Enter")
-    except NotImplementedError as exc:
-        # Windows has no interactive PTY transport. Its native shell backend
-        # recreates the named session, retaining the durable session identity.
-        backend.kill_session(handle.session_name)
-        if not backend.new_session(
-            handle.session_name,
-            command,
-            Path(row.serve_dir),
-            env={**os.environ, "PAGE_SERVER_TOKEN": handle.token},
-        ):
-            raise RuntimeError(f"failed to recreate page session {handle.session_name!r}") from exc
+    backend.send(handle.session_name, command)
+    backend.send_keys(handle.session_name, "Enter")
 
 
 def _server_is_healthy(host: str, port: int, token: str) -> bool:
@@ -315,40 +303,23 @@ def _page_server_occupants() -> dict[int, tuple[int, str | None]]:
     return found
 
 
-def _live_session_records(backend: SessionBackend) -> dict[str, SessionRecord] | None:
-    """One listing of the live pty sessions' records, or None when the backend
-    is not the PTY backend (the Windows native backend keeps no pty records).
+def _live_session_records() -> dict[str, SessionRecord]:
+    """One listing of the live pty sessions' records.
 
     A reconcile pass that asked ``has_session`` once per managed row would
     serialize a round trip per row inside the 2 s poll (the 2026-08-28 incident,
     when each ask cost a Python startup and serve()'s 15 s wait timed out about
     half the time); one listing answers every row.
     """
-    if not isinstance(backend, PtySessionBackend):
-        return None
     return pty_client.live_sessions()
 
 
-def _session_is_live(
-    backend: SessionBackend, live_names: set[str] | None, session_name: str
-) -> bool:
-    """Whether a page shell is alive: membership in the pass's one listing when
-    one exists, else the backend's per-name check (the Windows native backend,
-    whose has_session is in-process)."""
-    if live_names is not None:
-        return session_name in live_names
-    return backend.has_session(session_name)
-
-
 def _page_session_shell_pids(
-    wanted: dict[tuple[int, str], _PageRow], live: dict[str, SessionRecord] | None
+    wanted: dict[tuple[int, str], _PageRow], live: dict[str, SessionRecord]
 ) -> dict[int, tuple[int, str]]:
-    """Map live page-shell PIDs to their page-row keys on POSIX.
+    """Map live page-shell PIDs to their page-row keys.
 
-    ``live`` is the pass's pty record scan (None on Windows, where the native
-    backend keeps no pty records)."""
-    if live is None:
-        return {}
+    ``live`` is the pass's pty record scan."""
     session_keys = {
         row.session_name: key for key, row in wanted.items() if row.session_name is not None
     }
@@ -414,11 +385,11 @@ def _reclaim_occupants(
 
 
 def _close_persisted_sessions(
-    backend: SessionBackend, session_names: list[str], live_names: set[str] | None
+    backend: SessionBackend, session_names: list[str], live_names: set[str]
 ) -> None:
     """Finish closed-page teardown after a daemon restart lost its cache."""
     for page_session in session_names:
-        if _session_is_live(backend, live_names, page_session):
+        if page_session in live_names:
             _log.info("[page-server] closing persisted page session %s", page_session)
             backend.kill_session(page_session)
 
@@ -429,7 +400,7 @@ def _drop_stale_handles(
     managed: dict[tuple[int, str], _ServerHandle],
     backoff: dict[tuple[int, str], float],
     degraded: dict[tuple[int, str], _DegradedServeDir],
-    live_names: set[str] | None,
+    live_names: set[str],
 ) -> None:
     """Remove managed entries whose rows or sessions no longer match."""
     for key in list(managed):
@@ -438,14 +409,16 @@ def _drop_stale_handles(
         if row is None:
             _log.info("[page-server] closing %s (row gone)", key)
             _kill_page_session(backend, handle)
+            live_names.discard(handle.session_name)
             del managed[key]
         elif row.port != handle.port or row.serve_dir != handle.serve_dir:
             _log.info("[page-server] replacing %s (port/dir changed)", key)
             _kill_page_session(backend, handle)
+            live_names.discard(handle.session_name)
             del managed[key]
             backoff.pop(key, None)
             degraded.pop(key, None)
-        elif not _session_is_live(backend, live_names, handle.session_name):
+        elif handle.session_name not in live_names:
             _log.warning("[page-server] page session died for %s", key)
             del managed[key]
 
@@ -481,7 +454,7 @@ def _ensure_handle(
     backoff: dict[tuple[int, str], float],
     degraded: dict[tuple[int, str], _DegradedServeDir],
     now: float,
-    live_names: set[str] | None,
+    live_names: set[str],
     bus: EventBus,
 ) -> tuple[_ServerHandle | None, bool]:
     """Return a managed handle and whether this pass created its shell."""
@@ -491,7 +464,7 @@ def _ensure_handle(
         return None, False
     if now < backoff.get(key, 0.0):
         return None, False
-    if row.session_name is not None and _session_is_live(backend, live_names, row.session_name):
+    if row.session_name is not None and row.session_name in live_names:
         handle = _ServerHandle(
             row.agent_id,
             row.name,
@@ -606,8 +579,8 @@ def _reconcile_once(
     rows = _open_rows(pool, host)
     wanted = {(row.agent_id, row.name): row for row in rows}
     _discard_gone_degraded(degraded, wanted)
-    live = _live_session_records(backend)
-    live_names = set(live) if live is not None else None
+    live = _live_session_records()
+    live_names = set(live)
     now = time.monotonic()
     # Fast path: new/unadopted rows get their session now, before the slow
     # full-pass work. _ensure_handle's per-row snapshot re-check still guards
@@ -619,8 +592,8 @@ def _reconcile_once(
             )
     # Re-scan: sessions created above must be visible to the liveness checks
     # below, or a stale scan would reap them as dead in this same pass.
-    live = _live_session_records(backend)
-    live_names = set(live) if live is not None else None
+    live = _live_session_records()
+    live_names = set(live)
     occupants = _page_server_occupants()
     shell_pids = _page_session_shell_pids(wanted, live)
     _reclaim_occupants(rows, occupants, shell_pids)
@@ -644,8 +617,7 @@ def _reconcile_once(
             # session — drop it so the re-ensure below cannot re-adopt
             # the just-killed shell, then recreate in this same pass
             # (task #2670).
-            if live_names is not None:
-                live_names.discard(handle.session_name)
+            live_names.discard(handle.session_name)
             _ensure_handle(
                 pool, backend, row, key, managed, backoff, degraded, now, live_names, bus
             )

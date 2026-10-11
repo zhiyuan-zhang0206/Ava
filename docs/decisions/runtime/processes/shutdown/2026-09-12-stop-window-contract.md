@@ -96,3 +96,7 @@ loop, gated once in the shared round loop and by a lint for the hand-written one
 Forward: [decisions/2026-10-02-the-stop-reports-pooler-clients-it-does-not-release-pools.md](../../../data/database/2026-10-02-the-stop-reports-pooler-clients-it-does-not-release-pools.md)
 retires the fifth decision point (the pre-stop pool release) and replaces it with a report of the
 pooler's remaining clients.
+
+Forward: [decisions/2026-10-11-remove-starting-and-ready-maintenance-phases.md](2026-10-11-remove-starting-and-ready-maintenance-phases.md)
+removes the `starting`/`ready` phases and `in_stop_leg()`; `quiesced()` (`drained` .. `stopped`)
+is the only window predicate.

@@ -549,7 +549,7 @@ class InboundWakeDispatcher:
         recovery for all agents.
         """
         pattern = f"{redis_channel_prefix()}{_INBOUND_PATTERN_SUFFIX}"
-        while True:  # quiesce-exempt: scan gated by in_stop_leg, never the start leg
+        while True:  # quiesce-exempt: the scan itself is gated by quiesced()
             redis = self._bus.open_async_redis()
             pubsub = None
             try:
@@ -707,9 +707,9 @@ class InboundWakeDispatcher:
             return
         if self._stale_after_s is None:
             raise RuntimeError("hosted pending scan configured without stale_after_s")
-        if admission.in_stop_leg():
-            # Leave pending rows for the start leg, which scans even while held;
-            # pub/sub has no replay. The operator owns stop-leg cancellation.
+        if admission.quiesced():
+            # The operator owns stop-window cancellation; pending rows stay for
+            # the scan after the hold releases.
             return
 
         # Reconcile completed tasks before admitting more recovery turns.

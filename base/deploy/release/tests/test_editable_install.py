@@ -124,7 +124,7 @@ def test_repair_leaves_a_legal_source_pointer_without_trailing_newline(tmp_path:
 
 
 def test_crlf_semantic_pth_is_read_without_repair(tmp_path: Path) -> None:
-    """Universal-newline reading accepts a Windows pointer without changing its bytes."""
+    """Universal-newline reading accepts a CRLF pointer without changing its bytes."""
 
     source_root = tmp_path / "prod" / "source"
     pth = _write_pth(source_root, source_root)
@@ -229,24 +229,6 @@ def test_editable_console_script_violations_follow_the_posix_venv_layout(tmp_pat
     assert editable_install.editable_console_script_violations(source_root) == (
         f"{console_script} editable console script missing",
     )
-
-
-def test_editable_console_script_violations_follow_the_windows_venv_layout(tmp_path: Path) -> None:
-    """A Windows tree is inspected structurally even on a POSIX test host."""
-
-    source_root = tmp_path / "source"
-    interpreter = source_root / ".venv" / "Scripts" / "python.exe"
-    console_script = interpreter.with_name("ava.exe")
-    interpreter.parent.mkdir(parents=True)
-    interpreter.touch()
-
-    assert editable_install.editable_console_script_violations(source_root) == (
-        f"{console_script} editable console script missing",
-    )
-
-    console_script.touch()
-
-    assert editable_install.editable_console_script_violations(source_root) == ()
 
 
 def test_poisoned_direct_url_is_repaired_and_emits_warning_event(
@@ -555,7 +537,6 @@ def test_editable_import_gate_requires_the_checkout_editable_import(
     for candidate in (
         source_root / ".venv" / "bin" / "python3",
         source_root / ".venv" / "bin" / "python",
-        source_root / ".venv" / "Scripts" / "python.exe",
     ):
         candidate.unlink(missing_ok=True)
 

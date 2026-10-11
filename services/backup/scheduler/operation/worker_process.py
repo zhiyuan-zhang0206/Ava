@@ -194,8 +194,6 @@ async def run_operation(
     worker to unwind, then bounds termination of its known child/group. There
     is no durable custody, orphan census, quarantine or blocked-kind retirement.
     """
-    if os.name != "posix":
-        raise RuntimeError("backup operation workers require POSIX")
     kind.control_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     held = ExitStack()
     try:

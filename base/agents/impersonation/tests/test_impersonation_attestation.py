@@ -166,20 +166,6 @@ def test_unavailable_current_boot_is_unknown(
     assert not store._same_process(anchor, dict(anchor))
 
 
-@pytest.mark.parametrize("missing", ["boot_id", "starttime"])
-def test_windows_head_requires_explicit_native_fields(
-    monkeypatch: pytest.MonkeyPatch, missing: str
-) -> None:
-    monkeypatch.setattr(store, "sys", SimpleNamespace(platform="win32"))
-    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="win32"))
-    monkeypatch.setattr(store, "native_boot_id", lambda: None)
-    head = {"pid": 42, "name": "codex", "created_at": 100.0, "starttime": None, "boot_id": None}
-    store.verify_caller(_lease(head), dict(head))
-    del head[missing]
-    with pytest.raises(store.ImpersonationError, match="anchor-unavailable"):
-        store.verify_caller(_lease(head), dict(head))
-
-
 @pytest.mark.parametrize(
     "error,state", [(psutil.AccessDenied(4240), "denied"), (OSError("unreadable"), "unknown")]
 )

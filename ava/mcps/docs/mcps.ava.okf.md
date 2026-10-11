@@ -88,13 +88,13 @@ Installed server spawn cwd is given by `installed_mcp_dir(name)` (its package di
 
 Server entries may carry `requires` host-capability pre-checks. The shared
 `ava/mcp_config.py:validate_requirements` accepts missing, null or an empty map
-as no requirements; otherwise only `display` and `unix_socket` with boolean
-values are valid. Invalid declarations fail before a host probe in connections,
+as no requirements; otherwise only `display` with a boolean
+value is valid. Invalid declarations fail before a host probe in connections,
 inventory capability checks and CLI list/enable. The CLI checks only declaration
 validity; disabling remains possible even for a broken declaration. An unmet
 valid requirement returns an actionable capability error rather than an opaque
-failure from the underlying tool. `chrome` declares both — its wrapper reaches
-the `browser-mcp` daemon over a Unix socket, so it cannot run on Windows. Builtin
+failure from the underlying tool. `chrome` declares `display` — it drives a
+headed browser. Builtin
 server currently includes only **chrome**; other servers are installed outside
 core via `ava mcp install`, or declared in machine-level `mcp.json`.
 

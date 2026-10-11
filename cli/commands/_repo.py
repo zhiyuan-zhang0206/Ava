@@ -28,7 +28,6 @@ from base.cluster.machine import MachineRoles
 from base.config import settings
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
-from base.host.system.backend import get_backend
 from base.sessions.env_forwarding import frontend_toolchain_env
 
 # The service roster + capability filtering live in the `ops` module family — the
@@ -138,13 +137,10 @@ def _ensure_frontend_deps(repo: Path) -> None:
     else:
         reason = "missing" if not node_modules.is_dir() else "package-lock.json changed"
         print(f"  · frontend deps {reason}, running npm ci (~30-60s)")
-    # On Windows `npm` is `npm.cmd`, which CreateProcess won't resolve from a bare
-    # "npm" argv — run it through the shell so the .cmd shim is found.
     subprocess.run(
         ["npm", "ci"],
         cwd=str(fe),
         check=True,
-        shell=get_backend().npm_shell_flag(),
         env=frontend_toolchain_env(),
     )
     stamp.write_text(want)
