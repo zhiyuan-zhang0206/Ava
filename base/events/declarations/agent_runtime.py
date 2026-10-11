@@ -284,19 +284,6 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
     ),
     # db resilience
-    "db_outage_wait": telemetry_event(
-        "db_outage_wait", "db outage wait", tier="anomaly", retired=True
-    ),
-    "db_outage_pause": telemetry_event(
-        "db_outage_pause", "db outage pause", tier="anomaly", retired=True
-    ),
-    "db_outage_reconcile_retry": telemetry_event(
-        "db_outage_reconcile_retry",
-        "db outage reconcile retry",
-        tier="anomaly",
-        retired=True,
-    ),
-    "db_recovered": telemetry_event("db_recovered", "db recovered", tier="anomaly", retired=True),
     "db_pool_acquire_timeout": telemetry_event(
         "db_pool_acquire_timeout", "db pool acquire timeout", tier="anomaly"
     ),

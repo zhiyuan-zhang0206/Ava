@@ -12,7 +12,7 @@ always kept).
 helper functions (`pctiles`, `third_of`, `_fix_kinds`, `cost_usd`) as before so the math cannot
 drift.
 
-Failure events are the exec outcome spellings the registry names (`EXEC_FAILURE_EVENTS`); the
+Failure events are the exec outcomes the registry names (`EXEC_FAILURE_EVENTS`); the
 envelope and boot events are not outcomes.
 """
 
@@ -38,17 +38,12 @@ from base.telemetry.event_sql import numeric
 
 EXEC_FAILURE_EVENTS = [
     "exec_failed",
-    "exec(failed)",
     "exec_timeout",
-    "exec(timeout)",
     "exec_cancelled",
-    "exec(cancelled)",
     "exec_node_timeout",
 ]
 LIFECYCLE_EVENTS = {
     "agent_spawned": "spawned",
-    "agent_terminated": "terminated",
-    "agent_restarted": "restarted",
     "agent_resurrected": "resurrected",
 }
 IDLE_HALT_BODY = "no tool_call (idle)"
@@ -203,42 +198,30 @@ def _llm_sums(
 
 
 class LlmCostSums(NamedTuple):
-    """Recorded USD and explicitly unpriced calls, plus legacy-only tokens."""
+    """Recorded USD and explicitly unpriced calls."""
 
     cost: float
     unpriced: int
-    legacy_calls: int
-    legacy_in: int
-    legacy_out: int
-    legacy_cached: int
 
 
 def _llm_cost_sums(
     scope: _Scope, conn: psycopg.Connection[Any]
 ) -> dict[int | None, dict[str, LlmCostSums]]:
-    """Keep recorded costs authoritative; only pre-snapshot rows need pricing."""
+    """Recorded costs and explicitly unpriced calls per agent and model."""
     cost = _n(LLM_USAGE_KEYS["cost_usd"])
     unpriced = _n(LLM_USAGE_KEYS["unpriced"], "integer")
-    legacy = f"{cost} IS NULL AND COALESCE({unpriced}, 0) <> 1"
     sums = scope.run(
         conn,
         f"t.agent_id, COALESCE({LLM_USAGE_KEYS['model']}, ''), "
         f"COALESCE(sum({cost}), 0), "
-        f"count(*) FILTER (WHERE {cost} IS NULL AND {unpriced} = 1), "
-        f"count(*) FILTER (WHERE {legacy}), "
-        + ", ".join(
-            f"COALESCE(sum({_n(LLM_USAGE_KEYS[key])}) FILTER (WHERE {legacy}), 0)::bigint"
-            for key in ("in_total", "out_total", "cache_read")
-        ),
+        f"count(*) FILTER (WHERE {cost} IS NULL AND {unpriced} = 1)",
         "t.event_name = 'llm_usage'",
         "GROUP BY t.agent_id, 2",
     ).fetchall()
     result: dict[int | None, dict[str, LlmCostSums]] = {}
-    for agent, model, recorded, missing, calls, tin, tout, cached in sums:
+    for agent, model, recorded, missing in sums:
         aid = int(agent) if agent is not None else None
-        result.setdefault(aid, {})[str(model)] = LlmCostSums(
-            float(recorded), int(missing), int(calls), int(tin), int(tout), int(cached)
-        )
+        result.setdefault(aid, {})[str(model)] = LlmCostSums(float(recorded), int(missing))
     return result
 
 
@@ -296,10 +279,10 @@ def _per_agent_counters(
             "exec_ok": int(row[4]),
             "exec_failed": int(row[5]),
             "lifecycle": dict(
-                zip(LIFECYCLE_EVENTS.values(), (int(x) for x in row[6:10]), strict=True)
+                zip(LIFECYCLE_EVENTS.values(), (int(x) for x in row[6:8]), strict=True)
             ),
-            "first_ts": row[10],
-            "last_ts": row[11],
+            "first_ts": row[8],
+            "last_ts": row[9],
         }
     for key, (turn_ok, idle) in _outcomes(scope, conn).items():
         per_agent.setdefault(key, {"events": 0})
