@@ -10,8 +10,8 @@ Never restore an artifact into the live database.
 - **RPO:** one day at the daily cluster-time backup window (`services.backup_hour`, default 03:00).
 - **RTO target:** complete a full restore within one maintenance window.
 - **Measured dry run (2026-08-25):** the test-sized encrypted artifact completed
-  the full decrypt → scratch restore → checkpoint-reader verification
-  path in 22.8 seconds. This is a command-path measurement, not a substitute
+  the then-supported decrypt → gunzip → scratch restore → checkpoint-reader
+  verification path in 22.8 seconds. This is a command-path measurement, not a substitute
   for the operator's production-sized drill; record that elapsed value here
   after it runs.
 - **Measured dry run (2026-08-27, production size):** the new-format artifact
