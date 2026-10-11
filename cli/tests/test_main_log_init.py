@@ -31,6 +31,7 @@ from base import telemetry
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import postgres
 from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.paths import ava_home
@@ -521,3 +522,4 @@ def test_status_handler_body_forwards_the_parsed_namespace(
     assert len(calls) == 1
     assert calls[0]["database_factory"] is operator_database
     assert isinstance(calls[0]["machine"], MachineIdentity)
+    assert isinstance(calls[0]["config"], ConfigBoot)

@@ -15,6 +15,7 @@ import pytest
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.db.tests.fakes import patch_database
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster.tests.health_probe_inputs import (
@@ -507,13 +508,16 @@ def test_redis_bridge_probe_reports_running_but_dead_listener(
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 
-    def probe(*, machine: MachineIdentity) -> bridge.RedisBridgeStatus:
+    def probe(*, machine: MachineIdentity, config: ConfigBoot) -> bridge.RedisBridgeStatus:
         assert machine is command_runtime.machine
+        assert config is command_runtime.config
         return bridge_status(serving=False, detail="connection refused")
 
     monkeypatch.setattr(bridge, "probe_redis_bridge", probe)
 
-    failure = cluster_health._redis_bridge_probe(machine=command_runtime.machine)
+    failure = cluster_health._redis_bridge_probe(
+        machine=command_runtime.machine, config=command_runtime.config
+    )
 
     assert failure is not None
     assert "failed authenticated PING" in failure

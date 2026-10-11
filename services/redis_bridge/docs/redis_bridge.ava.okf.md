@@ -22,6 +22,11 @@ path, writes `com.ava.redis-bridge.plist`, and reloads the launchd job only when
 the source or desired job changes. A remote-managed data plane, a loopback-only
 machine identity, or a cluster without a bearer does not need a bridge;
 converge boots out any stale job and removes its plist and installed source.
+Install and observation use the caller's existing configuration and machine
+owners. The platform, remote-plane, bearer and loopback checks retain their
+short circuits; authenticated probes read the same owner's live Redis URL.
+The CLI's health and status paths borrow their command configuration without
+creating a second boot owner. The registry record still owns the Redis port.
 
 The relay treats its listening socket as replaceable state. An `accept()` or
 bind failure closes the descriptor and enters capped retry; a restored network

@@ -319,8 +319,8 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
     machine_identity: MachineIdentity,
 ) -> None:
     db_conn.execute("TRUNCATE machines")
-    _machine(db_conn, "runner-a-snap")
-    _snapshot_row(db_conn, "runner-a-snap", running_sha="from-the-snapshot")
+    _machine(db_conn, "runner-snap")
+    _snapshot_row(db_conn, "runner-snap", running_sha="from-the-snapshot")
     dialed: list[str] = []
 
     async def dispatch(*, target_machine: str, **_kw: Any) -> dict[str, object]:
@@ -333,11 +333,11 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
         assert dialed == []
         fresh = client.get("/api/cluster/roster?fresh=true").json()
 
-    row = next(m for m in default if m["name"] == "runner-a-snap")
+    row = next(m for m in default if m["name"] == "runner-snap")
     assert row["running_sha"] == "from-the-snapshot" and row["observed_at"] is not None
-    live = next(m for m in fresh if m["name"] == "runner-a-snap")
+    live = next(m for m in fresh if m["name"] == "runner-snap")
     assert live["running_sha"] == "from-a-dial" and live["observed_at"] is None
-    assert dialed == ["runner-a-snap"]
+    assert dialed == ["runner-snap"]
 
 
 def test_the_machines_endpoint_follows_the_same_two_modes(
@@ -347,8 +347,8 @@ def test_the_machines_endpoint_follows_the_same_two_modes(
     machine_identity: MachineIdentity,
 ) -> None:
     db_conn.execute("TRUNCATE machines")
-    _machine(db_conn, "runner-a-snap")
-    _snapshot_row(db_conn, "runner-a-snap", running_sha="x")
+    _machine(db_conn, "runner-snap")
+    _snapshot_row(db_conn, "runner-snap", running_sha="x")
     dialed: list[str] = []
 
     async def dispatch(*, target_machine: str, **_kw: Any) -> dict[str, object]:
@@ -360,4 +360,4 @@ def test_the_machines_endpoint_follows_the_same_two_modes(
         assert client.get("/api/cluster/machines").json()[0]["live"] is True
         assert dialed == []
         assert client.get("/api/cluster/machines?fresh=true").json()[0]["live"] is True
-    assert dialed == ["runner-a-snap"]
+    assert dialed == ["runner-snap"]

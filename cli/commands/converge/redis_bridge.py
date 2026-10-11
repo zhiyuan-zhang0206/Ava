@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from base.cluster.machine import MachineIdentity
-from base.config import settings
+from base.config import ConfigBoot
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
 from cli.commands.converge.spec import ConvergeCtx
@@ -54,9 +54,11 @@ class _RedisBridgeUnconfiguredError(RuntimeError):
     pass
 
 
-def _bridge_config(home: Path, *, machine: MachineIdentity) -> RedisBridgeConfig | None:
+def _bridge_config(
+    home: Path, *, machine: MachineIdentity, read_config: Callable[[], ConfigBoot]
+) -> RedisBridgeConfig | None:
     """Return this host's relay config, or None when no relay should exist."""
-    if sys.platform != "darwin" or settings.data_plane.is_remote:
+    if sys.platform != "darwin" or read_config().view.data_plane.is_remote:
         return None
 
     from base.cluster import get_record
@@ -220,7 +222,7 @@ def _retire_launchd_bridge(home: Path) -> None:
 
 def ensure_redis_bridge(ctx: ConvergeCtx) -> None:
     """Install and supervise the bridge when this gateway has off-box Redis clients."""
-    config = _bridge_config(ctx.ava_home, machine=ctx.machine)
+    config = _bridge_config(ctx.ava_home, machine=ctx.machine, read_config=ctx.read_config)
     if config is None:
         if sys.platform == "darwin":
             _retire_launchd_bridge(ctx.ava_home)
@@ -233,13 +235,15 @@ def ensure_redis_bridge(ctx: ConvergeCtx) -> None:
     )
 
 
-def probe_redis_bridge(home: Path | None = None, *, machine: MachineIdentity) -> RedisBridgeStatus:
+def probe_redis_bridge(
+    home: Path | None = None, *, machine: MachineIdentity, config: ConfigBoot
+) -> RedisBridgeStatus:
     """PING Redis through the relay and report its independent supervisor state."""
     from base.paths import ava_home
 
     target = (home or ava_home()).expanduser()
     try:
-        config = _bridge_config(target, machine=machine)
+        bridge_config = _bridge_config(target, machine=machine, read_config=lambda: config)
     except _RedisBridgeUnconfiguredError as exc:
         return RedisBridgeStatus(
             required=True,
@@ -248,7 +252,7 @@ def probe_redis_bridge(home: Path | None = None, *, machine: MachineIdentity) ->
             supervised=_job_loaded(),
             detail=str(exc),
         )
-    if config is None:
+    if bridge_config is None:
         return RedisBridgeStatus(
             required=False,
             endpoint="",
@@ -257,12 +261,12 @@ def probe_redis_bridge(home: Path | None = None, *, machine: MachineIdentity) ->
             detail="not required",
         )
 
-    endpoint = f"{config.listen_host}:{config.port}"
+    endpoint = f"{bridge_config.listen_host}:{bridge_config.port}"
     supervised = _job_loaded()
     try:
         import redis
 
-        bridge_url = url_with_host(settings.data_plane.redis_url, config.listen_host)
+        bridge_url = url_with_host(config.view.data_plane.redis_url, bridge_config.listen_host)
         client = redis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType]
             bridge_url,
             socket_connect_timeout=3.0,
@@ -291,8 +295,8 @@ def probe_redis_bridge(home: Path | None = None, *, machine: MachineIdentity) ->
     )
 
 
-def print_redis_bridge_status(*, machine: MachineIdentity) -> None:
-    status = probe_redis_bridge(machine=machine)
+def print_redis_bridge_status(*, machine: MachineIdentity, config: ConfigBoot) -> None:
+    status = probe_redis_bridge(machine=machine, config=config)
     if not status.required:
         print("  · not required (Redis has no local off-box ingress)")
         return
