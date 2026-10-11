@@ -109,6 +109,7 @@ async def upload_files(
         [file.filename or "untitled" for file in files],
         max_bytes=MAX_AGENT_UPLOAD_BYTES,
         max_files=MAX_AGENT_UPLOAD_FILES,
+        local_machine=request.app.state.machine.name(),
     )
 
 

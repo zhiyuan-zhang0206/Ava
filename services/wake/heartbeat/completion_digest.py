@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.daemon.schedules.completion_notices import (
@@ -61,7 +62,12 @@ def _digest_key(digest: CompletionDigest) -> str:
 
 
 async def flush_once(
-    pool: ConnectionPool, db: Database, bus: EventBus, *, now: datetime | None = None
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    *,
+    now: datetime | None = None,
+    machine: MachineIdentity,
 ) -> int:
     """Deliver each completed hour, then mark its persisted event rows.
 
@@ -84,6 +90,7 @@ async def flush_once(
             ),
             source=_SOURCE,
             client_message_id=_digest_key(digest),
+            local_machine=machine.name(),
         )
         if delivery.inbound_id is None:
             raise RuntimeError("completion-notice digest delivery returned no inbound receipt")
@@ -94,12 +101,17 @@ async def flush_once(
 
 
 async def completion_digest_loop(
-    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    progress: LoopProgress,
+    *,
+    machine: MachineIdentity,
 ) -> None:
     """The completion-digest flush as a resident sequential loop: one pass at
     start, then every `FLUSH_INTERVAL_S`."""
 
     async def one_round() -> None:
-        await flush_once(pool, db, bus)
+        await flush_once(pool, db, bus, machine=machine)
 
     await round_loop.run_rounds("completion-digest", progress, FLUSH_INTERVAL_S, one_round)

@@ -47,6 +47,7 @@ from psycopg_pool import ConnectionPool
 
 import base.log.process
 from base import db, telemetry
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.telemetry.delivery.receipts import DrainStatus
@@ -163,15 +164,19 @@ def test_borrowed_connection_arms_the_kernel_keepalive(database_gate: ProcessDbG
 # ─── the three sites #940 flagged and left ────────────────────────────────────
 
 
-def test_log_sink_pipeline_drain_thread_stays_alive(database: db.Database) -> None:
+def test_log_sink_pipeline_drain_thread_stays_alive(
+    database: db.Database, machine_identity: MachineIdentity, unit_home: Path
+) -> None:
     """The real log adapter uses its entry's writer and acknowledges a drain marker.
 
     A completed marker proves the background worker can drain. The pipeline
     remains live until this entry removes the adapter and performs bounded close.
     """
-    pipeline = telemetry.build_pipeline(database=lambda: database)
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity, home=unit_home
+    )
     sink_id = base.log.process.add_event_sink(
-        producer=lambda: pipeline, machine_reader=lambda: settings.cluster.self_machine_name
+        producer=lambda: pipeline, machine_reader=machine_identity.name
     )
     try:
         assert not pipeline.stopped
@@ -205,11 +210,11 @@ def test_log_sink_import_of_base_db_stays_deferred() -> None:
     )
 
 
-def test_gateway_pool_carries_keepalives() -> None:
+def test_gateway_pool_carries_keepalives(machine_identity: MachineIdentity) -> None:
     """`gateway/app.py`'s request-serving pool, asserted on the object the real
     lifespan builds. Sizing (max_size=8) is the site's own business; the posture
     is not."""
-    with gateway_test_client(app):
+    with gateway_test_client(app, machine=machine_identity):
         pool = app.state.db_pool
         _assert_pool_posture(pool, "gateway/app.py:lifespan")
         assert pool.max_size == 8

@@ -22,6 +22,8 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 
+__all__ = ["insert_inbound_kind", "make_runtime", "thread_config"]
+
 
 def _fake_llm(summary: str = "synthetic compaction summary") -> Any:
     """Mock LLM — bind_tools(...).ainvoke returns AIMessage(content=summary),
@@ -31,7 +33,7 @@ def _fake_llm(summary: str = "synthetic compaction summary") -> Any:
     return llm
 
 
-def _make_runtime(
+def make_runtime(
     *,
     ops_pool: AsyncConnectionPool | None = None,
     llm: Any | None = None,
@@ -40,7 +42,7 @@ def _make_runtime(
     agent_id: int | None = None,
     database_gate: ProcessDbGate,
 ) -> Runtime[AvaContext]:
-    """test helper: assemble AvaContext into Runtime.
+    """Assemble a claim Runtime borrowing the test SDK root's clients and machine.
 
     `ops_pool=None` takes the container early-return path;
 
@@ -52,6 +54,7 @@ def _make_runtime(
     retained = ava.context
     ctx = AvaContext(
         clients=retained.clients,
+        machine=retained.machine,
         original_incarnation=retained.original_incarnation,
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         ops_pool=ops_pool,
@@ -69,7 +72,7 @@ def _make_runtime(
     return Runtime(context=ctx)
 
 
-def _insert_inbound_kind(
+def insert_inbound_kind(
     db: psycopg.Connection, tid: int, content: str, kind: str, source: str = "system"
 ) -> int:
     """Directly INSERT an inbound of any kind (bypasses the chat-only helper in base/db/__init__.py)."""
@@ -107,7 +110,7 @@ async def _await_inbound_visible(pool: AsyncConnectionPool, inbound_id: int) -> 
     raise AssertionError(f"inbound {inbound_id} not visible on the claim pool after 2s")
 
 
-def _config(tid: int) -> RunnableConfig:
+def thread_config(tid: int) -> RunnableConfig:
     return {
         "configurable": {
             "thread_id": str(

@@ -25,6 +25,8 @@ from base.native_process.ownership import capture_tree
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import maintenance_stop as plane
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -107,6 +109,8 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     data, port = _private_home(tmp_path, monkeypatch)
     monkeypatch.setattr(instance, "archive_pg_args", _hung_archive_args)
@@ -122,7 +126,12 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     monkeypatch.setattr("base.telemetry.emit", emit)
     notes: list[str] = []
     try:
-        assert instance._start_pg(port, retained_children=retained_children) == 0
+        assert (
+            instance._start_pg(
+                port, retained_children=retained_children, machine=command_runtime.machine
+            )
+            == 0
+        )
         owner = ownership.postgres(data)
         assert owner is not None
         hung = _wait_for_hung_archive_command(data)

@@ -10,20 +10,20 @@ from unittest.mock import MagicMock
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from services.agent_runner.page_server import daemon
 from services.agent_runner.page_server.tests.slices import page_server_config
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_a_quiesced_unit_runs_no_reconcile_pass(
-    monkeypatch: pytest.MonkeyPatch, quiesced: bool
+    monkeypatch: pytest.MonkeyPatch, quiesced: bool, *, machine_identity: MachineIdentity
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
-    monkeypatch.setattr(daemon, "reachable_host", lambda: "127.0.0.1")
-    monkeypatch.setattr(daemon, "machine_name", lambda: "test-machine")
     passes: list[object] = []
 
     def record_pass(*args: object) -> None:
@@ -43,6 +43,7 @@ async def test_a_quiesced_unit_runs_no_reconcile_pass(
             LoopProgress("t", 60.0),
             page_server_config(),
             cast("EventBus", MagicMock()),
+            local_machine=machine_identity,
         )
     )
     try:

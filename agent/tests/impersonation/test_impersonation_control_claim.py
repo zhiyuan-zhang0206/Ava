@@ -8,11 +8,13 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent import impersonation
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
@@ -22,12 +24,16 @@ async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from agent.db import claim_inbound_batch
     from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     for kind in ("chat", "compact_request", "cancel"):
         db_conn.execute(
@@ -65,20 +71,23 @@ async def test_control_claim_records_superseded_accepted_intent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
 
     from agent.db import claim_inbound_batch
     from agent.ownership.hosted import admit_hosted_runtime
-    from base.cluster.machine import machine_name
     from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     owner = await admit_hosted_runtime(
         aops_pool,
         agent_id,
-        machine_name(),
+        machine_identity.name(),
         uuid4(),
         expected_from="idling",
         db=database,
@@ -130,12 +139,16 @@ async def test_control_claim_preserves_unaccepted_intent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     from agent.db import claim_inbound_batch
     from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'',%s,'user')",

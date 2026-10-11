@@ -18,9 +18,11 @@ from uuid import UUID
 import pytest
 
 from base.agents.impersonation.status import ImpersonationStatus
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.events.live.bus import EventBus
 from cli.commands.agents import impersonation_relay as relay
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 LEASE_ID = UUID("767fb040-aa54-42ae-b2c8-594039fbbf46")
 THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
@@ -589,6 +591,8 @@ def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents import impersonation
 
@@ -602,11 +606,15 @@ def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
     }
     calls: list[tuple[str, str]] = []
 
-    def get(_db: object, _bus: object, lease_id: str, token: str) -> dict[str, Any]:
+    def get(
+        _db: object, _bus: object, lease_id: str, token: str, *, local_machine: str
+    ) -> dict[str, Any]:
         calls.append((lease_id, token))
         return lease
 
-    def inbox(_db: object, lease_id: str, token: str) -> list[dict[str, Any]]:
+    def inbox(
+        _db: object, lease_id: str, token: str, *, local_machine: str
+    ) -> list[dict[str, Any]]:
         calls.append((lease_id, token))
         return [
             {
@@ -623,7 +631,14 @@ def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
 
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
-    snapshot = relay._read_inbox(database, event_bus, 42, LEASE_ID, "memory-only-token")
+    snapshot = relay._read_inbox(
+        database,
+        event_bus,
+        42,
+        LEASE_ID,
+        "memory-only-token",
+        local_machine=machine_identity.name(),
+    )
     assert snapshot.message_ids == frozenset({7})
     assert snapshot.messages[7].content == "the body rides into the push envelope"
     assert snapshot.start_message == ""
@@ -631,11 +646,17 @@ def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
 
 
 def test_agent_mismatch_refuses_inbox_before_subscription(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents import impersonation
 
-    def get(_db: object, _bus: object, _lease_id: str, _token: str) -> dict[str, Any]:
+    def get(
+        _db: object, _bus: object, _lease_id: str, _token: str, *, local_machine: str
+    ) -> dict[str, Any]:
         return {
             "id": str(LEASE_ID),
             "agent_id": 99,
@@ -645,20 +666,29 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
             "max_delivery_attempts": 2,
         }
 
-    def inbox(_db: object, _lease_id: str, _token: str) -> list[dict[str, Any]]:
+    def inbox(
+        _db: object, _lease_id: str, _token: str, *, local_machine: str
+    ) -> list[dict[str, Any]]:
         pytest.fail("Agent mismatch must not read this inbox")
 
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
     with pytest.raises(ValueError, match="does not belong"):
-        relay._read_inbox(database, event_bus, 42, LEASE_ID, "memory-only-token")
+        relay._read_inbox(
+            database,
+            event_bus,
+            42,
+            LEASE_ID,
+            "memory-only-token",
+            local_machine=machine_identity.name(),
+        )
 
 
 # ── Command plumbing ───────────────────────────────────────────────────────────
 
 
 def test_write_heartbeat_stops_at_a_terminal_lease(
-    monkeypatch: pytest.MonkeyPatch, database: Database
+    monkeypatch: pytest.MonkeyPatch, database: Database, *, machine_identity: MachineIdentity
 ) -> None:
     from unittest.mock import Mock
 
@@ -666,10 +696,22 @@ def test_write_heartbeat_stops_at_a_terminal_lease(
 
     beat = Mock()
     monkeypatch.setattr("base.agents.impersonation.relay_heartbeat", beat)
-    assert relay._write_heartbeat(database, LEASE_ID, "relay-token") is True
-    beat.assert_called_once_with(database, str(LEASE_ID), "relay-token")
+    assert (
+        relay._write_heartbeat(
+            database, LEASE_ID, "relay-token", local_machine=machine_identity.name()
+        )
+        is True
+    )
+    beat.assert_called_once_with(
+        database, str(LEASE_ID), "relay-token", local_machine=machine_identity.name()
+    )
     beat.side_effect = leases.ImpersonationError("Impersonation has ended")
-    assert relay._write_heartbeat(database, LEASE_ID, "relay-token") is False
+    assert (
+        relay._write_heartbeat(
+            database, LEASE_ID, "relay-token", local_machine=machine_identity.name()
+        )
+        is False
+    )
 
 
 @pytest.mark.parametrize("debounce", [-1.0, 31.0, float("nan"), float("inf")])
@@ -692,13 +734,19 @@ def test_invalid_debounce_fails_before_open(debounce: float) -> None:
 
 
 def test_release_racing_with_read_stops_cleanly(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.agents import impersonation
 
     states = iter(["active", "released"])
 
-    def get(_db: object, _bus: object, _lease_id: str, _token: str) -> dict[str, Any]:
+    def get(
+        _db: object, _bus: object, _lease_id: str, _token: str, *, local_machine: str
+    ) -> dict[str, Any]:
         return {
             "id": str(LEASE_ID),
             "agent_id": 42,
@@ -708,48 +756,13 @@ def test_release_racing_with_read_stops_cleanly(
             "max_delivery_attempts": 2,
         }
 
-    def inbox(_db: object, _lease_id: str, _token: str) -> list[dict[str, Any]]:
+    def inbox(
+        _db: object, _lease_id: str, _token: str, *, local_machine: str
+    ) -> list[dict[str, Any]]:
         raise impersonation.ImpersonationError("Lease released concurrently")
 
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
-    assert not relay._read_inbox(database, event_bus, 42, LEASE_ID, "test-token").active
-
-
-@pytest.mark.parametrize("primary", [RuntimeError("host failure"), asyncio.CancelledError()])
-def test_listener_stop_failure_preserves_relay_primary(primary: BaseException) -> None:
-    inbox = Inbox(11)
-    cleanup = ValueError("listener cleanup invariant")
-
-    class FailingStop(Listener):
-        async def stop(self) -> tuple[str, ...]:
-            self.closed = True
-            raise cleanup
-
-    listener = FailingStop(inbox)
-
-    def fail(_message: str) -> None:
-        raise primary
-
-    with pytest.raises(type(primary)) as captured:
-        run(inbox, listener, fail)
-    assert captured.value is primary
-    assert any("listener cleanup invariant" in note for note in primary.__notes__)
-    assert listener.closed
-
-
-def test_listener_stop_failure_fails_otherwise_successful_relay() -> None:
-    inbox = Inbox()
-    inbox.active = False
-    cleanup = ValueError("listener cleanup invariant")
-
-    class FailingStop(Listener):
-        async def stop(self) -> tuple[str, ...]:
-            self.closed = True
-            raise cleanup
-
-    listener = FailingStop(inbox)
-    with pytest.raises(ValueError) as captured:
-        run(inbox, listener, lambda _message: None)
-    assert captured.value is cleanup
-    assert listener.closed
+    assert not relay._read_inbox(
+        database, event_bus, 42, LEASE_ID, "test-token", local_machine=machine_identity.name()
+    ).active

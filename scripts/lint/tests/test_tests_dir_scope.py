@@ -190,7 +190,7 @@ def test_the_same_source_outside_tests_is_governed(
     assert lcs.main([], repo_root=tmp_path) == 1
     out = capsys.readouterr().out
     assert "`if TYPE_CHECKING:` is banned" in out
-    assert "machine_role() may only be called" in out
+    assert "machine_role() is retired" in out
     assert "reaches private `base.other._private`" in out  # Rule 4
 
 

@@ -12,6 +12,8 @@ from cli.commands.converge.spec import ConvergeCtx, ConvergeStep
 from cli.commands.converge.tests.context_inputs import Converge, default_home, other_home
 from cli.commands.converge.tests.context_inputs import converge as converge
 from cli.commands.converge.tests.context_inputs import home as home
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -20,6 +22,8 @@ def test_preparation_filters_service_consumers_but_keeps_shared_host_steps(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     calls: list[str] = []
 
@@ -46,6 +50,7 @@ def test_preparation_filters_service_consumers_but_keeps_shared_host_steps(
         services=frozenset({"loki"}),
         database_factory=operator_database,
         producer=operator_pipeline,
+        command=command_runtime,
     )
     assert calls == ["shared", "backend"]
 

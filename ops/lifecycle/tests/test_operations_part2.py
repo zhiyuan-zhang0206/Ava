@@ -14,6 +14,7 @@ from uuid import UUID
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
@@ -24,6 +25,7 @@ from ops.rpc_schemas import (
     LaunchAgentRequest,
     TerminateAgentRequest,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _db(*, database_gate: ProcessDbGate) -> Database:
@@ -87,7 +89,12 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
 
 @pytest.mark.asyncio
 async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    stub_pool: MagicMock,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A runner rejection is reported by the gateway; it never terminates creation."""
 
@@ -114,6 +121,11 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
     )
     with pytest.raises(RuntimeError, match="bad model config"):
         await lifecycle.launch_agent_op(
-            database, event_bus, body, stub_pool, catalog=build_model_catalog()
+            database,
+            event_bus,
+            body,
+            stub_pool,
+            catalog=build_model_catalog(),
+            local_machine=machine_identity.name(),
         )  # type: ignore[arg-type]
     assert reclaimed == []

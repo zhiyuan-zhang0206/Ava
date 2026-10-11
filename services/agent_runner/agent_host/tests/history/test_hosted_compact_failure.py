@@ -35,7 +35,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 from ...host import AgentHost
 from ...runtime import TurnOutcome
@@ -115,7 +115,7 @@ def _build_host_driving_invoke_until_done(
         pool=pool,
         checkpointer=saver,
         graph=graph,
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=ctx.require_catalog(),

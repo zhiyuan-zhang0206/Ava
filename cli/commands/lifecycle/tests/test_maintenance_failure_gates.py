@@ -20,16 +20,18 @@ import psycopg
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.db import Database, create_agent, insert_inbound_message
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from cli.commands.lifecycle.tests.stop_support import drained
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from ops import agent_pause
 from ops.cluster import pause as cluster_pause
 from tests.factories.maintenance import WHEN as STOP_WHEN
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 WHEN = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
@@ -52,12 +54,14 @@ def _publish(hold: MaintenanceHold) -> None:
     pause_owner.change_maintenance(HOLDER, WHEN, before.maintenance, hold)
 
 
-def _landed_member(db_conn: psycopg.Connection, *, database_gate: ProcessDbGate) -> tuple[int, int]:
+def _landed_member(
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate, machine_identity: MachineIdentity
+) -> tuple[int, int]:
     """A drained receipt's durable shape: idling row, claimed applied command."""
     agent = create_agent(db_conn)
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'idling',%s)",
-        (agent, machine_name()),
+        (agent, machine_identity.name()),
     )
     command = insert_inbound_message(
         db_conn,
@@ -96,10 +100,10 @@ def test_prepare_retry_refuses_a_recorded_failure() -> None:
 
 
 def test_verify_drained_refuses_a_recorded_failure(
-    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate, machine_identity: MachineIdentity
 ) -> None:
-    first = _landed_member(db_conn, database_gate=database_gate)
-    second = _landed_member(db_conn, database_gate=database_gate)
+    first = _landed_member(db_conn, database_gate=database_gate, machine_identity=machine_identity)
+    second = _landed_member(db_conn, database_gate=database_gate, machine_identity=machine_identity)
     hold = MaintenanceHold(
         MaintenancePhase.DRAINED,
         {first[0]: first[1], second[0]: second[1]},
@@ -123,16 +127,18 @@ def test_set_phase_refuses_a_recorded_failure() -> None:
 
 
 def test_unpause_names_start_for_a_recorded_failure(
-    database: Database, event_bus: EventBus
+    database: Database, event_bus: EventBus, machine_identity: MachineIdentity
 ) -> None:
     _publish(MaintenanceHold(MaintenancePhase.DRAINING, {1: 11}, failures={1: "RuntimeError"}))
 
     with pytest.raises(RuntimeError, match="run `ava start`"):
-        cluster_pause.unpause_local_cluster(database, event_bus)
+        cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
     assert pause_owner.read().status == "paused"
 
 
-def test_drain_aborts_on_a_recorded_failure(database: Database) -> None:
+def test_drain_aborts_on_a_recorded_failure(
+    database: Database, machine_identity: MachineIdentity
+) -> None:
     _publish(
         MaintenanceHold(
             MaintenancePhase.DRAINING, {1: 11, 2: 22}, drained=(2,), failures={1: "RuntimeError"}
@@ -140,7 +146,7 @@ def test_drain_aborts_on_a_recorded_failure(database: Database) -> None:
     )
 
     with pytest.raises(RuntimeError, match="continuations failed; hold retained"):
-        agent_pause.drain(database, HOLDER, WHEN, 1.0)
+        agent_pause.drain(database, HOLDER, WHEN, 1.0, local_machine=machine_identity)
 
 
 def test_resume_agents_refuses_a_recorded_failure(
@@ -154,13 +160,17 @@ def test_resume_agents_refuses_a_recorded_failure(
 
 
 def _pending_restart(
-    db_conn: psycopg.Connection, status: str = "idling", *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    status: str = "idling",
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> tuple[int, int]:
     """A cohort member's durable pointer: an agent row and its pending maintenance restart."""
     agent = create_agent(db_conn)
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine) VALUES(%s,%s,%s)",
-        (agent, status, machine_name()),
+        (agent, status, machine_identity.name()),
     )
     command = insert_inbound_message(
         db_conn,
@@ -180,11 +190,16 @@ class _StartHarness:
     """`ava start` over a standing hold, with its release collaborators observable."""
 
     def __init__(
-        self, monkeypatch: pytest.MonkeyPatch, *, database_factory: DatabaseFactory
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        database_factory: DatabaseFactory,
+        machine: MachineIdentity,
     ) -> None:
         from base.deploy.lifecycle import start_serving
 
         self.database_factory = database_factory
+        self.machine = machine
         self.woken: list[int] = []
         self.logger = MagicMock()
         monkeypatch.setattr(start_serving, "is_serving", lambda: True)
@@ -211,7 +226,7 @@ class _StartHarness:
             ran.append(True)
             return rc
 
-        result = start(None, database_factory)
+        result = start(None, database_factory, self.machine)
         assert ran == [True]
         return result
 
@@ -222,15 +237,20 @@ def test_start_redelivers_a_failed_continuation_and_releases_the_hold(
     operator_database: DatabaseFactory,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The failed member's restart pointer is intact: no error; the release wakes it."""
-    agent, command = _pending_restart(db_conn, database_gate=database_gate)
+    agent, command = _pending_restart(
+        db_conn, database_gate=database_gate, machine_identity=machine_identity
+    )
     _publish(
         MaintenanceHold(
             MaintenancePhase.DRAINING, {agent: command}, failures={agent: "RuntimeError"}
         )
     )
-    harness = _StartHarness(monkeypatch, database_factory=operator_database)
+    harness = _StartHarness(
+        monkeypatch, database_factory=operator_database, machine=machine_identity
+    )
 
     assert harness.start() == 0
 
@@ -245,10 +265,15 @@ def test_start_reports_and_notifies_a_continuation_it_cannot_redeliver(
     operator_database: DatabaseFactory,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A restart pointer that is gone is logged at ERROR as an `agent_continuation_lost` event; start still goes."""
-    lost, lost_command = _pending_restart(db_conn, database_gate=database_gate)
-    kept, kept_command = _pending_restart(db_conn, database_gate=database_gate)
+    lost, lost_command = _pending_restart(
+        db_conn, database_gate=database_gate, machine_identity=machine_identity
+    )
+    kept, kept_command = _pending_restart(
+        db_conn, database_gate=database_gate, machine_identity=machine_identity
+    )
     db_conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (lost_command,))
     db_conn.commit()
     _publish(
@@ -258,7 +283,9 @@ def test_start_reports_and_notifies_a_continuation_it_cannot_redeliver(
             failures={lost: "RuntimeError", kept: "ValueError"},
         )
     )
-    harness = _StartHarness(monkeypatch, database_factory=operator_database)
+    harness = _StartHarness(
+        monkeypatch, database_factory=operator_database, machine=machine_identity
+    )
 
     assert harness.start() == 0
 
@@ -277,8 +304,11 @@ def test_start_does_not_revive_a_terminated_agent_whose_continuation_failed(
     operator_database: DatabaseFactory,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent, command = _pending_restart(db_conn, status="terminated", database_gate=database_gate)
+    agent, command = _pending_restart(
+        db_conn, status="terminated", database_gate=database_gate, machine_identity=machine_identity
+    )
     db_conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (command,))
     db_conn.commit()
     _publish(
@@ -286,7 +316,9 @@ def test_start_does_not_revive_a_terminated_agent_whose_continuation_failed(
             MaintenancePhase.DRAINING, {agent: command}, failures={agent: "RuntimeError"}
         )
     )
-    harness = _StartHarness(monkeypatch, database_factory=operator_database)
+    harness = _StartHarness(
+        monkeypatch, database_factory=operator_database, machine=machine_identity
+    )
 
     assert harness.start() == 0
 
@@ -300,15 +332,20 @@ def test_failed_start_keeps_the_hold_and_its_receipts(
     operator_database: DatabaseFactory,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Receipts are settled only once the unit serves: a start that failed leaves them for the retry."""
-    agent, command = _pending_restart(db_conn, database_gate=database_gate)
+    agent, command = _pending_restart(
+        db_conn, database_gate=database_gate, machine_identity=machine_identity
+    )
     _publish(
         MaintenanceHold(
             MaintenancePhase.DRAINING, {agent: command}, failures={agent: "RuntimeError"}
         )
     )
-    harness = _StartHarness(monkeypatch, database_factory=operator_database)
+    harness = _StartHarness(
+        monkeypatch, database_factory=operator_database, machine=machine_identity
+    )
 
     assert harness.start(rc=1) == 1
 
@@ -325,14 +362,19 @@ def test_unreadable_pointer_check_keeps_the_failure_receipts(
     operator_database: DatabaseFactory,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent, command = _pending_restart(db_conn, database_gate=database_gate)
+    agent, command = _pending_restart(
+        db_conn, database_gate=database_gate, machine_identity=machine_identity
+    )
     _publish(
         MaintenanceHold(
             MaintenancePhase.DRAINING, {agent: command}, failures={agent: "RuntimeError"}
         )
     )
-    harness = _StartHarness(monkeypatch, database_factory=operator_database)
+    harness = _StartHarness(
+        monkeypatch, database_factory=operator_database, machine=machine_identity
+    )
 
     error = ConnectionError("database unreachable")
 
@@ -352,6 +394,7 @@ def test_unreadable_pointer_check_keeps_the_failure_receipts(
 def test_failed_flush_cannot_be_released_by_a_bare_resume(
     database: Database,
     event_bus: EventBus,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Only `ava start` settles a failed receipt; a resume that skips it refuses."""
     drained()
@@ -364,7 +407,7 @@ def test_failed_flush_cannot_be_released_by_a_bare_resume(
     from ops.cluster.pause import unpause_local_cluster
 
     with pytest.raises(RuntimeError, match="failed continuation/flush"):
-        unpause_local_cluster(database, event_bus)
+        unpause_local_cluster(database, event_bus, local_machine=machine_identity)
     with pytest.raises(RuntimeError, match="failed continuation/flush"):
         agent_pause.resume_agents(database, event_bus)
     assert admission.held()

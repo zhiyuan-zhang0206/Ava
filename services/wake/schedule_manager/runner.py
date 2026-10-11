@@ -15,6 +15,8 @@ from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock, clock_config_from_boot
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
@@ -27,13 +29,18 @@ from gateway.schedules import runner as engine
 
 
 def _bind_schedule_actor(
-    schedule_id: int, *, clients: ClientSet, clock_factory: Callable[[], Clock]
+    schedule_id: int,
+    *,
+    clients: ClientSet,
+    clock_factory: Callable[[], Clock],
+    machine: MachineIdentity,
 ) -> None:
     """Attribute SDK operations to this schedule using the process's client owner."""
     ava.bind_context(
         AvaContext(
             identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
             clients=clients,
+            machine=machine,
             clock_factory=clock_factory,
         )
     )
@@ -43,6 +50,7 @@ def run(schedule_id: int, revision: int | None = None) -> int:
     """Run a schedule with the SDK policy inputs owned by this process."""
     config = ConfigBoot()
     config.read_process_environment()
+    machine = machine_from_boot(config)
     image = ava.loaded_code_image()
     version = CodeVersion(image)
     gate = ProcessDbGate(process=process_name(), version=version.get)
@@ -51,21 +59,23 @@ def run(schedule_id: int, revision: int | None = None) -> int:
         return Database(
             db_config_from_boot(config),
             gate=gate,
-            local_host=lambda: config.view.general.machine_host.strip() or "localhost",
+            local_host=machine.host,
         )
 
     def clock_factory() -> Clock:
         return Clock(clock_config_from_boot(config))
 
-    clients = process_context.process_clients(config=config, database=database)
+    clients = process_context.process_clients(config=config, database=database, machine=machine)
     primary: BaseException | None = None
     try:
         return engine.run(
             schedule_id,
             revision,
             database=database,
-            inputs=ScheduleInputs(database, clients.event_pipeline, image),
-            bind_actor=partial(_bind_schedule_actor, clients=clients, clock_factory=clock_factory),
+            inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine),
+            bind_actor=partial(
+                _bind_schedule_actor, clients=clients, clock_factory=clock_factory, machine=machine
+            ),
             load_plugins=partial(
                 ava.ensure_plugins_loaded,
                 config=config,

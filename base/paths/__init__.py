@@ -11,6 +11,7 @@ The package holds only this door; its doc nodes (`docs/paths.ava.okf.md`,
 
 from pathlib import Path
 
+from base.cluster.machine import MachineRoles
 from base.config import settings
 from base.host.env.dotenv_boot import home_checkout_error, resolve_ava_home
 from base.host.private_storage import ensure_private_dir
@@ -149,16 +150,14 @@ def memory_dir() -> Path:
     return ava_home() / "memory"
 
 
-def gateway_memory_dir() -> Path:
+def gateway_memory_dir(*, roles: MachineRoles) -> Path:
     """Gateway's consolidated memory checkout path. On a combined unit
     (gateway+agent-runner on one host) this is $AVA_HOME/gateway/memory to
     keep the gateway's index source (main branch) separate from the
     agent-runner's authoring checkout (machine-<name> branch at memory_dir()).
     On a gateway-only unit it is the same as memory_dir(). Returns the path
     only."""
-    from base.cluster.machine import is_agent_runner
-
-    if is_agent_runner():
+    if "agent-runner" in roles:
         return ava_home() / "gateway" / "memory"
     return memory_dir()
 

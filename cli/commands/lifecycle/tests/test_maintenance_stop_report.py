@@ -21,6 +21,7 @@ from typing import Any, Literal
 import psutil
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.deploy.lifecycle import status_journal
 from base.native_process import ownership
 from base.native_process.ownership import OwnedProcess
@@ -40,6 +41,8 @@ from cli.commands.lifecycle.tests.stop_support import (
 from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop_support import written as written
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.components.agent.test_maintenance import WHEN
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -54,6 +57,8 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     process = launch(
         "private-terminal",
@@ -73,6 +78,7 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
             WHEN,
             direct_db=False,
             database_factory=operator_database,
+            local_machine=command_machine,
         )
     failure = caught.value
     assert identity.live(), "the survivor outlived its SIGKILL"
@@ -100,6 +106,8 @@ def test_report_keeps_known_job_diagnostic_of_a_closed_session(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """The session's shell is gone but a job outlived the SIGKILL: the report names the
     known job and its session without failing stop."""
@@ -125,6 +133,7 @@ def test_report_keeps_known_job_diagnostic_of_a_closed_session(
         WHEN,
         direct_db=False,
         database_factory=operator_database,
+        local_machine=command_machine,
     )
     assert child.live()
     diagnostic = capsys.readouterr().err

@@ -13,6 +13,7 @@ import pytest
 
 from base.telemetry import tracing as tracing_mod
 from base.telemetry.otlp import telemetry_otlp
+from base.telemetry.tests.identity_inputs import allow_identity, deny_identity, machine_identity
 from base.telemetry.tracing import (
     OtlpJsonHttpSpanExporter,
     initialize_tracing,
@@ -22,7 +23,7 @@ from base.telemetry.tracing import (
 
 @pytest.fixture(autouse=True)
 def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: True, raising=False)
+    monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity, raising=False)
 
 
 _TRACE_BG_THREAD_NAMES = frozenset({"trace-arm", "trace-collector-retry"})
@@ -78,8 +79,7 @@ def _reset_init_flag(monkeypatch: pytest.MonkeyPatch):
     """Reset trace-init and retry-loop state (and the key arming writes) between tests."""
     monkeypatch.setenv("TRACELOOP_TRACE_CONTENT", "")  # arming sets it; teardown deletes it
     _assert_no_background_trace_threads()
-    gate = telemetry_otlp.observability_export_allowed
-    gate.cache_clear()
+
     tracing_mod._state.clear()
     tracing_mod._state.update(
         initialized=False,
@@ -90,7 +90,7 @@ def _reset_init_flag(monkeypatch: pytest.MonkeyPatch):
         arm_failed=False,
         timeout_reported=False,
     )
-    gate.cache_clear()
+
     yield
     tracing_mod._state["initialized"] = True
     _drain_background_trace_threads()
@@ -129,7 +129,7 @@ def _collector_up(monkeypatch: pytest.MonkeyPatch):
 def test_disabled_returns_early(monkeypatch: pytest.MonkeyPatch):
     """When trace_enabled=False, initialize_tracing returns None and does not init the SDK."""
     monkeypatch.setattr("base.config.settings.observability.trace_enabled", False)
-    assert initialize_tracing() is None
+    assert initialize_tracing(machine=machine_identity(), home=Path(".ava")) is None
     assert tracing_mod._state["initialized"] is False
 
 
@@ -153,14 +153,18 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
         "base.config.settings.observability.telemetry_otlp_endpoint",
         "http://127.0.0.1:4318",
     )
-    monkeypatch.setattr(tracing_mod, "cluster_label", lambda: ".ava-test")
-    monkeypatch.setattr("base.telemetry.observability.production_identity", lambda: False)
+
+    def label(_home: Path | None = None) -> str:
+        return ".ava-test"
+
+    monkeypatch.setattr(tracing_mod, "cluster_label", label)
+    monkeypatch.setattr("base.telemetry.observability.production_identity", deny_identity)
     _under_watermark(monkeypatch)
 
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
     _wait_init_resolved()
 
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
@@ -195,11 +199,9 @@ def test_gateway_trace_recording_skips_without_lgtm_marker(
     home = tmp_path / ".ava-preview"
     home.mkdir()
     monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: True)
-    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
+    monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    telemetry_otlp.observability_export_allowed.cache_clear()
+
     calls: list[dict[str, object]] = []
 
     def record_init(**kw: object) -> None:
@@ -207,7 +209,8 @@ def test_gateway_trace_recording_skips_without_lgtm_marker(
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", record_init)
 
-    initialize_tracing()
+    machine = machine_identity(name="test-gateway", roles=frozenset({"gateway"}))
+    initialize_tracing(machine=machine, home=home)
 
     assert calls == []
     assert tracing_mod._state["initialized"] is False
@@ -220,13 +223,11 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     home.mkdir()
     (home / "lgtm-host").touch()
     monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: True)
-    monkeypatch.setattr("base.telemetry.observability.production_identity", lambda: True)
-    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
+    monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity)
+    monkeypatch.setattr("base.telemetry.observability.production_identity", allow_identity)
     monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path / "traces")
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    telemetry_otlp.observability_export_allowed.cache_clear()
+
     _under_watermark(monkeypatch)
     calls: list[dict[str, object]] = []
 
@@ -235,7 +236,8 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", record_init)
 
-    initialize_tracing()
+    machine = machine_identity(name="test-gateway", roles=frozenset({"gateway"}))
+    initialize_tracing(machine=machine, home=home)
     _wait_init_resolved()
 
     assert len(calls) == 1
@@ -266,7 +268,9 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
         lambda *a, **kw: warnings.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
 
-    initialize_tracing()  # must not raise: the failure is the arm thread's
+    initialize_tracing(
+        machine=machine_identity(), home=Path(".ava")
+    )  # must not raise: the failure is the arm thread's
     _wait_init_resolved()
 
     assert tracing_mod._state["initialized"] is False
@@ -292,11 +296,13 @@ def test_arm_failure_blocks_rearming(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _fail_then_record)
 
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
     _wait_init_resolved()
     assert tracing_mod._state["arm_failed"] is True
 
-    initialize_tracing()  # must be a no-op, not a second arming attempt
+    initialize_tracing(
+        machine=machine_identity(), home=Path(".ava")
+    )  # must be a no-op, not a second arming attempt
     assert calls == [1]
     assert tracing_mod._state["initialized"] is False
 
@@ -309,8 +315,8 @@ def test_idempotent_second_call_is_noop(monkeypatch: pytest.MonkeyPatch, tmp_pat
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
-    initialize_tracing()
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
     _wait_init_resolved()
 
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
@@ -348,11 +354,11 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", init_traceloop)
 
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
     retry_thread = tracing_mod._state["retry_thread"]
     assert isinstance(retry_thread, threading.Thread)
 
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
     assert tracing_mod._state["retry_thread"] is retry_thread
     assert initialized.wait(timeout=1.0)
     retry_thread.join(timeout=0.5)
@@ -382,7 +388,9 @@ def test_arming_runs_off_the_caller_thread(monkeypatch: pytest.MonkeyPatch, tmp_
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
 
-    initialize_tracing()  # returns immediately — the mock is still blocked
+    initialize_tracing(
+        machine=machine_identity(), home=Path(".ava")
+    )  # returns immediately — the mock is still blocked
     assert entered.wait(timeout=5.0), "arm thread must have started"
     assert tracing_mod._state["initialized"] is False  # boot already returned; init pending
 
@@ -409,7 +417,7 @@ def test_teardown_drains_pending_arm_thread(monkeypatch: pytest.MonkeyPatch, tmp
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
 
-    initialize_tracing()
+    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
     arm_thread = tracing_mod._state["arm_thread"]
     assert isinstance(arm_thread, threading.Thread)
     assert arm_thread.is_alive()
@@ -437,12 +445,12 @@ def test_arm_tracing_skips_init_when_already_resolved(
 
     tracing_mod._state["initialized"] = True
     tracing_mod._state["arm_failed"] = False
-    _arm_tracing("http://127.0.0.1:4318")
+    _arm_tracing("http://127.0.0.1:4318", production=False, home=Path(".ava"))
     assert calls == []
 
     tracing_mod._state["initialized"] = False
     tracing_mod._state["arm_failed"] = True
-    _arm_tracing("http://127.0.0.1:4318")
+    _arm_tracing("http://127.0.0.1:4318", production=False, home=Path(".ava"))
     assert calls == []
 
 
@@ -471,7 +479,12 @@ def test_concurrent_arm_threads_init_once(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
 
-    first = threading.Thread(target=_arm_tracing, args=("http://127.0.0.1:4318",), daemon=True)
+    first = threading.Thread(
+        target=_arm_tracing,
+        args=("http://127.0.0.1:4318",),
+        kwargs={"production": False, "home": Path(".ava")},
+        daemon=True,
+    )
     first.start()
     assert entered.wait(timeout=5.0), "first arm thread must reach Traceloop.init"
 
@@ -488,7 +501,12 @@ def test_concurrent_arm_threads_init_once(monkeypatch: pytest.MonkeyPatch, tmp_p
         timeout_reported=False,
     )
 
-    second = threading.Thread(target=_arm_tracing, args=("http://127.0.0.1:4318",), daemon=True)
+    second = threading.Thread(
+        target=_arm_tracing,
+        args=("http://127.0.0.1:4318",),
+        kwargs={"production": False, "home": Path(".ava")},
+        daemon=True,
+    )
     second.start()
     release.set()
     first.join(timeout=5.0)

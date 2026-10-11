@@ -2,6 +2,7 @@
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.cli_tests" = [
     "test_cluster_instance_bind.py",
+    "test_pg_authentication.py",
     "test_maintenance_stop.py",
     "test_pg_socket_dir.py",
     "test_pgbouncer_reachable_bind_wait.py",

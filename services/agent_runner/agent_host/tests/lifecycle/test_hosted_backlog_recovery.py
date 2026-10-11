@@ -16,7 +16,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.state import AgentState
 from base.agents.incarnation import resources as resource_codec
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -26,8 +26,9 @@ from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, T
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.recovery.tests.helpers import admit as _admit
 from services.agent_runner.agent_host.recovery.tests.helpers import checkpoint_graph as _graph
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from tests.components.base.poll_until import poll_until_async
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_pending_scan_classifies_lifecycle_work_and_lease(
@@ -38,12 +39,14 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent,))
@@ -57,6 +60,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        machine=configured_machine(),
     )
 
     wakes = await host.pending_inbound_wakes(60)
@@ -74,7 +78,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
         "INSERT INTO agent_impersonations(id,agent_id,session_id,source,machine,status,"
         "ttl_seconds,expires_at) VALUES(%s,%s,1,'cli',%s,'requested',300,"
         "clock_timestamp()+interval '5 minutes')",
-        (uuid4(), agent, machine_name()),
+        (uuid4(), agent, machine_identity.name()),
     )
     db_conn.commit()
     wakes = await host.pending_inbound_wakes(60)
@@ -91,12 +95,14 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     inbound = insert_inbound(db_conn, agent, "Queued before host recovery", "user")
@@ -126,6 +132,7 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        machine=configured_machine(),
     )
     host._owner = incarnation.owner
     scheduler = TurnScheduler(host.run_turn)
@@ -172,12 +179,14 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     host = AgentHost(
@@ -188,6 +197,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        machine=configured_machine(),
     )
     if boundary == "same_owner":
         host._owner = incarnation.owner
@@ -196,7 +206,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
         "WHERE id=%s",
         (
             "terminated" if boundary == "terminated" else status,
-            "another-machine" if boundary == "foreign" else machine_name(),
+            "another-machine" if boundary == "foreign" else machine_identity.name(),
             60 if boundary == "fresh" else -60,
             agent,
         ),
@@ -221,12 +231,14 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
         config_authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity,
     )
     agent = incarnation.agent_id
     host = AgentHost(
@@ -237,6 +249,7 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        machine=configured_machine(),
     )
     with subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE

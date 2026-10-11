@@ -8,12 +8,18 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.tests.impersonation._impersonation_helpers import _active, _agent, _request
+from base.tests.impersonation.support import (
+    accept_controller,
+    create_native_owner,
+    request_controller,
+)
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.impersonation_support import attested_caller
 
 
@@ -26,7 +32,9 @@ def test_closure_restores_six_native_owners(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
+    local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import reap_impersonations
     from base.db import pool
     from base.deploy.maintenance.cohort import _classify, _RuntimeRow
@@ -35,14 +43,19 @@ def test_closure_restores_six_native_owners(
     host = uuid4()
     owners: list[int] = []
     for _ in range(6):
-        original = _agent(db_conn)
+        original = create_native_owner(db_conn, local_machine=local_machine)
         owner = RuntimeIncarnation(original.agent_id, original.generation, host)
         db_conn.execute(
             "UPDATE agents_meta SET runtime_owner=%s,runtime_kind='hosted' WHERE id=%s",
             (host, owner.agent_id),
         )
         db_conn.commit()
-        lease = _active(owner, authority=config_authority, database_gate=database_gate)
+        lease = accept_controller(
+            owner,
+            authority=config_authority,
+            database_gate=database_gate,
+            local_machine=local_machine,
+        )
         before = db_conn.execute(
             "SELECT runtime_kind,lease_expires_at FROM agents_meta WHERE id=%s",
             (owner.agent_id,),
@@ -54,9 +67,21 @@ def test_closure_restores_six_native_owners(
         )
         db_conn.commit()
         if ending == "released":
-            leases.release(database, event_bus, lease["id"], attested_caller(lease), "Complete")
             leases.release(
-                database, event_bus, lease["id"], attested_caller(lease), "Complete again"
+                database,
+                event_bus,
+                lease["id"],
+                attested_caller(lease),
+                "Complete",
+                local_machine=local_machine,
+            )
+            leases.release(
+                database,
+                event_bus,
+                lease["id"],
+                attested_caller(lease),
+                "Complete again",
+                local_machine=local_machine,
             )
         else:
             db_conn.execute(
@@ -92,12 +117,24 @@ def test_closure_preserves_guarded_rows(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=local_machine)
     lease = (
-        _request(owner, authority=config_authority, database_gate=database_gate)
+        request_controller(
+            owner,
+            authority=config_authority,
+            database_gate=database_gate,
+            local_machine=local_machine,
+        )
         if guard == "requested"
-        else _active(owner, authority=config_authority, database_gate=database_gate)
+        else accept_controller(
+            owner,
+            authority=config_authority,
+            database_gate=database_gate,
+            local_machine=local_machine,
+        )
     )
     foreign = (uuid4(), uuid4())
     if guard != "consistent":
@@ -155,10 +192,22 @@ def test_closure_restore_rolls_back_with_lease(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority, database_gate=database_gate)
-    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=local_machine)
+    lease = request_controller(
+        owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
+    )
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=local_machine,
+    )
     if lease_status == "active":
         leases.activate(database, event_bus, lease["id"], owner)
     foreign = (uuid4(), uuid4())

@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from psycopg_pool import PoolTimeout
 
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
@@ -15,6 +16,7 @@ from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.lifecycle import maintenance as receipts
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _held() -> None:
@@ -147,7 +149,11 @@ def test_resume_agents_refuses_blocking_failures_with_start_hint(
 
 
 def test_unpause_releases_undelivered_receipts(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from unittest.mock import MagicMock
 
@@ -156,7 +162,7 @@ def test_unpause_releases_undelivered_receipts(
     monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
     _hold_with(undelivered={7: "PoolTimeout"})
-    unpause_local_cluster(database, event_bus)
+    unpause_local_cluster(database, event_bus, local_machine=machine_identity)
     assert pause_owner.read().status == "resumed"
 
 

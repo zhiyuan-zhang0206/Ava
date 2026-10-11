@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from gateway.agents import router as agent_router
 from gateway.agents.creation import scoped_creation_key
@@ -17,6 +18,7 @@ from gateway.tests.extensions.test_mcp_endpoint import _tool_call, _tool_result
 from ops.agents.creation_identity import creation_request_hash
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 PATH = "/api/keyed/v1/agents"
@@ -25,7 +27,9 @@ HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterator[TestClient]:
+def client(
+    monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any, *, machine_identity: MachineIdentity
+) -> Iterator[TestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
 
@@ -33,7 +37,9 @@ def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterat
         return SpawnedAgent(id=body.agent_id)
 
     monkeypatch.setattr(agent_router, "forward_spawn_to_remote", accept)
-    with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
+    with gateway_test_client(
+        app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+    ) as value:
         yield value
 
 
@@ -108,10 +114,14 @@ def test_preexisting_mcp_canonical_hash_replays_original_agent(
     client: TestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(settings.gateway, "mcp_endpoint_enabled", True)
     # The MCP manager is built by lifespan, so re-enter with the flag enabled.
-    with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as mcp:
+    with gateway_test_client(
+        app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+    ) as mcp:
         credentials = create_mcp_client(mcp, "prior", "write").json()
         token = credentials["token"]
         original = _tool_result(

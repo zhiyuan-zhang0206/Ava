@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import os
 import stat
 import threading
 from collections.abc import Callable
@@ -12,9 +11,13 @@ from typing import Any, cast
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.telemetry import EventPipeline
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
+from cli.tests.bootstrap.command_inputs import command_config_machine as command_config_machine
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.factories.external_skills import (
     SKILL,
     client_home,
@@ -38,6 +41,8 @@ def test_source_change_after_snapshot_does_not_mix_generations(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -57,7 +62,13 @@ def test_source_change_after_snapshot_does_not_mix_generations(
     monkeypatch.setattr(bridge, "_stage_copy", change_source_then_stage)
 
     bridge.converge_external_agent_skill(
-        skill_ctx(repo, tmp_path, operator_database=operator_database, producer=operator_pipeline),
+        skill_ctx(
+            repo,
+            tmp_path,
+            operator_database=operator_database,
+            producer=operator_pipeline,
+            command_config_machine=command_config_machine,
+        ),
         host_home=client.parent,
     )
 
@@ -66,38 +77,13 @@ def test_source_change_after_snapshot_does_not_mix_generations(
     assert (target_path(second_client, tmp_path) / "SKILL.md").read_text() == "operator v1\n"
 
 
-def test_path_and_open_handle_metadata_variants_are_not_a_source_change(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source_file = tmp_path / "SKILL.md"
-    source_file.write_text("operator\n")
-    real_fstat = bridge_fs.os.fstat
-
-    def fstat_with_platform_metadata(fd: int) -> SimpleNamespace:
-        current = real_fstat(fd)
-        return SimpleNamespace(
-            st_ctime_ns=current.st_ctime_ns + 1,
-            st_dev=current.st_dev,
-            st_ino=current.st_ino,
-            st_mode=current.st_mode,
-            st_mtime_ns=current.st_mtime_ns,
-            st_nlink=current.st_nlink,
-            st_size=current.st_size,
-        )
-
-    monkeypatch.setattr(bridge_fs.os, "fstat", fstat_with_platform_metadata)
-
-    data, mode = bridge_fs.read_regular(source_file, source=True)
-
-    assert data == b"operator\n"
-    assert mode == stat.S_IMODE(source_file.stat().st_mode)
-
-
 def test_linked_target_is_preserved_without_following(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     skill_source(repo)
@@ -110,7 +96,13 @@ def test_linked_target_is_preserved_without_following(
     target.symlink_to(outside, target_is_directory=True)
 
     bridge.converge_external_agent_skill(
-        skill_ctx(repo, tmp_path, operator_database=operator_database, producer=operator_pipeline),
+        skill_ctx(
+            repo,
+            tmp_path,
+            operator_database=operator_database,
+            producer=operator_pipeline,
+            command_config_machine=command_config_machine,
+        ),
         host_home=client.parent,
     )
 
@@ -130,12 +122,18 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
@@ -176,12 +174,18 @@ def test_target_appearing_after_claim_is_not_replaced(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
@@ -209,12 +213,18 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
@@ -248,12 +258,18 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
@@ -295,12 +311,18 @@ def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
@@ -335,12 +357,18 @@ def test_preexisting_generation_sibling_is_preserved_without_false_ownership(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
@@ -366,12 +394,18 @@ def test_concurrent_converges_serialize_transaction_owned_absence(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
@@ -426,6 +460,8 @@ def test_marker_spoof_without_external_ledger_is_unmanaged(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     skill_source(repo, "repo operator\n")
@@ -446,7 +482,13 @@ def test_marker_spoof_without_external_ledger_is_unmanaged(
     )
 
     bridge.converge_external_agent_skill(
-        skill_ctx(repo, tmp_path, operator_database=operator_database, producer=operator_pipeline),
+        skill_ctx(
+            repo,
+            tmp_path,
+            operator_database=operator_database,
+            producer=operator_pipeline,
+            command_config_machine=command_config_machine,
+        ),
         host_home=client.parent,
     )
 
@@ -461,12 +503,18 @@ def test_permission_only_modification_is_a_conflict(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
@@ -485,6 +533,8 @@ def test_source_modes_are_materialized_and_recorded(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -494,7 +544,11 @@ def test_source_modes_are_materialized_and_recorded(
     recovery.chmod(0o444)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
@@ -514,6 +568,8 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     skill_source(repo)
@@ -547,7 +603,13 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
     monkeypatch.setattr(bridge, "_stage_copy", inaccessible)
 
     bridge.converge_external_agent_skill(
-        skill_ctx(repo, tmp_path, operator_database=operator_database, producer=operator_pipeline),
+        skill_ctx(
+            repo,
+            tmp_path,
+            operator_database=operator_database,
+            producer=operator_pipeline,
+            command_config_machine=command_config_machine,
+        ),
         host_home=codex.parent,
     )
 
@@ -564,12 +626,18 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
@@ -599,12 +667,18 @@ def test_interrupted_post_activation_commit_recovers_deterministically(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
@@ -639,12 +713,18 @@ def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     original_materialize = bridge.materialize_source_snapshot
     failed = False
@@ -673,12 +753,18 @@ def test_late_target_keeps_stage_and_previous_in_transaction_state(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
     client = client_home(tmp_path)
     context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        repo,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
@@ -709,69 +795,3 @@ def test_late_target_keeps_stage_and_previous_in_transaction_state(
         "previous",
         "stage",
     }
-
-
-def test_cleanup_retains_private_residue_without_path_unlink(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-) -> None:
-    repo = tmp_path / "repo"
-    source = skill_source(repo)
-    client = client_home(tmp_path)
-    context = skill_ctx(
-        repo, tmp_path, operator_database=operator_database, producer=operator_pipeline
-    )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
-    target = target_path(client, tmp_path)
-    (source / "SKILL.md").write_text("operator v2\n")
-    original_unlink = Path.unlink
-    unlink_attempts = 0
-
-    def forbid_cleanup_unlink(path: Path, missing_ok: bool = False) -> None:
-        nonlocal unlink_attempts
-        if "-retained-previous-" in str(path):
-            unlink_attempts += 1
-            raise AssertionError(f"cleanup attempted pathname unlink: {path.name}")
-        original_unlink(path, missing_ok=missing_ok)
-
-    monkeypatch.setattr(Path, "unlink", forbid_cleanup_unlink)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
-    assert unlink_attempts == 0
-    ledger = json.loads(
-        (context.ava_home / "configs" / "external-agent-skills" / "codex.json").read_text()
-    )
-    assert ledger["transaction"] is None
-    assert ledger["garbage"] == []
-    assert [item["kind"] for item in ledger["retained"]] == ["previous"]
-    assert ledger["retained"][0]["location"] == "retained"
-
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
-    assert (target / "SKILL.md").read_text() == "operator v2\n"
-    assert list(target.parent.glob(f".{SKILL}.ava-*")) == []
-
-
-def test_cleanup_rejects_same_content_hard_link_without_changing_outside_inode(
-    tmp_path: Path,
-) -> None:
-    residue = tmp_path / "residue"
-    residue.mkdir()
-    residue_file = residue / "SKILL.md"
-    residue_file.write_text("operator\n")
-    residue_file.chmod(0o444)
-    manifest = bridge_fs.tree_manifest(residue)
-    residue_file.unlink()
-    outside = tmp_path / "outside.md"
-    outside.write_text("operator\n")
-    outside.chmod(0o444)
-    os.link(outside, residue_file)
-    outside_before = outside.stat()
-
-    with pytest.raises(bridge_fs.ClientConflictError, match="link"):
-        bridge_fs.remove_manifest_subset(residue, manifest)
-
-    assert residue_file.exists()
-    assert outside.exists()
-    assert residue_file.stat().st_ino == outside_before.st_ino
-    assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)

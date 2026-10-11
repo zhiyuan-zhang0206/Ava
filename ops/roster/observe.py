@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from base.host.proc import process_alive
 from ops.roster.service_spec import ServiceSpec
@@ -76,12 +76,12 @@ def _probe_kind_target(spec: ServiceSpec) -> tuple[str, str]:
     return "none", ""
 
 
-def probe_set(roles: MachineRoles) -> tuple[ProbeView, ...]:
+def probe_set(roles: MachineRoles, *, machine: MachineIdentity) -> tuple[ProbeView, ...]:
     """The scheduling/probe view for a host's capabilities — the set of services
     Status watches, each with how it is probed and its healthcheck module. Derived from
     the Spec roster, so it can never drift from what ``ava start`` launches."""
     views: list[ProbeView] = []
-    for spec, gate_reason in services_for_capabilities_annotated(roles):
+    for spec, gate_reason in services_for_capabilities_annotated(roles, machine=machine):
         kind, target = _probe_kind_target(spec)
         views.append(
             ProbeView(
@@ -166,14 +166,14 @@ def _tcp_ok(port: int) -> bool:
         return False
 
 
-def observe_services(roles: MachineRoles) -> tuple[ServiceStatus, ...]:
+def observe_services(roles: MachineRoles, *, machine: MachineIdentity) -> tuple[ServiceStatus, ...]:
     """Probe every service in a host's roster and return its observed liveness.
 
     A gated-out service is not probed — it reports ``alive=None`` with its
     ``gate_reason`` — so a service ``ava start`` chose not to launch reads as
     "n/a: <reason>" instead of a scary ``✗``."""
     out: list[ServiceStatus] = []
-    for spec, gate_reason in services_for_capabilities_annotated(roles):
+    for spec, gate_reason in services_for_capabilities_annotated(roles, machine=machine):
         if gate_reason is not None:
             out.append(
                 ServiceStatus(

@@ -25,6 +25,7 @@ from datetime import datetime
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import postgres as owned_postgres
+from base.cluster.machine import MachineIdentity
 from base.events.live.bus import EventBus
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.sessions.pty import client, closure
@@ -218,6 +219,7 @@ def _record_close_notices(
     *,
     direct_db: bool,
     database_factory: DatabaseFactory,
+    machine_name: str,
 ) -> None:
     """Write one closure notice per closed busy session to the database (issue #2044).
 
@@ -231,7 +233,11 @@ def _record_close_notices(
     stop would not restore the resources it closes.
     """
     notices = pty_close_notices.notices_for(
-        closed, reason=notice.reason, operation=notice.operation, acquired_at=notice.acquired_at
+        closed,
+        reason=notice.reason,
+        operation=notice.operation,
+        acquired_at=notice.acquired_at,
+        local_machine=machine_name,
     )
     for unwritten, exc in pty_close_notices.write_notices(
         database_factory(), EventBus.from_settings(), notices, direct=direct_db
@@ -252,6 +258,7 @@ def close_terminals(
     *,
     direct_db: bool,
     database_factory: DatabaseFactory,
+    local_machine: MachineIdentity,
 ) -> None:
     """Close this unit's terminals at `ava stop`: HUP/TERM, a bounded grace, then SIGKILL.
 
@@ -280,6 +287,7 @@ def close_terminals(
         _Notice(operation, acquired_at, reason),
         direct_db=direct_db,
         database_factory=database_factory,
+        machine_name=local_machine.name(),
     )
     _report_terminal_job_leftovers(outcome)
     if any(s.role == "terminal" and live_identities([s.process]) for s in outcome.survivors):

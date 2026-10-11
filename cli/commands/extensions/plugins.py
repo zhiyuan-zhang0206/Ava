@@ -35,6 +35,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 from cli.commands.extensions._claude_code_plugin import Materialized
 from cli.commands.extensions._manifest_gate import gate_refuses
 
@@ -148,6 +149,7 @@ def _install_bare_skill(
     *,
     accept_risk: bool,
     database_factory: DatabaseFactory,
+    machine: MachineIdentity,
 ) -> int:
     """Install a cloned bare-skill package into the load dir and register it.
 
@@ -164,6 +166,7 @@ def _install_bare_skill(
             ref=ref,
             accept_risk=accept_risk,
             database_factory=database_factory,
+            machine=machine,
         )
     except SkillScanRefused as e:
         return _report_refusal(e.report)
@@ -305,6 +308,7 @@ def cmd_plugins_install(
     *,
     accept_risk: bool = False,
     database_factory: DatabaseFactory,
+    machine: MachineIdentity,
 ) -> int:
     """`ava plugins install <url> [--path SUBDIR] [--ref REF] [--accept-risk]` —
     install an external package.
@@ -348,6 +352,7 @@ def cmd_plugins_install(
                 ref,
                 accept_risk=accept_risk,
                 database_factory=database_factory,
+                machine=machine,
             )
 
         if _claude_code_plugin.is_claude_code_plugin(pkg_dir):

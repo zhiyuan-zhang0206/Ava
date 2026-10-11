@@ -17,6 +17,8 @@ from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.clock import Clock, clock_config_from_boot
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from tests.fixtures.configuration import snapshot_process_config
@@ -41,6 +43,7 @@ def pin_agent(
     incarnation: RuntimeIncarnation | None = None,
     clock_factory: Callable[[], Clock] | None = None,
     clients: ClientSet | None = None,
+    machine: MachineIdentity | None = None,
 ) -> None:
     """Bind a context acting as `agent_id` for the rest of this test; the autouse fixture below
     puts the previous one back."""
@@ -48,6 +51,7 @@ def pin_agent(
     ava.context = AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=owns_loop, actor=actor, lease=lease),
         original_incarnation=incarnation,
+        machine=machine if machine is not None else (None if bound is None else bound.machine),
         # The identity changes, the connections stay: a test's `use_client` or fake SQL slot
         # entered before it pins an agent keeps applying.
         clients=clients if clients is not None else (bound.clients if bound else process_clients()),
@@ -73,10 +77,12 @@ def exec_context(
 ) -> AvaContext:
     """The host-side context of a turn that runs as `agent_id`: what an exec request carries."""
     config = snapshot_process_config()
+    machine = machine_from_boot(config)
     return AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True, actor=actor),
         original_incarnation=incarnation,
+        machine=machine,
         hosted_resources=resources,
-        clients=process_clients(config=config),
+        clients=process_clients(config=config, machine=machine),
         clock_factory=lambda: Clock(clock_config_from_boot(config)),
     )

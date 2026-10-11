@@ -26,7 +26,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.lifecycle.force_host_setup import (
     host_wakes_need_no_provider_credentials,
 )
@@ -49,7 +49,7 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
@@ -98,7 +98,7 @@ async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
@@ -166,7 +166,7 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
@@ -241,7 +241,7 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
@@ -323,7 +323,7 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
@@ -374,7 +374,7 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,

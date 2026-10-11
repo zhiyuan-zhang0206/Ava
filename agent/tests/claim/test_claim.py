@@ -31,14 +31,21 @@ from agent.graph import claim_node
 from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
-from agent.tests.claim.claim_status_support import _compact_tail
+from agent.tests.claim.claim_status_support import compact_tail
 from agent.tests.claim.claim_status_support import running_agent as running_agent
-from agent.tests.claim.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
+from agent.tests.claim.claim_support import (
+    _fake_llm,
+    insert_inbound_kind,
+    make_runtime,
+    thread_config,
+)
 from base.agents.context import AvaContext
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ExtensionRegistry
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 # Almost all claim tests are short-path dispatch: the inbound is INSERTed before
@@ -63,18 +70,22 @@ async def test_claim_resurrect_kind_appends_marker_and_continues(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """resurrect inbound (delivered to the new process by resurrect_agent) → claim appends
     lifecycle marker 'You have been resurrected by {source}' + goto BEFORE_LLM."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
+    insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -96,18 +107,22 @@ async def test_claim_resurrect_batch_appends_only_latest_marker(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Repeated failed recoveries are consumed together but render one marker."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    first = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="system:retry")
-    latest = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
+    first = insert_inbound_kind(db_conn, tid, "", "resurrect", source="system:retry")
+    latest = insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -135,22 +150,26 @@ async def test_unowned_resurrect_notification_cannot_cancel_pending_terminate(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """A newer notification is not admission or proof that prior intent completed."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     # id == insertion order: terminate older than the resurrect that follows it
-    _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
-    _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
-    _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
+    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
     with pytest.raises(RuntimeError, match="lifecycle claim requires an admitted"):
         await claim_node(
             AgentState(messages=[SystemMessage(content="sys")]),
-            _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-            _config(
+            make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+            thread_config(
                 tid,
             ),
         )
@@ -167,16 +186,17 @@ async def test_claim_resurrect_then_terminate_still_dies(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """An owned terminate dispatches alone; an older notification is not lost."""
     tid = running_agent()
-    notice = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    notice = insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
+    insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -197,6 +217,7 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Auto-resurrect-on-compact path: a /compact delivered to a terminated agent
     inserts the compact_request then a resurrect (newer id). The resurrect wins the
@@ -205,10 +226,13 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
     resurrect marker is appended after the summary. Without auto-resurrect the
     compact_request would sit pending with no live process to claim it."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "", "compact_request", source="user")
-    _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
+    insert_inbound_kind(db_conn, tid, "", "compact_request", source="user")
+    insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
     state = AgentState(
         messages=[
@@ -220,8 +244,8 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
     fake_llm = _fake_llm("LLM-generated summary")
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
-        _config(
+        make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
+        thread_config(
             tid,
         ),
     )
@@ -229,7 +253,7 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
     assert cmd.goto == "init_context"
     assert cmd.update["context_reset"].resume == "before_llm"  # type: ignore[index]
     fake_llm.bind_tools.return_value.ainvoke.assert_called_once()  # compact ran
-    msgs = _compact_tail(cmd.update)
+    msgs = compact_tail(cmd.update)
     assert msgs[0].content == compose_summary_message("LLM-generated summary")  # pyright: ignore[reportUnknownMemberType]
     # resurrect marker appended after the summary — the revive still wakes the agent
     contents = [m.content for m in msgs if isinstance(m.content, str)]  # pyright: ignore[reportUnknownMemberType]
@@ -243,6 +267,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """fork inbound (delivered to the new process by spawn_agent on fork) → claim appends
     identity marker: contains the fork source from source (agent:M) + new agent's own id (N) +
@@ -251,9 +276,12 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     the end, then the `on_fork` notes (fork_notes stubbed here — its membership is pinned in
     test_fork_notes.py, issue #1320)."""
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
+    insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
     monkeypatch = pytest.MonkeyPatch()
 
     def fork_notes(_extensions: ExtensionRegistry, _ctx: AvaContext) -> list[HumanMessage]:
@@ -263,8 +291,8 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     try:
         cmd = await claim_node(
             AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="inherited")]),
-            _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-            _config(
+            make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+            thread_config(
                 tid,
             ),
         )
@@ -301,6 +329,7 @@ async def test_claim_fork_strips_inherited_source_notes(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """The fork strip (issue #1320): inherited head notes that name the SOURCE —
     its agent id, its per-agent memory, its preloaded skills — are removed, and
@@ -309,9 +338,12 @@ async def test_claim_fork_strips_inherited_source_notes(
     from langchain_core.messages import RemoveMessage
 
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
+    insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
 
     def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:
         return HumanMessage(
@@ -337,8 +369,8 @@ async def test_claim_fork_strips_inherited_source_notes(
     try:
         cmd = await claim_node(
             AgentState(messages=list(inherited)),
-            _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-            _config(
+            make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+            thread_config(
                 tid,
             ),
         )

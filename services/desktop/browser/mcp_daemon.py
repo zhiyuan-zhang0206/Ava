@@ -68,7 +68,7 @@ from mcp import ClientSession, types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
-from base.cluster.machine import validate_machine_name
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -77,7 +77,7 @@ from base.log import logger
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import chrome_mcp_socket
+from base.paths import ava_home, chrome_mcp_socket
 from base.telemetry import build_pipeline
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.gateway_session import (
@@ -751,17 +751,19 @@ def main() -> None:
     image = LoadedCommit.capture()
     config = ConfigBoot()
     config.boot()
+    machine = machine_from_boot(config)
+    process_home = ava_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="browser-mcp")
 
     def database() -> Database:
-        return Database(db_config_from_boot(config), gate=gate)
+        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
 
-    pipeline = build_pipeline(database=database)
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
         name="browser-mcp",
         producer=lambda: pipeline,
-        machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+        machine_reader=machine.name,
         image=image,
     )
     asyncio.run(

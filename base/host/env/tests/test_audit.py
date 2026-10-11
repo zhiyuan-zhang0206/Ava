@@ -13,10 +13,12 @@ from typing import cast
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.host.env import audit
 from base.host.env import runtime_config as runtime_config
 from base.host.env.audit import check_env_integrity, last_env_write_record, record_env_write
 from base.telemetry import Event
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
@@ -69,11 +71,13 @@ def test_record_env_write_redacts_command_arguments(
     assert "cluster-secret-value" not in (audit_home / ".env.audit.jsonl").read_text()
 
 
-def test_audited_runtime_write_leaves_integrity_healthy(audit_home: Path) -> None:
+def test_audited_runtime_write_leaves_integrity_healthy(
+    audit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     """Removing the post-write record must make the guard report a mismatch."""
     runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
 
-    assert check_env_integrity() is None
+    assert check_env_integrity(machine_reader=machine_identity.name) is None
 
 
 def test_audited_runtime_write_records_env_aliases(audit_home: Path) -> None:
@@ -86,83 +90,95 @@ def test_audited_runtime_write_records_env_aliases(audit_home: Path) -> None:
     assert record["keys_written"] == ["AVA_MODEL"]
 
 
-def test_armed_guard_rebuilds_deleted_audit_history(audit_home: Path) -> None:
+def test_armed_guard_rebuilds_deleted_audit_history(
+    audit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     """Deleting history after an official write must be reported and repaired."""
     runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
     (audit_home / ".env.audit.jsonl").unlink()
 
-    detection = check_env_integrity()
+    detection = check_env_integrity(machine_reader=machine_identity.name)
 
     assert detection is not None
     assert detection["kind"] == "unauthorized"
     assert detection["reason"] == "audit_history_missing"
     assert last_env_write_record() == detection
-    assert check_env_integrity() is None
+    assert check_env_integrity(machine_reader=machine_identity.name) is None
 
 
-def test_armed_guard_rebuilds_empty_audit_history(audit_home: Path) -> None:
+def test_armed_guard_rebuilds_empty_audit_history(
+    audit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     """An empty history must not recreate the fresh-home unarmed branch."""
     runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
     (audit_home / ".env.audit.jsonl").write_text("")
 
-    detection = check_env_integrity()
+    detection = check_env_integrity(machine_reader=machine_identity.name)
 
     assert detection is not None
     assert detection["reason"] == "audit_history_empty"
     assert last_env_write_record() == detection
-    assert check_env_integrity() is None
+    assert check_env_integrity(machine_reader=machine_identity.name) is None
 
 
-def test_armed_guard_rebuilds_corrupt_audit_history(audit_home: Path) -> None:
+def test_armed_guard_rebuilds_corrupt_audit_history(
+    audit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     """A malformed final JSONL line must be reported and replaced safely."""
     runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
     (audit_home / ".env.audit.jsonl").write_text("not-json\n")
 
-    detection = check_env_integrity()
+    detection = check_env_integrity(machine_reader=machine_identity.name)
 
     assert detection is not None
     assert detection["reason"] == "audit_history_corrupt"
     assert last_env_write_record() == detection
-    assert check_env_integrity() is None
+    assert check_env_integrity(machine_reader=machine_identity.name) is None
 
 
-def test_armed_guard_rebuilds_history_without_a_digest(audit_home: Path) -> None:
+def test_armed_guard_rebuilds_history_without_a_digest(
+    audit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     """A record without its digest must not become an implicit unarmed state."""
     runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
     (audit_home / ".env.audit.jsonl").write_text('{"site":"test"}\n')
 
-    detection = check_env_integrity()
+    detection = check_env_integrity(machine_reader=machine_identity.name)
 
     assert detection is not None
     assert detection["reason"] == "audit_history_missing_digest"
     assert last_env_write_record() == detection
-    assert check_env_integrity() is None
+    assert check_env_integrity(machine_reader=machine_identity.name) is None
 
 
-def test_integrity_guard_records_one_out_of_band_write(audit_home: Path) -> None:
+def test_integrity_guard_records_one_out_of_band_write(
+    audit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     """Removing anomaly recording or its digest self-rate-limit breaks this test."""
     runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
     env_path = audit_home / ".env"
     env_path.write_text(env_path.read_text() + "AVA_EXEC_TIMEOUT_SECONDS=12\n")
 
-    detection = check_env_integrity()
+    detection = check_env_integrity(machine_reader=machine_identity.name)
 
     assert detection is not None
     assert detection["kind"] == "unauthorized"
     assert detection["last_official_site"] == "test"
     assert detection["keys"] == ["AVA_EXEC_TIMEOUT_SECONDS"]
-    assert check_env_integrity() is None
+    assert check_env_integrity(machine_reader=machine_identity.name) is None
     records = [
         json.loads(line) for line in (audit_home / ".env.audit.jsonl").read_text().splitlines()
     ]
     assert records[-1]["kind"] == "unauthorized"
 
 
-def test_integrity_guard_is_unarmed_without_an_audit_file(audit_home: Path) -> None:
+def test_integrity_guard_is_unarmed_without_an_audit_file(
+    audit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     """Creating an audit record for a fresh home must make this test fail."""
     (audit_home / ".env").write_text("AVA_MODEL=test-model\n")
 
-    assert check_env_integrity() is None
+    assert check_env_integrity(machine_reader=machine_identity.name) is None
     assert not (audit_home / ".env.audit.jsonl").exists()
 
 
@@ -263,7 +279,9 @@ def test_write_fields_records_old_to_new_values(audit_home: Path) -> None:
     ]
 
 
-def test_noop_upsert_leaves_no_record_and_a_real_change_still_records(audit_home: Path) -> None:
+def test_noop_upsert_leaves_no_record_and_a_real_change_still_records(
+    audit_home: Path, *, machine_identity: MachineIdentity
+) -> None:
     """A repeated byte-identical upsert must not manufacture an audit record.
 
     This is the converge noise of task #3637: converge presents the same app
@@ -285,7 +303,9 @@ def test_noop_upsert_leaves_no_record_and_a_real_change_still_records(audit_home
 
     assert audit_path.read_text().splitlines() == records_after_change
     assert env_path.read_text() == "AVA_MODEL=second-model\n"
-    assert check_env_integrity() is None  # the skip left the recorded digest standing
+    assert (
+        check_env_integrity(machine_reader=machine_identity.name) is None
+    )  # the skip left the recorded digest standing
 
     upsert_env(env_path, {"AVA_MODEL": "first-model"}, audit_site="test")
 
@@ -301,7 +321,7 @@ def test_noop_upsert_leaves_no_record_and_a_real_change_still_records(audit_home
             "new": "first-model",
         }
     ]
-    assert check_env_integrity() is None
+    assert check_env_integrity(machine_reader=machine_identity.name) is None
 
 
 def test_noop_upsert_does_not_arm_a_fresh_home(audit_home: Path) -> None:

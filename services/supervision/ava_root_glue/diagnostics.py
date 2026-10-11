@@ -17,7 +17,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 
 from base.agents.context.clients import ClientSet
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
@@ -161,6 +161,7 @@ class RootHealthRounds:
         *,
         clients: ClientSet,
         image: LoadedCommit,
+        machine: MachineIdentity,
         interval_s: float = 60.0,
         tasks: asyncio.TaskGroup | None = None,
     ) -> None:
@@ -172,6 +173,7 @@ class RootHealthRounds:
         self._diagnostics = diagnostics
         self._clients = clients
         self._image = image
+        self._machine = machine
         self._interval_s = interval_s
         self._task: asyncio.Task[None] | None = None
         self._tasks = tasks
@@ -215,7 +217,7 @@ class RootHealthRounds:
             init_gateway_process(
                 name="ava-root",
                 producer=self._clients.event_pipeline,
-                machine_reader=machine_name,
+                machine_reader=self._machine.name,
                 image=self._image,
             )
         except BaseException as primary:

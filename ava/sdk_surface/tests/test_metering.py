@@ -29,6 +29,7 @@ from base.agents.context.identity import ExternalLease
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.agents.sdk.tally import SdkCallTally
+from base.cluster.machine import MachineIdentity
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
@@ -67,6 +68,7 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, obje
         sampling_owner: call_policy.SamplingPolicyOwner,
         sampling_policy: call_policy.SamplingPolicy | None = None,
         producer: Callable[[], Any] | None = None,
+        machine_reader: Callable[[], str] | None = None,
     ) -> None:
         assert sampling_policy is not None
         calls.append((fn, dict(detail or {}), duration))
@@ -207,16 +209,25 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
     def _raise() -> str:
         raise base.cluster.machine.MachineNameMissing("machine name not set")
 
-    monkeypatch.setattr(base.cluster.machine, "machine_name", _raise)
-    # Cold SDK installation owns delivery environment changes in this test scope.
-    with patch.dict(os.environ):
-        # sanity: normal attribute access really does raise under this condition
-        with pytest.raises(base.cluster.machine.MachineNameMissing):
-            _ = ava.self.MACHINE_SPEC
+    machine = MachineIdentity(
+        name=_raise, role=frozenset, host=lambda: "", description=lambda: None
+    )
+    prior = ava.unbind_context()
+    ava.bind_context(AvaContext(machine=machine))
+    try:
+        # Cold SDK installation owns delivery environment changes in this test scope.
+        with patch.dict(os.environ):
+            # sanity: normal attribute access really does raise under this condition
+            with pytest.raises(base.cluster.machine.MachineNameMissing):
+                _ = ava.self.MACHINE_SPEC
 
-        fqs = {fq for _parent, _attr, fq in metering._instrument_targets()}
-        assert "self.compact" in fqs  # real functions still enumerated
-        assert "self.MACHINE_SPEC" not in fqs  # dynamic constant skipped, not evaluated
+            fqs = {fq for _parent, _attr, fq in metering._instrument_targets()}
+            assert "self.compact" in fqs  # real functions still enumerated
+            assert "self.MACHINE_SPEC" not in fqs  # dynamic constant skipped, not evaluated
+    finally:
+        ava.unbind_context()
+        if prior is not None:
+            ava.bind_context(prior)
 
 
 # ── recorder wrapping (agent side; call / emit logic is in test_sdk_telemetry) ───
@@ -599,13 +610,19 @@ async def test_awaited_calls_retain_their_entry_identity(
         entered.set()
         await release.wait()
 
-    pin_agent(41)
+    first_machine = MachineIdentity(
+        name=lambda: "first", role=frozenset, host=lambda: "", description=lambda: None
+    )
+    second_machine = MachineIdentity(
+        name=lambda: "second", role=frozenset, host=lambda: "", description=lambda: None
+    )
+    pin_agent(41, machine=first_machine)
     first_tally = SdkCallTally()
     ava.bind_context(replace(ava.context, sdk_calls=first_tally))
     first = asyncio.create_task(metering._make_recorder(held, "probe.held", sampling_owner)())
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
-        pin_agent(42)
+        pin_agent(42, machine=second_machine)
         second_tally = SdkCallTally()
         ava.bind_context(replace(ava.context, sdk_calls=second_tally))
         metering._make_recorder(lambda: None, "probe.next", sampling_owner)()
@@ -614,6 +631,7 @@ async def test_awaited_calls_retain_their_entry_identity(
     finally:
         release.set()
         await first
+    assert [row["machine_reader"]() for row in rows] == ["second", "first"]
     assert first_tally.snapshot() == {"probe.held": 1}
     assert second_tally.snapshot() == {"probe.next": 1}
     assert [(row["attributes"]["fn"], row["agent_id"], row["source"]) for row in rows] == [

@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from base.cluster.machine import MachineRoles
 from base.db import Database
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
@@ -70,7 +71,8 @@ class _TTYStdin:
         return True
 
 
-def _one_query(limit: int) -> list[str]:
+def _one_query(limit: int, *, roles: MachineRoles) -> list[str]:
+    del roles
     return [f"query-{limit}"]
 
 
@@ -245,7 +247,7 @@ def test_empty_query_pool_returns_before_capture_or_database(
     monkeypatch.setattr(LoadedCommit, "capture", capture)
     monkeypatch.setattr(reconcile, "Database", create)
 
-    def no_queries(limit: int) -> list[str]:
+    def no_queries(limit: int, *, roles: MachineRoles) -> list[str]:
         return []
 
     monkeypatch.setattr(reconcile, "_sample_queries", no_queries)

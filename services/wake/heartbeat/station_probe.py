@@ -36,14 +36,15 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
-from base.cluster.machine import validate_machine_name
-from base.config import settings
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.log import logger
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import ava_home
 from base.telemetry.emitter import build_pipeline
 from base.telemetry.station_endpoint import StationTarget as _StationTarget
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
@@ -152,17 +153,21 @@ def _station_answers(url: str) -> bool:
 
 def main() -> None:
     image = LoadedCommit.capture()
+    machine_config = ConfigBoot()
+    machine_config.boot()
+    machine = machine_from_boot(machine_config)
+    process_home = ava_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="station")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate)
+        return Database.from_settings(gate=gate, local_host=machine.host)
 
-    pipeline = build_pipeline(database=database)
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
         name="station",
         producer=lambda: pipeline,
-        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        machine_reader=machine.name,
         image=image,
     )
     target = resolve_target(database=database)

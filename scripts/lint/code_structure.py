@@ -22,24 +22,12 @@ cached); and LangGraph / Pydantic introspect type hints at runtime via
 import, or an `import torch`-class heavy dependency on a path that does not use
 the type — go in `_TYPE_CHECKING_ALLOWED` with a one-line reason.
 
-### Rule 3: `machine_role()` allowlist
+### Rule 3: retired ambient machine-role reader
 
-`machine_role()` answers "what does this host serve" and must never be used to
-decide *where an operation runs* — the gateway is the single routing point, and
-every CLI routes to it (user ruling 2026-08-21, issue #216). The line is not
-*where* the function is called but *what the answer is used for*:
-
-- **legitimate** — "what do I serve?": start the right daemons, advertise
-  honestly in register_self, audit this host, guard a capability.
-- **illegitimate** — "should I do this myself, or ask the gateway?": a module
-  that implements an operation must not branch on role.
-
-So instead of banning the call (legitimate uses exist) we allowlist it:
-`_MACHINE_ROLE_ALLOWED` enumerates the modules that may call `machine_role()`,
-each with a one-line reason naming the question it answers. A call anywhere
-else fails the run; an allowlisted module that stops calling it also fails
-(stale-entry alert, the `unmatched_ignore_imports_alerting` shape from #176)
-so the list cannot rot into a permission wall.
+Machine capabilities belong to an explicit MachineIdentity supplied by the
+composition root. The retired machine_role() call is rejected in every governed
+production module; there is no per-file allowance. Capability guards read the
+owner's role() and retain the single gateway routing contract (issue #216).
 
 ### Rule 4: package doors (locality)
 
@@ -148,24 +136,6 @@ _DIRECTORY_CEILING = 20
 _SCAN_DIRS = lint_common.FRAMEWORK_DIRS
 _AST_DIRS = ambient_state.SCOPE  # _SCAN_DIRS plus schedules/, which only Rule 9 governs
 _STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts")
-
-# Rule 3 allowlist — modules that may call machine_role(), each with the
-# question the call answers ("what do I serve" vs "where does this run").
-# A call site not listed here fails the lint; a listed module whose calls
-# disappear fails too (stale entry). See the module docstring.
-_MACHINE_ROLE_ALLOWED: dict[str, str] = {
-    "cli/commands/lifecycle/_temporary_stop.py": "Which selected local services and data plane does this unit own during explicit stop? No execution is routed elsewhere.",
-    "ops/agent_pause/__init__.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
-    "base/cluster/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
-    "base/telemetry/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",
-    "services/supervision/healthchecks/otel_collector.py": "does this unit own the LGTM collector healthcheck, preserving pure-runner relay behavior (what do I serve)",
-    "cli/commands/lifecycle/start.py": "which daemons do I bring up (what do I serve)",
-    "cli/commands/_repo.py": "resolve this host's capability set, None when unset, for stop/status/converge (what do I serve)",
-    "cli/commands/observability/trace.py": "which recovery ingress does this host serve: gateway-local Tempo or a pure-runner relay target (what do I serve)",
-    "services/agent_runner/agent_ops/boot.py": "what do I advertise in register_self (what do I serve)",
-    "ops/inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
-    "gateway/routers/configuration/runtime.py": "for the gateway itself, local role is authoritative (what do I serve)",
-}
 
 
 def _machine_role_calls(tree: ast.AST) -> list[int]:
@@ -284,31 +254,15 @@ def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> lis
                 )
             )
 
-    role_calls = _machine_role_calls(tree)
-    if rel_path in _MACHINE_ROLE_ALLOWED:
-        if not role_calls:
-            out.append(
-                (
-                    1,
-                    f"stale machine_role() allowlist entry — {rel_path} no longer calls "
-                    "machine_role(); remove it from _MACHINE_ROLE_ALLOWED in "
-                    "scripts/lint/code_structure.py (the list must match reality, "
-                    "issue #216).",
-                )
+    for lineno in _machine_role_calls(tree):
+        out.append(
+            (
+                lineno,
+                "machine_role() is retired; pass an explicit MachineIdentity owner "
+                "and read its role(). The gateway remains the single routing point "
+                "(issue #216).",
             )
-    elif role_calls:
-        for lineno in role_calls:
-            out.append(
-                (
-                    lineno,
-                    "machine_role() may only be called from modules in "
-                    "_MACHINE_ROLE_ALLOWED (scripts/lint/code_structure.py) — the "
-                    "gateway is the single routing point and no operation may branch "
-                    "on role (user ruling 2026-08-21, issue #216). Add the module "
-                    "deliberately with the question the call answers, or route the "
-                    "operation to the gateway instead.",
-                )
-            )
+        )
 
     out.extend(locality.allowlist_errors(tree, rel_path, _SCAN_DIRS))
     return out

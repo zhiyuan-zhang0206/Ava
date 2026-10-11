@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
+from base.cluster.machine import MachineIdentity
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from tests.fixtures.configuration import snapshot_process_config
 
@@ -30,7 +31,7 @@ SPAWN_PATH = "/api/keyed/v1/agents"
 
 @contextmanager
 def gateway_test_process(
-    application: FastAPI, *, process: GatewayProcess | None = None
+    application: FastAPI, *, machine: MachineIdentity, process: GatewayProcess | None = None
 ) -> Generator[GatewayProcess]:
     """Own one explicit entry, or borrow it across overlapping app lifespans.
 
@@ -41,7 +42,9 @@ def gateway_test_process(
         process = getattr(application.state, "gateway_process_input", None)
     owned = process is None
     if owned:
-        process = GatewayProcess(config=snapshot_process_config(), image=LOADED_IMAGE)
+        process = GatewayProcess(
+            config=snapshot_process_config(), image=LOADED_IMAGE, machine=machine
+        )
     assert process is not None
     with (
         process.lifetime() if owned else nullcontext(process),
@@ -57,7 +60,11 @@ def gateway_test_process(
 
 @contextmanager
 def gateway_test_client(
-    application: FastAPI, *, process: GatewayProcess | None = None, **kwargs: Any
+    application: FastAPI,
+    *,
+    machine: MachineIdentity,
+    process: GatewayProcess | None = None,
+    **kwargs: Any,
 ) -> Generator[TestClient]:
     """Run an assembled Gateway with this test's current explicit entry inputs.
 
@@ -67,7 +74,7 @@ def gateway_test_client(
     default (`tests.fixtures.unit.gateway_auth`).
     """
     with (
-        gateway_test_process(application, process=process),
+        gateway_test_process(application, machine=machine, process=process),
         TestClient(application, **kwargs) as client,
     ):
         yield client

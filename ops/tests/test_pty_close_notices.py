@@ -19,6 +19,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -26,6 +27,7 @@ from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.telemetry import Event
 from ops import pty_close_notices as notices
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _WHEN = datetime(2026, 9, 10, 1, 2, 3, tzinfo=UTC)
 
@@ -348,12 +350,18 @@ def _ended(agent_id: int, session_id: int = 11, starttime: int = 4242) -> closur
 
 
 def test_a_crash_notice_names_the_crash_and_no_operation(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A sweep has no stop and no maintenance hold: the notice says the service ended
     uncleanly and carries neither an operation nor a hold time."""
     aid = _agent(db_conn, "running")
-    (built,) = notices.notices_for([_ended(aid)], reason=notices.CRASH_REASON)
+    (built,) = notices.notices_for(
+        [_ended(aid)], reason=notices.CRASH_REASON, local_machine=machine_identity.name()
+    )
 
     assert notices.write_notices(database, event_bus, [built], direct=False) == []
 
@@ -365,13 +373,17 @@ def test_a_crash_notice_names_the_crash_and_no_operation(
     assert record["shell_birth"] == "starttime:4242" and record["shell_pid"] == 9090
 
 
-def test_notices_for_skips_a_session_that_is_not_an_agent_shell() -> None:
+def test_notices_for_skips_a_session_that_is_not_an_agent_shell(
+    *, machine_identity: MachineIdentity
+) -> None:
     sessions = [
         closure.ClosedSession("ava-gateway", OwnedProcess(1, 1.0, 1)),
         _ended(5),
     ]
 
-    built = notices.notices_for(sessions, reason=notices.CRASH_REASON)
+    built = notices.notices_for(
+        sessions, reason=notices.CRASH_REASON, local_machine=machine_identity.name()
+    )
 
     assert [notice.agent_id for notice in built] == [5]
 

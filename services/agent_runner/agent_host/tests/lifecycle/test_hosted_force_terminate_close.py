@@ -31,6 +31,7 @@ from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.context import AvaContext
 from base.agents.impersonation import ImpersonationError
 from base.agents.incarnation.hosted_force import install_hosted_force
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -38,9 +39,10 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.settlement import close_hosted_turn
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 from tests.fixtures.pin_agent import exec_context as ctx_of
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _FORCE_ERROR = "Native runtime no longer owns this agent"
 
@@ -57,7 +59,7 @@ def _host(
         pool=pool,
         checkpointer=Mock(),
         graph=graph,
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
@@ -107,6 +109,7 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     async with hosted_scope(expected_error=ImpersonationError) as resources:
         agent_id = agent_row(db_conn)

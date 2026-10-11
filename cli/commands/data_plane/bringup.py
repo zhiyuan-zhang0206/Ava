@@ -24,6 +24,7 @@ import psycopg
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.authority.model import Generation
+from base.cluster.machine import MachineIdentity
 from base.cluster.record import ClusterRecord
 from base.config import settings
 from base.host.net.url_secret import url_host
@@ -35,6 +36,7 @@ def ensure_gateway_data_plane(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
+    machine: MachineIdentity,
 ) -> int:
     """Bring up owned storage, or probe an explicitly remote-managed plane.
 
@@ -107,6 +109,7 @@ def ensure_gateway_data_plane(
         redis_password=redis_password_from_env(),
         redis_user=redis_identity(),
         retained_children=retained_children,
+        machine=machine,
     )
 
 
@@ -364,7 +367,14 @@ def api_delivery(cls: DbAccess) -> dict[str, str]:
     return {API_TOKEN_ENV: api_token(ava_home().resolve(), cls)}
 
 
-def _ensure_pooler(rec: ClusterRecord, database: str, home: Path, generation: Generation) -> None:
+def _ensure_pooler(
+    rec: ClusterRecord,
+    database: str,
+    home: Path,
+    generation: Generation,
+    *,
+    machine: MachineIdentity,
+) -> None:
     """Serve exactly `generation` through the owned pooler (restart on change)."""
     if not settings.data_plane.pgbouncer_enabled:
         return
@@ -377,6 +387,7 @@ def _ensure_pooler(rec: ClusterRecord, database: str, home: Path, generation: Ge
         db_name=database,
         userlist=render_userlist(home, generation),
         admin_password=read_pooler_admin(home).password,
+        machine=machine,
     )
     if rc:
         raise RuntimeError("pooler did not become ready")
@@ -459,7 +470,10 @@ def _admitted_generation(
 
 
 def complete_gateway_data_plane(
-    *, refresh_schema: bool = True, database_factory: DatabaseFactory
+    *,
+    refresh_schema: bool = True,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentity,
 ) -> None:
     """Grant the final schema, establish the write generation, start the pooler,
     then verify consumer credentials.
@@ -513,7 +527,7 @@ def complete_gateway_data_plane(
                 generation = _birth_generation(conn, home, database)
             else:
                 generation = _admitted_generation(conn, home, database, refresh=refresh_schema)
-            _ensure_pooler(rec, database, home, generation)
+            _ensure_pooler(rec, database, home, generation, machine=machine)
             prove_generation_logins(home, generation, endpoint)
             if authority.require_ledger(home).active is None:
                 verified = authority.verify_generation(conn, home)

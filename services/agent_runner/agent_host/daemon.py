@@ -58,9 +58,9 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import NoPermissionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+import ava
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
-from ava import loaded_code_image
 from ava.sdk_surface.install import Installation
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context.clients import ClientSet
@@ -98,6 +98,7 @@ from .exec_memory_guard import run_memory_guard_forever
 from .force_termination import kill_terminating_agent_shells
 from .host import AgentHost
 from .lifecycle.configuration import (
+    boot_process,
     host_machine,
     host_policy,
     initialize_logging,
@@ -577,6 +578,7 @@ async def run(
     config: ConfigBoot,
     database: Callable[[], Database],
     machine: MachineIdentity,
+    home: Path,
     clients: ClientSet | None = None,
     on_clients_owned: Callable[[], None] | None = None,
 ) -> None:
@@ -604,12 +606,12 @@ async def run(
     try:
         if on_clients_owned is not None:
             on_clients_owned()
-        init_process_scope()
+        init_process_scope(machine=machine, home=home)
         land_cluster_extensions(db)
         local_machine = machine.name()
         await _open_host_pools(workload_pool, control_pool, local_machine)
         if clients is None:
-            clients = process_clients(database=lambda: db, config=config)
+            clients = process_clients(database=lambda: db, config=config, machine=machine)
         from agent.extensions import load_extensions
 
         installation = load_installation(
@@ -626,7 +628,7 @@ async def run(
             control_pool=control_pool,
             checkpointer=checkpointer,
             graph=build_graph(checkpointer, installation.registry),
-            machine=local_machine,
+            machine=machine,
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
@@ -660,7 +662,7 @@ async def run(
         health = await start_health_server(
             "agent_host",
             endpoint.health_port,
-            image=loaded_code_image(),
+            image=ava.loaded_code_image(),
             liveness=liveness,
             extra_routes={
                 ("GET", "/stats"): stats_route(host, scheduler),
@@ -724,14 +726,10 @@ def _require_helper_parent_chain() -> None:
 
 def main() -> None:
     """Entry point: SDK posture, schema gate, logging, graceful shutdown, then the loop."""
-    import ava
-
     ava.bind_host_process()
     from base.deploy.schema.migrations import assert_schema_current
 
-    config = ConfigBoot()
-    config.boot()
-    config.ensure_eager()
+    config, home = boot_process()
     _require_helper_parent_chain()
     assert_schema_current(config.view.data_plane.db_url)
     machine = host_machine(config)
@@ -741,7 +739,7 @@ def main() -> None:
     def database() -> Database:
         return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
 
-    clients = process_clients(database=database, config=config)
+    clients = process_clients(database=database, config=config, machine=machine)
     clients_handed_off = False
 
     def hand_off_clients() -> None:
@@ -760,6 +758,7 @@ def main() -> None:
                 config=config,
                 database=database,
                 machine=machine,
+                home=home,
                 clients=clients,
                 on_clients_owned=hand_off_clients,
             )

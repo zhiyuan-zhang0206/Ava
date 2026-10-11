@@ -52,7 +52,7 @@ from base.api_contracts.mcp_tool_contract import (
     server_instructions,
     tool_description,
 )
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -261,6 +261,7 @@ def _register_read_tools(
     catalog: ModelCatalog,
     default_model_reader: Callable[[], str],
     image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> None:
     """Read-side tools: list / inspect / cluster snapshot."""
     from mcp.server.mcpserver import MCPServer
@@ -304,7 +305,7 @@ def _register_read_tools(
     async def cluster_status() -> dict[str, Any]:
         from gateway.cluster.router import cluster_status_snapshot
 
-        snapshot = await cluster_status_snapshot(db, image=image)
+        snapshot = await cluster_status_snapshot(db, image=image, local_machine=local_machine)
         return snapshot.model_dump(mode="json")
 
 
@@ -318,6 +319,7 @@ async def _mcp_deliver_send_message(
     client: dict[str, Any],
     as_external_agent: bool,
     idempotency_key: str | None,
+    local_machine: str,
 ) -> dict[str, Any]:
     """Deliver an MCP `send_message` call: as the user by default, as the
     authenticated client's external-agent identity when asked, with
@@ -362,6 +364,7 @@ async def _mcp_deliver_send_message(
                 source_verified_by=f"mcp_client:{client['id']}",
                 source_transport="http",
             ),
+            local_machine=local_machine,
         )
     except (AvaAgentError, ClientMessageConflictError) as exc:
         raise ToolError(str(exc)) from exc
@@ -378,6 +381,7 @@ def _register_spawn_tools(
     *,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    local_machine: MachineIdentity,
 ) -> None:
     """Register keyed creation through the immutable native birth owner."""
     from mcp.server.mcpserver import MCPServer
@@ -413,7 +417,7 @@ def _register_spawn_tools(
             machine=machine,
             config=config_overlay,
         )
-        target = body.machine if body.machine is not None else machine_name()
+        target = body.machine if body.machine is not None else local_machine.name()
         # Same path as the keyed REST spawn route: `create_and_launch_agent`
         # (preflight + row creation off the event loop, then the launch op).
         # Referenced through the router module so tests patch the same seam.
@@ -452,13 +456,22 @@ def _register_fleet_tools(
     *,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    local_machine: MachineIdentity,
 ) -> None:
     """Register fleet mutation and transcript tools with their native owners."""
     from mcp.server.mcpserver import MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
 
     typed_server = cast(MCPServer, server)
-    _register_spawn_tools(typed_server, pool, db, bus, catalog=catalog, authority=authority)
+    _register_spawn_tools(
+        typed_server,
+        pool,
+        db,
+        bus,
+        catalog=catalog,
+        authority=authority,
+        local_machine=local_machine,
+    )
 
     @typed_server.tool(description=tool_description("send_message"))
     async def send_message(
@@ -480,6 +493,7 @@ def _register_fleet_tools(
             client=client,
             as_external_agent=as_external_agent,
             idempotency_key=idempotency_key,
+            local_machine=local_machine.name(),
         )
 
     @typed_server.tool(description=tool_description("get_messages"))
@@ -532,6 +546,7 @@ def _build_server(  # noqa: ANN202 — inferred from the lazy import
     catalog: ModelCatalog,
     authority: ConfigAuthority,
     image: LoadedCommit,
+    local_machine: MachineIdentity,
 ):
     """Assemble the MCP server: one tool per gateway control route.
 
@@ -549,8 +564,11 @@ def _build_server(  # noqa: ANN202 — inferred from the lazy import
         catalog=catalog,
         default_model_reader=lambda: cast(str, authority.service_field_value("llm_model")),
         image=image,
+        local_machine=local_machine,
     )
-    _register_fleet_tools(server, pool, db, bus, catalog=catalog, authority=authority)
+    _register_fleet_tools(
+        server, pool, db, bus, catalog=catalog, authority=authority, local_machine=local_machine
+    )
     return server
 
 
@@ -562,6 +580,7 @@ def build_manager(  # noqa: ANN201 — inferred from the lazy import
     catalog: ModelCatalog,
     authority: ConfigAuthority,
     image: LoadedCommit,
+    local_machine: MachineIdentity,
 ):
     """Create the /mcp session manager (server + stateless HTTP transport).
 
@@ -571,7 +590,15 @@ def build_manager(  # noqa: ANN201 — inferred from the lazy import
     """
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-    server = _build_server(pool, db, bus, catalog=catalog, authority=authority, image=image)
+    server = _build_server(
+        pool,
+        db,
+        bus,
+        catalog=catalog,
+        authority=authority,
+        image=image,
+        local_machine=local_machine,
+    )
     # The public path builds the manager too: streamable_http_app() constructs
     # it and stores it on the server; session_manager then hands it over. The
     # Starlette sub-app it returns is discarded — the gateway mounts the bare

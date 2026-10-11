@@ -1,2 +1,2 @@
 # Operator commands share one explicit database constructor.
-db = ["database.py"]
+db = ["database/__init__.py"]

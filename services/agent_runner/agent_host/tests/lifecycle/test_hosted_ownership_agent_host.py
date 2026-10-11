@@ -13,7 +13,7 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 
 def _agent(conn: psycopg.Connection) -> int:
@@ -82,7 +82,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
         control_pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="host-test",
+        machine=configured_machine(name="host-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
@@ -138,7 +138,7 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="host-test",
+        machine=configured_machine(name="host-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,

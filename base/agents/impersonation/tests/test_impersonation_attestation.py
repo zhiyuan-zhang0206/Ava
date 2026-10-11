@@ -10,7 +10,6 @@ import psutil
 import pytest
 
 from base.agents.impersonation import _store as store
-from base.cluster.machine import machine_name
 from base.db import Database
 from base.native_process import ownership
 from tests.impersonation_support import (
@@ -183,7 +182,7 @@ def test_attested_native_identity_still_requires_same_machine() -> None:
     lease = _lease(recorded_tree())
     lease["machine"] += "-other"
     with pytest.raises(store.ImpersonationError, match="own machine"):
-        store.authenticate(lease, attested_caller(lease))
+        store.authenticate(lease, attested_caller(lease), local_machine="attestation-unit")
 
 
 def _stub_birth(monkeypatch: pytest.MonkeyPatch, birth: float) -> None:
@@ -194,7 +193,7 @@ def _stub_birth(monkeypatch: pytest.MonkeyPatch, birth: float) -> None:
 
 
 def _lease(tree: dict[str, Any]) -> dict[str, Any]:
-    return {"process_metadata": tree, "machine": machine_name()}
+    return {"process_metadata": tree, "machine": "attestation-unit"}
 
 
 def _stub_liveness(

@@ -33,6 +33,7 @@ from xml.sax.saxutils import escape
 from loguru import logger
 
 import base.host.system.cron
+from base.cluster.machine import MachineIdentity
 
 # Daily at 00:25 host-local (macmini lives on the fleet wall clock,
 # Asia/Shanghai): just past midnight so the previous day is complete, clear of
@@ -170,7 +171,7 @@ def _unregister_linux() -> int:
     )
 
 
-def credential_blocker() -> str | None:
+def credential_blocker(*, machine: MachineIdentity, home: Path) -> str | None:
     """Why this unit cannot run the sampler, or None when it can.
 
     Cheap and local by design (converge runs on every start): production-home
@@ -179,7 +180,7 @@ def credential_blocker() -> str | None:
     """
     from base.telemetry.observability import production_identity
 
-    if not production_identity():
+    if not production_identity(machine=machine, home=home):
         return "not the registered production home"
     if shutil.which("gh") is None:
         return "gh CLI not on PATH"
@@ -189,7 +190,9 @@ def credential_blocker() -> str | None:
     return None
 
 
-def register_pr_flow_job(*, enabled_reader: Callable[[], bool]) -> None:
+def register_pr_flow_job(
+    *, enabled_reader: Callable[[], bool], machine: MachineIdentity, home: Path
+) -> None:
     """Register the daily PR-flow sampler (idempotent).
 
     Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED` — the test suite), when
@@ -202,7 +205,7 @@ def register_pr_flow_job(*, enabled_reader: Callable[[], bool]) -> None:
         return
     if not base.host.system.cron.owns_os_jobs("pr flow"):
         return
-    blocker = credential_blocker()
+    blocker = credential_blocker(machine=machine, home=home)
     if blocker is not None:
         logger.info("PR-flow sampler job not registered: {}", blocker)
         return

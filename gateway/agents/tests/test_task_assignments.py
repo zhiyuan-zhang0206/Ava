@@ -11,12 +11,14 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from gateway.agents import router as agent_router
 from gateway.agents.task_assignment import router as task_assignments
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 PATH = "/api/keyed/v1/task-assignments"
 HEADERS = {"Idempotency-Key": "compound", "Idempotency-Scope": "principal-v1"}
@@ -24,7 +26,9 @@ SECRET = "compound-test-secret"  # noqa: S105 -- isolated test authentication
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterator[TestClient]:
+def client(
+    monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any, *, machine_identity: MachineIdentity
+) -> Iterator[TestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
 
@@ -32,7 +36,9 @@ def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterat
         return SpawnedAgent(id=body.agent_id)
 
     monkeypatch.setattr(agent_router, "forward_spawn_to_remote", accept)
-    with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
+    with gateway_test_client(
+        app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+    ) as value:
         yield value
 
 

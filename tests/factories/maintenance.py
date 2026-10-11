@@ -9,7 +9,7 @@ import psycopg
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.db import create_agent
 from base.deploy.maintenance import admission, pause_owner
 from cli.database import operator_database_factory
@@ -23,18 +23,20 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
 
-def maintenance_agent(conn: psycopg.Connection[Any]) -> int:
+def maintenance_agent(conn: psycopg.Connection[Any], *, machine_name: str) -> int:
     agent_id = create_agent(conn)
     conn.execute(
         "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'idling',%s)",
-        (agent_id, machine_name()),
+        (agent_id, machine_name),
     )
     conn.commit()
     return agent_id
 
 
-def start_cluster_through_ready_gate(monkeypatch: pytest.MonkeyPatch) -> None:
-    database_factory = operator_database_factory()
+def start_cluster_through_ready_gate(
+    monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity
+) -> None:
+    database_factory = operator_database_factory(local_host=machine.host)
     from base.deploy.lifecycle import start_serving
     from cli.commands.lifecycle._pause_resume import resume_after_start
 
@@ -49,5 +51,5 @@ def start_cluster_through_ready_gate(monkeypatch: pytest.MonkeyPatch) -> None:
         admission.require_start_allowed(operation)
         return 0
 
-    assert ready_start(None, database_factory) == 0
+    assert ready_start(None, database_factory, machine) == 0
     assert not admission.held()

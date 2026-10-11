@@ -213,14 +213,16 @@ def _own_label(ctx: AvaContext, agent_id: int) -> str | None:
     return " ".join(str(row[0]).split())
 
 
-def _machine_clause() -> str | None:
+def _machine_clause(ctx: AvaContext) -> str | None:
     """The host's machine name, whitespace-normalized, or None when unset.
 
     An unset machine name omits this optional clause; other failures propagate."""
-    from base.cluster.machine import MachineNameMissing, machine_name
+    from base.cluster.machine import MachineNameMissing
 
+    if ctx.machine is None:
+        return None
     try:
-        name = machine_name()
+        name = ctx.machine.name()
     except MachineNameMissing:  # an unset machine name only drops the machine clause
         return None
     return " ".join(name.split()) or None
@@ -264,7 +266,7 @@ def agent_id_note(ctx: AvaContext) -> HumanMessage | None:
     label = _own_label(ctx, aid)
     if label:
         clauses.append(f"label: {label}")
-    machine = _machine_clause()
+    machine = _machine_clause(ctx)
     if machine:
         clauses.append(f"machine: {machine}")
     detail = f" ({', '.join(clauses)})" if clauses else ""

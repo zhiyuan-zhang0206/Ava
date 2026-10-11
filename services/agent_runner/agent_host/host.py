@@ -1,9 +1,8 @@
 """Run local agents through a shared graph and explicit per-turn context.
 
-The dispatcher owns single-flight; the daemon owns pools and checkpointer.
-Cold admission consumes interrupted inputs; persistence failure never replays work.
-Lifecycle requests retain original command and resource settlement fences.
-Unknown failures propagate; expected failures settle their checkpoint.
+The dispatcher owns single-flight; turns borrow the daemon's pools, checkpointer
+and machine. Cold admission consumes interrupted inputs without replaying work.
+Lifecycle requests retain settlement fences; unknown failures propagate.
 """
 
 from __future__ import annotations
@@ -32,12 +31,12 @@ from agent.impersonation import (
     native_status,
     supervise_relay,
 )
+from agent.ownership import hosted
 from agent.ownership.corpse_reap import reap_crash_corpses
 from agent.ownership.hosted import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
     release_hosted_owner,
-    renew_hosted_owner,
     settle_hosted_runtime,
 )
 from agent.startup import reconcile_claimed_inbounds_at_startup, repair_dangling_tool_use_at_startup
@@ -55,7 +54,7 @@ from base.agents.incarnation.native_work_models import NativeWorkTarget, NativeW
 from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.deploy.maintenance import admission
@@ -138,7 +137,7 @@ class AgentHost:
         control_pool: AsyncConnectionPool[psycopg.AsyncConnection] | None = None,
         checkpointer: AsyncPostgresSaver,
         graph: _HostGraph,
-        machine: str | None = None,
+        machine: MachineIdentity,
         bus: EventBus,
         db: Database,
         catalog: ModelCatalog,
@@ -162,7 +161,8 @@ class AgentHost:
         self._peek_lock = (
             asyncio.Lock()
         )  # one optional interrupt peek on the control pool at a time
-        self._machine = machine if machine is not None else machine_name()
+        self._machine_identity = machine
+        self._machine = machine.name()
         self._owner = uuid4()
         self._runtimes: OrderedDict[int, _AgentRuntime] = OrderedDict()
         self._rejected_configs: dict[int, str] = {}
@@ -457,7 +457,13 @@ class AgentHost:
         # record_failure is a no-op outside maintenance; the next wake re-drives recovery.
         session = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
         await supervise_relay(
-            self._db, self._bus, session, agent_id, self.relays, incarnation=incarnation
+            self._db,
+            self._bus,
+            session,
+            agent_id,
+            self.relays,
+            incarnation=incarnation,
+            read_local_machine=self._machine_identity.name,
         )
         # An earlier ordinary failure can leave a buffered tail. Preserve
         # it before accepting maintenance intent, without replaying graph work.
@@ -572,6 +578,7 @@ class AgentHost:
             self._bus.async_redis(), self._bus.channel, agent_id=agent_id
         )
         ctx = AvaContext(
+            machine=self._machine_identity,
             ops_pool=self._pool,
             llm=runtime.llm,
             catalog=self._catalog,
@@ -715,7 +722,7 @@ class AgentHost:
 
     async def renew_ownership(self) -> None:
         """Renew healthy leases before reporting and reaping crash corpses."""
-        await renew_hosted_owner(self._control_pool, self._machine, self._owner)
+        await hosted.renew_hosted_owner(self._control_pool, self._machine, self._owner)
         try:
             await reap_crash_corpses(
                 self._control_pool,

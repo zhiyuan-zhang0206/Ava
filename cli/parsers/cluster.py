@@ -50,6 +50,7 @@ def _h_cluster_health_probe(args: argparse.Namespace) -> int:
         check_schema=args.schema_check,
         database_factory=args.database_factory,
         producer=args.producer,
+        command=args.runtime,
     )
 
 

@@ -12,7 +12,7 @@ import ava
 from schedules.catchup import fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 from base.daemon.schedules.inputs import ScheduleInputs
-from schedules.entry import schedule_entry
+from schedules.entry import fresh_schedule_entry, schedule_entry
 
 CRON = "*/5 * * * *"
 TIMEZONE = "UTC"
@@ -41,5 +41,5 @@ if __name__ == "__main__":
         from base.log import prepare_process_logging
 
         prepare_process_logging()
-    with schedule_entry(entry_inputs) as inputs:
+    with fresh_schedule_entry() if entry_inputs is None else schedule_entry(entry_inputs) as inputs:
         main(inputs=inputs)

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from base.cluster.machine import is_agent_runner, machine_name, machine_role
+from base.cluster.machine import MachineIdentity
 from base.packages.plugins import enable_config, mcp_enabled
 from ops.rpc_schemas import (
     FieldWriteResult,
@@ -40,7 +40,7 @@ def _mcp_summary(spec: dict[str, Any]) -> str:
     return " ".join(p for p in parts if p)
 
 
-def _assert_agent_runner() -> None:
+def _assert_agent_runner(*, local_machine: MachineIdentity) -> None:
     """Declare the invariant that inventory ops run only on an agent-runner.
 
     Plugins + MCP servers are an agent-runner-only concern: a gateway runs no
@@ -51,13 +51,13 @@ def _assert_agent_runner() -> None:
     gateway is a broken call path, not a degraded mode: fail loud rather
     than resurface the gateway's built-in items as if installed.
     """
-    if not is_agent_runner():
+    if "agent-runner" not in local_machine.role():
         raise RuntimeError(
-            f"inventory ops run only on an agent-runner, not {sorted(machine_role())!r}"
+            f"inventory ops run only on an agent-runner, not {sorted(local_machine.role())!r}"
         )
 
 
-def inventory_read_op() -> InventoryReadResult:
+def inventory_read_op(*, local_machine: MachineIdentity) -> InventoryReadResult:
     """Read this host's plugin + MCP enable inventory, each with metadata.
 
     Returns an InventoryReadResult with:
@@ -72,7 +72,7 @@ def inventory_read_op() -> InventoryReadResult:
     """
     from ava.mcp_config import load_mcp_config, server_capability
 
-    _assert_agent_runner()
+    _assert_agent_runner(local_machine=local_machine)
     discovered = enable_config.discover_plugins()
     cfg = enable_config.load_for_runtime(set(discovered))
     plugins: dict[str, InventoryReadItem] = {}
@@ -101,14 +101,14 @@ def inventory_read_op() -> InventoryReadResult:
         )
 
     return InventoryReadResult(
-        machine=machine_name(),
+        machine=local_machine.name(),
         plugins=plugins,
         mcp_servers=mcp_servers,
     )
 
 
 def inventory_write_op(
-    plugins: dict[str, bool], mcp_servers: dict[str, bool]
+    plugins: dict[str, bool], mcp_servers: dict[str, bool], *, local_machine: MachineIdentity
 ) -> InventoryWriteOpResult:
     """Validate and atomically apply a set of plugin + MCP enable toggles.
 
@@ -125,7 +125,7 @@ def inventory_write_op(
     """
     from ava.mcp_config import load_mcp_config, server_capability
 
-    _assert_agent_runner()
+    _assert_agent_runner(local_machine=local_machine)
     discovered = set(enable_config.discover_plugins())
     plugin_results: dict[str, FieldWriteResult] = {}
     for name in plugins:
@@ -157,7 +157,7 @@ def inventory_write_op(
             mcp_enabled.set_mcp_enabled(name, enabled=want)
 
     return InventoryWriteOpResult(
-        machine=machine_name(),
+        machine=local_machine.name(),
         plugin_results=plugin_results,
         mcp_results=mcp_results,
         applied=applied,

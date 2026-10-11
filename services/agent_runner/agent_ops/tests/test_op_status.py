@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db import pool as db_pool
@@ -16,6 +17,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_ops import daemon
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
@@ -46,6 +48,8 @@ async def test_replay_returns_canonical_status_without_reexecution(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     _record(db_conn, status.value)
     actual, result = await daemon._dispatch_idempotent_pass(
@@ -60,6 +64,7 @@ async def test_replay_returns_canonical_status_without_reexecution(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )
     assert actual is status
     assert result == {}
@@ -75,6 +80,8 @@ async def test_replay_rejects_unknown_stored_status_without_reexecution(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     _record(db_conn, status)
     with pytest.raises(ValueError, match="OpStatus"):
@@ -90,6 +97,7 @@ async def test_replay_rejects_unknown_stored_status_without_reexecution(
             authority=config_authority,
             database=ops_database,
             image=ops_image,
+            local_machine=machine_identity,
         )
     assert db_conn.execute(
         "SELECT op_status FROM api_idempotency WHERE key='status-test'"
@@ -105,6 +113,8 @@ async def test_null_still_waits_for_owner_instead_of_becoming_a_result(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     _record(db_conn, None)
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_ATTEMPTS", 1)
@@ -125,6 +135,7 @@ async def test_null_still_waits_for_owner_instead_of_becoming_a_result(
         authority=config_authority,
         database=ops_database,
         image=ops_image,
+        local_machine=machine_identity,
     )
     assert status is OpStatus.FAILED
     assert "never completed" in str(result["error"])

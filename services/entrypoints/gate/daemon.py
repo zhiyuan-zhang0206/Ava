@@ -39,12 +39,14 @@ import re
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from base.config import settings
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot, settings
 from base.log import logger
 from base.paths import ava_home
 
@@ -341,12 +343,12 @@ def _app_base() -> str:
     return f"http://127.0.0.1:{app_port()}"
 
 
-def _gateway_base() -> str:
+def _gateway_base(*, local_host: Callable[[], str]) -> str:
     """The gateway API base the gate probes and the login page posts to.
 
     The host must be one the user's browser can dial: the login page posts the
     cluster secret to this origin, and a remote browser resolving `127.0.0.1`
-    would hit itself. `reachable_host()` (`AVA_MACHINE_HOST`, else `localhost`) is the
+    would hit itself. The supplied owner host (`AVA_MACHINE_HOST`, else `localhost`) is the
     same operator-declared address `ava.ui.show` hands the user for direct page URLs
     and the bootstrap rewrites loopback data-plane URLs to; a single box falls back to
     `localhost` unchanged. The server-side auth probe follows the same base —
@@ -354,19 +356,17 @@ def _gateway_base() -> str:
     own reachable address is equivalent to loopback and keeps one origin
     everywhere, mirroring how remote agent-runners dial the gateway.
     """
-    from base.cluster.machine import reachable_host
-
-    host = reachable_host()
+    host = local_host()
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"  # IPv6 literal — netloc needs brackets
     return f"http://{host}:{settings.gateway.gateway_port}"
 
 
-def _serve_http(args: argparse.Namespace) -> None:
+def _serve_http(args: argparse.Namespace, *, local_host: Callable[[], str]) -> None:
     static_dir = args.static_dir or (Path(__file__).parent / "static")
     port = args.port or entry_port()
     gate = Gate(
-        gateway_base=_gateway_base(),
+        gateway_base=_gateway_base(local_host=local_host),
         browser_origin=settings.gateway.browser_origin,
         app_base=_app_base(),
         static_dir=static_dir,
@@ -398,7 +398,6 @@ def main() -> None:
     parser.add_argument("--static-dir", type=Path, default=None, help="static pages directory")
     args = parser.parse_args()
 
-    from base.cluster.machine import machine_name
     from base.daemon.shutdown import install_graceful_shutdown
     from base.db import Database
     from base.db.code_version_gate import ProcessDbGate
@@ -409,17 +408,20 @@ def main() -> None:
     from base.telemetry.emitter import build_pipeline, report_no_pipeline
 
     image = LoadedCommit.capture()
+    config = ConfigBoot()
+    config.boot()
+    machine = machine_from_boot(config)
     gate = ProcessDbGate(process="gate", version=CodeVersion(image).get)
-    database = partial(Database.from_settings, gate=gate)
-    pipeline = build_pipeline(database=database)
+    database = partial(Database.from_settings, gate=gate, local_host=machine.host)
+    pipeline = build_pipeline(database=database, machine=machine, home=ava_home().resolve())
     primary: BaseException | None = None
     try:
         init_gateway_process(
-            "gate", producer=lambda: pipeline, machine_reader=machine_name, image=image
+            "gate", producer=lambda: pipeline, machine_reader=machine.name, image=image
         )
         # Root's signal interrupts serving, then closes HTTP before the writer.
         install_graceful_shutdown("gate")
-        _serve_http(args)
+        _serve_http(args, local_host=machine.host)
     except BaseException as exc:
         primary = exc
         raise

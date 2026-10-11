@@ -16,6 +16,7 @@ import pytest
 from base.cluster import postgres as owned_postgres
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

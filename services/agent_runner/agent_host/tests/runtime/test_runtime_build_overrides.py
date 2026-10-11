@@ -11,7 +11,7 @@ from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 
 @pytest.mark.parametrize("pinned", [True, False])
@@ -44,6 +44,7 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
         bus=Mock(),
         db=Mock(),
         catalog=model_catalog,
+        machine=configured_machine(),
     )
     pins = {"reasoning_effort": "low", "claude_thinking_budget_tokens": 777} if pinned else {}
     slices = AgentSlices.resolve(

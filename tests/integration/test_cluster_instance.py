@@ -30,11 +30,14 @@ from redis.retry import Retry
 
 from base import cluster
 from base.cluster import provision_database
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host.env.dotenv_boot import resolve_ava_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 from cli.commands.data_plane.pgbouncer import stop_pgbouncer
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _BEARER = "test_bearer_abc123"
@@ -156,6 +159,8 @@ def _admin(pg_port: int, database: str) -> psycopg.Connection[tuple[object, ...]
 def test_per_cluster_instance_bringup(
     isolated_cluster: tuple[int, int],
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     pg_port, redis_port = isolated_cluster
     bearer = settings.data_plane.cluster_secret
@@ -166,6 +171,7 @@ def test_per_cluster_instance_bringup(
         redis_password=_REDIS_RUNTIME,
         redis_user="ava_tinst",
         retained_children=retained_children,
+        machine=command_machine,
     )
     assert rc == 0
 
@@ -229,6 +235,8 @@ def test_per_cluster_instance_bringup(
 def test_bringup_is_idempotent(
     isolated_cluster: tuple[int, int],
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """A second ensure on an already-running instance is a no-op success (the warm
     `ava start` path)."""
@@ -242,6 +250,7 @@ def test_bringup_is_idempotent(
                 redis_password=_REDIS_RUNTIME,
                 redis_user="ava_tinst",
                 retained_children=retained_children,
+                machine=command_machine,
             )
             == 0
         )
@@ -252,6 +261,8 @@ def test_gateway_cold_start_restores_redis_url_identity(
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
     operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """Official start restores Redis's own ACL after a real RDB-only shutdown."""
     pg_port, redis_port = isolated_cluster
@@ -259,7 +270,9 @@ def test_gateway_cold_start_restores_redis_url_identity(
     _born_intent(home)
     assert (
         ensure_gateway_data_plane(
-            retained_children=retained_children, database_factory=operator_database
+            retained_children=retained_children,
+            database_factory=operator_database,
+            machine=command_machine,
         )
         == 0
     )
@@ -278,7 +291,9 @@ def test_gateway_cold_start_restores_redis_url_identity(
     assert (home / "redis" / "dump.rdb").is_file()
     assert (
         ensure_gateway_data_plane(
-            retained_children=retained_children, database_factory=operator_database
+            retained_children=retained_children,
+            database_factory=operator_database,
+            machine=command_machine,
         )
         == 0
     )
@@ -295,6 +310,8 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
     tmp_path: Path,
     retained_children: list[subprocess.Popen[bytes]],
     operator_database: Callable[[], Any],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """A fresh single-box home is born with a minted cluster secret and generated Redis
     credentials, and the official bring-up serves a Redis that refuses an
@@ -332,7 +349,9 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
     try:
         assert (
             ensure_gateway_data_plane(
-                retained_children=retained_children, database_factory=operator_database
+                retained_children=retained_children,
+                database_factory=operator_database,
+                machine=command_machine,
             )
             == 0
         )
@@ -358,10 +377,12 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
 def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
     isolated_cluster: tuple[int, int],
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """TCP ownership does not make another directory's equal Unix port ours."""
     pg_port, _redis_port = isolated_cluster
-    assert ci._start_pg(pg_port, retained_children=retained_children) == 0
+    assert ci._start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
     owned_data = resolve_ava_home() / "pg"
     with tempfile.TemporaryDirectory(prefix="ava-pg-foreign-", dir="/tmp") as temporary:
         directory = Path(temporary)
@@ -449,6 +470,8 @@ def _active_hba(pg_port: int) -> list[tuple[str, str]]:
 def test_birth_hba_of_a_single_box_has_loopback_lines_only(
     isolated_cluster: tuple[int, int],
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """First-start birth of a box that declares no reachable address (the cluster has its
     secret all the same): the hba has loopback SCRAM lines only (no reachable/cidr
@@ -462,6 +485,7 @@ def test_birth_hba_of_a_single_box_has_loopback_lines_only(
         redis_password=_REDIS_RUNTIME,
         redis_user="ava_tinst",
         retained_children=retained_children,
+        machine=command_machine,
     )
     assert rc == 0
     assert _active_hba(pg_port) == [("127.0.0.1", "scram-sha-256"), ("::1", "scram-sha-256")]
@@ -474,13 +498,15 @@ def test_birth_hba_of_a_single_box_has_loopback_lines_only(
 def test_rewritten_hba_is_reloaded_into_running_server(
     isolated_cluster: tuple[int, int],
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """A running server keeps its last-loaded hba until reloaded. A postmaster
     that still serves a legacy trust hba must, after `_start_pg` rewrites the
     file, enforce passwords before start proceeds — the loaded proof, not the
     file on disk."""
     pg_port, _redis_port = isolated_cluster
-    assert ci._start_pg(pg_port, retained_children=retained_children) == 0
+    assert ci._start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
     data = resolve_ava_home() / "pg"
     # A legacy postmaster: trust everywhere, reloaded into the running server.
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")
@@ -497,7 +523,7 @@ def test_rewritten_hba_is_reloaded_into_running_server(
             assert time.monotonic() < deadline, "legacy trust hba never loaded"
             time.sleep(0.05)
 
-    assert ci._start_pg(pg_port, retained_children=retained_children) == 0
+    assert ci._start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
     with pytest.raises(psycopg.OperationalError, match="password"):
         psycopg.connect(
             host="127.0.0.1", port=pg_port, user=getpass.getuser(), password="", dbname="postgres"
@@ -507,12 +533,14 @@ def test_rewritten_hba_is_reloaded_into_running_server(
 def test_hba_proof_refuses_a_postmaster_still_serving_trust(
     isolated_cluster: tuple[int, int],
     retained_children: list[subprocess.Popen[bytes]],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     """The loaded-hba proof is behavioral: a postmaster that still admits a
     password-less dial (a trust line loaded) fails the proof, whatever file is
     on disk."""
     pg_port, _redis_port = isolated_cluster
-    assert ci._start_pg(pg_port, retained_children=retained_children) == 0
+    assert ci._start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
     ci.require_authenticated_hba(pg_port, "127.0.0.1")
     data = resolve_ava_home() / "pg"
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")

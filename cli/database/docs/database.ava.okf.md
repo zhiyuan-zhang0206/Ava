@@ -7,7 +7,7 @@ tags: [cli, database]
 
 # Operator database composition
 
-`cli/database.py:operator_database_factory()` returns one command-owned lazy
+`cli/database/__init__.py:operator_database_factory(local_host=command.machine.host)` returns one command-owned lazy
 constructor. All handles returned by that constructor share an exempt
 `ProcessDbGate`. Construction reads neither Settings nor Git; the first handle
 imports the dial stack, and each handle reads the live connection settings.
@@ -19,9 +19,10 @@ another process or service gate. An operator can stop stale code without a Git
 checkout, while service entries retain their captured-image admission.
 
 The entry constructs the factory after parsing and passes it through the parsed
-command to every handle consumer. Import and help retain their lightweight
+command to every handle consumer. The callback stays lazy and belongs to the
+same `CommandRuntime.machine` used by logging and telemetry. Import and help retain their lightweight
 boundaries; init and start admit the home before configuration-dependent work.
-`operator_event_pipeline(factory)` retains one lazy pipeline for logging and
+`operator_event_pipeline(factory, machine=command.machine, home=ava_home())` retains one lazy pipeline for logging and
 health initialization and cold command reporters. Its database writer borrows
 this same factory. Producer ports are `Callable[[], EventPipeline]`; the
 ordinary callable owner retains `EventPipeline | None` and returns the original

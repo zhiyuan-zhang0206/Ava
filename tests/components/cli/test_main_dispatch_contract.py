@@ -43,4 +43,4 @@ def test_only_the_cli_database_owner_declares_exempt_admission() -> None:
             for node in ast.walk(ast.parse(text)):
                 if _declares_exempt_gate(node):
                     callers.add(path.relative_to(root).as_posix())
-    assert callers == {"cli/database.py"}
+    assert callers == {"cli/database/__init__.py"}

@@ -5,17 +5,20 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from ava_builtins.plugins.ava_fleet.task_maintenance import daemon
-from base.config import settings
+from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import Liveness
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import DbConfig
 from base.events.live.bus import EventBus
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
@@ -55,6 +58,16 @@ def _patch_fleet_config(
     monkeypatch.setattr(daemon, "disk_image_path", image_path)
 
 
+def _entry_config() -> ConfigBoot:
+    owner = ConfigBoot()
+    owner.set_field("machine_name", "fleet-entry")
+    return owner
+
+
+def _ignore_signals(_name: str) -> None:
+    pass
+
+
 @pytest.mark.parametrize("sha", ["captured-task-maintenance", None])
 def test_entry_shares_the_image_gate_and_fleet_config(
     monkeypatch: pytest.MonkeyPatch, sha: str | None
@@ -69,11 +82,14 @@ def test_entry_shares_the_image_gate_and_fleet_config(
     factories: list[Callable[[], Database]] = []
     pipeline = object()
 
+    machines: list[MachineIdentity] = []
+
     class Store:
-        @classmethod
-        def from_settings(cls, *, gate: ProcessDbGate) -> Store:
+        def __init__(
+            self, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+        ) -> None:
             gates.append(gate)
-            return cls()
+            assert local_host == machines[0].host
 
     def capture() -> LoadedCommit:
         stages.append("capture")
@@ -83,8 +99,9 @@ def test_entry_shares_the_image_gate_and_fleet_config(
         reads.append((root, commit))
         return 42
 
-    def build(*, database: Callable[[], Database]) -> object:
+    def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
         stages.append("producer")
+        machines.append(machine)
         assert gates == []
         factories.append(database)
         return pipeline
@@ -108,22 +125,20 @@ def test_entry_shares_the_image_gate_and_fleet_config(
     def check_schema(_url: str) -> None:
         stages.append("schema")
 
-    def no_signals(_name: str) -> None:
-        pass
-
     captured = image
-    monkeypatch.setattr(settings.general, "machine_name", "fleet-entry")
+    monkeypatch.setattr(daemon, "ConfigBoot", _entry_config)
     monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
     monkeypatch.setattr(code_version, "first_parent_count", count)
     monkeypatch.setattr(daemon, "Database", Store)
     monkeypatch.setattr(daemon.telemetry, "build_pipeline", build)
     monkeypatch.setattr(daemon, "init_gateway_process", initialize)
     monkeypatch.setattr(migrations, "assert_schema_current", check_schema)
-    monkeypatch.setattr(daemon, "install_graceful_shutdown", no_signals)
+    monkeypatch.setattr(daemon, "install_graceful_shutdown", _ignore_signals)
     _patch_fleet_config(monkeypatch, config, sha is not None)
     monkeypatch.setattr(daemon, "run", work)
     monkeypatch.setattr(daemon, "_remove_pidfile", lambda: stages.append("pidfile"))
-    daemon.main()
+    with patch.dict("os.environ"):
+        daemon.main()
     assert stages == ["capture", "schema", "producer", "logging", "run", "pidfile"]
     _assert_gate_matches_image(gates, reads, image)
 

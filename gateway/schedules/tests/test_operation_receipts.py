@@ -9,10 +9,12 @@ from fastapi.testclient import TestClient
 
 import base.db
 from base.api_contracts.idempotency import keyed_headers
+from base.cluster.machine import MachineIdentity
 from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.schedules import router
 from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _create(client: TestClient) -> int:
@@ -20,9 +22,9 @@ def _create(client: TestClient) -> int:
 
 
 def test_concurrent_restart_uses_one_desired_revision(
-    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
     with (
         base.db.pool(max_size=4, gate=database_gate) as pool,
@@ -40,8 +42,10 @@ def test_concurrent_restart_uses_one_desired_revision(
     assert db_conn.execute("SELECT count(*) FROM schedule_operation_receipts").fetchone() == (1,)
 
 
-def test_delayed_restart_replay_cannot_undo_newer_stop(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client(app) as client:
+def test_delayed_restart_replay_cannot_undo_newer_stop(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
         path = f"/api/schedules/{sid}/restart"
         headers = keyed_headers("restart-one")
@@ -56,9 +60,9 @@ def test_delayed_restart_replay_cannot_undo_newer_stop(db_conn: psycopg.Connecti
 
 
 def test_edit_receipt_replays_original_result_and_conflicts_on_changed_payload(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
         path = f"/api/schedules/{sid}"
         headers = keyed_headers("edit-one")
@@ -85,9 +89,9 @@ def test_edit_receipt_replays_original_result_and_conflicts_on_changed_payload(
     ],
 )
 def test_malformed_operation_identity_does_not_change_schedule(
-    db_conn: psycopg.Connection, headers: dict[str, str]
+    db_conn: psycopg.Connection, headers: dict[str, str], *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app) as client:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
         assert client.post(f"/api/schedules/{sid}/restart", headers=headers).status_code == 400
     assert db_conn.execute(
@@ -95,8 +99,10 @@ def test_malformed_operation_identity_does_not_change_schedule(
     ).fetchone() == (0,)
 
 
-def test_new_restart_identity_is_a_new_deliberate_rerun(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client(app) as client:
+def test_new_restart_identity_is_a_new_deliberate_rerun(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+) -> None:
+    with gateway_test_client(app, machine=machine_identity) as client:
         sid = _create(client)
         for key in ("one", "two"):
             assert (

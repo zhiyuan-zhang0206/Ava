@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -167,7 +167,7 @@ def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_wa
         def connect(self) -> Generator[psycopg.Connection]:
             yield db
 
-    def database(*, gate: ProcessDbGate) -> _Database:
+    def database(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> _Database:
         assert isinstance(gate, ProcessDbGate)
         assert gate.application_name() == "ava:rollup-operator:v7"
         return _Database()

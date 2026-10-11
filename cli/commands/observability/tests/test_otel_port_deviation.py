@@ -12,6 +12,8 @@ from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.tests.test_converge_otel_collector import _render_real_template
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.wake.heartbeat import station_probe
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -22,6 +24,8 @@ def test_remote_station_advertisement_drives_render_and_probe(
     station_port: int,
     operator_database: Callable[[], Any],
     database_gate: ProcessDbGate,
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(settings.observability, "telemetry_otlp_port", 4319)
     monkeypatch.setattr(settings.observability, "otel_collector_metrics_port", 8889)
@@ -39,6 +43,7 @@ def test_remote_station_advertisement_drives_render_and_probe(
             frozenset({"gateway"}),
             observability_url="http://10.0.0.46",
             operator_database=operator_database,
+            command_runtime=command_runtime,
         )
         endpoint = f"http://10.0.0.46:{station_port}"
         for name in ("tempo", "loki", "prometheus"):
@@ -69,7 +74,10 @@ def test_unregistered_station_uses_remote_port_projection(
 
 
 def test_runner_does_not_discover_station(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     def fail_discovery(_db: object, base: str) -> None:
         pytest.fail("pure runners must use their published gateway relay")
@@ -80,5 +88,6 @@ def test_runner_does_not_discover_station(
         frozenset({"agent-runner"}),
         observability_url="http://10.0.0.46",
         operator_database=operator_database,
+        command_runtime=command_runtime,
     )
     assert cfg["exporters"]["otlphttp/tempo"]["endpoint"] == "http://10.0.0.10:4318"

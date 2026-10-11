@@ -19,7 +19,9 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from cli.commands.data_plane import pgbouncer as pgb
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 
 _SECRET = "pgbouncerstopisolationtestsecret"  # noqa: S105 — test fixture, not a real credential
 
@@ -161,7 +163,9 @@ def test_sibling_home_sharing_a_path_prefix_is_not_ours(
     assert not pidfile.exists()
 
 
-def test_start_does_not_reload_a_recycled_pid(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_does_not_reload_a_recycled_pid(
+    home: Path, monkeypatch: pytest.MonkeyPatch, *, command_machine: MachineIdentity
+) -> None:
     """A foreign live PID leaves custody unresolved; start neither signals nor writes."""
     _write_pidfile(home, os.getpid())
     monkeypatch.setattr(pgb, "pgbouncer_bin", lambda: str(Path(__file__)))
@@ -173,4 +177,5 @@ def test_start_does_not_reload_a_recycled_pid(home: Path, monkeypatch: pytest.Mo
             db_name="ava_scratch",
             userlist=b"",
             admin_password="unused-admin-credential",  # noqa: S106 — never presented
+            machine=command_machine,
         )

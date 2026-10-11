@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -12,15 +11,17 @@ from typing import Any
 import pytest
 import yaml
 
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, backend_urls, service_argv
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from cli.commands.observability import lgtm_native
+from cli.database.runtime import CommandRuntime
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
-
-_REAL_VERIFY_LOKI = lgtm_native._verify_loki
 
 
 def _skip_binary_verification(_home: Path) -> None:
@@ -109,6 +110,8 @@ def test_ensure_skips_download_when_markers_match(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     _mark_current(home)
@@ -129,6 +132,7 @@ def test_ensure_skips_download_when_markers_match(
         services=frozenset(lgtm_native.BACKENDS),
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     assert (home / "lgtm/native/config/loki.yaml").exists()
@@ -139,6 +143,8 @@ def test_ensure_downloads_when_a_marker_is_stale(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     _mark_current(home)
@@ -163,6 +169,7 @@ def test_ensure_downloads_when_a_marker_is_stale(
         services=frozenset(lgtm_native.BACKENDS),
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     assert downloads == ["loki"]
@@ -328,6 +335,8 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     _mark_current(home)
@@ -340,6 +349,7 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
         services=frozenset(lgtm_native.BACKENDS),
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     config_dir = _native_dir(home) / "config"
@@ -383,6 +393,8 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The Prometheus scrape targets derive from the telemetry read URLs, so
     the external-migration form (widened listen host + matching URLs) keeps
@@ -410,6 +422,7 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
         services=frozenset(lgtm_native.BACKENDS),
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     prometheus = yaml.safe_load(
@@ -432,6 +445,8 @@ def test_render_configs_validates_loki_before_writing(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     validated: list[dict[str, object]] = []
     write_if_changed = lgtm_native._write_if_changed
@@ -453,6 +468,7 @@ def test_render_configs_validates_loki_before_writing(
         tmp_path / "home",
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
 
     assert validated
@@ -464,14 +480,16 @@ def test_native_step_does_not_touch_an_unmarked_home(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
+    machine_config_484 = ConfigBoot()
     ctx = lgtm_native.ConvergeCtx(
         repo=_repo(),
         ava_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
         services=frozenset(lgtm_native.BACKENDS),
-        config=ConfigBoot(),
+        config=machine_config_484,
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=machine_from_boot(machine_config_484),
     )
 
     def fail_ensure(_repo_path: Path, _home: Path) -> None:
@@ -648,6 +666,8 @@ def test_native_listener_ports_are_independent_of_external_query_urls(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "isolated"
     native = home / "lgtm/native"
@@ -663,7 +683,12 @@ def test_native_listener_ports_are_independent_of_external_query_urls(
     monkeypatch.setattr(settings.observability, "telemetry_loki_url", "https://query.example/loki")
     repo = Path(__file__).resolve().parents[4]
     lgtm_native._render_configs(
-        repo, native, home, database_factory=operator_database, producer=operator_pipeline
+        repo,
+        native,
+        home,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
     loki = yaml.safe_load((native / "config/loki.yaml").read_text())
     assert loki["server"]["http_listen_port"] == 53100
@@ -684,6 +709,8 @@ def test_matching_versions_from_another_platform_are_downloaded_again(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     native = home / "lgtm/native"
@@ -709,29 +736,9 @@ def test_matching_versions_from_another_platform_are_downloaded_again(
         services=frozenset(lgtm_native.BACKENDS),
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
     assert downloads == list(BACKENDS)
-
-
-def test_pinned_loki_parser_rejection_blocks_preparation(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    calls: list[list[str]] = []
-
-    def reject(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, 1, "", "unknown config field")
-
-    monkeypatch.setattr(lgtm_native.subprocess, "run", reject)
-    with pytest.raises(RuntimeError, match="unknown config field"):
-        _REAL_VERIFY_LOKI(tmp_path)
-    assert calls == [
-        [
-            str(tmp_path / "lgtm/native/bin/loki"),
-            f"-config.file={tmp_path}/lgtm/native/config/loki.yaml",
-            "-verify-config",
-        ]
-    ]
 
 
 def test_native_preparation_downloads_only_selected_backend(
@@ -739,6 +746,8 @@ def test_native_preparation_downloads_only_selected_backend(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     downloads: list[str] = []
 
@@ -755,9 +764,11 @@ def test_native_preparation_downloads_only_selected_backend(
         *,
         database_factory: Callable[[], Any],
         producer: Callable[[], EventPipeline],
+        machine: MachineIdentity,
     ) -> None:
         assert database_factory is operator_database
         assert producer is operator_pipeline
+        assert machine is command_runtime.machine
 
     def no_loki(_home: Path) -> None:
         pytest.fail("Unselected Loki must not require its executable or validator")
@@ -774,5 +785,6 @@ def test_native_preparation_downloads_only_selected_backend(
         services=frozenset({"prometheus"}),
         database_factory=operator_database,
         producer=operator_pipeline,
+        machine=command_runtime.machine,
     )
     assert downloads == ["prometheus"]

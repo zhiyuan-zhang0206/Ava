@@ -70,9 +70,15 @@ def run_start(
         with file_lock(home / "start-intent.lock", timeout_s=30):
             require_initialized(home)
             _enter_home(home)
+            from base.log.process import init_cli_process
             from cli.main import _init_cli_logging
 
-            _init_cli_logging(["start"], producer=producer)
+            def initialize(name: str) -> None:
+                init_cli_process(
+                    name=name, producer=producer, machine_reader=args.runtime.machine.name
+                )
+
+            _init_cli_logging(["start"], initialize=initialize)
             from cli.commands.lifecycle.start import cmd_start
 
             result = cmd_start(
@@ -83,6 +89,7 @@ def run_start(
                 retained_children=retained_children,
                 database_factory=database_factory,
                 producer=producer,
+                command=args.runtime,
             )
             if result == 0:
                 from base.deploy.lifecycle.start_serving import clear_serving

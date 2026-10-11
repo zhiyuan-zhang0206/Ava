@@ -16,7 +16,7 @@ from typing import Any
 from base.agents.context.clients import DatabaseFactory
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.cluster import session_name
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
@@ -29,6 +29,7 @@ from cli.commands.lifecycle._start_bookmarks import record_running_sha as _recor
 from cli.commands.lifecycle.login_link import print_login_link
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.status import cmd_status
+from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
 from ops.roster.service_spec import ServiceSpec
 
@@ -37,6 +38,7 @@ def _ensure_gateway_data_plane(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
+    machine: MachineIdentity,
 ) -> int:
     """Bring up this cluster's data plane — local instance or remote probe.
 
@@ -46,7 +48,7 @@ def _ensure_gateway_data_plane(
     from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 
     return ensure_gateway_data_plane(
-        retained_children=retained_children, database_factory=database_factory
+        retained_children=retained_children, database_factory=database_factory, machine=machine
     )
 
 
@@ -78,10 +80,12 @@ def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     return 1
 
 
-def _prepare_start_schema(*, database_factory: DatabaseFactory) -> int:
+def _prepare_start_schema(
+    *, database_factory: DatabaseFactory, machine_name: Callable[[], str]
+) -> int:
     print("\n→ apply pending migrations")
     try:
-        cmd_migrations_apply(database_factory=database_factory)
+        cmd_migrations_apply(database_factory=database_factory, machine_name=machine_name)
     except Exception as e:
         print(f"  ✗ migrations apply failed: {e}", file=sys.stderr)
         return 1
@@ -96,6 +100,7 @@ def _prepare_cold_start(
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
+    command: CommandRuntime,
 ) -> int:
     """Prepare storage/configuration only with no prior live application root."""
     import cli.commands._repo as _repo_commands
@@ -110,6 +115,7 @@ def _prepare_cold_start(
             services=frozenset(spec.session for spec in roster),
             database_factory=database_factory,
             producer=producer,
+            command=command,
         )
     except Exception as e:
         print(f"  ✗ converge failed: {e}", file=sys.stderr)
@@ -121,7 +127,9 @@ def _prepare_cold_start(
     #    Linux: pg_ctl + redis-server. No docker on any POSIX platform.
     if "gateway" in roles:
         rc = _ensure_gateway_data_plane(
-            retained_children=retained_children, database_factory=database_factory
+            retained_children=retained_children,
+            database_factory=database_factory,
+            machine=command.machine,
         )
         if rc != 0:
             return rc
@@ -131,14 +139,14 @@ def _prepare_cold_start(
     else:
         print("\n→ local services: skipped (agent-runner uses central node's DB/Redis)")
 
-    rc = _prepare_start_schema(database_factory=database_factory)
+    rc = _prepare_start_schema(database_factory=database_factory, machine_name=command.machine.name)
     if rc:
         return rc
 
     if "gateway" in roles:
         from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
-        complete_gateway_data_plane(database_factory=database_factory)
+        complete_gateway_data_plane(database_factory=database_factory, machine=command.machine)
     rc = _repo_commands._assert_schema_current_or_die()
     if rc != 0:
         return rc
@@ -158,7 +166,7 @@ def _prepare_cold_start(
     # Adopt first: a name this machine installed before the registry existed is
     # invisible to the materializer until it has a row, and sweeping first means
     # one pass leaves machine and cluster agreeing rather than two.
-    adopt_local_extensions(database_factory=database_factory)
+    adopt_local_extensions(database_factory=database_factory, machine_name=command.machine.name)
     materialize_cluster_extensions(database_factory=database_factory)
 
     return 0
@@ -169,6 +177,7 @@ class _StartState:
     """What the start phases hand to each other."""
 
     runtime: StartRuntime
+    command: CommandRuntime
     repo: Path
     resolved: SetupValues
     roles: MachineRoles
@@ -212,14 +221,14 @@ def _guard_start(
     return runtime, repo
 
 
-def _resolve_identity() -> tuple[SetupValues, MachineRoles] | int:
+def _resolve_identity(command: CommandRuntime) -> tuple[SetupValues, MachineRoles] | int:
     """Collect the home's recorded setup fields and settle its roles against `ava init`."""
     import cli.commands._setup as _setup_commands
     from base.paths import ava_home
 
     # 0b) collect & validate the home's recorded setup fields (capability-aware filter)
     try:
-        resolved, missing = _setup_commands._collect_setup_values()
+        resolved, missing = _setup_commands._collect_setup_values(config=command.config)
     except ValueError as e:
         # validator failure (e.g. MachineRoleInvalid) — do not persist invalid
         # value, print error + exit.
@@ -229,13 +238,9 @@ def _resolve_identity() -> tuple[SetupValues, MachineRoles] | int:
         print(_missing_setup_message(missing), file=sys.stderr)
         return 1
 
-    # reset identity holder so downstream base.cluster.machine.machine_name() /
-    # machine_role() re-resolve from settings.
-    from base.cluster.machine import machine_role, reset_identity
-
-    reset_identity()
-
-    roles = machine_role()
+    # Successful setup refreshes only this invocation's cached identity.
+    command.machine.reset()
+    roles = command.machine.role()
     from cli.start_identity import read_intent
 
     recorded = read_intent(ava_home())
@@ -255,14 +260,21 @@ def _resolve_identity() -> tuple[SetupValues, MachineRoles] | int:
 
 
 def _roster_for(
-    roles: MachineRoles, selection: _Selection, *, publish: bool = True
+    roles: MachineRoles,
+    selection: _Selection,
+    *,
+    publish: bool = True,
+    machine: MachineIdentity,
 ) -> tuple[ServiceSpec, ...]:
     """The launch roster of the resolved service selection; `publish=False` only inspects it."""
     import cli.commands.lifecycle.root_driver as _root_driver_commands
     from base.deploy.lifecycle.service_selection import resolve_selection
     from ops.spec import services_for_capabilities_annotated
 
-    names = {spec.session for spec, _reason in services_for_capabilities_annotated(roles)}
+    names = {
+        spec.session
+        for spec, _reason in services_for_capabilities_annotated(roles, machine=machine)
+    }
     launch_skip = resolve_selection(
         names,
         only=selection.only_services,
@@ -271,7 +283,7 @@ def _roster_for(
         persist=selection.persist_services,
         **({} if publish else {"publish": False}),
     )
-    return _root_driver_commands.start_roster(roles, launch_skip)
+    return _root_driver_commands.start_roster(roles, launch_skip, machine=machine)
 
 
 def _admit_start(
@@ -280,13 +292,14 @@ def _admit_start(
     *,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
+    command: CommandRuntime,
 ) -> int | None:
     """Admit the start (or prepare a cold one) and check the schema before anything launches."""
     import cli.commands._repo as _repo_commands
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 
     # Resolve desired services without publishing changes before admission.
-    roster = _roster_for(state.roles, selection, publish=False)
+    roster = _roster_for(state.roles, selection, publish=False, machine=command.machine)
     try:
         state.live = _root_driver_commands.admit_live_start(
             roster, state.repo, state.roles, reconcile=selection.persist_services
@@ -299,6 +312,7 @@ def _admit_start(
                 retained_children=state.retained_children,
                 database_factory=database_factory,
                 producer=producer,
+                command=command,
             )
             if rc:
                 return rc
@@ -329,7 +343,9 @@ def _register_and_probe(state: _StartState, *, database_factory: DatabaseFactory
     # agent-runner will also fail every subsequent `ava cluster status` and
     # The fleet update orchestration.
     print("\n→ register machine in central DB")
-    rc = _repo_commands._register_machine_or_die(database_factory(), state.resolved, state.roles)
+    rc = _repo_commands._register_machine_or_die(
+        database_factory(), state.resolved, state.roles, command=state.command
+    )
     if rc != 0:
         return rc
 
@@ -347,20 +363,19 @@ def _register_and_probe(state: _StartState, *, database_factory: DatabaseFactory
     return None
 
 
-def _print_gateway_hint() -> None:
+def _print_gateway_hint(*, machine: MachineIdentity) -> None:
     """Where a remote agent-runner dials this gateway, and how a browser logs in.
 
     The gateway's own .env holds the loopback URL (a box reaches its own gateway over
     loopback); this prints the OTHER address, so whoever just brought the gateway up can
     enroll runners against it without hunting for the host/port.
     """
-    from base.cluster.machine import reachable_host
     from base.config import settings as _settings
     from base.host.net.predicates import is_loopback_host
     from base.paths import ava_home
 
     port = _settings.gateway.gateway_port
-    host = reachable_host()
+    host = machine.host()
     print(
         f"\n→ web login password: the AVA_CLUSTER_SECRET value in {ava_home() / '.env'} "
         "(the CLI, SDK and local services present their own credentials)"
@@ -420,6 +435,7 @@ def _cmd_start_body(
     runtime: StartRuntime | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
+    command: CommandRuntime,
 ) -> int | StartDelegation:
     """Core start logic, shared by cmd_start and cmd_restart.
 
@@ -436,15 +452,17 @@ def _cmd_start_body(
     if isinstance(guarded, int):
         return guarded
     runtime, repo = guarded
-    identity = _resolve_identity()
+    identity = _resolve_identity(command)
     if isinstance(identity, int):
         return identity
     resolved, roles = identity
     state = _StartState(
-        runtime, repo, resolved, roles, live=False, retained_children=retained_children
+        runtime, command, repo, resolved, roles, live=False, retained_children=retained_children
     )
     selection = _Selection(only_services, disabled_services, all_services, persist_services)
-    rc = _admit_start(state, selection, database_factory=database_factory, producer=producer)
+    rc = _admit_start(
+        state, selection, database_factory=database_factory, producer=producer, command=command
+    )
     if rc is not None:
         return rc
     rc = _register_and_probe(state, database_factory=database_factory)
@@ -452,7 +470,7 @@ def _cmd_start_body(
         return rc
 
     # Preparation may materialize plugins on a cold start; publish only now.
-    roster = _roster_for(roles, selection)
+    roster = _roster_for(roles, selection, machine=command.machine)
 
     # 4a) probe before binding: refuse to launch a daemon onto a health port
     # another unit already answers on — this is the last point at which nothing
@@ -485,7 +503,9 @@ def _cmd_start_body(
     # authorized owner, or resume_after_start, alone may release admission.
     from base.deploy.state.host_deploy_state import set_posture
 
-    set_posture(database_factory(), "paused" if admission.held() else "idle")
+    set_posture(
+        database_factory(), "paused" if admission.held() else "idle", machine=command.machine.name()
+    )
 
     # Success requires real readiness for every launched service, frontend included.
     print("\n→ waiting for services to come up")
@@ -495,11 +515,11 @@ def _cmd_start_body(
     )
 
     print("\n→ status")
-    cmd_status(database_factory=database_factory)
+    cmd_status(database_factory=database_factory, machine=command.machine)
 
     # 7) gateway reachability hint.
     if any(spec.session == "gateway" for spec in started) and not wait.unready:
-        _print_gateway_hint()
+        _print_gateway_hint(machine=command.machine)
         print_login_link({spec.session for spec in started})
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
@@ -528,6 +548,7 @@ def cmd_start(
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
+    command: CommandRuntime,
 ) -> int:
     """Converge one configured unit through storage, schema, root and readiness.
 
@@ -540,6 +561,7 @@ def cmd_start(
     return _cmd_start_body(
         operation,
         database_factory,
+        command.machine,
         disabled_services=disabled_services,
         only_services=only_services,
         all_services=all_services,
@@ -547,4 +569,5 @@ def cmd_start(
         runtime=runtime,
         retained_children=retained_children,
         producer=producer,
+        command=command,
     )

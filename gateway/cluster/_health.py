@@ -9,7 +9,6 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
 
-from base.cluster.machine import machine_name
 from base.daemon.health_schema import DEGRADED, OK, component, render
 from base.paths import ava_home
 
@@ -42,7 +41,7 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
         "status": "ok",
         "name": "gateway",
         "home": str(ava_home()),
-        "machine": machine_name(),
+        "machine": request.app.state.machine.name(),
         "started_at": request.app.state.started_at,
         "sha": request.app.state.process_image.sha,
         "liveness": OK,

@@ -23,7 +23,7 @@ from collections.abc import Callable
 
 import uvicorn
 
-from base.cluster.machine import validate_machine_name
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
@@ -33,6 +33,7 @@ from base.db.config import db_config_from_boot
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import ava_home
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.emitter import build_pipeline
 from services.derived.memory_indexer.embeddings.factory import get_descriptor
@@ -91,6 +92,8 @@ def main() -> None:
     """Entry point: pidfile -> log init -> serve -> cleanup."""
     boot = ConfigBoot()
     boot.boot()
+    machine = machine_from_boot(boot)
+    process_home = ava_home().resolve()
     config = memory_search_config(config=boot)
     if _is_running(config):
         sys.exit(1)
@@ -101,15 +104,15 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="memory_search")
 
     def database() -> Database:
-        return Database(db_config_from_boot(boot), gate=gate)
+        return Database(db_config_from_boot(boot), gate=gate, local_host=machine.host)
 
-    pipeline = build_pipeline(database=database)
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     code = 0
     try:
         init_gateway_process(
             name="memory_search",
             producer=lambda: pipeline,
-            machine_reader=lambda: validate_machine_name(boot.view.general.machine_name),
+            machine_reader=machine.name,
             image=image,
         )
         install_graceful_shutdown("memory_search")

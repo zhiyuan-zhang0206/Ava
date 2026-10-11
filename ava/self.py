@@ -50,7 +50,7 @@ class MachineSpec(NamedTuple):
 
 
 MACHINE_SPEC: MachineSpec
-"""The machine this agent runs on."""
+"""The machine from the bound context; no context is an error."""
 
 
 def __getattr__(name: str) -> object:
@@ -63,9 +63,10 @@ def __getattr__(name: str) -> object:
 
         return ava.sdk_surface.agent_identity.agent_id()
     if name == "MACHINE_SPEC":
-        from base.cluster.machine import machine_description, machine_name
+        import ava
 
-        return MachineSpec(machine_name(), machine_description() or "")
+        machine = ava.context.require_machine()
+        return MachineSpec(machine.name(), machine.description() or "")
     if name == "InvalidConfigOverlay":
         from base.packages.plugins.config_registration import InvalidConfigOverlay
 

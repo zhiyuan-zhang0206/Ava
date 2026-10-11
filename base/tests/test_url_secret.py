@@ -19,12 +19,14 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
-from base.cluster.machine import reachable_host, reset_identity
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
 from base.config import DataPlaneSettings, settings
 from base.config.domains.storage import data_plane
 from base.config.domains.storage.data_plane import self_machine_host
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.url_secret import redacted_url, url_with_password, url_with_userinfo
+from tests.fixtures.configuration import snapshot_process_config
 
 _SECRET = "new-secret_v2"  # noqa: S105 — test fixture, not a real credential
 
@@ -446,20 +448,14 @@ class TestPinIpv4Hostaddr:
 
 @pytest.mark.usefixtures("_restore_machine_env")
 class TestSelfMachineHostParity:
-    """`self_machine_host` is a leaf duplicate of `base.cluster.machine.reachable_host`
+    """`self_machine_host` is a leaf duplicate of `MachineIdentity.host`
     (the config sub-model cannot import base.cluster.machine — circular), so pin its
     precedence (env AVA_MACHINE_HOST > localhost) to the real resolver: each source case
     asserts both return the same value, so a future drift in either side fails here."""
 
-    @pytest.fixture(autouse=True)
-    def _fresh_identity(self) -> Iterator[None]:
-        # reachable_host caches per process — reset around each case so it
-        # re-resolves from the sources this test pins.
-        reset_identity()
-        yield
-        reset_identity()
-
-    def _pin(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, env: str | None) -> None:
+    def _pin(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, env: str | None
+    ) -> MachineIdentity:
         # The two resolvers read different surfaces of the same sources:
         # self_machine_host reads os.environ at construction time; reachable_host
         # reads the settings singleton (machine_host / ava_home fields). Pin both
@@ -471,21 +467,22 @@ class TestSelfMachineHostParity:
         else:
             os.environ["AVA_MACHINE_HOST"] = env
             monkeypatch.setattr(settings.general, "machine_host", env)
+        return machine_from_boot(snapshot_process_config())
 
     def test_env_wins(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        self._pin(monkeypatch, tmp_path, env="gw.env-host")
-        assert self_machine_host() == reachable_host() == "gw.env-host"
+        identity = self._pin(monkeypatch, tmp_path, env="gw.env-host")
+        assert self_machine_host() == identity.host() == "gw.env-host"
 
     def test_a_machine_host_file_is_not_read(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        self._pin(monkeypatch, tmp_path, env=None)
+        identity = self._pin(monkeypatch, tmp_path, env=None)
         (tmp_path / "machine_host").write_text("gw.file-host\n")
-        assert self_machine_host() == reachable_host() == "localhost"
+        assert self_machine_host() == identity.host() == "localhost"
 
     def test_localhost_default(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        self._pin(monkeypatch, tmp_path, env=None)
-        assert self_machine_host() == reachable_host() == "localhost"
+        identity = self._pin(monkeypatch, tmp_path, env=None)
+        assert self_machine_host() == identity.host() == "localhost"
 
 
 class TestRedactedUrl:

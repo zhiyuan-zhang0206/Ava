@@ -9,13 +9,19 @@ import pytest
 
 from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.tests.impersonation._impersonation_helpers import _active, _agent, _request, _status
+from base.tests.impersonation.support import (
+    accept_controller,
+    create_native_owner,
+    native_status,
+    request_controller,
+)
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -25,8 +31,10 @@ def test_request_requires_a_relay_binding(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
     with pytest.raises(ValueError, match="provider"):
         leases.request(
             database,
@@ -35,6 +43,7 @@ def test_request_requires_a_relay_binding(
             caller=CallerIdentity(kind="external_agent", subject="codex"),
             relay_provider="nope",
             authority=config_authority,
+            local_machine=local_machine,
         )
     with pytest.raises(ValueError, match="thread id"):
         leases.request(
@@ -44,6 +53,7 @@ def test_request_requires_a_relay_binding(
             caller=CallerIdentity(kind="external_agent", subject="codex"),
             relay_provider="codex",
             authority=config_authority,
+            local_machine=local_machine,
         )
     with pytest.raises(ValueError, match="thread id and remote are rejected"):
         leases.request(
@@ -54,6 +64,7 @@ def test_request_requires_a_relay_binding(
             relay_provider="claude",
             relay_thread_id=str(uuid4()),
             authority=config_authority,
+            local_machine=local_machine,
         )
     with pytest.raises(ValueError, match="unix:// or ws://"):
         leases.request(
@@ -65,6 +76,7 @@ def test_request_requires_a_relay_binding(
             relay_thread_id=str(uuid4()),
             relay_codex_remote="http://not-a-codex-endpoint",
             authority=config_authority,
+            local_machine=local_machine,
         )
 
 
@@ -75,24 +87,34 @@ def test_claude_request_mints_a_scoped_relay_credential(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    lease = _request(
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = request_controller(
         owner,
         provider="claude",
         thread=None,
         authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity.name(),
     )
     assert lease["relay_provider"] == "claude"
     assert lease.get("relay_token")
     assert "relay_token_hash" not in lease
     assert (
-        leases.relay_get(database, event_bus, lease["id"], lease["relay_token"])["status"]
+        leases.relay_get(
+            database,
+            event_bus,
+            lease["id"],
+            lease["relay_token"],
+            local_machine=machine_identity.name(),
+        )["status"]
         == "requested"
     )
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
-        leases.relay_get(database, event_bus, lease["id"], "wrong")
+        leases.relay_get(
+            database, event_bus, lease["id"], "wrong", local_machine=machine_identity.name()
+        )
 
 
 def test_request_validates_and_records_the_batch_window(
@@ -102,10 +124,16 @@ def test_request_validates_and_records_the_batch_window(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    lease = _request(
-        owner, provider="codex", authority=config_authority, database_gate=database_gate
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = request_controller(
+        owner,
+        provider="codex",
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
     )
     assert lease["relay_batch_window_seconds"] == 0  # default: deliver immediately
     for bad in (-1, 301, 1.5, True, "30"):
@@ -119,10 +147,15 @@ def test_request_validates_and_records_the_batch_window(
                 relay_thread_id=str(uuid4()),
                 authority=config_authority,
                 relay_batch_window_seconds=bad,  # type: ignore[arg-type] — the runtime check rejects non-ints
+                local_machine=local_machine,
             )
     with pytest.raises(leases.ImpersonationError, match="already has"):
-        _request(
-            owner, provider="codex", authority=config_authority, database_gate=database_gate
+        request_controller(
+            owner,
+            provider="codex",
+            authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity.name(),
         )  # first lease still open
     leases.reject(database, event_bus, lease["id"], owner.agent_id, owner, "window probe done")
     window_off = leases.request(
@@ -134,6 +167,7 @@ def test_request_validates_and_records_the_batch_window(
         relay_thread_id=str(uuid4()),
         relay_batch_window_seconds=0,
         authority=config_authority,
+        local_machine=local_machine,
     )
     assert window_off["relay_batch_window_seconds"] == 0
 
@@ -145,32 +179,53 @@ def test_codex_request_defers_relay_credential_to_activation(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority, database_gate=database_gate)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = request_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     assert lease["relay_provider"] == "codex"
     assert lease["relay_thread_id"]
     assert "relay_token" not in lease
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
-        leases.relay_get(database, event_bus, lease["id"], "any")
+        leases.relay_get(
+            database, event_bus, lease["id"], "any", local_machine=machine_identity.name()
+        )
 
 
 def test_accept_without_relay_binding_fails_loudly(
-    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     # A legacy-shape lease (created before the relay binding existed) has all
     # relay fields NULL; accepting it must fail loudly, never guess an endpoint.
-    owner = _agent(db_conn)
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
     legacy_id = uuid4()
     db_conn.execute(
         "INSERT INTO agent_impersonations(id,agent_id,source,machine,token_hash,reason,"
         "status,ttl_seconds,expires_at,session_id) VALUES(%s,%s,'external_agent:codex:old',%s,%s,'',"
         "'requested',300,clock_timestamp()+interval '5 minutes',0)",
-        (legacy_id, owner.agent_id, machine_name(), "legacy-hash"),
+        (legacy_id, owner.agent_id, local_machine, "legacy-hash"),
     )
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="no relay binding"):
-        leases.accept(database, event_bus, str(legacy_id), owner.agent_id, owner, "Handoff brief")
+        leases.accept(
+            database,
+            event_bus,
+            str(legacy_id),
+            owner.agent_id,
+            owner,
+            "Handoff brief",
+            local_machine=local_machine,
+        )
 
 
 def test_provision_relay_only_for_the_accepting_incarnation(
@@ -180,10 +235,25 @@ def test_provision_relay_only_for_the_accepting_incarnation(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority, database_gate=database_gate)
-    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = request_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=local_machine,
+    )
     foreign = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
     with pytest.raises(leases.ImpersonationError):
         leases.provision_relay(database, lease["id"], foreign, "relay-credential")
@@ -191,7 +261,13 @@ def test_provision_relay_only_for_the_accepting_incarnation(
     assert provisioned is not None
     assert "relay_token_hash" not in provisioned
     assert (
-        leases.relay_get(database, event_bus, lease["id"], "relay-credential")["status"]
+        leases.relay_get(
+            database,
+            event_bus,
+            lease["id"],
+            "relay-credential",
+            local_machine=machine_identity.name(),
+        )["status"]
         == "accepted"
     )
 
@@ -203,10 +279,25 @@ def test_provision_relay_revokes_the_previous_credential(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority, database_gate=database_gate)
-    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = request_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=local_machine,
+    )
     leases.activate(database, event_bus, lease["id"], owner)
     first = leases.provision_relay(database, lease["id"], owner, "first")
     assert first is not None
@@ -215,8 +306,15 @@ def test_provision_relay_revokes_the_previous_credential(
     )
     assert second is not None
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
-        leases.relay_get(database, event_bus, lease["id"], "first")
-    assert leases.relay_get(database, event_bus, lease["id"], "second")["status"] == "active"
+        leases.relay_get(
+            database, event_bus, lease["id"], "first", local_machine=machine_identity.name()
+        )
+    assert (
+        leases.relay_get(
+            database, event_bus, lease["id"], "second", local_machine=machine_identity.name()
+        )["status"]
+        == "active"
+    )
 
 
 def test_active_lease_binding_inherits_the_replacement_incarnation(
@@ -226,18 +324,24 @@ def test_active_lease_binding_inherits_the_replacement_incarnation(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Every restart/host turnover mints a fresh incarnation; the active lease's
     accepting binding must follow it so relay supervision can re-provision."""
-    owner = _agent(db_conn)
-    lease = _active(owner, authority=config_authority, database_gate=database_gate)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     replacement = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
     db_conn.execute(
         "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s WHERE id=%s",
         (replacement.generation, replacement.owner, owner.agent_id),
     )
     db_conn.commit()
-    state = _status(replacement, database_gate=database_gate)
+    state = native_status(replacement, database_gate=database_gate)
     assert state["status"] == "active"
     assert (state["accepted_generation"], state["accepted_owner"]) == (
         str(replacement.generation),
@@ -253,7 +357,14 @@ def test_active_lease_binding_inherits_the_replacement_incarnation(
     assert provisioned is not None
     assert "relay_token_hash" not in provisioned
     assert (
-        leases.relay_get(database, event_bus, lease["id"], "relay-credential")["status"] == "active"
+        leases.relay_get(
+            database,
+            event_bus,
+            lease["id"],
+            "relay-credential",
+            local_machine=machine_identity.name(),
+        )["status"]
+        == "active"
     )
     # The old incarnation cannot mint the relay credential after the transfer.
     with pytest.raises(leases.ImpersonationError):
@@ -269,29 +380,42 @@ def test_relay_inbox_uses_the_scoped_credential_only(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    lease = _request(
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = request_controller(
         owner,
         provider="claude",
         thread=None,
         authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity.name(),
     )
-    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=local_machine,
+    )
     leases.activate(database, event_bus, lease["id"], owner)
     insert_inbound_message(
         db_conn, owner.agent_id, "hello", "system", kind=kind, bus=event_bus, database=database
     )
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
-        leases.relay_inbox(database, lease["id"], "wrong")
-    rows = leases.relay_inbox(database, lease["id"], lease["relay_token"])
+        leases.relay_inbox(database, lease["id"], "wrong", local_machine=machine_identity.name())
+    rows = leases.relay_inbox(
+        database, lease["id"], lease["relay_token"], local_machine=machine_identity.name()
+    )
     assert [row["content"] for row in rows] == ["hello"]
     # The relay credential is not a caller attestation: the controller inbox
     # refuses anything that is not the session's recorded process tree.
     with pytest.raises(leases.ImpersonationError, match="caller check failed"):
-        leases.inbox(database, lease["id"], lease["relay_token"])
+        leases.inbox(database, lease["id"], lease["relay_token"], local_machine=local_machine)
 
 
 def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
@@ -301,24 +425,54 @@ def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    lease = _request(
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = request_controller(
         owner,
         provider="claude",
         thread=None,
         authority=config_authority,
         database_gate=database_gate,
+        local_machine=machine_identity.name(),
     )
-    leases.relay_heartbeat(database, lease["id"], lease["relay_token"])
-    row = leases.relay_get(database, event_bus, lease["id"], lease["relay_token"])
+    leases.relay_heartbeat(
+        database, lease["id"], lease["relay_token"], local_machine=machine_identity.name()
+    )
+    row = leases.relay_get(
+        database,
+        event_bus,
+        lease["id"],
+        lease["relay_token"],
+        local_machine=machine_identity.name(),
+    )
     assert row["relay_heartbeat_at"] is not None
-    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=local_machine,
+    )
     leases.activate(database, event_bus, lease["id"], owner)
-    leases.relay_heartbeat(database, lease["id"], lease["relay_token"])
-    leases.release(database, event_bus, lease["id"], attested_caller(lease), "Done")
+    leases.relay_heartbeat(
+        database, lease["id"], lease["relay_token"], local_machine=machine_identity.name()
+    )
+    leases.release(
+        database,
+        event_bus,
+        lease["id"],
+        attested_caller(lease),
+        "Done",
+        local_machine=local_machine,
+    )
     with pytest.raises(leases.ImpersonationError, match="ended"):
-        leases.relay_heartbeat(database, lease["id"], lease["relay_token"])
+        leases.relay_heartbeat(
+            database, lease["id"], lease["relay_token"], local_machine=machine_identity.name()
+        )
 
 
 def test_fail_acceptance_rolls_back_with_reason_and_native_note(
@@ -328,10 +482,25 @@ def test_fail_acceptance_rolls_back_with_reason_and_native_note(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority, database_gate=database_gate)
-    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = request_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=local_machine,
+    )
     result = leases.fail_acceptance(
         database, event_bus, lease["id"], owner, "relay process exited at startup"
     )
@@ -352,12 +521,27 @@ def test_fail_acceptance_requires_an_accepted_lease(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    lease = _request(owner, authority=config_authority, database_gate=database_gate)
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = request_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     with pytest.raises(leases.ImpersonationError):
         leases.fail_acceptance(database, event_bus, lease["id"], owner, "too early")
-    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=local_machine,
+    )
     leases.activate(database, event_bus, lease["id"], owner)
     with pytest.raises(leases.ImpersonationError):
         leases.fail_acceptance(database, event_bus, lease["id"], owner, "too late")
@@ -369,9 +553,15 @@ def test_record_relay_failure_is_rate_limited(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    lease = _active(owner, authority=config_authority, database_gate=database_gate)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     assert leases.record_relay_failure(database, lease["id"], owner) is True
     assert leases.record_relay_failure(database, lease["id"], owner) is False
 
@@ -383,13 +573,19 @@ def test_abort_lease_stops_the_takeover_and_keeps_the_request_reason(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A core-component death (task #3998) stops the takeover like an expiry:
     the cause lands in rejection_reason prefixed "aborted: ", the request's own
     reason survives, a non-automatic lease gets the legacy end note, and a
     second abort is a no-op."""
-    owner = _agent(db_conn)
-    lease = _active(owner, authority=config_authority, database_gate=database_gate)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    lease = accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     ended = leases.abort_lease(
         database, event_bus, lease["id"], owner, "the executor process is gone"
     )
@@ -415,10 +611,12 @@ def test_abort_lease_leaves_the_automatic_end_note_to_the_resume_chain(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     """An automatic takeover's end note belongs to the resume chain
     (deliver_handoff), never to the abort transaction itself (task #3998)."""
-    owner = _agent(db_conn)
+    local_machine = machine_identity.name()
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
     lease = leases.request(
         database,
         event_bus,
@@ -433,8 +631,17 @@ def test_abort_lease_leaves_the_automatic_end_note_to_the_resume_chain(
         name="Auto takeover",
         executor_name="Codex: test",
         authority=config_authority,
+        local_machine=local_machine,
     )
-    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=local_machine,
+    )
     leases.activate(database, event_bus, lease["id"], owner)
     ended = leases.abort_lease(
         database, event_bus, lease["id"], owner, "the bound relay stopped heartbeating"
@@ -457,9 +664,15 @@ def test_relay_liveness_alert_logs_only_for_stale_active_leases(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    owner = _agent(db_conn)
-    _active(owner, authority=config_authority, database_gate=database_gate)
+    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    accept_controller(
+        owner,
+        authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity.name(),
+    )
     errors: list[tuple[str, object]] = []
 
     class FakeLogger:

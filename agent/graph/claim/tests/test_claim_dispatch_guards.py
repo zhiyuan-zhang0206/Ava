@@ -10,17 +10,19 @@ from agent.graph import claim_node
 from agent.state import AgentState
 from agent.tests.claim.claim_support import (
     _await_inbound_visible,
-    _config,
-    _insert_inbound_kind,
-    _make_runtime,
+    insert_inbound_kind,
+    make_runtime,
+    thread_config,
 )
 from base.agents.incarnation.native_work_models import NativeWorkTarget
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -32,6 +34,7 @@ async def test_claim_unknown_kind_raises(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Unrecognized inbound kind = framework / DB schema desync — immediately raise,
     do not silently swallow bugs by 'defaulting to chat processing'.
@@ -43,9 +46,12 @@ async def test_claim_unknown_kind_raises(
     from agent.db import ClaimedInbound
 
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    runtime = _make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
 
     async def fake_claim(
         _db: object,
@@ -66,7 +72,7 @@ async def test_claim_unknown_kind_raises(
         await claim_node(
             AgentState(),
             runtime,
-            _config(
+            thread_config(
                 tid,
             ),
         )
@@ -82,6 +88,7 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """The other half of the race: the batch (terminate alone) is claimed, but a
     message lands in the queue before the exit is committed. The claim node's
@@ -94,14 +101,17 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
     from agent.db import ClaimedInbound
 
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
+    terminate_id = insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
     chat_id = insert_inbound_message(
         db_conn, tid, "message after the claim", source="user", bus=event_bus, database=database
     )
     await _await_inbound_visible(aops_pool, chat_id)
-    runtime = _make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
 
     async def fake_claim(
         _pool: AsyncConnectionPool,
@@ -131,7 +141,7 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
         runtime,
-        _config(
+        thread_config(
             tid,
         ),
     )
@@ -169,20 +179,24 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Veto half 1: a same-batch chat newer than the terminate keeps the agent
     alive."""
     from agent.db import ClaimedInbound
 
     tid = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    terminate_id = insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     chat_id = insert_inbound_message(
         db_conn, tid, "message in the batch", source="user", bus=event_bus, database=database
     )
     await _await_inbound_visible(aops_pool, chat_id)
-    runtime = _make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
 
     async def fake_claim(
         _pool: AsyncConnectionPool,
@@ -213,7 +227,7 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
         runtime,
-        _config(
+        thread_config(
             tid,
         ),
     )

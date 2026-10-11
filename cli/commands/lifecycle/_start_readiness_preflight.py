@@ -39,7 +39,7 @@ import os
 import sys
 from pathlib import Path
 
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.host.private_storage import (
     private_file_problem,
     private_tree_root_problem,
@@ -51,7 +51,11 @@ _TREE_ROOTS = ("logs", "workspaces", "memory")
 
 
 def preflight_start_readiness(
-    repo: Path, *, check_launcher: bool = True, runtime: StartRuntime | None = None
+    repo: Path,
+    *,
+    check_launcher: bool = True,
+    runtime: StartRuntime | None = None,
+    machine: MachineIdentity,
 ) -> int:
     """Vet the local state the coming `ava start` needs, before the stop.
 
@@ -74,14 +78,14 @@ def preflight_start_readiness(
     if checkout_problem is not None:
         fatal.append(checkout_problem)
 
-    roles = _machine_roles()
+    roles = _machine_roles(machine=machine)
     if roles is None:
         observations.append(
             "machine role did not resolve — port checks skipped (the probe gate "
             "ahead of this one reports the same condition)"
         )
     else:
-        port_fatal, port_observations = _port_findings(roles)
+        port_fatal, port_observations = _port_findings(roles, machine=machine)
         fatal += port_fatal
         observations += port_observations
 
@@ -104,7 +108,7 @@ def _prod_checkout_problem(repo: Path) -> str | None:
     return prod_service_checkout_error(repo)
 
 
-def _machine_roles() -> MachineRoles | None:
+def _machine_roles(*, machine: MachineIdentity) -> MachineRoles | None:
     """Resolve this host's roles via the canonical read-only accessor.
 
     `_roles_or_none` is the same helper `stop` / `status` / `converge/firewall_command.py` use
@@ -115,10 +119,10 @@ def _machine_roles() -> MachineRoles | None:
     """
     import cli.commands._repo as _repo_commands
 
-    return _repo_commands._roles_or_none()
+    return _repo_commands._roles_or_none(machine=machine)
 
 
-def _port_findings(roles: MachineRoles) -> tuple[list[str], list[str]]:
+def _port_findings(roles: MachineRoles, *, machine: MachineIdentity) -> tuple[list[str], list[str]]:
     """(fatal, observations) for the health-port gate, checked on the roster that
     the update's own `ava start` will launch with.
 
@@ -137,7 +141,9 @@ def _port_findings(roles: MachineRoles) -> tuple[list[str], list[str]]:
 
     try:
         available = {s.session for s in _roster.build_services()}
-        roster = _root_tree_roster(roles, resolve_selection(available, persist=False))
+        roster = _root_tree_roster(
+            roles, resolve_selection(available, persist=False), machine=machine
+        )
         occupied = _probe_commands.occupied_health_ports(roster)
     except Exception as exc:  # a preflight must not fail the update
         return [], [f"health-port check skipped: {exc}"]

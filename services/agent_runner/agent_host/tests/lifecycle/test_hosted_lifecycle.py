@@ -32,7 +32,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.force_termination import kill_terminating_agent_shells
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
@@ -114,7 +114,7 @@ async def test_hosted_applies_only_after_continuation_returns(
             pool=aops_pool,
             checkpointer=Mock(),
             graph=_graph_blocked_until_released(kind, entered, release),
-            machine="claim-test",
+            machine=configured_machine(name="claim-test"),
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
@@ -196,7 +196,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
             pool=aops_pool,
             checkpointer=Mock(),
             graph=graph,
-            machine="claim-test",
+            machine=configured_machine(name="claim-test"),
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
@@ -310,7 +310,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
@@ -377,7 +377,7 @@ async def _run_terminating_turn(
             pool=aops_pool,
             checkpointer=Mock(),
             graph=graph,
-            machine="claim-test",
+            machine=configured_machine(name="claim-test"),
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
@@ -533,7 +533,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
@@ -573,7 +573,7 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
         pool=aops_pool,
         checkpointer=Mock(),
         graph=Mock(),
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,

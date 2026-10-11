@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any
 
 from base.log import logger
 
+__all__ = ["ClientSet", "DatabaseFactory", "DatabaseHandle", "LazyConnection"]
+
 if TYPE_CHECKING:
     import httpx
     import psycopg
@@ -221,6 +223,19 @@ class ClientSet:
         if pipeline is None:
             return DrainResult(DrainStatus.COMPLETED, DrainPhase.DRAIN)
         return pipeline.sync(timeout=timeout)
+
+    def finalize_events(self) -> None:
+        """Finalize this owner's constructed exporter without creating a cold pipeline."""
+        with self._lock:
+            pipeline = self._event_pipeline
+        if pipeline is not None:
+            pipeline.finalize_exports()
+
+    def exports_deferred(self) -> bool | None:
+        """Read an existing pipeline's export posture; a cold owner stays cold."""
+        with self._lock:
+            pipeline = self._event_pipeline
+        return None if pipeline is None else bool(pipeline.exports_deferred())
 
     # ── release ──────────────────────────────────────────────────────────
 

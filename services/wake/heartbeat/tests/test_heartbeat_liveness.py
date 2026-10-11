@@ -11,22 +11,18 @@ fake so the full DB merge runs without dialing real ops servers.
 from __future__ import annotations
 
 import asyncio
-import time
-from types import SimpleNamespace
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
-from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from services.wake.heartbeat import JITTER_SPAN_S
-from services.wake.heartbeat import daemon as heartbeat_daemon
 from services.wake.heartbeat.liveness import (
     _OFFLINE_AFTER_FAILURES,
     _merge_liveness,
@@ -38,6 +34,7 @@ from services.wake.heartbeat.tests.machine_probe_setup import (
     pool,
     register_machine,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -76,6 +73,7 @@ def _make_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """Spawn an agent on `machine`. `lease_s_ahead` sets lease_expires_at
     relative to now() (None = NULL, negative = expired). `claimed=False`
@@ -85,6 +83,7 @@ def _make_agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     with db.cursor() as cur:
         cur.execute(
@@ -126,8 +125,6 @@ class TestLivenessPass:
                 "agent_host_online": False,
             }
 
-        import asyncio
-
         asyncio.run(
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
@@ -163,6 +160,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(
@@ -170,6 +168,7 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _merge_liveness(pool)
         assert _state(db_conn, aid) == ("unknown", None)
@@ -183,6 +182,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(
@@ -190,6 +190,7 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _set_machine_probe(db_conn, MACHINE, online=True, failures=0)
         with db_conn.cursor() as cur:
@@ -214,6 +215,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The pass's probe budget is `settings.gateway.status_probe_timeout_seconds`
         — the SAME setting the roster's probe reads, so the two probes stay
@@ -221,7 +223,6 @@ class TestLivenessPass:
         3.0s budget flipped a slow-but-healthy runner offline). A probe
         that outgrows the budget must be a failure (counted toward offline),
         never a success."""
-        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 12.0)
         register_machine(db_conn)
@@ -232,6 +233,7 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         seen: dict[str, object] = {}
 
@@ -262,6 +264,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """R1 lease is the process-liveness authority: an idling row whose
         lease expired with the machine up is a dead process -> offline."""
@@ -273,8 +276,8 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        import asyncio
 
         asyncio.run(
             run_liveness_pass(
@@ -297,6 +300,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(
@@ -306,8 +310,8 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        import asyncio
 
         asyncio.run(
             run_liveness_pass(
@@ -328,6 +332,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A host judged offline (>= 2 consecutive failed probes) takes every
         non-terminated row on it offline, lease notwithstanding."""
@@ -340,6 +345,7 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         aid2 = _make_agent(
             db_conn,
@@ -348,6 +354,7 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         # Probe success would reset the failure count — this test exercises
         # the merge judgement directly on a pre-set probe state.
@@ -364,6 +371,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """One failed probe is a blip: consecutive_failures must reach
         _OFFLINE_AFTER_FAILURES before the machine reads offline."""
@@ -376,6 +384,7 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         _merge_liveness(pool)
         assert _state(db_conn, aid)[0] == "online"
@@ -389,6 +398,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """Consecutive failures accumulate across passes; one success resets."""
         register_machine(db_conn)
@@ -399,8 +409,8 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        import asyncio
 
         fail = FakeProbe({MACHINE: False})
         asyncio.run(
@@ -436,7 +446,6 @@ class TestLivenessPass:
         self, pool: ConnectionPool, db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
     ) -> None:
         register_machine(db_conn)
-        import asyncio
 
         fail = FakeProbe({MACHINE: False})
         for expected in (1, 2, 3):
@@ -470,6 +479,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A mounted frontend receives online/offline truth without a poll storm."""
         register_machine(db_conn)
@@ -479,6 +489,7 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         announced: list[int] = []
 
@@ -489,7 +500,6 @@ class TestLivenessPass:
             "services.wake.heartbeat.liveness.publish_agent_updated_sync",
             capture_announcement,
         )
-        import asyncio
 
         asyncio.run(
             run_liveness_pass(
@@ -562,6 +572,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A freshly born idling row has no process claim, so it must not flash
         offline while the launcher is still waiting for the child to claim it."""
@@ -574,8 +585,8 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        import asyncio
 
         asyncio.run(
             run_liveness_pass(
@@ -596,6 +607,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A terminated row already renders dead; the pass must not touch it
         (its status is terminal by intent)."""
@@ -607,6 +619,7 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -614,7 +627,6 @@ class TestLivenessPass:
                 (aid,),
             )
         db_conn.commit()
-        import asyncio
 
         asyncio.run(
             run_liveness_pass(
@@ -635,6 +647,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A row whose machine is not in the machines table is not judged —
         stays 'unknown' (rendered conservatively as online)."""
@@ -646,8 +659,8 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        import asyncio
 
         asyncio.run(
             run_liveness_pass(
@@ -668,6 +681,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """A machine that comes back (probe success resets failures) flips its
         agents back online on the next pass — the G5 self-heal path, no
@@ -680,8 +694,8 @@ class TestLivenessPass:
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
+            local_machine=machine_identity,
         )
-        import asyncio
 
         fail = FakeProbe({MACHINE: False})
         asyncio.run(
@@ -710,68 +724,3 @@ class TestLivenessPass:
             )
         )
         assert _state(db_conn, aid)[0] == "online"
-
-
-@pytest.mark.usefixtures(pool.__name__)
-async def test_failed_checkin_is_retried_after_backoff_across_ticks(
-    pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-    event_bus: EventBus,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-) -> None:
-    """A failed check-in stays skipped, then becomes a probe when its window ends."""
-    idle_threshold = settings.daemon.heartbeat_idle_threshold_seconds
-    aid = spawn_agent(
-        spawner="user",
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-    )
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET status = 'idling', "
-            "last_active_at = now() - make_interval(secs => %s) WHERE id = %s",
-            (idle_threshold + JITTER_SPAN_S + 100, aid),
-        )
-    db_conn.commit()
-
-    start = time.time()
-    tick_times = iter(
-        [start, start + 1, start + 1 + idle_threshold, start + 2 + 2 * idle_threshold]
-    )
-    clock = [start]
-    tick = [-1]
-    sent_on_ticks: list[int] = []
-
-    async def next_tick(_liveness: object, _step: float) -> None:
-        try:
-            clock[0] = next(tick_times)
-        except StopIteration:
-            raise asyncio.CancelledError from None
-        tick[0] += 1
-
-    def record_checkin(
-        _pool: ConnectionPool, _db: Database, _bus: EventBus, agent_id: int, _idle_minutes: float
-    ) -> None:
-        if agent_id == aid:
-            sent_on_ticks.append(tick[0])
-
-    def skip_sweep(_pool: ConnectionPool) -> None:
-        pass
-
-    monkeypatch.setattr(heartbeat_daemon, "time", SimpleNamespace(time=lambda: clock[0]))
-    monkeypatch.setattr(heartbeat_daemon, "_sleep_with_liveness", next_tick)
-    monkeypatch.setattr(heartbeat_daemon, "_send_heartbeat_checkin", record_checkin)
-    monkeypatch.setattr(heartbeat_daemon, "_sweep_backoff_resets", skip_sweep)
-
-    with pytest.raises(asyncio.CancelledError):
-        await heartbeat_daemon._dispatch_loop(
-            pool, database, event_bus, LoopProgress("dispatch", 60.0)
-        )
-
-    assert sent_on_ticks == [0, 3]

@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -18,6 +18,7 @@ from ops import lifecycle
 from ops.agents.spawn import create_agent_row
 from ops.lifecycle import launch
 from ops.rpc_schemas import LaunchAgentRequest
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.asyncio
@@ -28,11 +29,12 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
     db_conn: psycopg.Connection,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     agent_id, birth_config, inbound_id, attempt = create_agent_row(
         database,
         event_bus,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         prompt="one goal",
         prompt_source="user",
         catalog=build_model_catalog(),
@@ -54,21 +56,41 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
     pool: ConnectionPool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1)
     with pool:
         await lifecycle.launch_agent_op(
-            database, event_bus, body, pool, catalog=build_model_catalog()
+            database,
+            event_bus,
+            body,
+            pool,
+            catalog=build_model_catalog(),
+            local_machine=machine_identity.name(),
         )
         await lifecycle.launch_agent_op(
-            database, event_bus, body, pool, catalog=build_model_catalog()
+            database,
+            event_bus,
+            body,
+            pool,
+            catalog=build_model_catalog(),
+            local_machine=machine_identity.name(),
         )
         stale = body.model_copy(update={"launch_attempt_id": uuid4()})
         with pytest.raises(ValueError, match="stale or misplaced"):
             await lifecycle.launch_agent_op(
-                database, event_bus, stale, pool, catalog=build_model_catalog()
+                database,
+                event_bus,
+                stale,
+                pool,
+                catalog=build_model_catalog(),
+                local_machine=machine_identity.name(),
             )
         db_conn.execute("UPDATE agents_meta SET machine='later-placement' WHERE id=%s", (agent_id,))
         db_conn.commit()
         with pytest.raises(ValueError, match="stale or misplaced"):
             await lifecycle.launch_agent_op(
-                database, event_bus, body, pool, catalog=build_model_catalog()
+                database,
+                event_bus,
+                body,
+                pool,
+                catalog=build_model_catalog(),
+                local_machine=machine_identity.name(),
             )
     assert wakes == [(agent_id, "0"), (agent_id, "0")]
     assert db_conn.execute(

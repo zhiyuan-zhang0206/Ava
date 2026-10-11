@@ -12,12 +12,14 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules import runner as sr
 from gateway.schedules.tests.runner_inputs import run_schedule as run
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _log_text(records: list[dict[str, Any]]) -> str:
@@ -218,6 +220,8 @@ def test_script_failure_stays_primary_when_guard_close_fails(
     loguru_records: list[dict[str, Any]],
     primary: BaseException,
     database_gate: ProcessDbGate,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     _fast_guard(monkeypatch)
     failed = threading.Event()
@@ -254,7 +258,10 @@ def test_script_failure_stays_primary_when_guard_close_fails(
             tmp_path / "script.py",
             load_plugins=ava.ensure_plugins_loaded,
             inputs=ScheduleInputs(
-                lambda: Database.from_settings(gate=database_gate), Mock(), ava.loaded_code_image()
+                lambda: Database.from_settings(gate=database_gate),
+                Mock(),
+                ava.loaded_code_image(),
+                machine=machine_identity,
             ),
         )
     assert caught.value is primary
@@ -329,6 +336,8 @@ def test_successful_script_exit_cannot_complete_after_guard_close_failure(
     exit_code: int | None,
     blocked: bool,
     loguru_records: list[dict[str, Any]],
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     _fast_guard(monkeypatch)
     failed = threading.Event()
@@ -366,12 +375,12 @@ def test_successful_script_exit_cannot_complete_after_guard_close_failure(
     monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: None)
     try:
         if blocked:
-            assert run(row[0]) == 1
+            assert run(row[0], machine=machine_identity) == 1
             assert guards[0].thread.is_alive()
             assert "stall guard did not stop" in _log_text(loguru_records)
         else:
             with pytest.raises(WorkerFailure) as caught:
-                run(row[0])
+                run(row[0], machine=machine_identity)
             assert caught.value is error
         assert db_conn.execute(
             "SELECT status FROM schedules WHERE id = %s", (row[0],)

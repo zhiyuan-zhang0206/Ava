@@ -15,10 +15,11 @@ from typing import cast
 
 import pytest
 
-from base.cluster.machine import MachineRole
+from base.cluster.machine import MachineIdentity, MachineRole
 from base.daemon.endpoints import ServiceEndpoints
 from ops import roster, spec
 from ops.roster import service_spec
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _GATEWAY_SESSIONS = {
     "gate",
@@ -114,24 +115,43 @@ def test_capability_partition() -> None:
     ("role", "expected"),
     [("gateway", _GATEWAY_SESSIONS), ("agent-runner", _AGENT_RUNNER_SESSIONS)],
 )
-def test_annotated_roster_membership_per_capability(role: str, expected: set[str]) -> None:
+def test_annotated_roster_membership_per_capability(
+    role: str, expected: set[str], *, machine_identity: MachineIdentity
+) -> None:
     """The annotated (ungated) roster for a single capability is exactly that
     capability's services — env-independent, so gating does not perturb it."""
-    got = {s.session for s, _reason in spec.services_for_capabilities_annotated(frozenset({role}))}
+    got = {
+        s.session
+        for s, _reason in spec.services_for_capabilities_annotated(
+            frozenset({role}), machine=machine_identity
+        )
+    }
     assert got == expected
 
 
 def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", lambda: False)
-    rows = spec.services_for_capabilities_annotated(frozenset({"observability-station"}))
+    def disabled(*, machine: MachineIdentity) -> bool:
+        assert machine is machine_identity
+        return False
+
+    def enabled(*, machine: MachineIdentity) -> bool:
+        assert machine is machine_identity
+        return True
+
+    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", disabled)
+    rows = spec.services_for_capabilities_annotated(
+        frozenset({"observability-station"}), machine=machine_identity
+    )
     assert {service.session for service, _reason in rows} == {"loki", "prometheus", "grafana"}
     assert all(reason is not None for _service, reason in rows)
-    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", lambda: True)
+    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", enabled)
     assert {
         service.session
-        for service in spec.services_for_capabilities(frozenset({"observability-station"}))
+        for service in spec.services_for_capabilities(
+            frozenset({"observability-station"}), machine=machine_identity
+        )
     } == {"loki", "prometheus", "grafana"}
 
 
@@ -141,10 +161,13 @@ def test_gateway_roster_ordering_is_load_bearing() -> None:
     assert order.index("memory-search") < order.index("memory-indexer")
 
 
-def test_agent_runner_roster_ordering() -> None:
+def test_agent_runner_roster_ordering(*, machine_identity: MachineIdentity) -> None:
     """The agent host is available before the inbound ops service starts."""
     order = [
-        s.session for s, _r in spec.services_for_capabilities_annotated(frozenset({"agent-runner"}))
+        s.session
+        for s, _r in spec.services_for_capabilities_annotated(
+            frozenset({"agent-runner"}), machine=machine_identity
+        )
     ]
     assert order.index("agent-host") < order.index("ops")
 
@@ -157,67 +180,106 @@ def test_application_roster_has_one_supervision_authority() -> None:
     assert all("services.watchdog.daemon" not in service.cmd for service in services.values())
 
 
-def test_browser_gated_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_browser_gated_when_disabled(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """The config gate flows through ops.spec: a disabled browser drops it from the
     start roster but keeps it (with a reason) in the annotated view."""
     monkeypatch.setattr(spec.settings.services, "browser_enabled", False)
-    start = {s.session for s in spec.services_for_capabilities(frozenset({"agent-runner"}))}
+    start = {
+        s.session
+        for s in spec.services_for_capabilities(
+            frozenset({"agent-runner"}), machine=machine_identity
+        )
+    }
     assert "browser" not in start
     annotated = {
         s.session: r
-        for s, r in spec.services_for_capabilities_annotated(frozenset({"agent-runner"}))
+        for s, r in spec.services_for_capabilities_annotated(
+            frozenset({"agent-runner"}), machine=machine_identity
+        )
     }
     assert annotated["browser"] and "AVA_BROWSER_ENABLED" in annotated["browser"]
     assert annotated["browser-mcp"] and "AVA_BROWSER_ENABLED" in annotated["browser-mcp"]
 
 
-def _agent_runner_annotated(monkeypatch: pytest.MonkeyPatch) -> dict[str, str | None]:
+def _agent_runner_annotated(
+    monkeypatch: pytest.MonkeyPatch, *, local_machine: MachineIdentity
+) -> dict[str, str | None]:
     monkeypatch.setattr(spec.settings.services, "browser_enabled", True)
     return {
         s.session: r
-        for s, r in spec.services_for_capabilities_annotated(frozenset({"agent-runner"}))
+        for s, r in spec.services_for_capabilities_annotated(
+            frozenset({"agent-runner"}), machine=local_machine
+        )
     }
 
 
 def test_otel_collector_gated_on_gateway_without_lgtm_marker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     home = tmp_path / "gateway"
     home.mkdir()
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    monkeypatch.setattr(spec, "gateway_observability_home", lambda: home)
+
+    def observability_home(machine: MachineIdentity, *, home: Path) -> Path:
+        assert machine is machine_identity
+        return target_home
+
+    target_home = home
+    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
 
     annotated = {
         service.session: reason
-        for service, reason in spec.services_for_capabilities_annotated(frozenset({"gateway"}))
+        for service, reason in spec.services_for_capabilities_annotated(
+            frozenset({"gateway"}), machine=machine_identity
+        )
     }
     reason = annotated["otel-collector"]
     assert reason is not None
     assert "lgtm-host" in reason
 
-    start = {service.session for service in spec.services_for_capabilities(frozenset({"gateway"}))}
+    start = {
+        service.session
+        for service in spec.services_for_capabilities(
+            frozenset({"gateway"}), machine=machine_identity
+        )
+    }
     assert "otel-collector" not in start
 
 
 def test_otel_collector_runs_on_gateway_with_lgtm_marker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     home = tmp_path / "gateway"
     home.mkdir()
     (home / "lgtm-host").touch()
-    monkeypatch.setattr(spec, "gateway_observability_home", lambda: home)
+
+    def observability_home(machine: MachineIdentity, *, home: Path) -> Path:
+        assert machine is machine_identity
+        return target_home
+
+    target_home = home
+    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
 
     annotated = {
         service.session: reason
-        for service, reason in spec.services_for_capabilities_annotated(frozenset({"gateway"}))
+        for service, reason in spec.services_for_capabilities_annotated(
+            frozenset({"gateway"}), machine=machine_identity
+        )
     }
     assert annotated["otel-collector"] is None
-    start = {service.session for service in spec.services_for_capabilities(frozenset({"gateway"}))}
+    start = {
+        service.session
+        for service in spec.services_for_capabilities(
+            frozenset({"gateway"}), machine=machine_identity
+        )
+    }
     assert "otel-collector" in start
 
 
 def test_otel_collector_runs_on_gateway_without_marker_when_endpoint_override_explicit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """An explicit AVA_TELEMETRY_OTLP_ENDPOINT opens the collector gate on a
     non-LGTM gateway — the same escape hatch the exporter side honors, so the
@@ -225,42 +287,66 @@ def test_otel_collector_runs_on_gateway_without_marker_when_endpoint_override_ex
     home = tmp_path / "gateway"
     home.mkdir()
     monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
-    monkeypatch.setattr(spec, "gateway_observability_home", lambda: home)
+
+    def observability_home(machine: MachineIdentity, *, home: Path) -> Path:
+        assert machine is machine_identity
+        return target_home
+
+    target_home = home
+    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
 
     annotated = {
         service.session: reason
-        for service, reason in spec.services_for_capabilities_annotated(frozenset({"gateway"}))
+        for service, reason in spec.services_for_capabilities_annotated(
+            frozenset({"gateway"}), machine=machine_identity
+        )
     }
     assert annotated["otel-collector"] is None
-    start = {service.session for service in spec.services_for_capabilities(frozenset({"gateway"}))}
+    start = {
+        service.session
+        for service in spec.services_for_capabilities(
+            frozenset({"gateway"}), machine=machine_identity
+        )
+    }
     assert "otel-collector" in start
 
 
 def test_otel_collector_runs_on_pure_runner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     home = tmp_path / "runner"
     home.mkdir()
-    monkeypatch.setattr(spec, "gateway_observability_home", lambda: None)
+
+    def observability_home(machine: MachineIdentity, *, home: Path) -> None:
+        assert machine is machine_identity
+
+    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
 
     annotated = {
         service.session: reason
-        for service, reason in spec.services_for_capabilities_annotated(frozenset({"agent-runner"}))
+        for service, reason in spec.services_for_capabilities_annotated(
+            frozenset({"agent-runner"}), machine=machine_identity
+        )
     }
     assert annotated["otel-collector"] is None
     start = {
-        service.session for service in spec.services_for_capabilities(frozenset({"agent-runner"}))
+        service.session
+        for service in spec.services_for_capabilities(
+            frozenset({"agent-runner"}), machine=machine_identity
+        )
     }
     assert "otel-collector" in start
 
 
-def test_browser_mcp_gated_out_when_browser_is(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_browser_mcp_gated_out_when_browser_is(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """An incapable browser host also drops browser-mcp, with the browser reason."""
     monkeypatch.setattr(
         "base.host.system.probes.browser_incapability", lambda: "no display (headless)"
     )
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: "no display (headless)")
-    annotated = _agent_runner_annotated(monkeypatch)
+    annotated = _agent_runner_annotated(monkeypatch, local_machine=machine_identity)
     assert annotated["browser"] == "no display (headless)"
     assert annotated["browser-mcp"] == "no display (headless)"
 
@@ -343,7 +429,9 @@ def test_daemon_identity_binds_the_probe_to_one_daemons_facts(
     assert str(ServiceEndpoints.from_settings().of("ops").health_port) in str(seen["url"])
 
 
-def test_im_bridge_gated_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_im_bridge_gated_when_disabled(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """AVA_IM_BRIDGE_ENABLED=false gates im-bridge out of the roster — the
     no-adapter daemon otherwise exits immediately and the watchdog fails its
     healthcheck every round (2026-08-10 preview noise)."""
@@ -352,7 +440,9 @@ def test_im_bridge_gated_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.services, "im_bridge_enabled", False)
     annotated = {
         s.session: reason
-        for s, reason in spec.services_for_capabilities_annotated(frozenset({"gateway"}))
+        for s, reason in spec.services_for_capabilities_annotated(
+            frozenset({"gateway"}), machine=machine_identity
+        )
     }
     assert "im-bridge" in annotated
     assert annotated["im-bridge"] == "disabled (AVA_IM_BRIDGE_ENABLED off)"

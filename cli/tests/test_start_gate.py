@@ -12,9 +12,12 @@ import pytest
 
 import cli.main as cli_main
 from base import cluster
+from base.host.env.dotenv_boot import resolve_ava_home
 from cli import start_identity, start_intent, unit_join
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
+from cli.database.runtime import CommandRuntime
 from cli.parsers import build_parser
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _GATEWAY = {"gateway", "agent-runner"}
@@ -24,7 +27,7 @@ def _every_port_free(_port: int) -> bool:
     return True
 
 
-def _no_logging(_argv: list[str], *, producer: Callable[[], Any]) -> None:
+def _no_logging(_argv: list[str], *, initialize: Callable[[str], None]) -> None:
     return None
 
 
@@ -76,10 +79,16 @@ def _home(
     return home
 
 
-def _start(*flags: str, operator_database: OperatorDatabaseFactory) -> int:
-    producer = operator_event_pipeline(operator_database)
+def _start(
+    *flags: str, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
+) -> int:
+    producer = operator_event_pipeline(
+        operator_database, machine=command_runtime.machine, home=resolve_ava_home()
+    )
+    args = build_parser().parse_args(["start", *flags])
+    args.runtime = command_runtime
     return start_intent.run_start(
-        build_parser().parse_args(["start", *flags]),
+        args,
         retained_children=[],
         database_factory=operator_database,
         producer=producer,
@@ -99,11 +108,12 @@ def test_a_missing_home_is_refused_and_nothing_is_made(
     start: list[dict[str, Any]],
     capsys: pytest.CaptureFixture[str],
     operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "never-initialized"
     monkeypatch.setenv("AVA_HOME", str(home))
 
-    assert _start(operator_database=operator_database) == 1
+    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 
     assert "not initialized: run `ava init` first" in capsys.readouterr().err
     assert not home.exists() and start == []
@@ -115,12 +125,13 @@ def test_resources_without_an_intent_are_refused(
     start: list[dict[str, Any]],
     capsys: pytest.CaptureFixture[str],
     operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     (home / "pg").mkdir(parents=True)
     monkeypatch.setenv("AVA_HOME", str(home))
 
-    assert _start(operator_database=operator_database) == 1
+    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 
     assert "no initialization authority" in capsys.readouterr().err
     assert start == []
@@ -133,12 +144,13 @@ def test_a_claim_in_progress_sends_the_operator_back_to_init(
     start: list[dict[str, Any]],
     capsys: pytest.CaptureFixture[str],
     operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = _home(tmp_path, monkeypatch, tools, _GATEWAY)
     path = home / start_identity.INTENT_NAME
     path.write_text(path.read_text().replace('"phase": "configured"', '"phase": "claiming"'))
 
-    assert _start(operator_database=operator_database) == 1
+    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 
     err = capsys.readouterr().err
     assert "partly initialized" in err and "Re-run `ava init`" in err
@@ -152,11 +164,12 @@ def test_a_detached_home_is_refused(
     start: list[dict[str, Any]],
     capsys: pytest.CaptureFixture[str],
     operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = _home(tmp_path, monkeypatch, tools, _GATEWAY)
     (home / "destroy-intent.json").write_text('{"version":1,"state":"detached"}\n')
 
-    assert _start(operator_database=operator_database) == 1
+    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 
     assert "destroyed or detached" in capsys.readouterr().err
     assert start == []
@@ -170,12 +183,21 @@ def test_an_initialized_home_starts_with_its_service_selection_and_is_left_as_it
     start: list[dict[str, Any]],
     phase: str,
     operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = _home(tmp_path, monkeypatch, tools, _GATEWAY)
     start_identity.mark_phase(home, phase)
     before = _bytes(home)
 
-    assert _start("--only-service", "gateway", operator_database=operator_database) == 0
+    assert (
+        _start(
+            "--only-service",
+            "gateway",
+            operator_database=operator_database,
+            command_runtime=command_runtime,
+        )
+        == 0
+    )
 
     assert [c["only_services"] for c in start] == [("gateway",)]
     assert _bytes(home) == before
@@ -187,6 +209,7 @@ def test_start_never_joins_a_gateway(
     tools: str,
     start: list[dict[str, Any]],
     operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The join (bundle, bootstrap fetch) belongs to init and install-unit: a started
     runner fetches its configuration through Settings and probes its gateway itself."""
@@ -203,7 +226,7 @@ def test_start_never_joins_a_gateway(
         AVA_GATEWAY_URL="http://10.0.0.7:8000",
     )
 
-    assert _start(operator_database=operator_database) == 0
+    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 0
     assert len(start) == 1
 
 
@@ -231,12 +254,13 @@ def test_an_incomplete_home_is_refused_before_any_effect(
     drop: str,
     message: str,
     operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
     extra = {} if "gateway" in roles else {"AVA_GATEWAY_URL": "http://10.0.0.7:8000"}
     home = _home(tmp_path, monkeypatch, tools, roles, **extra)
     _rewrite_env(home, lambda lines: [ln for ln in lines if not ln.startswith(drop)])
 
-    assert _start(operator_database=operator_database) == 1
+    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 
     assert message in capsys.readouterr().err
     assert start == []
@@ -249,13 +273,14 @@ def test_a_remote_unit_that_records_the_human_secret_is_refused(
     start: list[dict[str, Any]],
     capsys: pytest.CaptureFixture[str],
     operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
     home = _home(
         tmp_path, monkeypatch, tools, {"agent-runner"}, AVA_GATEWAY_URL="http://10.0.0.7:8000"
     )
     _rewrite_env(home, lambda lines: [*lines, "AVA_CLUSTER_SECRET=leaked"])
 
-    assert _start(operator_database=operator_database) == 1
+    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 
     assert "records the human cluster secret" in capsys.readouterr().err
     assert start == []
@@ -276,6 +301,7 @@ def test_a_home_with_an_identity_but_no_intent_is_refused(
     capsys: pytest.CaptureFixture[str],
     env: str,
     operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
 ) -> None:
     """A home with no `start-intent.json` has no admission, whatever its `.env` and
     capability flags declare: `ava start` takes an identity only from `ava init`."""
@@ -286,7 +312,7 @@ def test_a_home_with_an_identity_but_no_intent_is_refused(
     )
     monkeypatch.setenv("AVA_HOME", str(home))
 
-    assert _start(operator_database=operator_database) == 1
+    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 
     assert "no recorded identity" in capsys.readouterr().err
     assert start == []

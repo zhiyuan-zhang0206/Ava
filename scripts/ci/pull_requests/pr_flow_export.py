@@ -603,10 +603,9 @@ def emit_snapshot(snapshot: dict[str, Any], *, dry_run: bool, pipeline: Any) -> 
 def _emit_events(snapshot: dict[str, Any], *, pipeline: Any) -> None:
     """The pipeline write (separate seam so tests can assert dry-run silence)."""
     from base import telemetry
-    from base.telemetry.otlp import telemetry_otlp
 
     telemetry.init_telemetry(process=PROCESS_NAME, pipeline=pipeline)
-    telemetry_otlp.warmup()
+    pipeline.warmup_exports()
     for day, entry in sorted(snapshot["days"].items()):
         attributes = {key: value for key, value in entry.items() if value is not None}
         telemetry.emit("telemetry", "pr_flow_daily", attributes={"day": day, **attributes})

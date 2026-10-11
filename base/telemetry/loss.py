@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -45,7 +46,13 @@ def loss_event(
     )
 
 
-def report_loss(event: Event, count: int, queue_name: str) -> Event:
+def report_loss(
+    event: Event,
+    count: int,
+    queue_name: str,
+    *,
+    record_metric: Callable[[Event], None] | None = None,
+) -> Event:
     """File/stderr diagnostic plus an independent metric; neither uses a log queue."""
     report = loss_event(event, count, queue_name)
     # Always available, even before logging/provider initialization in bare scripts.
@@ -59,19 +66,16 @@ def report_loss(event: Event, count: int, queue_name: str) -> Event:
         )
     except Exception as exc:
         _stderr(f"ERROR: Telemetry loss log for queue {queue_name} failed: {exc!r}")
-    try:
-        from base.telemetry.otlp import telemetry_otlp
-
-        backend = telemetry_otlp.backend
-        if backend._meter is not None:
-            metric_report = report
-            if queue_name == "emitter":
-                metric_report = replace(
-                    report, attributes={k: v for k, v in report.attributes.items() if k != "n"}
-                )
-            backend._record_metrics(metric_report)
-    except Exception as exc:
-        _stderr(f"ERROR: Telemetry loss metric for queue {queue_name} failed: {exc!r}")
+    if record_metric is not None:
+        metric_report = report
+        if queue_name == "emitter":
+            metric_report = replace(
+                report, attributes={k: v for k, v in report.attributes.items() if k != "n"}
+            )
+        try:
+            record_metric(metric_report)
+        except Exception as exc:
+            _stderr(f"ERROR: Telemetry loss metric for queue {queue_name} failed: {exc!r}")
     return report
 
 
@@ -100,7 +104,13 @@ class _ExporterDropFilter(logging.Filter):
                 source="system",
                 target_agent_id=None,
             )
-            report = report_loss(event, 1, "otel-sdk")
+            pipeline = state["pipeline"]
+            report = report_loss(
+                event,
+                1,
+                "otel-sdk",
+                record_metric=pipeline.record_export_loss if pipeline is not None else None,
+            )
             telemetry._append_jsonl([report])
         except Exception as exc:
             _stderr(f"ERROR: OTel SDK queue-overflow loss could not be recorded: {exc!r}")

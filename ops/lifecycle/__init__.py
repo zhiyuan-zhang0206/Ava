@@ -27,7 +27,6 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartRefused,
 )
 from base.agents.messages.inbound import WakeTriggerKind
-from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, insert_inbound_message
 from base.events.live.announce import publish_agent_updated_sync
@@ -263,6 +262,7 @@ async def resurrect_agent_op(
     *,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
+    local_machine: str,
 ) -> ResurrectAgentResponse:
     """Commit hosted resurrection intent, then publish a wake to the home host.
 
@@ -284,6 +284,7 @@ async def resurrect_agent_op(
             prompt=body.prompt,
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
+            local_machine=local_machine,
         )
     except (ResurrectAlreadyAlive, ResurrectTriggerStaleError):
         return ResurrectAgentResponse(status=ResurrectResult.ALREADY_ALIVE)
@@ -297,6 +298,7 @@ async def resurrect_if_terminated(
     *,
     trigger_inbound_id: int,
     trigger_inbound_kind: WakeTriggerKind,
+    local_machine: str,
 ) -> AgentStatus:
     """Try one home-machine wake for an exact newly delivered input.
 
@@ -344,7 +346,7 @@ async def resurrect_if_terminated(
             )
             result_status = ResurrectAgentResponse.model_validate(forwarded).status
         except _cluster_rpc.ClusterOpUnreachable:
-            if home == machine_name():
+            if home == local_machine:
                 # Local ops server not reachable (test / single-process):
                 # fall back to in-process resurrect.
                 result_status = (
@@ -355,6 +357,7 @@ async def resurrect_if_terminated(
                         body,
                         trigger_inbound_id=trigger_inbound_id,
                         trigger_inbound_kind=trigger_inbound_kind,
+                        local_machine=local_machine,
                     )
                 ).status
             else:
@@ -507,6 +510,7 @@ async def lifecycle_op(
     catalog: ModelCatalog,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
+    local_machine: str,
 ) -> (
     TerminateAgentResponse
     | ResurrectAgentResponse
@@ -541,7 +545,11 @@ async def lifecycle_op(
         )
     if action == "resurrect-explicit":
         return await resurrect_agent_op(
-            db, bus, agent_id, ResurrectAgentRequest.model_validate(body)
+            db,
+            bus,
+            agent_id,
+            ResurrectAgentRequest.model_validate(body),
+            local_machine=local_machine,
         )
     if action == "resurrect-if-pending-work":
         request = _pending_work_resurrection_request(body, trigger_inbound_id)
@@ -552,6 +560,7 @@ async def lifecycle_op(
             request,
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
+            local_machine=local_machine,
         )
     if action == "restart":
         return await restart_agent_op(

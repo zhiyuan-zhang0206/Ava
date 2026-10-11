@@ -20,7 +20,7 @@ from langgraph.types import Command, interrupt
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
@@ -75,8 +75,8 @@ def _persist_end(conn: psycopg.Connection[Any], agent: int, *, pending: str | No
     conn.commit()
 
 
-def _retired(conn: psycopg.Connection[Any]) -> int:
-    agent = _agent(conn)
+def _retired(conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity) -> int:
+    agent = _agent(conn, machine_name=machine_identity.name())
     conn.execute(
         "UPDATE agents_meta SET status='idling',runtime_kind='hosted',runtime_owner=%s,"
         "runtime_generation=%s,lease_expires_at=%s WHERE id=%s",
@@ -90,9 +90,11 @@ def _retired(conn: psycopg.Connection[Any]) -> int:
 def test_completed_retired_consumer_parks_without_inventing_receipts(
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     _hide_machine_processes(monkeypatch)
-    agent = _retired(db_conn)
+    agent = _retired(db_conn, machine_identity=machine_identity)
     before = db_conn.execute(
         "SELECT runtime_kind,runtime_owner,runtime_generation,lease_expires_at,"
         "lifecycle_command_id,incarnation_resources FROM agents_meta WHERE id=%s",
@@ -108,7 +110,7 @@ def test_completed_retired_consumer_parks_without_inventing_receipts(
     pause_owner.begin_maintenance("cold", WHEN)
     hold = cohort.prepare(
         db_conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=None,
         holder="cold",
         acquired_at=WHEN,
@@ -142,11 +144,11 @@ def test_completed_retired_consumer_parks_without_inventing_receipts(
     )
 
 
-def _prepare(conn: psycopg.Connection[Any]) -> None:
+def _prepare(conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity) -> None:
     pause_owner.begin_maintenance("cold", WHEN)
     cohort.prepare(
         conn,
-        machine=machine_name(),
+        machine=machine_identity.name(),
         host_owner=None,
         holder="cold",
         acquired_at=WHEN,
@@ -158,9 +160,9 @@ def _prepare(conn: psycopg.Connection[Any]) -> None:
     "defect", ["fresh_lease", "unknown_version", "branch", "interrupt", "no_end"]
 )
 def test_incomplete_or_live_end_is_not_parked(
-    db_conn: psycopg.Connection[Any], defect: str
+    db_conn: psycopg.Connection[Any], defect: str, *, machine_identity: MachineIdentity
 ) -> None:
-    agent = _retired(db_conn)
+    agent = _retired(db_conn, machine_identity=machine_identity)
     if defect == "fresh_lease":
         db_conn.execute(
             "UPDATE agents_meta SET lease_expires_at=clock_timestamp()+interval '1 hour' "
@@ -180,27 +182,32 @@ def test_incomplete_or_live_end_is_not_parked(
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     db_conn.commit()
     with pytest.raises(RuntimeError):
-        _prepare(db_conn)
+        _prepare(db_conn, machine_identity=machine_identity)
     assert db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone() == before
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
 def test_pending_lifecycle_keeps_the_original_cold_intent(
-    db_conn: psycopg.Connection[Any], kind: str, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection[Any],
+    kind: str,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = _retired(db_conn)
+    agent = _retired(db_conn, machine_identity=machine_identity)
     insert_inbound_message(db_conn, agent, "", "user", kind=kind, bus=event_bus, database=database)
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     db_conn.commit()
     with pytest.raises(RuntimeError):
-        _prepare(db_conn)
+        _prepare(db_conn, machine_identity=machine_identity)
     assert db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone() == before
 
 
 def test_real_unrecorded_legacy_consumer_blocks_cold_prepare(
-    db_conn: psycopg.Connection[Any], tmp_path: Path
+    db_conn: psycopg.Connection[Any], tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    agent = _retired(db_conn)
+    agent = _retired(db_conn, machine_identity=machine_identity)
     package = tmp_path / "agent"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -221,7 +228,7 @@ def test_real_unrecorded_legacy_consumer_blocks_cold_prepare(
                 assert process.poll() is None and time.monotonic() < deadline
                 time.sleep(0.02)
             with pytest.raises(RuntimeError, match="native consumer"):
-                _prepare(db_conn)
+                _prepare(db_conn, machine_identity=machine_identity)
         finally:
             # SIGKILL: SIGTERM=SIG_IGN inherited from the session shell
             # would leave the child alive and hang this teardown.
@@ -279,15 +286,19 @@ def _exec_request_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple
 
 
 def test_superseded_exec_envelope_is_quarantined_and_cold_prepare_parks(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A superseded incarnation's envelope no longer fences cold preparation."""
-    agent = _retired(db_conn)
+    agent = _retired(db_conn, machine_identity=machine_identity)
     exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
     request = _aged_request(exec_dir, agent, owner=uuid4())
     before = request.read_text()
 
-    _prepare(db_conn)
+    _prepare(db_conn, machine_identity=machine_identity)
 
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
         "idling",
@@ -301,15 +312,19 @@ def test_superseded_exec_envelope_is_quarantined_and_cold_prepare_parks(
 
 
 def test_unattributable_exec_envelope_refuses_cold_prepare_with_disposition(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """No incarnation attribution: refuse, name the file, keep the evidence."""
-    agent = _retired(db_conn)
+    agent = _retired(db_conn, machine_identity=machine_identity)
     exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
     request = _aged_request(exec_dir, agent, owner=None)
 
     with pytest.raises(RuntimeError, match="unsettled exec request") as excinfo:
-        _prepare(db_conn)
+        _prepare(db_conn, machine_identity=machine_identity)
 
     message = str(excinfo.value)
     assert request.name in message
@@ -323,10 +338,14 @@ def test_unattributable_exec_envelope_refuses_cold_prepare_with_disposition(
 
 
 def test_old_unreadable_exec_envelope_still_refuses_cold_prepare(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Age cannot prove unknown code execution settled; retain the envelope."""
-    agent = _retired(db_conn)
+    agent = _retired(db_conn, machine_identity=machine_identity)
     exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
     request = exec_dir / str(agent) / f"req-{uuid4().hex}.json"
     request.parent.mkdir(parents=True, exist_ok=True)
@@ -336,7 +355,7 @@ def test_old_unreadable_exec_envelope_still_refuses_cold_prepare(
     _hide_machine_processes(monkeypatch)
 
     with pytest.raises(RuntimeError, match="unsettled exec request"):
-        _prepare(db_conn)
+        _prepare(db_conn, machine_identity=machine_identity)
 
     assert request.exists() and not quarantine.exists()
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
@@ -345,10 +364,14 @@ def test_old_unreadable_exec_envelope_still_refuses_cold_prepare(
 
 
 def test_young_unreadable_exec_envelope_still_refuses_cold_prepare(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Young remnants still refuse: the bound waits out the request's full life."""
-    agent = _retired(db_conn)
+    agent = _retired(db_conn, machine_identity=machine_identity)
     exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
     request = exec_dir / str(agent) / f"req-{uuid4().hex}.json"
     request.parent.mkdir(parents=True, exist_ok=True)
@@ -356,7 +379,7 @@ def test_young_unreadable_exec_envelope_still_refuses_cold_prepare(
     _hide_machine_processes(monkeypatch)
 
     with pytest.raises(RuntimeError, match="unsettled exec request"):
-        _prepare(db_conn)
+        _prepare(db_conn, machine_identity=machine_identity)
 
     assert request.exists() and not quarantine.exists()
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
@@ -365,10 +388,13 @@ def test_young_unreadable_exec_envelope_still_refuses_cold_prepare(
 
 
 def test_failed_current_lifecycle_cannot_be_parked(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     _hide_machine_processes(monkeypatch)
-    agent = _retired(db_conn)
+    agent = _retired(db_conn, machine_identity=machine_identity)
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,status,source,content,target_generation,"
         "target_owner,claimed_at,payload) SELECT id,'restart','done','system:update','',"
@@ -378,16 +404,19 @@ def test_failed_current_lifecycle_cannot_be_parked(
     )
     db_conn.commit()
     with pytest.raises(RuntimeError, match="failed lifecycle"):
-        _prepare(db_conn)
+        _prepare(db_conn, machine_identity=machine_identity)
 
 
 def test_checkpoint_replaced_by_real_second_connection_refuses_parking(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from base.deploy.maintenance import cold
 
     _hide_machine_processes(monkeypatch)
-    agent = _retired(db_conn)
+    agent = _retired(db_conn, machine_identity=machine_identity)
     original = cold.require_persisted_end
 
     def replace(conn: psycopg.Connection[Any], agent_id: int) -> str:
@@ -398,7 +427,7 @@ def test_checkpoint_replaced_by_real_second_connection_refuses_parking(
 
     monkeypatch.setattr(cold, "require_persisted_end", replace)
     with pytest.raises(RuntimeError, match="checkpoint changed"):
-        _prepare(db_conn)
+        _prepare(db_conn, machine_identity=machine_identity)
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
         "idling",
     )
@@ -409,14 +438,16 @@ async def test_resume_admits_a_successor_without_rewriting_legacy_history(
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
     event_bus: EventBus,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    agent = _retired(db_conn)
+    agent = _retired(db_conn, machine_identity=machine_identity)
     history = db_conn.execute(
         "SELECT * FROM inbound_messages WHERE agent_id=%s ORDER BY id", (agent,)
     ).fetchall()
     checkpoint = PostgresSaver(db_conn).get_tuple({"configurable": {"thread_id": str(agent)}})
     db_conn.commit()
-    _prepare(db_conn)
+    _prepare(db_conn, machine_identity=machine_identity)
     current = pause_owner.read()
     assert current.maintenance is not None
     cohort.verify_drained(db_conn, current.maintenance)
@@ -424,13 +455,13 @@ async def test_resume_admits_a_successor_without_rewriting_legacy_history(
     owner = uuid4()
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent, machine_name(), owner, expected_from="idling", db=database
+            aops_pool, agent, machine_identity.name(), owner, expected_from="idling", db=database
         )
         is None
     )
     resume_agents(database, event_bus)
     admitted = await admit_hosted_runtime(
-        aops_pool, agent, machine_name(), owner, expected_from="idling", db=database
+        aops_pool, agent, machine_identity.name(), owner, expected_from="idling", db=database
     )
     assert admitted is not None and admitted.owner == owner
     assert await settle_hosted_runtime(aops_pool, admitted, bus=event_bus, resources=None)

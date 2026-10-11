@@ -26,6 +26,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.history.checkpoint import FullHistory, single_segment_history
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import Clock, ClockConfig
+from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -340,7 +341,9 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
     pipeline = object()
 
     class Store:
-        def __init__(self, config: DbConfig, *, gate: ProcessDbGate) -> None:
+        def __init__(
+            self, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+        ) -> None:
             gates.append(gate)
             slices.append(config)
 
@@ -352,7 +355,7 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
         reads.append((root, commit))
         return 42
 
-    def build(*, database: Callable[[], Database]) -> object:
+    def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
         stages.append("producer")
         factories.append(database)
         return pipeline

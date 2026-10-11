@@ -19,10 +19,11 @@ from pathlib import Path
 import pytest
 
 import ava.mcp_config as mcp_cfg_mod
+from base.cluster.machine import MachineIdentity
 from base.packages.plugins import enable_config, mcp_enabled
-from ops import inventory as ops
 from ops.inventory import inventory_read_op, inventory_write_op
 from ops.rpc_schemas import FieldWriteResult
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -34,7 +35,9 @@ def _write_machine_mcp(unit_home: Path, servers: dict[str, dict]) -> None:
 
 
 @pytest.fixture
-def _machine_only_mcp(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def _machine_only_mcp(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
+) -> Path:
     """Isolate the MCP merged map to just the machine `mcp.json` under test —
     the public MCP loader supplies that real file's server map. Also pins
     the host role to agent-runner (the ops' precondition): inventory ops run only
@@ -45,10 +48,7 @@ def _machine_only_mcp(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         return mcp_cfg_mod.read_servers(unit_home / "mcp.json")
 
     monkeypatch.setattr(mcp_cfg_mod, "load_mcp_config", machine_config)
-    # is_agent_runner() (the ops precondition) reads base.cluster.machine.machine_role;
-    # ops.machine_role is only used to format the rejection message. Pin both.
-    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(ops, "machine_role", lambda: frozenset({"agent-runner"}))
+    machine_identity.set(role=frozenset({"agent-runner"}))
     return unit_home
 
 
@@ -58,12 +58,12 @@ def _machine_only_mcp(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_inventory_read_op_lists_real_plugins(
-    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch
+    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """The repo's real built-in plugins (ava_code, etc.) appear, each with
     an enabled bool + a description. (ava_compact moved to core, Issue #1284.)"""
-    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = inventory_read_op()
+    machine_identity.set(name="test-machine")
+    result = inventory_read_op(local_machine=machine_identity)
     assert result.machine == "test-machine"
     plugins = result.plugins
     # Real repo plugins discovered under <repo>/ava_builtins/plugins/.
@@ -77,13 +77,13 @@ def test_inventory_read_op_lists_real_plugins(
 
 
 def test_inventory_read_op_mcp_server_default_on(
-    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch
+    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """A machine-config server with no overlay entry shows enabled=True and a
     one-line description."""
-    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
+    machine_identity.set(name="test-machine")
     _write_machine_mcp(_machine_only_mcp, {"fs": {"command": "run-fs", "args": ["--root", "/"]}})
-    result = inventory_read_op()
+    result = inventory_read_op(local_machine=machine_identity)
     servers = result.mcp_servers
     assert "fs" in servers
     assert servers["fs"].enabled is True
@@ -93,41 +93,51 @@ def test_inventory_read_op_mcp_server_default_on(
 
 
 def test_inventory_read_op_overlay_reflected(
-    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch
+    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """A server the per-host overlay marks disabled reads back enabled=False."""
-    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
+    machine_identity.set(name="test-machine")
     _write_machine_mcp(_machine_only_mcp, {"X": {"command": "x"}})
     mcp_enabled.set_mcp_enabled("X", enabled=False)
-    result = inventory_read_op()
+    result = inventory_read_op(local_machine=machine_identity)
     assert result.mcp_servers["X"].enabled is False
 
 
 @pytest.mark.parametrize("requires", [[], {"gpu": False}, {"display": "false"}])
 def test_inventory_rejects_invalid_requirements_before_read_or_write(
-    _machine_only_mcp: Path, requires: object, monkeypatch: pytest.MonkeyPatch
+    _machine_only_mcp: Path,
+    requires: object,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
+    machine_identity.set(name="test-machine")
     _write_machine_mcp(_machine_only_mcp, {"broken": {"command": "x", "requires": requires}})
     mcp_enabled.set_mcp_enabled("broken", enabled=False)
     before = mcp_enabled.local_config_path().read_bytes()
 
     with pytest.raises(mcp_cfg_mod.MCPError, match="requires"):
-        inventory_read_op()
+        inventory_read_op(local_machine=machine_identity)
     with pytest.raises(mcp_cfg_mod.MCPError, match="requires"):
-        inventory_write_op(plugins={"ava_code": False}, mcp_servers={"broken": True})
+        inventory_write_op(
+            plugins={"ava_code": False},
+            mcp_servers={"broken": True},
+            local_machine=machine_identity,
+        )
     assert mcp_enabled.local_config_path().read_bytes() == before
     assert not enable_config.local_config_path().exists()
 
 
 def test_inventory_can_disable_server_with_invalid_requirements(
-    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch
+    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
+    machine_identity.set(name="test-machine")
     spec = {"command": "x", "requires": {"display": "false"}}
     _write_machine_mcp(_machine_only_mcp, {"broken": spec})
 
-    result = inventory_write_op(plugins={}, mcp_servers={"broken": False})
+    result = inventory_write_op(
+        plugins={}, mcp_servers={"broken": False}, local_machine=machine_identity
+    )
     assert result.applied is True
     assert result.mcp_results["broken"] == FieldWriteResult(ok=True, reason=None)
     assert mcp_enabled.read_enabled() == {"broken": False}
@@ -140,11 +150,13 @@ def test_inventory_can_disable_server_with_invalid_requirements(
 
 
 def test_inventory_write_op_plugin_happy_path(
-    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch
+    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """Disabling a present plugin -> applied=True, and the local config reflects it."""
-    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = inventory_write_op(plugins={"ava_code": False}, mcp_servers={})
+    machine_identity.set(name="test-machine")
+    result = inventory_write_op(
+        plugins={"ava_code": False}, mcp_servers={}, local_machine=machine_identity
+    )
     assert result.applied is True
     assert result.plugin_results["ava_code"] == FieldWriteResult(ok=True, reason=None)
     # The per-machine plugins_config.json now records ava_code as disabled.
@@ -153,12 +165,16 @@ def test_inventory_write_op_plugin_happy_path(
 
 
 def test_inventory_write_op_atomic_rejects_unknown_plugin(
-    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch
+    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """A payload mixing a present plugin toggle + an unknown plugin is rejected
     atomically: applied=False, the present plugin's file is UNCHANGED."""
-    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = inventory_write_op(plugins={"ava_code": False, "does-not-exist": True}, mcp_servers={})
+    machine_identity.set(name="test-machine")
+    result = inventory_write_op(
+        plugins={"ava_code": False, "does-not-exist": True},
+        mcp_servers={},
+        local_machine=machine_identity,
+    )
     assert result.applied is False
     assert result.plugin_results["ava_code"].ok is True
     assert result.plugin_results["does-not-exist"].ok is False
@@ -168,45 +184,51 @@ def test_inventory_write_op_atomic_rejects_unknown_plugin(
 
 
 def test_inventory_write_op_rejects_unknown_mcp_server(
-    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch
+    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """An MCP name not in the merged map is rejected with a reason; applied=False."""
-    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = inventory_write_op(plugins={}, mcp_servers={"ghost": True})
+    machine_identity.set(name="test-machine")
+    result = inventory_write_op(
+        plugins={}, mcp_servers={"ghost": True}, local_machine=machine_identity
+    )
     assert result.applied is False
     assert result.mcp_results["ghost"].ok is False
     assert "known MCP server" in (result.mcp_results["ghost"].reason or "")
 
 
 def test_inventory_write_op_mcp_capability_rejected(
-    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch
+    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """A server requiring a display, on a host with none, can't be enabled
     (applied=False) but can always be disabled."""
-    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
+    machine_identity.set(name="test-machine")
     _write_machine_mcp(_machine_only_mcp, {"that": {"command": "x", "requires": {"display": True}}})
     # Patch the symbol where server_capability looks it up.
     monkeypatch.setattr(mcp_cfg_mod, "display_available", lambda: False)
 
-    enable = inventory_write_op(plugins={}, mcp_servers={"that": True})
+    enable = inventory_write_op(
+        plugins={}, mcp_servers={"that": True}, local_machine=machine_identity
+    )
     assert enable.applied is False
     assert enable.mcp_results["that"].ok is False
     assert enable.mcp_results["that"].reason is not None
     # Nothing written on rejection.
     assert mcp_enabled.read_enabled() == {}
 
-    disable = inventory_write_op(plugins={}, mcp_servers={"that": False})
+    disable = inventory_write_op(
+        plugins={}, mcp_servers={"that": False}, local_machine=machine_identity
+    )
     assert disable.applied is True
     assert disable.mcp_results["that"] == FieldWriteResult(ok=True, reason=None)
     assert mcp_enabled.read_enabled() == {"that": False}
 
 
 def test_inventory_write_op_empty_payload_trivially_applied(
-    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch
+    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """Empty payload -> applied=True, nothing written."""
-    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
-    result = inventory_write_op(plugins={}, mcp_servers={})
+    machine_identity.set(name="test-machine")
+    result = inventory_write_op(plugins={}, mcp_servers={}, local_machine=machine_identity)
     assert result.applied is True
     assert result.plugin_results == {}
     assert result.mcp_results == {}
@@ -215,12 +237,14 @@ def test_inventory_write_op_empty_payload_trivially_applied(
 
 
 def test_inventory_write_op_applies_both_plugin_and_mcp(
-    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch
+    _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """A mixed payload (present plugin + known MCP, both passing) writes both."""
-    monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
+    machine_identity.set(name="test-machine")
     _write_machine_mcp(_machine_only_mcp, {"fs": {"command": "x"}})
-    result = inventory_write_op(plugins={"ava_code": False}, mcp_servers={"fs": False})
+    result = inventory_write_op(
+        plugins={"ava_code": False}, mcp_servers={"fs": False}, local_machine=machine_identity
+    )
     assert result.applied is True
     cfg = enable_config.load(set(enable_config.discover_plugins()))
     assert cfg.plugins["ava_code"].enabled is False
@@ -232,13 +256,14 @@ def test_inventory_write_op_applies_both_plugin_and_mcp(
 # ---------------------------------------------------------------------------
 
 
-def test_inventory_ops_reject_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inventory_ops_reject_gateway(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     """On a gateway both ops raise before touching any local file — the
     invariant that inventory is agent-runner-only, made loud rather than silently
     surfacing the gateway checkout's built-in plugins/MCP."""
-    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(ops, "machine_role", lambda: frozenset({"gateway"}))
+    machine_identity.set(role=frozenset({"gateway"}))
     with pytest.raises(RuntimeError, match="only on an agent-runner"):
-        inventory_read_op()
+        inventory_read_op(local_machine=machine_identity)
     with pytest.raises(RuntimeError, match="only on an agent-runner"):
-        inventory_write_op(plugins={}, mcp_servers={})
+        inventory_write_op(plugins={}, mcp_servers={}, local_machine=machine_identity)

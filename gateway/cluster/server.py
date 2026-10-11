@@ -16,7 +16,7 @@ import uvicorn
 from uvicorn.config import STARTUP_FAILURE
 
 from base.cluster.auth import require_cluster_secret
-from base.cluster.machine import is_gateway
+from base.cluster.machine.boot import machine_from_boot
 from base.cluster.port_preflight import serves_off_box
 from base.cluster.transport_encryption import verify_transport_encryption
 from base.config import ConfigBoot, settings
@@ -69,7 +69,10 @@ def main() -> None:
     """Prepare the gateway process and start its ASGI server."""
     # The API always authenticates: a gateway without a human secret refuses to
     # serve, before it touches the database or binds a port.
-    if is_gateway():
+    config = ConfigBoot()
+    config.boot()
+    machine = machine_from_boot(config)
+    if "gateway" in machine.role():
         require_cluster_secret(settings.data_plane.cluster_secret, where="this gateway")
     assert_schema_current(settings.data_plane.db_url)
 
@@ -93,19 +96,16 @@ def main() -> None:
     # inherit the raised ceiling.
     raise_fd_limit(65536)
 
-    config = ConfigBoot()
-    config.boot()
-    process = GatewayProcess(config=config, image=LOADED_IMAGE)
+    process = GatewayProcess(config=config, image=LOADED_IMAGE, machine=machine)
     with process.lifetime():
         _serve_process(process)
 
 
 def _serve_process(process: GatewayProcess) -> None:
     """Serve one owned entry; the ASGI lifespan borrows its existing root."""
-    config = process.config
     init_gateway_process(
         producer=process.event_pipeline,
-        machine_reader=lambda: config.view.general.machine_name,
+        machine_reader=process.machine.name,
         image=process.image,
     )
 
@@ -113,7 +113,7 @@ def _serve_process(process: GatewayProcess) -> None:
     # left running older code (a runner offline during the update) then refuses
     # to write. After the schema assertion and the logger init, so a refusal or
     # a failure is logged; a runner's local gateway holds no write on the row.
-    if is_gateway():
+    if "gateway" in process.machine.role():
         process.gate.raise_min_code_version(process.database())
 
     # Thread dump on SIGUSR1: the watchdog's gateway healthcheck sends this
@@ -152,7 +152,10 @@ def _serve_process(process: GatewayProcess) -> None:
     # mode binds through uvicorn's own bind_socket, which maps "" to a
     # v4-only wildcard — dev-only, and browsers fall back from the refused
     # IPv6 dial instantly.
-    host = "" if is_gateway() and serves_off_box() else "127.0.0.1"
+    serves_off_box_gateway = "gateway" in process.machine.role() and serves_off_box(
+        machine=process.machine
+    )
+    host = "" if serves_off_box_gateway else "127.0.0.1"
     if host != "127.0.0.1":
         verify_transport_encryption(host, authenticated=True)
     if _GATEWAY_UVICORN_WORKERS != 1:

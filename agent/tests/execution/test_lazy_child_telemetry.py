@@ -81,8 +81,8 @@ def _forbidden_loader_probe(root: str) -> str:
 
     `_init_logger` is the exact arm seam (file sink + event-pipeline sink +
     deferred OTLP arm); `_emit_child_boot_timing` is the record that used to
-    bring the exporter stack up within the first drain tick. The wait polls the
-    backend's hold so the assertion never runs before the tick landed.
+    bring the exporter stack up within the first drain tick. A writer receipt
+    observes that tick; the exporter's public flush reports the retained tail.
     """
     return f"""
 import json
@@ -91,23 +91,31 @@ import time
 
 sys.path.insert(0, {str(root)!r})
 import agent.execution.child as exec_child
-from base.telemetry.delivery.pipeline import EventPipeline
+from base.agents.context.clients import ClientSet
+from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.otlp import telemetry_otlp
 
-pipeline = EventPipeline(writer=telemetry_otlp.export_batch)
+backends = []
+
+def writer(events, backend):
+    backends.append(backend)
+    backend.export_batch(events)
+
+pipeline = telemetry_otlp.ExportingEventPipeline(writer=writer, export_allowed=lambda: True)
+clients = ClientSet(pipeline_factory=lambda: pipeline)
 exec_child._init_logger(
     999999,
-    producer=lambda: pipeline,
+    producer=clients.event_pipeline,
     machine_reader=lambda: "lazy-child-probe",
 )  # the real arm path (task #3816 M4b)
 # The boot clock is all the record reads; the SDK modules stay unimported.
 child = exec_child._ChildContext(ava=None, boot_started_at=time.perf_counter())
-exec_child._emit_child_boot_timing(child)  # the record that used to bring OTLP up
-
-deadline = time.monotonic() + 5.0
-while telemetry_otlp.backend._queue.qsize() == 0 and time.monotonic() < deadline:
-    time.sleep(0.1)  # the emitter drain tick is on a 0.5 s cadence
-pipeline.stop()
+exec_child._emit_child_boot_timing(child, clients=clients)
+assert pipeline.sync(timeout=5.0).status is DrainStatus.COMPLETED
+assert backends
+unfinished = backends[0].flush(timeout=0).status is DrainStatus.UNFINISHED
+deferred = clients.exports_deferred()
+pipeline.stop(timeout=5.0)
 
 FORBIDDEN = (
     "opentelemetry.sdk._logs",
@@ -119,8 +127,8 @@ FORBIDDEN = (
 )
 loaded = sorted(name for name in sys.modules if name.startswith(FORBIDDEN))
 print(json.dumps({{
-    "deferred": telemetry_otlp.deferred_state(),
-    "held": telemetry_otlp.backend._queue.qsize(),
+    "deferred": deferred,
+    "unfinished": unfinished,
     "forbidden": loaded,
 }}))
 """
@@ -149,7 +157,7 @@ def test_identity_child_record_holds_without_exporter_imports() -> None:
     assert proc.returncode == 0, proc.stderr
     result = json.loads(proc.stdout.strip().splitlines()[-1])
     assert result["deferred"] is True, "the identity child must arm the deferral"
-    assert result["held"] >= 1, "the boot record must have reached the deferred hold"
+    assert result["unfinished"] is True, "the boot record must have reached the deferred hold"
     assert result["forbidden"] == [], (
         f"a deferred child must not import the OTLP exporter stack, found: {result['forbidden']}"
     )

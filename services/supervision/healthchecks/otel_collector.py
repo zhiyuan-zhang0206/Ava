@@ -5,9 +5,10 @@ import urllib.request
 from dataclasses import dataclass
 from http.client import HTTPException
 
-from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
+from base.cluster.machine import MachineIdentity, MachineRoleMissing
 from base.config import settings
 from base.daemon.health import DaemonProbe
+from base.paths import ava_home
 from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
 
 _QUEUE_SAMPLE = re.compile(
@@ -19,15 +20,18 @@ _ENQUEUE_FAILURE_SAMPLE = re.compile(
 _LABEL = re.compile(r'(?:^|,)\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)="(?P<value>[^"]*)"')
 
 
-def _collector_serves_this_home() -> bool:
+def _collector_serves_this_home(*, machine: MachineIdentity) -> bool:
     """Whether this unit owns a collector that the healthcheck should probe."""
     try:
-        roles = machine_role()
-    except (MachineRoleMissing, MachineRoleInvalid):
+        roles = machine.role()
+    except MachineRoleMissing:
         return False
     if "gateway" not in roles:
         return True
-    return collector_allowed_for_home(gateway_observability_home())
+    home = ava_home()
+    return collector_allowed_for_home(
+        gateway_observability_home(machine, home=home), machine=machine, unit_home=home
+    )
 
 
 @dataclass(frozen=True)

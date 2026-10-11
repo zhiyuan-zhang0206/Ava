@@ -4,11 +4,13 @@ for split-runner memory bootstrap (2026-08-27 company-mini incident)."""
 from __future__ import annotations
 
 import subprocess
+from functools import partial
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineRoles
 from gateway.app import app
 
 
@@ -48,7 +50,7 @@ def test_pool_serves_bundle_of_consolidated_checkout(
     (root / "__pycache__" / "c.pyc").write_bytes(b"x")
     (root / ".DS_Store").write_text("x")
 
-    monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: root)
+    monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, root))
 
     with TestClient(app) as client:
         resp = client.get("/api/memory/pool")
@@ -81,9 +83,15 @@ def test_pool_404_when_gateway_checkout_missing(
     the runner's bootstrap then fails loud, it never installs garbage."""
     import gateway.routers.memory as _gw_memory
 
-    monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path / "nope")
+    monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path / "nope"))
 
     with TestClient(app) as client:
         resp = client.get("/api/memory/pool")
 
     assert resp.status_code == 404
+
+
+def _memory_root(root: Path, *, roles: MachineRoles) -> Path:
+    """Keep the original test filesystem while accepting the explicit role input."""
+    del roles
+    return root

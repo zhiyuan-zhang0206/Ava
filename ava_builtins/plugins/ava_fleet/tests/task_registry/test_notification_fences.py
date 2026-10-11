@@ -11,6 +11,7 @@ from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.messages.inbound import InboundKind
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db import pool as db_pool
@@ -22,6 +23,7 @@ from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
 from tests.components.ops.resurrection_support import status, terminated
 from tests.fixtures.pin_agent import pin_agent
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_reassigned_task_refuses_delayed_home_wake(
@@ -33,6 +35,7 @@ def test_reassigned_task_refuses_delayed_home_wake(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """An in-flight selector/RPC cannot revive a recipient after reassignment."""
     actor = _seed_agent(db_conn)
@@ -43,6 +46,7 @@ def test_reassigned_task_refuses_delayed_home_wake(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     next_owner = _seed_agent(db_conn)
     task = task_registry.create(
@@ -66,6 +70,7 @@ def test_reassigned_task_refuses_delayed_home_wake(
             resurrected_by="system",
             trigger_inbound_id=selected[0][1],
             trigger_inbound_kind=InboundKind.SYSTEM_NOTE,
+            local_machine=machine_identity.name(),
         )
     assert status(db_conn, owner)[0] == "terminated"
     assert db_conn.execute(

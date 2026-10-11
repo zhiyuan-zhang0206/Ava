@@ -12,6 +12,7 @@ from unittest.mock import Mock
 import pytest
 
 from base.agents.context.clients import ClientSet
+from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.ownership import OwnedProcess
@@ -25,6 +26,7 @@ from services.supervision.ava_root_glue.diagnostics import (
     DiagnosticMonitor,
     RootHealthRounds,
 )
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class _EventLog:
@@ -220,7 +222,7 @@ class _Health(HealthMonitor):
 
 
 async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
-    events: list[dict[str, object]],
+    events: list[dict[str, object]], *, machine_identity: MachineIdentity
 ) -> None:
     health = _Health()
     diagnostics = DiagnosticMonitor([Diagnostic("failed", lambda: DaemonProbe.down("failed"))])
@@ -229,6 +231,7 @@ async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
         diagnostics,
         clients=ClientSet(),
         image=LoadedCommit(source_root=Path(__file__).resolve().parents[4], sha=None),
+        machine=machine_identity,
     )
     task = asyncio.create_task(rounds.run_round())
     await asyncio.sleep(0.01)
@@ -245,7 +248,7 @@ async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
 
 
 async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
-    events: list[dict[str, object]],
+    events: list[dict[str, object]], *, machine_identity: MachineIdentity
 ) -> None:
     async with asyncio.TaskGroup() as tasks:
         health = _Health()
@@ -255,6 +258,7 @@ async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
             clients=ClientSet(),
             image=LoadedCommit(source_root=Path(__file__).resolve().parents[4], sha=None),
             tasks=tasks,
+            machine=machine_identity,
         )
         await rounds.start()
         assert events[0]["event"] == "root_health_expected"
@@ -276,6 +280,8 @@ async def test_root_logging_owns_only_the_started_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     events: list[dict[str, object]],
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     image = LoadedCommit(source_root=tmp_path, sha=sha)
     made: list[EventPipeline] = []
@@ -299,7 +305,12 @@ async def test_root_logging_owns_only_the_started_pipeline(
     monkeypatch.setattr("base.log.process.init_gateway_process", initialize)
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
-            _Health(), DiagnosticMonitor([]), clients=clients, image=image, tasks=tasks
+            _Health(),
+            DiagnosticMonitor([]),
+            clients=clients,
+            image=image,
+            tasks=tasks,
+            machine=machine_identity,
         )
         assert made == []
         await rounds.start()
@@ -309,8 +320,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
 
 
 async def test_logging_startup_error_stops_its_constructed_writer(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
     made: list[EventPipeline] = []
     error = ValueError("root logging failed after constructing its writer")
@@ -334,6 +344,7 @@ async def test_logging_startup_error_stops_its_constructed_writer(
             clients=clients,
             image=LoadedCommit(source_root=tmp_path, sha=None),
             tasks=tasks,
+            machine=machine_identity,
         )
         with pytest.raises(ValueError) as caught:
             await rounds.start()
@@ -341,10 +352,17 @@ async def test_logging_startup_error_stops_its_constructed_writer(
         assert made[0].stopped
 
 
-def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_helper_diagnostics_are_macos_only(
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+) -> None:
     monkeypatch.setattr(probes, "is_macos", lambda: False)
-    monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
-    names = {check.name for check in probes.build_diagnostics(set(), database=_unused_database)}
+    machine_identity.set(role="agent-runner")
+    names = {
+        check.name
+        for check in probes.build_diagnostics(
+            set(), database=_unused_database, machine=machine_identity
+        )
+    }
     assert names == {"venv"}
     monkeypatch.setattr(probes, "is_macos", lambda: True)
     monkeypatch.setattr(
@@ -352,7 +370,12 @@ def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> N
         "settings",
         SimpleNamespace(services=SimpleNamespace(permissions_helper_enabled=False)),
     )
-    names = {check.name for check in probes.build_diagnostics(set(), database=_unused_database)}
+    names = {
+        check.name
+        for check in probes.build_diagnostics(
+            set(), database=_unused_database, machine=machine_identity
+        )
+    }
     assert names == {"venv", "brew-pin", "permissions-helper"}
 
 
@@ -402,18 +425,25 @@ def test_redis_acl_uses_runtime_ping_without_native_custody(
 
 
 def test_each_root_roster_owns_its_helper_episode_reporter(
-    monkeypatch: pytest.MonkeyPatch, events: list[dict[str, object]]
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[dict[str, object]],
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(probes, "is_macos", lambda: True)
-    monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
+    machine_identity.set(role="agent-runner")
     first = next(
         check
-        for check in probes.build_diagnostics(set(), database=_unused_database)
+        for check in probes.build_diagnostics(
+            set(), database=_unused_database, machine=machine_identity
+        )
         if check.name == "permissions-helper"
     )
     second = next(
         check
-        for check in probes.build_diagnostics(set(), database=_unused_database)
+        for check in probes.build_diagnostics(
+            set(), database=_unused_database, machine=machine_identity
+        )
         if check.name == "permissions-helper"
     )
     assert first.report is not None and second.report is not None

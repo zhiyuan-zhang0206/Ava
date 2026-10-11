@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
@@ -20,23 +22,36 @@ from scripts.ci.pull_requests import export_process, runs_export
 
 @pytest.mark.parametrize("sha", ["a" * 40, None])
 def test_writer_uses_one_captured_gate_and_is_joined(
-    monkeypatch: pytest.MonkeyPatch, sha: str | None
+    monkeypatch: pytest.MonkeyPatch, sha: str | None, tmp_path: Path
 ) -> None:
     image = LoadedCommit(Path("/loaded-exporter"), sha)
     gates: list[ProcessDbGate] = []
+    hosts: list[Callable[[], str]] = []
     counts: list[tuple[Path, str]] = []
+    config = ConfigBoot()
+    config.set_field("machine_name", "export-owner")
+    monkeypatch.setattr(export_process, "ConfigBoot", lambda: config)
+    monkeypatch.setattr(export_process, "ava_home", lambda: tmp_path)
 
     def count(repo: Path, rev: str = "HEAD") -> int:
         counts.append((repo, rev))
         return 22
 
-    def handle(*, gate: ProcessDbGate) -> Database:
+    def handle(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> Database:
         gates.append(gate)
-        return Database(db_config_from_settings(), gate=gate)
+        hosts.append(local_host)
+        return Database(db_config_from_settings(), gate=gate, local_host=local_host)
 
-    def build(*, database: Callable[[], Database]) -> EventPipeline:
+    def build(
+        *, database: Callable[[], Database], machine: MachineIdentity, home: Path
+    ) -> EventPipeline:
+        assert machine.name() == "export-owner"
+        assert home == tmp_path
+        config.set_field("machine_name", "changed-after-first-read")
+        assert machine.name() == "export-owner"
         database()
         database()
+        assert hosts == [machine.host, machine.host]
         return EventPipeline(writer=lambda _events: None)
 
     monkeypatch.setattr(Database, "from_settings", handle)
@@ -66,7 +81,9 @@ def test_body_error_preserves_the_original_writer_error_during_close(
 
     pipeline = EventPipeline(writer=write, batch_size=1)
 
-    def build(*, database: Callable[[], Database]) -> EventPipeline:
+    def build(
+        *, database: Callable[[], Database], machine: MachineIdentity, home: Path
+    ) -> EventPipeline:
         assert callable(database)
         return pipeline
 
@@ -128,7 +145,9 @@ def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
             api_requests=1,
         )
 
-    def build(*, database: Callable[[], Database]) -> EventPipeline:
+    def build(
+        *, database: Callable[[], Database], machine: MachineIdentity, home: Path
+    ) -> EventPipeline:
         assert not borrowed and callable(database)
         calls.append("build")
         return pipeline

@@ -13,12 +13,14 @@ from psycopg_pool import AsyncConnectionPool
 import ava
 from agent.graph import claim_node
 from agent.state import AgentState
-from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
+from agent.tests.claim.claim_support import insert_inbound_kind, make_runtime, thread_config
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 
 
@@ -30,20 +32,23 @@ async def running_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """Admit a real hosted owner and bind it throughout each dispatch test."""
     from uuid import uuid4
 
     from agent.ownership.hosted import admit_hosted_runtime
-    from base.cluster.machine import machine_name
 
     agent_id = spawn_agent(
-        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
     incarnation = await admit_hosted_runtime(
         aops_pool,
         agent_id,
-        machine_name(),
+        machine_identity.name(),
         uuid4(),
         expected_from="idling",
         db=database,
@@ -64,22 +69,22 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ):
     """A settled prior command, not marker recency, protects the real successor."""
 
     from uuid import uuid4
 
     from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
-    from base.cluster.machine import machine_name
     from ops.agents.wake import resurrect_agent
 
     tid = running_agent()
-    stop = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    stop = insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     assert (
         await claim_node(
             AgentState(messages=[SystemMessage(content="sys")]),
-            _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-            _config(
+            make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+            thread_config(
                 tid,
             ),
         )
@@ -97,7 +102,9 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     insert_inbound_message(
         db_conn, tid, "are you there?", source="user", bus=event_bus, database=database
     )
-    resurrect_agent(database, event_bus, tid, resurrected_by="user")
+    resurrect_agent(
+        database, event_bus, tid, resurrected_by="user", local_machine=machine_identity.name()
+    )
     launch = db_conn.execute(
         "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='resurrect' "
         "AND status='pending'",
@@ -108,7 +115,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     successor = await admit_hosted_runtime(
         aops_pool,
         tid,
-        machine_name(),
+        machine_identity.name(),
         uuid4(),
         expected_from="idling",
         db=database,
@@ -119,11 +126,11 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
         AgentState(messages=[SystemMessage(content="sys")]),
         Runtime(
             context=replace(
-                _make_runtime(ops_pool=aops_pool, database_gate=database_gate).context,
+                make_runtime(ops_pool=aops_pool, database_gate=database_gate).context,
                 original_incarnation=successor,
             )
         ),
-        _config(tid),
+        thread_config(tid),
     )
 
     assert cmd.goto == "before_llm"

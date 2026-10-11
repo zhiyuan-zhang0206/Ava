@@ -12,9 +12,11 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.state import host_deploy_state as hds
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _db(database_gate: ProcessDbGate) -> Database:
@@ -22,68 +24,73 @@ def _db(database_gate: ProcessDbGate) -> Database:
 
 
 @pytest.fixture(autouse=True)
-def _clean_row(db_conn: psycopg.Connection) -> Iterator[None]:
+def _clean_row(db_conn: psycopg.Connection, *, machine_identity: MachineIdentity) -> Iterator[None]:
     """host_deploy_state is infra (not in the conftest TRUNCATE list) — this
     module self-manages its row."""
     with db_conn.cursor() as cur:
-        cur.execute("DELETE FROM host_deploy_state WHERE machine = %s", (_machine(),))
+        cur.execute("DELETE FROM host_deploy_state WHERE machine = %s", (machine_identity.name(),))
     db_conn.commit()
     yield
     with db_conn.cursor() as cur:
-        cur.execute("DELETE FROM host_deploy_state WHERE machine = %s", (_machine(),))
+        cur.execute("DELETE FROM host_deploy_state WHERE machine = %s", (machine_identity.name(),))
     db_conn.commit()
 
 
-def _machine() -> str:
-    from base.cluster.machine import machine_name
-
-    return machine_name()
-
-
-def test_no_row_reads_as_none(database: Database) -> None:
-    assert hds.read(database) is None
+def test_no_row_reads_as_none(database: Database, *, machine_identity: MachineIdentity) -> None:
+    assert hds.read(database, machine=machine_identity.name()) is None
 
 
 def test_read_uses_the_callers_connection(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A bundled snapshot can read the row without opening or owning another connection."""
-    hds.set_posture(database, "paused")
+    hds.set_posture(database, "paused", machine=machine_identity.name())
 
     def _fresh_connect(**_kwargs: object) -> object:
         raise AssertionError("read opened a fresh connection")
 
     monkeypatch.setattr("base.db.connect", _fresh_connect)
 
-    state = hds.read(database, conn=db_conn)
+    state = hds.read(database, conn=db_conn, machine=machine_identity.name())
 
     assert state is not None
     assert state.posture == "paused"
 
 
 @pytest.mark.parametrize("posture", ["bogus", "converging"])
-def test_invalid_posture_is_rejected(posture: str, database: Database) -> None:
+def test_invalid_posture_is_rejected(
+    posture: str, database: Database, *, machine_identity: MachineIdentity
+) -> None:
     with pytest.raises(ValueError, match="invalid posture"):
-        hds.set_posture(database, posture)
+        hds.set_posture(database, posture, machine=machine_identity.name())
 
 
-def test_posture_round_trips_and_stamps_the_database_clock(database: Database) -> None:
-    hds.set_posture(database, "paused")
-    paused = hds.read(database)
+def test_posture_round_trips_and_stamps_the_database_clock(
+    database: Database, *, machine_identity: MachineIdentity
+) -> None:
+    hds.set_posture(database, "paused", machine=machine_identity.name())
+    paused = hds.read(database, machine=machine_identity.name())
     assert paused is not None
     assert paused.posture == "paused"
     assert paused.updated_at <= paused.db_now
 
-    hds.set_posture(database, "idle")
-    idle = hds.read(database)
+    hds.set_posture(database, "idle", machine=machine_identity.name())
+    idle = hds.read(database, machine=machine_identity.name())
     assert idle is not None
     assert idle.posture == "idle"
     assert idle.updated_at >= paused.updated_at
 
 
 def test_read_all_returns_every_machines_row(
-    database: Database, database_gate: ProcessDbGate
+    database: Database,
+    database_gate: ProcessDbGate,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    hds.set_posture(database, "paused")
+    hds.set_posture(database, "paused", machine=machine_identity.name())
     rows = hds.read_all(_db(database_gate=database_gate))
-    assert rows[_machine()].posture == "paused"
+    assert rows[machine_identity.name()].posture == "paused"

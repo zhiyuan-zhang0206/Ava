@@ -11,11 +11,12 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.agents.messages.chat_delivery import insert_chat_inbound_once
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -26,14 +27,16 @@ def session(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> dict[str, Any]:
+    local_machine = machine_identity.name()
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
         "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
         "clock_timestamp()+interval '10 minutes')",
-        (agent_id, machine_name(), owner.generation, owner.owner),
+        (agent_id, local_machine, owner.generation, owner.owner),
     )
     db_conn.commit()
     requested = sessions.request(
@@ -46,13 +49,22 @@ def session(
         thread_id=str(uuid4()),
         process_metadata=recorded_tree(),
         authority=config_authority,
+        local_machine=local_machine,
     )
-    lease = history.resolve(database, agent_id, requested["session_id"])
+    lease = history.resolve(
+        database, agent_id, requested["session_id"], local_machine=local_machine
+    )
     leases.accept(
-        database, event_bus, str(lease["id"]), agent_id, owner, "Check the history contract"
+        database,
+        event_bus,
+        str(lease["id"]),
+        agent_id,
+        owner,
+        "Check the history contract",
+        local_machine=local_machine,
     )
     leases.activate(database, event_bus, str(lease["id"]), owner)
-    return history.resolve(database, agent_id, requested["session_id"])
+    return history.resolve(database, agent_id, requested["session_id"], local_machine=local_machine)
 
 
 def test_idempotent_inbound_retry_preserves_one_real_message(
@@ -87,8 +99,11 @@ def peer_chats(
     database: Database,
     event_bus: EventBus,
     publish_wake: Callable[[int, str], bool],
+    *,
+    machine_identity: MachineIdentity,
 ) -> int:
     """Send real chats through the chat emitter; return the executor's recipient."""
+    local_machine = machine_identity.name()
     recipient = create_agent(db_conn)
     incoming_sender = create_agent(db_conn)
     db_conn.commit()
@@ -107,7 +122,12 @@ def peer_chats(
             publish_wake=publish_wake,
         )
     leases.release(
-        database, event_bus, str(session["id"]), attested_caller(session), "Sent the peer update"
+        database,
+        event_bus,
+        str(session["id"]),
+        attested_caller(session),
+        "Sent the peer update",
+        local_machine=local_machine,
     )
     return recipient
 
@@ -127,12 +147,20 @@ def test_only_the_executors_outgoing_peer_operations_enter_the_lease_log(
 
 
 def test_recipient_statistics_follow_real_chat_event_direction(
-    db_conn: psycopg.Connection, session: dict[str, Any], peer_chats: int, database: Database
+    db_conn: psycopg.Connection,
+    session: dict[str, Any],
+    peer_chats: int,
+    database: Database,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     # Both incoming and outgoing peer messages belong to the conversation;
     # only the outgoing message is evidence of a recipient of this executor.
+    local_machine = machine_identity.name()
     document = history.build_document(
-        history.resolve(database, session["agent_id"], session["session_id"]),
+        history.resolve(
+            database, session["agent_id"], session["session_id"], local_machine=local_machine
+        ),
         history.entries(str(session["id"]), db_conn),
     )
     assert document["statistics"]["message_recipients"] == {str(peer_chats): 1}

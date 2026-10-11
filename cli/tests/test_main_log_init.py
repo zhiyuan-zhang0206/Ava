@@ -30,12 +30,16 @@ import cli.main as _main
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import postgres
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.paths import ava_home
 from base.telemetry import EventPipeline
 from cli import parsers
 from cli.database import OperatorDatabaseFactory, operator_database_factory, operator_event_pipeline
+from cli.database.runtime import CommandRuntime
 from cli.parsers import build_parser
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -187,6 +191,7 @@ def test_main_reuses_only_the_explicit_caller_child_owner(monkeypatch: pytest.Mo
         return 0
 
     monkeypatch.setattr("cli.start_intent.run_start", dispatched)
+    monkeypatch.setattr("cli.start_identity.require_initialized", _ignoring_retention(lambda: None))
     monkeypatch.setattr("cli.commands.lifecycle.stop.cmd_stop", stopped)
     shared: list[subprocess.Popen[bytes]] = []
     assert _main.main(["start"], retained_children=shared) == 0
@@ -213,21 +218,29 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
 
     pipeline = MagicMock(spec=telemetry.EventPipeline)
     factories: list[DatabaseFactory] = []
+    machines: list[MachineIdentity] = []
+    readers: list[Callable[[], str]] = []
     inputs: list[object] = []
 
-    def build(*, database: DatabaseFactory) -> telemetry.EventPipeline:
+    def build(
+        *, database: DatabaseFactory, machine: MachineIdentity, home: Path
+    ) -> telemetry.EventPipeline:
         factories.append(database)
+        machines.append(machine)
+        assert home == ava_home()
         return pipeline
 
     def initialize(
         *, name: str, producer: Callable[[], EventPipeline], machine_reader: Callable[[], str]
     ) -> None:
         assert name == "cli-restart"
-        assert callable(machine_reader)
+        readers.append(machine_reader)
         inputs.append(producer())
 
     def dispatch(args: argparse.Namespace) -> int:
-        assert args.database_factory is factories[0]
+        assert args.database_factory is factories[-1]
+        assert args.runtime.machine is machines[-1]
+        assert readers[-1] == args.runtime.machine.name
         inputs.append(args.producer())
         return 0
 
@@ -240,6 +253,10 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
     assert _main.main(["restart"]) == 0
     assert len(factories) == 1
     assert inputs == [pipeline, pipeline]
+    assert _main.main(["restart"]) == 0
+    assert machines[0] is not machines[1]
+    assert factories[0] is not factories[1]
+    assert inputs == [pipeline, pipeline, pipeline, pipeline]
 
 
 def _parsed_args(args: argparse.Namespace) -> Callable[..., argparse.Namespace]:
@@ -287,7 +304,7 @@ def _cold_report(
         )
         assert len(notes) == 1 and "fast shutdown timed out" in notes[0]
         return 0
-    from base.config import ConfigBoot, settings
+    from base.config import settings
     from base.telemetry.metrics import grafana_dashboard_supply
     from cli.commands.converge.spec import ConvergeCtx
     from cli.commands.observability import lgtm_native
@@ -311,11 +328,13 @@ def _cold_report(
     destination = native / "config/provisioning/dashboards/ava-ops-main.json"
     destination.parent.mkdir(parents=True)
     destination.write_text("previous dashboard")
+    args.runtime.machine.set(role="observability-station")
     context = ConvergeCtx(
         repo=repo,
         ava_home=path,
         roles=frozenset({"observability-station"}),
-        config=ConfigBoot(),
+        config=args.runtime.config,
+        machine=args.runtime.machine,
         database_factory=args.database_factory,
         producer=args.producer,
         services=frozenset({"prometheus"}),
@@ -347,11 +366,13 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
     # Handles are never dialed; the same real operator gate reaches work and writer.
     from base.db.config import db_config_from_settings
 
-    def construct(*, gate: ProcessDbGate) -> Database:
+    def construct(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> Database:
         gates.append(gate)
-        return Database(db_config_from_settings(), gate=gate)
+        return Database(db_config_from_settings(), gate=gate, local_host=local_host)
 
-    def build(*, database: DatabaseFactory) -> telemetry.EventPipeline:
+    def build(
+        *, database: DatabaseFactory, machine: MachineIdentity, home: Path
+    ) -> telemetry.EventPipeline:
         factories.append(database)
 
         def write(batch: list[telemetry.Event]) -> None:
@@ -385,12 +406,18 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
     assert len(gates) >= 2 and all(gate is gates[0] for gate in gates)
 
 
-def test_quiet_command_does_not_construct_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_quiet_command_does_not_construct_pipeline(
+    monkeypatch: pytest.MonkeyPatch, command_runtime: CommandRuntime, tmp_path: Path
+) -> None:
     def forbidden(**kwargs: object) -> telemetry.EventPipeline:
         raise AssertionError("a quiet command must not construct a writer")
 
     monkeypatch.setattr(telemetry, "build_pipeline", forbidden)
-    owner = operator_event_pipeline(operator_database_factory())
+    owner = operator_event_pipeline(
+        operator_database_factory(local_host=command_runtime.machine.host),
+        machine=command_runtime.machine,
+        home=tmp_path,
+    )
     assert owner.close() is None
 
     def quiet(_args: argparse.Namespace) -> int:
@@ -404,6 +431,8 @@ def test_quiet_command_does_not_construct_pipeline(monkeypatch: pytest.MonkeyPat
 
 def test_unfinished_command_writer_remains_owned_until_join(
     monkeypatch: pytest.MonkeyPatch,
+    command_runtime: CommandRuntime,
+    tmp_path: Path,
 ) -> None:
     entered = threading.Event()
     release = threading.Event()
@@ -414,7 +443,11 @@ def test_unfinished_command_writer_remains_owned_until_join(
 
     pipeline = telemetry.EventPipeline(writer=write, batch_size=1)
     monkeypatch.setattr(telemetry, "build_pipeline", _owned_pipeline(pipeline))
-    owner = operator_event_pipeline(operator_database_factory())
+    owner = operator_event_pipeline(
+        operator_database_factory(local_host=command_runtime.machine.host),
+        machine=command_runtime.machine,
+        home=tmp_path,
+    )
     try:
         telemetry.emit("telemetry", "schedule_verify_failed", producer=owner)
         assert entered.wait(5)
@@ -476,8 +509,15 @@ def test_status_handler_body_forwards_the_parsed_namespace(
     import cli.commands.lifecycle.status as _status_commands
 
     calls: list[dict[str, object]] = []
-    monkeypatch.setattr("cli.database.operator_database_factory", lambda: operator_database)
+
+    def database_owner(*, local_host: Callable[[], str]) -> OperatorDatabaseFactory:
+        assert callable(local_host)
+        return operator_database
+
+    monkeypatch.setattr("cli.database.operator_database_factory", database_owner)
     monkeypatch.setattr(_status_commands, "cmd_status", lambda **kwargs: calls.append(kwargs) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _main.main(["status"]) == 0
-    assert calls == [{"database_factory": operator_database}]
+    assert len(calls) == 1
+    assert calls[0]["database_factory"] is operator_database
+    assert isinstance(calls[0]["machine"], MachineIdentity)

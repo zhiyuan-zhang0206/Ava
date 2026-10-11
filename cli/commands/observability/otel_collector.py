@@ -35,7 +35,7 @@ from string import Template
 from urllib.parse import unquote, urlsplit
 
 from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.release import collector_artifact
 from base.host.atomic_io import write_text_atomic
 from base.telemetry.observability import collector_allowed_for_home
@@ -291,7 +291,9 @@ def _cluster_bearer() -> str:
     return f"Bearer {token}"
 
 
-def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
+def _remote_receiver_fragments(
+    roles: MachineRoles | None, *, machine: MachineIdentity
+) -> dict[str, str]:
     """Template fragments for the authenticated remote OTLP ingress.
 
     Served by any unit that remote peers dial OTLP into: a gateway (pure
@@ -318,11 +320,10 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     if roles is None or not (roles & {"gateway", "observability-station"}):
         return no_remote
 
-    from base.cluster.machine import reachable_host
     from base.host.net.predicates import is_loopback_host
 
     token = telemetry_bearer()
-    host = reachable_host()
+    host = machine.host()
     if _unspecified_address(host):
         # 0.0.0.0 / :: is never a reachable host (the loopback classifier
         # treats 0.0.0.0 as loopback, so check the wildcard form first): a
@@ -402,11 +403,15 @@ def _otlp_exporters(roles: MachineRoles | None, *, database_factory: DatabaseFac
 
 
 def generate_config(
-    repo: Path, ava_home: Path, roles: MachineRoles | None, *, database_factory: DatabaseFactory
+    repo: Path,
+    ava_home: Path,
+    roles: MachineRoles | None,
+    *,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentity,
 ) -> str:
     """Render the sidecar config from the repo template + this unit's settings."""
     from base.cluster import home_label
-    from base.cluster.machine import machine_name
     from base.config import settings
 
     obs = settings.observability
@@ -417,7 +422,7 @@ def generate_config(
     substitutions = {
         "AVA_HOME": str(ava_home),
         "CLUSTER_LABEL": home_label(ava_home),
-        "MACHINE_NAME": _ottl_quote(machine_name()),
+        "MACHINE_NAME": _ottl_quote(machine.name()),
         # Kept as named generation inputs for small downstream/custom templates;
         # the shipped template consumes the role-specific OTLP_EXPORTERS block.
         "TEMPO_ENDPOINT": obs.telemetry_tempo_endpoint.rstrip("/"),
@@ -430,7 +435,7 @@ def generate_config(
         "DATA_PLANE_PIPELINE_RECEIVERS": data_plane_pipeline,
         "OTLP_EXPORTERS": _otlp_exporters(roles, database_factory=database_factory),
     }
-    substitutions.update(_remote_receiver_fragments(roles))
+    substitutions.update(_remote_receiver_fragments(roles, machine=machine))
     return Template(_config_template(repo)).substitute(substitutions)
 
 
@@ -492,7 +497,12 @@ def _write_config(path: Path, rendered: str) -> None:
 
 
 def ensure_otel_collector(
-    repo: Path, ava_home: Path, roles: MachineRoles | None, *, database_factory: DatabaseFactory
+    repo: Path,
+    ava_home: Path,
+    roles: MachineRoles | None,
+    *,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentity,
 ) -> None:
     """Idempotent install: pinned binary present + config regenerated.
 
@@ -530,7 +540,7 @@ def ensure_otel_collector(
         )
     _write_config(
         dest_dir / "config.yaml",
-        generate_config(repo, ava_home, roles, database_factory=database_factory),
+        generate_config(repo, ava_home, roles, database_factory=database_factory, machine=machine),
     )
 
 
@@ -544,7 +554,9 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
     if (
         ctx.roles is not None
         and "gateway" in ctx.roles
-        and not collector_allowed_for_home(ctx.ava_home)
+        and not collector_allowed_for_home(
+            ctx.ava_home, machine=ctx.machine, unit_home=ctx.ava_home
+        )
     ):
         print(
             "  ! otel-collector: collector skipped — this gateway home is not "
@@ -562,4 +574,10 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
                 file=sys.stderr,
             )
         return
-    ensure_otel_collector(ctx.repo, ctx.ava_home, ctx.roles, database_factory=ctx.database_factory)
+    ensure_otel_collector(
+        ctx.repo,
+        ctx.ava_home,
+        ctx.roles,
+        database_factory=ctx.database_factory,
+        machine=ctx.machine,
+    )

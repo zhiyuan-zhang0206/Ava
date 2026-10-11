@@ -9,7 +9,7 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -39,6 +39,7 @@ def _make_idle(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
+    local_machine: MachineIdentity,
 ) -> int:
     """Spawn an agent and park it. `status_changed_s_ago` backdates
     status_changed_at via a timestamp-only UPDATE (the BEFORE-UPDATE-OF-status
@@ -57,6 +58,7 @@ def _make_idle(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
+        machine=local_machine,
     )
     with db.cursor() as cur:
         cur.execute(
@@ -89,6 +91,7 @@ def _lease(
     applied_version: int = 0,
     automatic: bool = False,
     handoff_applied: bool = False,
+    local_machine: MachineIdentity,
 ) -> None:
     """Insert one impersonation lease row for the agent (task #4872).
 
@@ -107,7 +110,7 @@ def _lease(
             (
                 uuid4(),
                 agent_id,
-                machine_name(),
+                local_machine.name(),
                 status,
                 Jsonb([{} for _ in range(delta_version)]),
                 delta_version,

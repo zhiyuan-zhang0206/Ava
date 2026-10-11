@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.incarnation.native_work_models import NativeWorkUncertainError
 from base.agents.messages.native_cancel import accept_native_cancel
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -27,8 +28,9 @@ from services.agent_runner.agent_host.invocation.native_work import (
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_force_observation_waits_for_actual_projection_continuation(
@@ -39,6 +41,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
     database: Database,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
@@ -61,7 +64,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
         pool=aops_pool,
         checkpointer=saver,
         graph=graph,
-        machine="claim-test",
+        machine=configured_machine(name="claim-test"),
         bus=EventBus.from_settings(),
         db=database,
         catalog=model_catalog,
@@ -96,6 +99,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
                 EventBus.from_settings(),
                 target.agent_id,
                 resurrected_by="user",
+                local_machine=machine_identity.name(),
             )
         assert db_conn.execute(
             "SELECT transfer_chain FROM native_graph_work WHERE id=%s", (target.work_id,)
@@ -115,6 +119,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
             EventBus.from_settings(),
             target.agent_id,
             resurrected_by="user",
+            local_machine=machine_identity.name(),
         )
         successor = await admit_hosted_runtime(
             aops_pool,

@@ -23,7 +23,7 @@ from ava.sdk_surface.install import Installation
 from base.agents import impersonation as leases
 from base.agents.impersonation import history
 from base.agents.messages.caller_identity import CallerIdentity
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -48,6 +48,8 @@ def native_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
     model_installation: Installation,
+    *,
+    machine_identity: MachineIdentity,
 ) -> tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]:
     registry = ExtensionRegistry(
         (("integration", PluginContributions(state=(IntegrationPlugin,))),)
@@ -74,7 +76,7 @@ def native_checkpoint(
         "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
         "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
         "clock_timestamp()+interval '10 minutes')",
-        (agent_id, machine_name(), owner.generation, owner.owner),
+        (agent_id, machine_identity.name(), owner.generation, owner.owner),
     )
     db_conn.commit()
     checkpoint = empty_checkpoint()
@@ -105,6 +107,8 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     owner, handle = native_checkpoint
     agent_id = owner.agent_id
@@ -118,8 +122,17 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
         authority=config_authority,
+        local_machine=machine_identity.name(),
     )
-    leases.accept(database, event_bus, lease["id"], agent_id, owner, "Handoff brief")
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=machine_identity.name(),
+    )
     leases.activate(database, event_bus, lease["id"], owner)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
     script = (
@@ -138,7 +151,15 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         assert ava.state.messages[-1].content == "Native task"
         assert handle.read().seen == {"native"}
         handle.update({"seen": {"external"}})
-    updated = leases.get(database, event_bus, lease["id"], attested_caller(lease))
+    updated = leases.get(
+        database,
+        event_bus,
+        lease["id"],
+        attested_caller(
+            lease,
+        ),
+        local_machine=machine_identity.name(),
+    )
     assert updated["delta_version"] == 1
     native_snapshot, _, _ = load_snapshot(agent_id, database=database)
     assert decode_plugin_delta(updated["plugin_delta"][0], cast(Any, type(native_snapshot))) == {
@@ -149,7 +170,16 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     with external.attach(lease["id"]):
         assert handle.read().seen == {"native", "external"}
     assert (
-        leases.get(database, event_bus, lease["id"], attested_caller(lease))["delta_version"] == 1
+        leases.get(
+            database,
+            event_bus,
+            lease["id"],
+            attested_caller(
+                lease,
+            ),
+            local_machine=machine_identity.name(),
+        )["delta_version"]
+        == 1
     )
 
 
@@ -161,6 +191,8 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     owner, _ = native_checkpoint
     monkeypatch.setenv(
@@ -170,7 +202,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine,lease_expires_at) "
         "VALUES(%s,'idling',%s,clock_timestamp()+interval '10 minutes')",
-        (peer_id, machine_name()),
+        (peer_id, machine_identity.name()),
     )
     db_conn.commit()
     caller = CallerIdentity(kind="external_agent", subject="codex", instance="test")
@@ -183,8 +215,17 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
         authority=config_authority,
+        local_machine=machine_identity.name(),
     )
-    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.accept(
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+        local_machine=machine_identity.name(),
+    )
     leases.activate(database, event_bus, lease["id"], owner)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
 
@@ -204,6 +245,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
         lease["id"],
         attested_caller(lease),
         "Delivered the implementation to the peer",
+        local_machine=machine_identity.name(),
     )
     handoff = db_conn.execute(
         "SELECT agent_id,content,source,payload FROM inbound_messages WHERE id=%s",
@@ -226,6 +268,8 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Attachment-owned ``ava.agents.send_message`` is a central audit row in the lease log."""
     owner, _ = native_checkpoint
@@ -233,7 +277,7 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine,lease_expires_at) "
         "VALUES(%s,'idling',%s,clock_timestamp()+interval '10 minutes')",
-        (peer_id, machine_name()),
+        (peer_id, machine_identity.name()),
     )
     db_conn.commit()
     lease = leases.request(
@@ -248,15 +292,31 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
         name="attachment-event-log",
         executor_name="codex",
         authority=config_authority,
+        local_machine=machine_identity.name(),
     )
     leases.accept(
-        database, event_bus, lease["id"], owner.agent_id, owner, "Send through the attachment"
+        database,
+        event_bus,
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Send through the attachment",
+        local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], owner)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
     with external.attach(lease["id"]):
         ava.agents.send_message(peer_id, "Log-backed attachment send")
-    leases.release(database, event_bus, lease["id"], attested_caller(lease), "Sent the peer update")
+    leases.release(
+        database,
+        event_bus,
+        lease["id"],
+        attested_caller(
+            lease,
+        ),
+        "Sent the peer update",
+        local_machine=machine_identity.name(),
+    )
 
     # The attachment-local SDK meter may be disabled by the surrounding process
     # profile, but the borrowed inter-agent send is always a central audit row.
@@ -268,6 +328,6 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
     assert [(event["event_name"], event["agent_id"]) for event in api_events] == [
         ("send_message", peer_id)
     ]
-    completed = history.resolve(database, owner.agent_id, 0)
+    completed = history.resolve(database, owner.agent_id, 0, local_machine=machine_identity.name())
     assert completed["events_completed_at"] is not None
     assert completed["event_delivery_pending_reason"] is None

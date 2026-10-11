@@ -2,7 +2,10 @@
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.cli_tests" = [
     "test_converge_lgtm.py",
+    "test_lgtm_station.py",
+    "test_lgtm_validation.py",
     "test_converge_otel_collector.py",
+    "test_collector_admission.py",
     "test_lgtm_native.py",
     "test_lgtm_toggle.py",
     "test_observatory_urls.py",
@@ -12,6 +15,8 @@
 "tests.fixtures.unit.sdk" = [
     "test_atomic_writer_contracts.py",
     "test_converge_lgtm.py",
+    "test_lgtm_station.py",
+    "test_lgtm_validation.py",
     "test_grafana_render_cmd.py",
     "test_lgtm_native.py",
     "test_lgtm_toggle.py",

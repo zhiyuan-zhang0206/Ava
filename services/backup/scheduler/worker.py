@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from base.cluster.machine import validate_machine_name
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -237,21 +237,28 @@ def main() -> None:
 
     # The store-verified publish ACK is an INFO record: route it to the log sinks.
     config = ConfigBoot()
+    config.boot()
+    machine = machine_from_boot(config)
+    process_home = ava_home().resolve()
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="pg-backup-worker")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate)
+        return Database.from_settings(gate=gate, local_host=machine.host)
 
     def database_for_url(url: str) -> Database:
-        return Database(dataclasses.replace(db_config_from_settings(), db_url=url), gate=gate)
+        return Database(
+            dataclasses.replace(db_config_from_settings(), db_url=url),
+            gate=gate,
+            local_host=machine.host,
+        )
 
-    pipeline = build_pipeline(database=database)
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
         name="pg-backup-worker",
         producer=lambda: pipeline,
-        machine_reader=lambda: validate_machine_name(config.view.general.machine_name),
+        machine_reader=machine.name,
         image=image,
     )
     publish_result(

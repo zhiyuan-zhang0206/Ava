@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from ava.gateway_client import transport
 from base.agents import GatewayUnavailable
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from gateway.agents import router as agent_router
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, SECRET
@@ -20,6 +21,7 @@ from ops.lifecycle.launch import _validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.retry_waits import retry_waits as retry_waits
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 
@@ -30,6 +32,8 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     monkeypatch: pytest.MonkeyPatch,
     set_machine_identity: Any,
     rotate: bool,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
@@ -38,7 +42,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     async def accept(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         # Exercise the runner's real original-attempt/placement fence, rather
         # than treating matching JSON as execution evidence.
-        _validate_launch_row(app.state.db_pool, body)
+        _validate_launch_row(app.state.db_pool, body, local_machine=machine_identity.name())
         launches.append(body)
         return SpawnedAgent(id=body.agent_id)
 
@@ -61,7 +65,9 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
 
     http.post.side_effect = submit
     with transport.use_client(http):
-        with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as target:
+        with gateway_test_client(
+            app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+        ) as target:
             with pytest.raises(GatewayUnavailable):
                 _sdk()
             lost_attempts = http.post.call_count
@@ -82,7 +88,9 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
                 assert retry.status_code == 200, retry.text
                 assert retry.json()["launch_attempt_id"] != str(original)
         # A new lifespan owns fresh pools and no prior acceptance cache.
-        with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as target:
+        with gateway_test_client(
+            app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+        ) as target:
             assert _sdk() == agent_id
     assert http.post.call_count == lost_attempts + 1
     assert all(call == http.post.call_args_list[0] for call in http.post.call_args_list)

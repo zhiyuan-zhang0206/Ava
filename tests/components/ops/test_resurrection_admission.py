@@ -18,7 +18,7 @@ from base.agents.incarnation.resources import (
     decode_resources,
 )
 from base.agents.messages.inbound import InboundKind
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
 from base.db.code_version_gate import ProcessDbGate
@@ -73,6 +73,7 @@ async def test_never_admitted_birth_resurrects_as_a_fresh_hosted_birth(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """No runtime identity plus the unconsumed fresh-INSERT marker proves no
     predecessor allocation exists: resurrection is a fresh birth."""
@@ -83,6 +84,7 @@ async def test_never_admitted_birth_resurrects_as_a_fresh_hosted_birth(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     trigger = (
         insert_inbound_message(db_conn, aid, "continue", "user", bus=event_bus, database=database)
@@ -98,13 +100,14 @@ async def test_never_admitted_birth_resurrects_as_a_fresh_hosted_birth(
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger,
         trigger_inbound_kind=InboundKind.CHAT if guarded else None,
+        local_machine=machine_identity.name(),
     )
 
     assert status(db_conn, aid) == ("idling", None)
     assert _resources(db_conn, aid) == marker
     assert wakes == [(aid, "0")]
     incarnation = await admit_hosted_runtime(
-        aops_pool, aid, machine_name(), uuid4(), expected_from="idling", db=database
+        aops_pool, aid, machine_identity.name(), uuid4(), expected_from="idling", db=database
     )
     assert incarnation is not None
     admitted = decode_resources(_resources(db_conn, aid))
@@ -124,6 +127,7 @@ def test_fresh_birth_transition_reproves_its_evidence_under_the_row_lock(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """The final CAS, not only the earlier read, requires the unconsumed marker
     or this agent's own unowned termination receipt."""
@@ -133,6 +137,7 @@ def test_fresh_birth_transition_reproves_its_evidence_under_the_row_lock(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     named: int | None = None
     if receipt == "unmarked":
@@ -144,7 +149,7 @@ def test_fresh_birth_transition_reproves_its_evidence_under_the_row_lock(
             database,
             event_bus,
             spawner="user",
-            machine=machine_name(),
+            machine=machine_identity.name(),
             authority=config_authority,
             catalog=model_catalog,
         )
@@ -180,6 +185,7 @@ def test_retired_resources_require_cutover_before_resurrection(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     generation, owner = uuid4(), uuid4()
     before = _retired(generation, owner)
@@ -189,6 +195,7 @@ def test_retired_resources_require_cutover_before_resurrection(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     db_conn.execute(
         "UPDATE agents_meta SET runtime_kind='hosted',runtime_generation=%s,runtime_owner=%s "
@@ -198,7 +205,9 @@ def test_retired_resources_require_cutover_before_resurrection(
     db_conn.commit()
 
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
-        wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
+        wake.resurrect_agent(
+            database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+        )
     assert status(db_conn, aid) == ("terminated", "hosted")
     assert _resources(db_conn, aid) == before
     assert wakes == []
@@ -214,6 +223,7 @@ async def test_closed_form_terminated_row_resurrects_through_its_terminate_recei
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     generation, owner = uuid4(), uuid4()
     before = _retired(generation, owner) | {"frozen_by": 1}
@@ -223,6 +233,7 @@ async def test_closed_form_terminated_row_resurrects_through_its_terminate_recei
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     receipt = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,status,claimed_at,applied_at,"
@@ -239,9 +250,11 @@ async def test_closed_form_terminated_row_resurrects_through_its_terminate_recei
     db_conn.commit()
     _closed_form(db_conn, aid, before)
 
-    wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
+    wake.resurrect_agent(
+        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+    )
     successor = await admit_hosted_runtime(
-        aops_pool, aid, machine_name(), uuid4(), expected_from="idling", db=database
+        aops_pool, aid, machine_identity.name(), uuid4(), expected_from="idling", db=database
     )
     assert successor is not None
     admitted = decode_resources(_resources(db_conn, aid))
@@ -256,6 +269,7 @@ def _refused_locally(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> tuple[int, int]:
     """A never-admitted row without the birth marker: unknown, so the real
     in-process op refuses and the chat stays queued."""
@@ -265,6 +279,7 @@ def _refused_locally(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     trigger = insert_inbound_message(
         db,
@@ -290,6 +305,7 @@ def _refused_remotely(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> tuple[int, int]:
     aid = terminated(
         db,
@@ -297,6 +313,7 @@ def _refused_remotely(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     trigger = insert_inbound_message(
         db,
@@ -326,6 +343,7 @@ async def test_auto_resurrect_refusal_is_a_warning_naming_the_reason(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     aid, trigger = arrange(
         monkeypatch,
@@ -333,6 +351,7 @@ async def test_auto_resurrect_refusal_is_a_warning_naming_the_reason(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     status = await lifecycle.resurrect_if_terminated(
         Database.from_settings(gate=database_gate),
@@ -340,6 +359,7 @@ async def test_auto_resurrect_refusal_is_a_warning_naming_the_reason(
         aid,
         trigger_inbound_id=trigger,
         trigger_inbound_kind=InboundKind.CHAT,
+        local_machine=machine_identity.name(),
     )
     assert status is AgentStatus.TERMINATED
     refused = [r for r in loguru_records if r["extra"].get("event") == "auto_resurrect_refused"]
@@ -363,6 +383,7 @@ async def test_unknown_auto_resurrect_failure_propagates(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     aid = terminated(
         db_conn,
@@ -370,6 +391,7 @@ async def test_unknown_auto_resurrect_failure_propagates(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     trigger = insert_inbound_message(
         db_conn, aid, "hello", "user", bus=event_bus, database=database
@@ -387,6 +409,7 @@ async def test_unknown_auto_resurrect_failure_propagates(
             aid,
             trigger_inbound_id=trigger,
             trigger_inbound_kind=InboundKind.CHAT,
+            local_machine=machine_identity.name(),
         )
     assert not any(r["extra"].get("event") == "auto_resurrect_failed" for r in loguru_records)
     assert db_conn.execute(
@@ -410,6 +433,7 @@ class _Arrange(Protocol):
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> Awaitable[int]: ...
 
 
@@ -424,12 +448,16 @@ def _unowned_idle(db: psycopg.Connection, aid: int) -> bool:
 
 
 async def _admitted(
-    pool: AsyncConnectionPool, aid: int, database_gate: ProcessDbGate
+    pool: AsyncConnectionPool,
+    aid: int,
+    database_gate: ProcessDbGate,
+    *,
+    machine_identity: MachineIdentity,
 ) -> RuntimeIncarnation:
     owner = await admit_hosted_runtime(
         pool,
         aid,
-        machine_name(),
+        machine_identity.name(),
         uuid4(),
         expected_from="idling",
         db=Database.from_settings(gate=database_gate),
@@ -445,13 +473,14 @@ async def _spawned(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     """(a) a new agent never admitted: its birth epoch is its origin."""
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
-        machine=machine_name(),
+        machine=machine_identity.name(),
         authority=config_authority,
         catalog=model_catalog,
     )
@@ -465,6 +494,7 @@ async def _resurrected(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     """(b) resurrected from its retained identity, not admitted again yet."""
     aid = legacy_row(
@@ -472,8 +502,9 @@ async def _resurrected(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
-    await _admitted(pool, aid, database_gate=database_gate)
+    await _admitted(pool, aid, database_gate=database_gate, machine_identity=machine_identity)
     db.execute(
         "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
         (aid,),
@@ -484,6 +515,7 @@ async def _resurrected(
         EventBus.from_settings(),
         aid,
         resurrected_by="user",
+        local_machine=machine_identity.name(),
     )
     return aid
 
@@ -495,6 +527,7 @@ async def _restarted(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     """(c) released by its applied restart, no successor admitted yet."""
     aid = legacy_row(
@@ -502,8 +535,11 @@ async def _restarted(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
-    owner = await _admitted(pool, aid, database_gate=database_gate)
+    owner = await _admitted(
+        pool, aid, database_gate=database_gate, machine_identity=machine_identity
+    )
     insert_inbound_message(
         db,
         aid,
@@ -529,6 +565,7 @@ async def _managed_restarted(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> int:
     """An actual fresh birth whose original host applied its restart."""
     aid = await _spawned(
@@ -537,8 +574,11 @@ async def _managed_restarted(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
-    owner = await _admitted(pool, aid, database_gate=database_gate)
+    owner = await _admitted(
+        pool, aid, database_gate=database_gate, machine_identity=machine_identity
+    )
     insert_inbound_message(
         db,
         aid,
@@ -572,6 +612,7 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """Each way this runtime leaves a row unowned, then a force before the next
     admission: the force records the receipt, the row resurrects as a fresh
@@ -582,6 +623,7 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     assert _unowned_idle(db_conn, aid)
     command = force(aid)
@@ -601,11 +643,14 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger,
         trigger_inbound_kind=InboundKind.CHAT if guarded else None,
+        local_machine=machine_identity.name(),
     )
 
     assert _unowned_idle(db_conn, aid)
     assert wakes == [(aid, "0")]
-    assert await _admitted(aops_pool, aid, database_gate=database_gate)
+    assert await _admitted(
+        aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
+    )
 
 
 async def test_a_managed_row_ended_unowned_keeps_its_predecessor_receipt(
@@ -617,6 +662,7 @@ async def test_a_managed_row_ended_unowned_keeps_its_predecessor_receipt(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
     """(b) with a recorded resource set: resurrection keeps the closed set, the
     force leaves the terminate receipt alone, and the successor is admitted
@@ -629,6 +675,7 @@ async def test_a_managed_row_ended_unowned_keeps_its_predecessor_receipt(
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
+        machine_identity=machine_identity,
     )
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,status,claimed_at,applied_at,"
@@ -642,12 +689,18 @@ async def test_a_managed_row_ended_unowned_keeps_its_predecessor_receipt(
         (generation, owner, aid),
     )
     db_conn.commit()
-    wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
+    wake.resurrect_agent(
+        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+    )
     assert unowned_receipt(db_conn, force(aid))
 
-    wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
+    wake.resurrect_agent(
+        database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
+    )
 
-    successor = await _admitted(aops_pool, aid, database_gate=database_gate)
+    successor = await _admitted(
+        aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
+    )
     admitted = decode_resources(_resources(db_conn, aid))
     assert isinstance(admitted, IncarnationResources)
     assert (admitted.generation, admitted.owner) == (successor.generation, successor.owner)

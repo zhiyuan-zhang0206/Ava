@@ -1,5 +1,6 @@
 """Configuration HTTP requests use the serving app's resources, without its lifespan."""
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock
@@ -9,23 +10,29 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from base.cluster import machines
-from base.cluster.machine import machine_name
+from base.cluster.machine import MachineIdentity
 from base.config import get_config_metadata
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from gateway.routers.configuration import runtime
 from ops.cluster import rpc
 from ops.rpc_schemas import ConfigReadResult, HostConfigField
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
 def clients(
-    monkeypatch: pytest.MonkeyPatch, config_authority: ConfigAuthority, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    config_authority: ConfigAuthority,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentity,
 ) -> list[TestClient]:
     """Two router-only apps have distinct pools, role/RPC handles and config paths."""
     apps = [FastAPI(), FastAPI()]
     for index, app in enumerate(apps):
         app.include_router(runtime.router)
+        app.state.machine = machine_identity
         app.state.db = MagicMock(spec=Database)
         app.state.db_pool = MagicMock()
         cursor = app.state.db_pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
@@ -41,7 +48,7 @@ def clients(
 
     def roles(db: Database, target: str) -> list[str]:
         index = index_of(db)
-        assert target in {"remote", f"remote-{index}", machine_name()}
+        assert target in {"remote", f"remote-{index}", machine_identity.name()}
         return ["agent-runner"] if index == 0 else ["agent-runner", "gateway"]
 
     def runners(db: Database) -> list[tuple[str, str | None]]:
@@ -73,7 +80,7 @@ def clients(
                 "records": [{"ts": target_machine, "site": str(index)}],
             }
         assert kind == "config_write"
-        assert payload["local"] is (target_machine == machine_name())
+        assert payload["local"] is (target_machine == machine_identity.name())
         assert payload["overrides"] == {"ops_concurrency": 4}
         return {
             "machine": target_machine,
@@ -85,7 +92,11 @@ def clients(
     monkeypatch.setattr(machines, "lookup_role", roles)
     monkeypatch.setattr(machines, "list_agent_runners", runners)
     monkeypatch.setattr(rpc, "dispatch_to_machine", dispatch)
-    monkeypatch.setattr(runtime, "check_env_integrity", lambda: None)
+
+    def check_integrity(*, machine_reader: Callable[[], str]) -> None:
+        assert machine_reader() == machine_identity.name()
+
+    monkeypatch.setattr(runtime, "check_env_integrity", check_integrity)
     return [TestClient(app) for app in apps]
 
 
@@ -118,7 +129,7 @@ def test_config_read_and_capabilities_use_each_apps_db(clients: list[TestClient]
 
 @pytest.mark.parametrize("machine", [None, "all"])
 def test_audit_reads_and_fanout_use_each_apps_db(
-    clients: list[TestClient], machine: str | None
+    clients: list[TestClient], machine: str | None, *, machine_identity: MachineIdentity
 ) -> None:
     for index in (1, 0, 1):
         params: dict[str, str | int] = {"last": 2}
@@ -130,7 +141,9 @@ def test_audit_reads_and_fanout_use_each_apps_db(
         assert len(records) == (2 if machine == "all" else 1)
         assert {record["site"] for record in records} == {str(index)}
         assert {record["machine"] for record in records} == (
-            {machine_name(), f"remote-{index}"} if machine == "all" else {machine_name()}
+            {machine_identity.name(), f"remote-{index}"}
+            if machine == "all"
+            else {machine_identity.name()}
         )
 
 

@@ -13,6 +13,7 @@ import ava
 from ava import gateway_client
 from ava.agents import AgentNotFound, AgentStatus
 from ava.sdk_surface.install import Installation
+from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from gateway.tests.agents.sdk_support import (
@@ -20,6 +21,7 @@ from gateway.tests.agents.sdk_support import (
 )
 from gateway.tests.agents.sdk_support import spawn_agent
 from tests.fixtures.pin_agent import pin_agent
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestGetNeighbors:
@@ -195,9 +197,14 @@ class TestListAgents:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         ids = [
-            spawn_agent(config_authority=config_authority, database_gate=database_gate)
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
             for _ in range(3)
         ]
         for agent_id, status in zip(ids, ("running", "idling", "terminated"), strict=True):
@@ -215,9 +222,14 @@ class TestListAgents:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         ids = [
-            spawn_agent(config_authority=config_authority, database_gate=database_gate)
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
             for _ in range(5)
         ]
         for agent_id in ids:
@@ -328,8 +340,15 @@ class TestListAgents:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
-        pin_agent(spawn_agent(config_authority=config_authority, database_gate=database_gate))
+        pin_agent(
+            spawn_agent(
+                config_authority=config_authority,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
+        )
         agent_id = ava.agents.spawn(idempotency_key=str(uuid4()))
         db_conn.execute("UPDATE agents SET label = 'test-agent' WHERE id = %s", (agent_id,))
         db_conn.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))

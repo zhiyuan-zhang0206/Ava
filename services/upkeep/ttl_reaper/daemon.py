@@ -31,8 +31,8 @@ from pathlib import Path
 
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import validate_machine_name
-from base.config import settings
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup
@@ -44,6 +44,7 @@ from base.events.live.bus import EventBus
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import ava_home
 from base.telemetry.emitter import build_pipeline
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.upkeep.ttl_reaper import remote, shells, sweep
@@ -113,19 +114,23 @@ def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     image = LoadedCommit.capture()
+    machine_config = ConfigBoot()
+    machine_config.boot()
+    machine = machine_from_boot(machine_config)
+    process_home = ava_home().resolve()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="ttl_reaper")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate)
+        return Database.from_settings(gate=gate, local_host=machine.host)
 
-    pipeline = build_pipeline(database=database)
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
         name="ttl_reaper",
         producer=lambda: pipeline,
-        machine_reader=lambda: validate_machine_name(settings.general.machine_name),
+        machine_reader=machine.name,
         image=image,
     )
     install_graceful_shutdown("ttl_reaper")

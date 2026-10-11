@@ -9,19 +9,24 @@ from typing import cast
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from gateway.app import app
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestRefreshPath:
     """refresh calls base.deploy.git.memory_repo.pull_main(), passing the returned sha through to the caller."""
 
-    def test_refresh_returns_head_sha(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_refresh_returns_head_sha(
+        self, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
+    ) -> None:
         """stub pull_main → verify 200 + head returned, and pull_main called once."""
         import base.deploy.git.memory_repo as _memory_repo
 
         calls = {"n": 0}
 
-        def _fake_pull_main() -> str:
+        def _fake_pull_main(*, machine: MachineIdentity) -> str:
+            assert machine is machine_identity
             calls["n"] += 1
             return "abc1234"
 
@@ -39,7 +44,9 @@ class TestRefreshOffEventLoop:
     a worker thread, never the gateway's event loop, or a dead remote freezes
     the whole gateway until the watchdog kills it (2026-09-10 04:06-04:35)."""
 
-    def test_refresh_runs_pull_off_the_event_loop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_refresh_runs_pull_off_the_event_loop(
+        self, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
+    ) -> None:
         import asyncio as _asyncio
         import threading
 
@@ -49,7 +56,8 @@ class TestRefreshOffEventLoop:
         handoffs: list[tuple[object, int]] = []  # (fn, event-loop thread ident)
         pull_threads: list[int] = []
 
-        def _fake_pull_main() -> str:
+        def _fake_pull_main(*, machine: MachineIdentity) -> str:
+            assert machine is machine_identity
             pull_threads.append(threading.get_ident())
             return "abc1234"
 

@@ -10,12 +10,14 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from gateway.agents import launch_retry
 from gateway.agents import router as birth_router
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
+from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
@@ -23,6 +25,8 @@ def client(
     monkeypatch: pytest.MonkeyPatch,
     set_machine_identity: Callable[..., None],
     db_conn: psycopg.Connection[Any],
+    *,
+    machine_identity: MachineIdentity,
 ) -> Iterator[TestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     db_conn.execute("INSERT INTO machines(name) VALUES ('local-test') ON CONFLICT DO NOTHING")
@@ -37,7 +41,9 @@ def client(
 
     monkeypatch.setattr(birth_router, "forward_spawn_to_remote", born)
     monkeypatch.setattr(launch_retry.rpc, "dispatch_to_machine", reconcile)
-    with gateway_test_client(app, headers={"Authorization": "Bearer retry-test-secret"}) as value:
+    with gateway_test_client(
+        app, headers={"Authorization": "Bearer retry-test-secret"}, machine=machine_identity
+    ) as value:
         yield value
 
 
@@ -181,6 +187,8 @@ def test_native_repeat_rejects_superseded_target(
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     changed: str,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from ops.lifecycle import launch_reconcile
     from ops.rpc_schemas.launch_retry import LaunchReconcileRequest
@@ -196,10 +204,18 @@ def test_native_repeat_rejects_superseded_target(
     monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", wake)
     payload = LaunchReconcileRequest(launch_attempt_id=accepted["launch_attempt_id"])
     assert launch_reconcile._reconcile(
-        app.state.db, app.state.bus, payload, app.state.db_pool
+        app.state.db,
+        app.state.bus,
+        payload,
+        app.state.db_pool,
+        local_machine=machine_identity.name(),
     ).wake_published
     assert launch_reconcile._reconcile(
-        app.state.db, app.state.bus, payload, app.state.db_pool
+        app.state.db,
+        app.state.bus,
+        payload,
+        app.state.db_pool,
+        local_machine=machine_identity.name(),
     ).wake_published
     if changed == "admitted":
         db_conn.execute(
@@ -216,7 +232,11 @@ def test_native_repeat_rejects_superseded_target(
         db_conn.execute("DELETE FROM agents_meta WHERE id=%s", (agent_id,))
     db_conn.commit()
     assert not launch_reconcile._reconcile(
-        app.state.db, app.state.bus, payload, app.state.db_pool
+        app.state.db,
+        app.state.bus,
+        payload,
+        app.state.db_pool,
+        local_machine=machine_identity.name(),
     ).wake_published
     assert len(wakes) == 2
     count = db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone()
@@ -224,7 +244,11 @@ def test_native_repeat_rejects_superseded_target(
 
 
 def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
-    client: TestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    client: TestClient,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from ops.lifecycle import launch_reconcile
     from ops.rpc_schemas.launch_retry import LaunchReconcileRequest
@@ -238,7 +262,13 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
 
     monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", crash)
     with pytest.raises(RuntimeError, match="native crash"):
-        launch_reconcile._reconcile(app.state.db, app.state.bus, payload, app.state.db_pool)
+        launch_reconcile._reconcile(
+            app.state.db,
+            app.state.bus,
+            payload,
+            app.state.db_pool,
+            local_machine=machine_identity.name(),
+        )
     wakes: list[tuple[object, ...]] = []
 
     def wake(*args: object) -> bool:
@@ -248,8 +278,20 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
     monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", wake)
     # Discard the successful result just as a lost RPC ACK; repeat the same
     # natural wake without introducing a second queue item or rotating identity.
-    launch_reconcile._reconcile(app.state.db, app.state.bus, payload, app.state.db_pool)
-    launch_reconcile._reconcile(app.state.db, app.state.bus, payload, app.state.db_pool)
+    launch_reconcile._reconcile(
+        app.state.db,
+        app.state.bus,
+        payload,
+        app.state.db_pool,
+        local_machine=machine_identity.name(),
+    )
+    launch_reconcile._reconcile(
+        app.state.db,
+        app.state.bus,
+        payload,
+        app.state.db_pool,
+        local_machine=machine_identity.name(),
+    )
     assert len(wakes) == 2
     assert db_conn.execute(
         "SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,)
@@ -263,7 +305,11 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
 
 
 def test_reconcile_holds_row_fence_until_publication(
-    client: TestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    client: TestClient,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     from threading import Event
 
@@ -283,7 +329,12 @@ def test_reconcile_holds_row_fence_until_publication(
     monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", wake)
     with ThreadPoolExecutor(max_workers=1) as executor:
         pending = executor.submit(
-            launch_reconcile._reconcile, app.state.db, app.state.bus, payload, app.state.db_pool
+            launch_reconcile._reconcile,
+            app.state.db,
+            app.state.bus,
+            payload,
+            app.state.db_pool,
+            local_machine=machine_identity.name(),
         )
         try:
             assert publishing.wait(5)

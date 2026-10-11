@@ -15,8 +15,15 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
+from tests.fixtures.unit.identity import machine_identity as machine_identity
+
+
+def _allow_pr_flow(*, machine: MachineIdentity, home: Path) -> None:
+    """Credentials are present; registration still applies its home and switch gates."""
+    _ = machine, home
 
 
 class _ExplodingBackend:
@@ -181,17 +188,27 @@ _UNREGISTERS = [pytest.param(call, id=name) for name, call in _UNREGISTER_CALLS.
 
 @pytest.mark.parametrize("call", _REGISTERS)
 def test_registration_never_reaches_the_backend_when_gated(
-    call: object, default_home: Path, monkeypatch: pytest.MonkeyPatch
+    call: object,
+    default_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr("base.host.system.backend.get_backend", _ExplodingBackend)
     assert callable(call)
-    call()  # no AssertionError == the gate held
+    if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
+        call(machine=machine_identity, home=default_home / ".ava")
+    else:
+        call()  # no AssertionError == the gate held
 
 
 def test_registration_dispatches_when_enabled(
-    gate_on: None, default_home: Path, backend: _RecordingBackend, monkeypatch: pytest.MonkeyPatch
+    gate_on: None,
+    default_home: Path,
+    backend: _RecordingBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr(pr_flow_job, "credential_blocker", lambda: None)
+    monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
     cron.register_os_cron(enabled_reader=lambda: settings.general.os_jobs_enabled)
     autostart.register_autostart(enabled_reader=lambda: settings.general.os_jobs_enabled)
     logs_job.register_logs_job(enabled_reader=lambda: settings.general.os_jobs_enabled)
@@ -200,7 +217,11 @@ def test_registration_dispatches_when_enabled(
         refresh_enabled_reader=lambda: settings.packages.refresh_enabled,
         tick_reader=lambda: settings.packages.refresh_tick_seconds,
     )
-    pr_flow_job.register_pr_flow_job(enabled_reader=lambda: settings.general.os_jobs_enabled)
+    pr_flow_job.register_pr_flow_job(
+        enabled_reader=lambda: settings.general.os_jobs_enabled,
+        machine=machine_identity,
+        home=default_home / ".ava",
+    )
     walg_job.register_walg_job(
         enabled_reader=lambda: settings.general.os_jobs_enabled,
         backup_hour_reader=lambda: settings.services.backup_hour,
@@ -244,12 +265,19 @@ def test_deregistration_is_not_gated_by_the_os_jobs_switch(
 
 @pytest.mark.parametrize("call", _REGISTERS)
 def test_a_scratch_home_registers_nothing(
-    call: object, gate_on: None, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    call: object,
+    gate_on: None,
+    unit_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr("base.host.system.backend.get_backend", _ExplodingBackend)
-    monkeypatch.setattr(pr_flow_job, "credential_blocker", lambda: None)
+    monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
     assert callable(call)
-    call()  # no AssertionError == nothing reached the scheduler
+    if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
+        call(machine=machine_identity, home=unit_home)
+    else:
+        call()  # no AssertionError == nothing reached the scheduler
 
 
 @pytest.mark.parametrize("call", _UNREGISTERS)

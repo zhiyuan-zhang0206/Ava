@@ -303,15 +303,13 @@ def direct_db_url(
     matches it byte-for-byte), and a home with no record (no gateway capability)
     keeps `AVA_DB_URL` as-is rather than guessing.
     """
-    from base.cluster.machine import reachable_host
-
     return _direct_url(
         config or db_config_from_settings(),
-        local_host=reachable_host if local_host is None else local_host,
+        local_host=local_host,
     )
 
 
-def _direct_url(cfg: DbConfig, *, local_host: Callable[[], str]) -> str:
+def _direct_url(cfg: DbConfig, *, local_host: Callable[[], str] | None) -> str:
     """`direct_db_url` for one resolved config."""
     from base.cluster import get_record
     from base.config.domains.storage.data_plane import gateway_url_host
@@ -329,9 +327,17 @@ def _direct_url(cfg: DbConfig, *, local_host: Callable[[], str]) -> str:
         return url
     if port is None:
         return url
+
+    def matches_local_host() -> bool:
+        if local_host is None:
+            raise RuntimeError(
+                "direct database host resolution requires an explicit local_host reader"
+            )
+        return host == local_host().lower()
+
     # Only a loopback or self-named host can be resolved against this home's
     # record — a remote host's record lives on that box, not here.
-    rec = get_record(ava_home()) if is_loopback_host(host) or host == local_host().lower() else None
+    rec = get_record(ava_home()) if is_loopback_host(host) or matches_local_host() else None
     if rec is not None:
         if port == rec.ports["pgbouncer"]:
             # URL names this cluster's pooler -> swap to its direct pg port.
@@ -344,7 +350,7 @@ def _direct_url(cfg: DbConfig, *, local_host: Callable[[], str]) -> str:
     # stand-in, or a split runner naming the gateway's pooler. A remote/SaaS plane (Task #1752)
     # is direct by definition — no local pooler exists — so it dials silently.
     if cfg.pgbouncer_enabled and (
-        is_loopback_host(host) or host == local_host().lower() or host == gateway_url_host()
+        is_loopback_host(host) or matches_local_host() or host == gateway_url_host()
     ):
         # Expected shape on a split agent-runner (its URL names the gateway's
         # pooler): every `ava start` logs one, so it is INFO, not a WARNING

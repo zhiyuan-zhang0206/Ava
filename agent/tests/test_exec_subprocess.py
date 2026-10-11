@@ -165,8 +165,15 @@ async def test_exec_child_disables_otlp_after_cluster_env_authority(
         result = await _run(
             tmp_path,
             (
-                "from base.telemetry.otlp.telemetry_otlp import backend\n"
-                'print("OTLP_ENABLED_IN_CHILD:", backend._enabled())\n'
+                "import ava\n"
+                "from base.telemetry.otlp import telemetry_otlp\n"
+                "probes = []\n"
+                "def endpoint_probe(endpoint):\n"
+                "    probes.append(endpoint)\n"
+                "    return False\n"
+                "telemetry_otlp.endpoint_reachable = endpoint_probe\n"
+                "ava.context.clients.event_pipeline().warmup_exports()\n"
+                'print("OTLP_ENABLED_IN_CHILD:", bool(probes))\n'
             ),
             database_gate=database_gate,
         )

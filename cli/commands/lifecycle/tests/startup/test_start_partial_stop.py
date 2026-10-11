@@ -7,12 +7,14 @@ from typing import Any
 import pytest
 
 from base import cluster, paths
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance.hold_driver import HoldDriver
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as stop
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
+from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -76,16 +78,28 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_machine: MachineIdentity,
 ) -> None:
     steps: list[str] = []
 
     def _fake_stop_plan(
-        *, preserve_sessions: frozenset[str], keep_browser: bool, keep_infra: bool
+        *,
+        preserve_sessions: frozenset[str],
+        keep_browser: bool,
+        keep_infra: bool,
+        machine: MachineIdentity,
     ) -> tuple[MachineRoles, frozenset[str], frozenset[str]]:
+        assert machine is command_machine
         return frozenset({"gateway"}), frozenset(), frozenset()
 
     def _fake_pause_agents(
-        _db: object, _bus: object, timeout: float = 0, *, driver: HoldDriver | None = None
+        _db: object,
+        _bus: object,
+        timeout: float = 0,
+        *,
+        driver: HoldDriver | None = None,
+        local_machine: MachineIdentity,
     ) -> None:
         pytest.fail("unstarted home has no work to drain")
 
@@ -132,6 +146,7 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
             timeout=3,
             database_factory=operator_database,
             producer=operator_pipeline,
+            machine=command_machine,
         )
         == 0
     )

@@ -7,12 +7,14 @@ import json
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
 from base import telemetry
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.log import process as slog
 from base.paths import logs_dir
@@ -21,9 +23,13 @@ _AGENT = 8901
 
 
 @pytest.fixture
-def logging_pipeline(database: Database) -> Iterator[None]:
+def logging_pipeline(
+    database: Database, machine_identity: MachineIdentity, unit_home: Path
+) -> Iterator[None]:
     """The adapter test explicitly owns its native writer for its whole record."""
-    pipeline = telemetry.build_pipeline(database=lambda: database)
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity, home=unit_home
+    )
     try:
         telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
         yield
@@ -63,7 +69,9 @@ def _rec(extra: dict[str, Any]) -> Any:
     return {"extra": extra}
 
 
-def test_add_event_sink_registers_at_most_once(database: Database) -> None:
+def test_add_event_sink_registers_at_most_once(
+    database: Database, machine_identity: MachineIdentity, unit_home: Path
+) -> None:
     """Two `add_event_sink` calls (exec_child's env + request init paths)
     must not double-register the adapter: one loguru record lands exactly one
     mirror row. The 2026-08-24 double registration wrote every post-init
@@ -73,7 +81,9 @@ def test_add_event_sink_registers_at_most_once(database: Database) -> None:
 
     from base.log import logger as _g
 
-    pipeline = telemetry.build_pipeline(database=lambda: database)
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity, home=unit_home
+    )
     first = slog.add_event_sink(
         process="test-dup-guard", producer=lambda: pipeline, machine_reader=lambda: "test-host"
     )
