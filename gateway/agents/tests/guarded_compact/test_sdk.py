@@ -19,8 +19,10 @@ from base.config import settings
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import make_host
+from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 
+@pytest.mark.usefixtures("retry_waits")
 async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -49,6 +51,7 @@ async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
     secret = "sdk-compact-test-secret"  # noqa: S105 -- isolated fixture credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     posts: list[httpx.Request] = []
+    lose = True
 
     def handle(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
@@ -58,7 +61,7 @@ async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
             result = client.post(
                 request.url.path, json=json.loads(request.content), headers=dict(request.headers)
             )
-            if len(posts) == 1:
+            if lose:
                 assert result.status_code == 202, result.text
                 raise httpx.ReadTimeout("accepted response lost", request=request)
         return httpx.Response(
@@ -76,7 +79,9 @@ async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
         target = compaction.observe(agent)
         with pytest.raises(GatewayUnavailable):
             compaction.submit(target, idempotency_key="intent")
-        assert len(posts) == 1
+        lost_attempts = len(posts)
+        assert lost_attempts > 1
+        lose = False
         db_conn.execute(
             "UPDATE agents_meta SET status='terminated',runtime_owner=%s WHERE id=%s",
             (uuid4(), agent),
@@ -102,9 +107,10 @@ async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
     assert db_conn.execute(
         "SELECT count(*) FROM native_compact_commands WHERE agent_id=%s", (agent,)
     ).fetchone() == (1,)
-    assert (
-        posts[0].url == posts[1].url
-        and posts[0].headers == posts[1].headers
-        and posts[0].content == posts[1].content
+    assert all(
+        post.url == posts[0].url
+        and post.headers == posts[0].headers
+        and post.content == posts[0].content
+        for post in posts[: lost_attempts + 1]
     )
     assert len(ordinary) == 1  # acceptance/status never invoke another native/model turn

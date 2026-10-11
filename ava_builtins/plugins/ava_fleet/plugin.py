@@ -282,13 +282,11 @@ def edit_notice(
     # One unified write path (R3 door ④): the gateway edits exactly the observed
     # notice row and re-publishes the posted event.
     from ava import gateway_client
-    from base.api_contracts.idempotency import PRINCIPAL_SCOPE
 
     resp = gateway_client.patch(
         f"/api/agents/{aid}/notices/current/guarded-v1",
         {"observed_notice_id": observed, **body},
         idempotency_key=uuid.uuid4().hex,
-        idempotency_scope=PRINCIPAL_SCOPE,
     )
     _raise_as_value_error(resp)
 
@@ -303,13 +301,11 @@ def dismiss_notice() -> None:
     # One unified write path (R3 door ④): the gateway withdraws exactly the
     # observed notice row and publishes the resolve + agent-updated events.
     from ava import gateway_client
-    from base.api_contracts.idempotency import PRINCIPAL_SCOPE
 
     resp = gateway_client.post(
         f"/api/agents/{aid}/notices/current/dismiss/guarded-v1",
         {"observed_notice_id": observed},
         idempotency_key=uuid.uuid4().hex,
-        idempotency_scope=PRINCIPAL_SCOPE,
     )
     _raise_as_value_error(resp)
 

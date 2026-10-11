@@ -13,8 +13,9 @@ commands prevent a replacement from treating unknown execution as stopped.
 
 `base/agents/incarnation/native_work.py` owns admission; the dedicated cancel
 command owner is `base/agents/messages/native_cancel.py`. HTTP observation and
-acceptance remain exact-target, validated and idempotent. Acceptance is a
-receipt for the request, not a promise that execution stopped. See
+acceptance remain exact-target, validated and idempotent; SDK transport retries
+reuse the same key and replay the original command. Acceptance is a receipt for
+the request, not a promise that execution stopped. See
 [[gateway/agents/docs/control-acceptance.ava.okf.md]].
 
 The live original invocation observes cancellation, unwinds its known resources,

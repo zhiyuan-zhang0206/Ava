@@ -792,13 +792,15 @@ export interface paths {
          *
          *     Auto-resurrect in `deliver_chat_inbound` ensures the message always reaches
          *     a live agent — the caller does not branch on status. An optional
-         *     `Idempotency-Key` is stored transactionally with the inbound; same-key
-         *     retries return the same `inbound_id` and mismatched key reuse fails 409.
+         *     `Idempotency-Key` (always sent with `Idempotency-Scope: principal-v1`) is
+         *     stored transactionally with the inbound; same-key retries return the same
+         *     `inbound_id` and mismatched key reuse fails 409.
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
          *     409: the key already identifies a different agent/body/source.
          *     413: message content exceeds the 1 MiB transport limit.
-         *     422: a block list gated out (non-vision model) or referencing a bad upload.
+         *     422: a block list gated out (non-vision model) or referencing a bad upload,
+         *     or a key without the principal-v1 scope header.
          */
         post: operations["post_agent_message_api_agents__agent_id__messages_post"];
         delete?: never;

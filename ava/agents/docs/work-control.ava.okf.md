@@ -27,8 +27,9 @@ eligibility remain the server's authority. No new server ACL is claimed.
 
 Retain the original target and key for same-intent recovery. Re-observation can
 target newer work and must not replace the original retry input. The SDK makes
-no automatic ambiguous-failure retry and never falls back to `/api/cancel`.
-Connect-family retries preserve the same target/key. A deliberate new command
+never falls back to `/api/cancel`. Transport retries (connection failures and
+ambiguous outcomes) preserve the same target/key, and the gateway replays the
+original command. A deliberate new command
 needs a new key and a separately observed target. There is no client journal,
 outbox, retention policy or rollout change.
 

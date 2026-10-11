@@ -28,15 +28,15 @@ or fallback to another creation path, including after 404/405, 409, 422, 5xx or
 an uncertain transport outcome. A router without the guarded path rejects the
 request without creating an agent.
 
-The transport retains the route owner's conservative retry gate. Connection
-failures known to occur before sending may retry. A lost read/write response
-remains terminal to the invocation; the caller can retry the same intent
-explicitly. This change does not activate automatic ambiguous retries.
+The transport retries connection failures and ambiguous outcomes (a lost
+read/write response, 429/502/503/504) under the same key and body; the gateway
+replays the original birth, so a retry never creates a twin. A caller may also
+retry the same intent explicitly with the same key.
 
 ## Scope and result
 
 The server records birth identity using the verified authorization principal,
-POST method, guarded logical path and raw key. Other operation paths have different receipt namespaces; keep the same path
+POST method, guarded logical path and caller key. Other operation paths have different receipt namespaces; keep the same path
 while recovering one intent.
 A changed body within the same namespace returns 409. A different verified
 principal identifies a different namespace, not the old receipt. SDK provenance

@@ -29,13 +29,13 @@ def mock_client() -> Iterator[MagicMock]:
         httpx.RemoteProtocolError("peer closed"),
     ],
 )
-def test_keyed_spawn_does_not_retry_uncertain_transport_error(
+def test_keyed_spawn_retries_uncertain_transport_error_under_one_key(
     mock_client: MagicMock, error: httpx.TransportError
 ) -> None:
     from ava.gateway_client import spawn
 
     mock_client.post.side_effect = error
-    with pytest.raises(GatewayUnavailable, match="result unknown"):
+    with pytest.raises(GatewayUnavailable, match=r"after \d+ retries"):
         spawn(
             spawner="user",
             prompt="hello",
@@ -43,7 +43,9 @@ def test_keyed_spawn_does_not_retry_uncertain_transport_error(
             prompt_source="user",
             idempotency_key=str(uuid4()),
         )
-    assert mock_client.post.call_count == 1
+    assert mock_client.post.call_count > 1
+    sent = {call.kwargs["headers"]["Idempotency-Key"] for call in mock_client.post.call_args_list}
+    assert len(sent) == 1
 
 
 def reply(status_code: int, **body: object) -> httpx.Response:

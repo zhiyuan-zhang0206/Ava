@@ -10,9 +10,9 @@ description: Atomic original task and agent acceptance with independent native l
 `Idempotency-Scope: principal-v1` and a verified request principal. The fixed
 versioned path makes an older router fail without creating either object.
 The SDK never falls back to separate spawn/create calls for that intent.
-The route is AtLeastOnceWithKey but retains conservative ambiguous-failure
-transport retries (`legacy_keyed_retry=False`). Retrying an entire execute_code
-script is outside this contract.
+The route is AtLeastOnceWithKey: SDK transport retries an ambiguous failure under
+the same key and recovers the original acceptance. Retrying an entire
+execute_code script is outside this contract.
 
 ## Intent and SDK admission
 
@@ -37,7 +37,7 @@ writes. ExternalLease callbacks cannot be serialized or revalidated by the remot
 transaction after lock waits.
 Server actor/spawner fields are execution provenance, not proof of lease authority
 or a new security ACL. Scope comes from verified HTTP authentication, method,
-actual versioned path and raw key. Cookie and bearer credentials for the same
+actual versioned path and caller key. Cookie and bearer credentials for the same
 verified administrator share a principal; revoked credentials cannot replay.
 Different verified principals have independent namespaces, without a promise of
 sharing the same pair across them. No browser or MCP compound consumer is added.

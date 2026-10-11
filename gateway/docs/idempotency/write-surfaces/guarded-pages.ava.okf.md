@@ -12,9 +12,9 @@ description: Versioned page registry acceptance and observed-row close routes.
 | `POST /api/keyed/v1/agents/{agent_id}/pages/{name}/close` | keyed | observed numeric row close and original PageRow receipt |
 
 These are the only page register and close write surfaces; they require
-verified `principal-v1` and a valid caller key and retain
-`legacy_keyed_retry=False`. SDK `ava.gateway_client.register_page` sends one
-fresh key per call. `close_page` first reads the agent's open pages, then closes
+verified `principal-v1` and a valid caller key. SDK
+`ava.gateway_client.register_page` sends one fresh key per call and retries an
+ambiguous outcome under it. `close_page` first reads the agent's open pages, then closes
 exactly the observed row; no open page of that name means nothing is sent.
 Fresh registration allocates a new row ID even after an expired same-name
 registration. Historical acceptance is not proof that the name-based URL still

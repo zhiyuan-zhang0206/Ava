@@ -14,7 +14,6 @@ import ava
 from ava.agents import compaction
 from ava.gateway_client import transport
 from ava.sdk_surface import agent_identity
-from base.agents import GatewayUnavailable
 from base.agents.compaction.models import (
     CompactAcceptance,
     CompactOutcome,
@@ -22,6 +21,7 @@ from base.agents.compaction.models import (
     CompactTarget,
 )
 from base.agents.incarnation.native_work_models import NativeWorkTarget
+from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 TARGET = CompactTarget(
     protocol=1,
@@ -85,7 +85,8 @@ def test_fixed_routes_keep_original_source_and_distinguish_status() -> None:
     assert json.loads(calls[1].content) == TARGET.model_dump(mode="json")
 
 
-def test_lost_response_requires_explicit_same_source_replay() -> None:
+@pytest.mark.usefixtures("retry_waits")
+def test_lost_response_is_retried_with_the_same_source() -> None:
     calls: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -98,10 +99,8 @@ def test_lost_response_requires_explicit_same_source_replay() -> None:
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
         transport.use_client(http),
     ):
-        with pytest.raises(GatewayUnavailable):
-            compaction.submit(TARGET, idempotency_key="intent")
-        assert len(calls) == 1
         assert compaction.submit(TARGET, idempotency_key="intent") == ACCEPTED
+    assert len(calls) == 2
     assert (
         calls[0].url == calls[1].url
         and calls[0].headers == calls[1].headers

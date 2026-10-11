@@ -60,9 +60,8 @@ and config. Receipt lookup precedes mutable model/preset/fork validation.
 Reusing the key with changed request data returns 409. Creation snapshots are
 never pruned. A replay never
 launches an agent that has since been admitted or terminated. The SDK supplies
-one key per creation call and reuses it for connect-family retries. Automatic
-retry of an ambiguous outcome requires proven gateway capability and remains
-disabled because an older gateway may ignore the key.
+one key per creation call and reuses it for every retry, including an ambiguous
+outcome; the replay returns the original birth.
 The runner accepts only `spawn-launch`, with a required UUID
 `launch_attempt_id` matching the committed row and local placement. Runner
 launch payloads reject `prompt`, `prompt_source`, `label`, and unknown fields.
