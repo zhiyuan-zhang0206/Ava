@@ -3,8 +3,7 @@
 Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Resident
 loops under one `TaskGroup` (one that raises ends the process):
 
-- Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): recover missed
-  observations (`services.upkeep.events_maintenance.observed_metrics`), replay the JSONL mirror
+- Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): replay the JSONL mirror
   into `telemetry_events` (`services.upkeep.events_maintenance.telemetry_replay`), recompute the
   day-grain rollup tables of the last closed days (`services.upkeep.events_maintenance.rollup`),
   run the incremental blob VACUUM (`services.upkeep.events_maintenance.blob_vacuum`), and the hourly
@@ -93,7 +92,6 @@ from services.upkeep.events_maintenance.blob_vacuum import (
     run_blob_vacuum,
 )
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
-from services.upkeep.events_maintenance.observed_metrics import recover_observations
 from services.upkeep.events_maintenance.resolution import AutoDismissCadence, run_resolution_slice
 from services.upkeep.events_maintenance.rollup import compute_rollup
 from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
@@ -170,24 +168,15 @@ class _MaintenancePass:
 def _run_maintenance(
     pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig, db: Database
 ) -> None:
-    """One hourly pass: the recoveries (observed metrics, the telemetry mirror replay), the
+    """One hourly pass: the telemetry mirror replay, the
     cost-ledger rollup of the last closed days (`telemetry_events` → `agent_model_tokens_daily`
     and `agent_metrics_daily`) and the fold of its settled days into `agent_model_tokens_total`, the hourly checkpoint size/row-count telemetry sample, and the
     blob VACUUM. One `now` drives the time-based steps.
     Logs what each step did; a no-op pass logs nothing."""
     now = datetime.now(tz=UTC)
-    # Recovery is independent of the rollup: a failing source must not prevent the
+    # The telemetry_events record is independent of the rollup: its writer reports its own
+    # failures and the mirror holds what it missed, so a failing replay must not prevent the
     # remaining maintenance work from making progress.
-    try:
-        with pool.connection() as conn:
-            recovered = recover_observations(conn, now=now)
-        if recovered:
-            _log.info("[events-maintenance] recovered %d metric observations", recovered)
-    except Exception:
-        _log.exception("[events-maintenance] observed metrics recovery incomplete")
-    progress.beat()
-    # The telemetry_events record is independent too: its writer reports its own failures and
-    # the mirror holds what it missed.
     try:
         with pool.connection() as conn:
             replayed = recover_telemetry_events(conn)
