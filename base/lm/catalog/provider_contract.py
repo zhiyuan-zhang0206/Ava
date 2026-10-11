@@ -13,8 +13,6 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NotRequired, TypedDict
 
-import httpx
-
 if TYPE_CHECKING:
     # Annotation-only reference (`ProviderBinding.build`): the registration
     # path must not import the LangChain chat-model stack (exec-child boot,
@@ -23,7 +21,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from base.host.env.agent_slices import ModelOverrides
-from base.lm.catalog.decide.types import DecisionBinding, DecisionModelSpec
+from base.lm.catalog.decide.types import AsyncTransport, DecisionBinding, DecisionModelSpec
 from base.lm.registry import ModelSpec
 from base.lm.stop import StopSpec
 
@@ -209,7 +207,7 @@ class DecisionBuildContext:
     model: str
     spec: DecisionModelSpec
     timeout: float | None
-    transport: httpx.AsyncBaseTransport | None = None
+    transport: AsyncTransport | None = None
     """HTTP transport override; absent means the real network (tests inject a mock)."""
 
 

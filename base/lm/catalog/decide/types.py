@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 TRUE = "true"
 FALSE = "false"
@@ -161,6 +161,16 @@ class DecisionModelSpec:
     @property
     def request_limit(self) -> int:
         return self.max_request_tokens or self.context_window
+
+
+class AsyncTransport(Protocol):
+    """The slice of ``httpx.AsyncBaseTransport`` a decision call needs.
+
+    Declared structurally so the provider contract does not import httpx at module level: the
+    contract loads on the exec-child boot path, which must not load the connection stack.
+    """
+
+    async def handle_async_request(self, request: Any) -> Any: ...
 
 
 class DecisionBinding(Protocol):
