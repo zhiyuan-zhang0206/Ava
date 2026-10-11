@@ -7,12 +7,14 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from tests.fixtures.gateway_config import create_mcp_client
 
 
 def _assert_created_client(body: dict[str, Any], *, name: str, scope: str) -> None:
     assert body["id"] > 0
     assert body["name"] == name
     assert body["scope"] == scope
+    assert body["replayed"] is False
     assert isinstance(body["token"], str)
     assert len(body["token"]) >= 32
 
@@ -38,10 +40,7 @@ def _assert_listed_client_row(
 
 def test_create_shows_token_once_and_list_redacts_credentials() -> None:
     with TestClient(app) as client:
-        created = client.post(
-            "/api/mcp/clients",
-            json={"name": "codex", "scope": "write"},
-        )
+        created = create_mcp_client(client, "codex", "write")
         assert created.status_code == 200, created.text
         body = created.json()
         _assert_created_client(body, name="codex", scope="write")
@@ -58,13 +57,10 @@ def test_create_shows_token_once_and_list_redacts_credentials() -> None:
 
 def test_duplicate_name_returns_conflict() -> None:
     with TestClient(app) as client:
-        first = client.post("/api/mcp/clients", json={"name": "claude"})
+        first = create_mcp_client(client, "claude")
         assert first.status_code == 200, first.text
 
-        duplicate = client.post(
-            "/api/mcp/clients",
-            json={"name": "claude", "scope": "write"},
-        )
+        duplicate = create_mcp_client(client, "claude", "write")
 
     assert duplicate.status_code == 409
     assert "already exists" in duplicate.json()["detail"]
@@ -72,7 +68,7 @@ def test_duplicate_name_returns_conflict() -> None:
 
 def test_revoke_succeeds_once() -> None:
     with TestClient(app) as client:
-        created = client.post("/api/mcp/clients", json={"name": "readonly"})
+        created = create_mcp_client(client, "readonly")
         assert created.status_code == 200, created.text
         client_id = created.json()["id"]
 

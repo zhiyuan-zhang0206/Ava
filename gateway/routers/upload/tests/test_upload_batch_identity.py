@@ -18,12 +18,16 @@ from gateway.routers.upload.batches import UploadItem
 from tests.fixtures.gateway_config import spawn_via_http
 
 
+def _headers(key: str) -> dict[str, str]:
+    return {"Idempotency-Key": key, "Idempotency-Scope": "principal-v1"}
+
+
 def _post(
     client: TestClient, agent: int, key: str, *, body: bytes = b"image", name: str = "photo.png"
 ) -> httpx.Response:
     return client.post(
-        f"/api/agents/{agent}/uploads?deliver=false",
-        headers={"Idempotency-Key": key},
+        f"/api/agents/{agent}/uploads",
+        headers=_headers(key),
         files=[("files", (name, body, "image/png"))],
     )
 
@@ -59,15 +63,13 @@ def test_lost_response_replays_receipt_and_preserves_old_image(
     assert row is not None and row[0] == 0
 
     reserved = Path(file["path"]).name
-    legacy = client.post(
-        f"/api/agents/{agent}/uploads?deliver=false",
-        files=[("files", (reserved, b"replace", "image/png"))],
-    )
-    assert legacy.status_code == 409
+    reusing = _post(client, agent, "reserved-name", body=b"replace", name=reserved)
+    assert reusing.status_code == 200
+    assert Path(reusing.json()["files"][0]["path"]).name != reserved
     assert client.get(file["url"]).content == b"image"
 
 
-@pytest.mark.parametrize("change", ["bytes", "name", "type", "deliver"])
+@pytest.mark.parametrize("change", ["bytes", "name", "type"])
 def test_manifest_conflict_before_file_effect(
     uploaded_agent: tuple[TestClient, int], change: str
 ) -> None:
@@ -75,8 +77,8 @@ def test_manifest_conflict_before_file_effect(
     first = _post(client, agent, "fixed")
     assert first.status_code == 200
     response = client.post(
-        f"/api/agents/{agent}/uploads?deliver={'true' if change == 'deliver' else 'false'}",
-        headers={"Idempotency-Key": "fixed"},
+        f"/api/agents/{agent}/uploads",
+        headers=_headers("fixed"),
         files=[
             (
                 "files",
@@ -93,13 +95,13 @@ def test_manifest_conflict_before_file_effect(
     assert len([p for p in directory.iterdir() if p.is_file()]) == 1
 
 
-def test_unimplemented_delivery_and_invalid_suffix_do_not_claim(
+def test_delivery_request_and_invalid_suffix_do_not_claim(
     uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection
 ) -> None:
     client, agent = uploaded_agent
     unsupported = client.post(
-        f"/api/agents/{agent}/uploads",
-        headers={"Idempotency-Key": "delivery"},
+        f"/api/agents/{agent}/uploads?deliver=true",
+        headers=_headers("delivery"),
         files=[("files", ("a.png", b"image", "image/png"))],
     )
     assert unsupported.status_code == 422
@@ -222,10 +224,7 @@ def test_shared_quota_counts_receiving_once(
     monkeypatch.setattr(upload_batches, "publish_files", interrupted)
     with pytest.raises(OSError):
         _post(client, agent, "quota")
-    other = client.post(
-        f"/api/agents/{agent}/uploads?deliver=false",
-        files=[("files", ("ordinary.txt", b"x", "text/plain"))],
-    )
+    other = _post(client, agent, "other-key", body=b"x", name="ordinary.png")
     assert other.status_code == 413
     monkeypatch.setattr(upload_batches, "publish_files", original)
     assert _post(client, agent, "quota").status_code == 200
@@ -237,8 +236,8 @@ def test_duplicate_display_names_have_distinct_objects_and_order_is_identity(
     client, agent = uploaded_agent
     files = [("files", ("same.png", body, "image/png")) for body in (b"a", b"b")]
     response = client.post(
-        f"/api/agents/{agent}/uploads?deliver=false",
-        headers={"Idempotency-Key": "ordered"},
+        f"/api/agents/{agent}/uploads",
+        headers=_headers("ordered"),
         files=files,
     )
     assert response.status_code == 200
@@ -247,8 +246,8 @@ def test_duplicate_display_names_have_distinct_objects_and_order_is_identity(
     assert [client.get(url).content for url in urls] == [b"a", b"b"]
     assert (
         client.post(
-            f"/api/agents/{agent}/uploads?deliver=false",
-            headers={"Idempotency-Key": "ordered"},
+            f"/api/agents/{agent}/uploads",
+            headers=_headers("ordered"),
             files=list(reversed(files)),
         ).status_code
         == 409
@@ -258,10 +257,12 @@ def test_duplicate_display_names_have_distinct_objects_and_order_is_identity(
 @pytest.mark.parametrize(
     "headers",
     [
-        {"Idempotency-Key": ""},
-        {"Idempotency-Key": "x" * 129},
+        {"Idempotency-Key": "", "Idempotency-Scope": "principal-v1"},
+        {"Idempotency-Key": "x" * 129, "Idempotency-Scope": "principal-v1"},
         {"Idempotency-Scope": "principal-v1"},
+        {"Idempotency-Key": "scoped"},
         {"Idempotency-Key": "scoped", "Idempotency-Scope": "unsupported"},
+        {},
     ],
 )
 def test_invalid_identity_before_claim(
@@ -271,10 +272,10 @@ def test_invalid_identity_before_claim(
 ) -> None:
     client, agent = uploaded_agent
     response = client.post(
-        f"/api/agents/{agent}/uploads?deliver=false",
+        f"/api/agents/{agent}/uploads",
         headers=headers,
         files=[("files", ("a.png", b"a", "image/png"))],
     )
-    assert response.status_code == 400
+    assert response.status_code == 422
     row = db_conn.execute("SELECT count(*) FROM agent_upload_batches").fetchone()
     assert row is not None and row[0] == 0

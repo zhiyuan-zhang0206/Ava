@@ -462,23 +462,37 @@ def get(
 
 
 def patch(
-    path: str, json: dict[str, Any] | None = None, *, idempotency_key: str | None = None
+    path: str,
+    json: dict[str, Any] | None = None,
+    *,
+    idempotency_key: str | None = None,
+    idempotency_scope: str | None = None,
 ) -> TransportResponse:
     """Unified PATCH wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
     Retry ambiguous failures only when the route declares natural idempotency.
     A PATCH verb alone does not prove its business effects are repeatable.
-    Newly keyed routes send a stable key but do not retry ambiguous failures:
-    an older gateway may ignore the header. Pass the original key to replay.
+    Keyed routes send a stable key but do not retry ambiguous failures.
+    Pass the original key to replay. `idempotency_scope` opts into the
+    principal-v1 wire namespace like `post` and requires an explicit key on a
+    keyed route.
     """
     contract = contracts.contract_for("PATCH", path)
     keyed = contract is not None and contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY
+    if idempotency_scope is not None:
+        if idempotency_scope != PRINCIPAL_SCOPE:
+            raise ValueError("unsupported idempotency scope; expected principal-v1")
+        if not keyed:
+            raise ValueError("idempotency scope requires a keyed route")
+        idempotency_key = validate_idempotency_key(idempotency_key)
     key = (
         validate_idempotency_key(idempotency_key)
         if idempotency_key is not None
         else _uuid.uuid4().hex
     )
     headers = {"Idempotency-Key": key} if keyed else None
+    if idempotency_scope is not None and headers is not None:
+        headers[SCOPE_HEADER] = idempotency_scope
     return _request_with_retry(
         lambda: (
             _http().patch(path, json=json or {}, headers=headers)
@@ -487,13 +501,4 @@ def patch(
         ),
         _max_retries(),
         retryable=contracts.idempotency_for("PATCH", path) is Idempotency.IDEMPOTENT,
-    )
-
-
-def _delete(path: str) -> TransportResponse:
-    """Delete with the route's verified retry policy, not a verb-based assumption."""
-    return _request_with_retry(
-        lambda: _http().delete(path),
-        _max_retries(),
-        retryable=contracts.idempotency_for("DELETE", path) is Idempotency.IDEMPOTENT,
     )

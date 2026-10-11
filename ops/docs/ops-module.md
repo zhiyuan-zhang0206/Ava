@@ -11,15 +11,15 @@ coordination. Its design rationale is recorded in
 | Native agent drain | `ops/agent_pause/` (drain, `probe` of the running host) |
 | Agent lifecycle | `ops/agents/` (birth and wake); `ops/lifecycle/` (lifecycle RPC ops) |
 | RPC | `ops/rpc_schemas/` (wire vocabulary); `ops/cluster/rpc.py` (gateway client) |
-| Op clusters the ops server dispatches | `ops/lifecycle/`, `ops/cluster/operations.py`, `ops/host_config.py`, `ops/inventory.py`, `ops/uploads.py` |
+| Op clusters the ops server dispatches | `ops/lifecycle/`, `ops/cluster/operations.py`, `ops/host_config.py`, `ops/inventory.py` |
 | Stop and restart | CLI maintenance orchestration over the shared drain |
 | Fleet update | `cli/fleet_update.py` (down and up scripts per unit, gated by the code version) |
 
 Each package door is the module it grew from; `ops.agents`,
 `ops.rpc_schemas`, `ops.cluster.operations_status`, `ops.agent_pause` and `ops.roster`
 kept their import paths. Module names never repeat the package name, so the
-op clusters read `ops.lifecycle`, `ops.cluster.operations.operations`, `ops.host_config`,
-`ops.inventory` and `ops.uploads`. `ops/private_files/` owns the private-file
+op clusters read `ops.lifecycle`, `ops.cluster.operations.operations`, `ops.host_config`
+and `ops.inventory`. `ops/private_files/` owns the private-file
 verifier and its manifest.
 Its operator entry point remains `python -m ops.private_files`.
 

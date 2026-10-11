@@ -13,8 +13,8 @@ tags:
 `POST /api/keyed/v1/mcp/clients` requires the current human credential, a
 1–128 character `Idempotency-Key`, and `Idempotency-Scope: principal-v1`.
 Authentication precedes receipt lookup. Machine sessions and MCP client tokens
-cannot create credentials or recover these receipts. The old
-`POST /api/mcp/clients` remains one-shot; older routing has no safe fallback.
+cannot create credentials or recover these receipts. This is the only
+creation route.
 
 The guarded request freezes `name` and the canonical `McpClientScope` (`read`
 or `write`). `creation_receipts.py` locks the authenticated principal/path/key,
@@ -42,6 +42,5 @@ returns the original ID, never a newly created credential.
 
 `clients.py` owns credential creation and scope vocabulary. Its
 `create_client_in_transaction` requires an already active transaction and
-leaves commit to the caller; the legacy wrapper preserves its original
-signature and one-time response. No client Outbox, UI/SDK activation, new
+leaves commit to the caller. No client Outbox, UI/SDK activation, new
 worker, or runtime rollout is included.

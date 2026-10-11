@@ -16,5 +16,5 @@ tags:
 The [credential owner](../../../mcp_server/docs/credential-creation.ava.okf.md)
 defines human authentication, strict principal-v1 keys, one-transaction
 acceptance, historical metadata and explicit revoke/new-intent recovery.
-The legacy unguarded creation remains one-shot. Neither receipt recovery nor
-transport retry implicitly rotates credentials or activates a client retry.
+Neither receipt recovery nor transport retry implicitly rotates credentials or
+activates a client retry.

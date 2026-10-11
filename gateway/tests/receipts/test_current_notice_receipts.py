@@ -228,9 +228,9 @@ def test_reply_concurrent_with_guarded_edit_has_no_lock_cycle(
         edit = executor.submit(_send, client, agent, notice, False)
         reply = executor.submit(
             client.post,
-            f"/api/agents/{agent}/notices/{notice}/resolve",
+            f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve",
             json={"action": "answer", "reply": "yes"},
-            headers={"Idempotency-Key": "reply"},
+            headers={**HEADERS, "Idempotency-Key": "reply"},
         )
         assert edit.result(timeout=10).status_code in (200, 409)
         assert reply.result(timeout=10).status_code == 201
@@ -315,9 +315,9 @@ def test_reply_fk_is_compatible_with_guarded_agent_lock(
         db_conn.execute("SELECT id FROM agents WHERE id=%s FOR NO KEY UPDATE", (agent,))
         reply = executor.submit(
             client.post,
-            f"/api/agents/{agent}/notices/{notice}/resolve",
+            f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve",
             json={"action": "answer", "reply": "yes"},
-            headers={"Idempotency-Key": "reply"},
+            headers={**HEADERS, "Idempotency-Key": "reply"},
         )
         assert reply.result(timeout=10).status_code == 201
     assert _send(client, agent, notice, False).status_code == 409

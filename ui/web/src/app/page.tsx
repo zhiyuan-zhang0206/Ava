@@ -375,7 +375,7 @@ function HomeContent({
   const attachImage = useCallback(
     async (file: File): Promise<string> => {
       if (activeId == null) throw new Error("no active agent");
-      const batch = await api.uploadFiles(activeId, [file], undefined, false);
+      const batch = await api.uploadFiles(activeId, [file]);
       return batch.files[0].url;
     },
     [activeId],

@@ -61,6 +61,7 @@ Design trade-offs:
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Literal, NamedTuple
 
 import ava
@@ -69,7 +70,6 @@ from ava.gateway_client.launch_retry import get_launch_attempt as get_launch_att
 from ava.gateway_client.launch_retry import retry_launch as retry_launch
 from ava.gateway_client.transport import (
     _MEMORY_SEARCH_MAX_RETRIES,
-    _delete,
     _memory_search_timeout,
     get,
     post,
@@ -83,6 +83,7 @@ from ava.gateway_client.transport import (
 )
 from base.agents import GatewayUnavailable as GatewayUnavailable
 from base.agents.context import AvaContext
+from base.api_contracts.idempotency import PRINCIPAL_SCOPE
 from base.api_contracts.memory_search import MemorySearchPurpose
 from base.log import logger
 
@@ -469,7 +470,10 @@ def register_page(
     serve_dir: str | None = None,
     ttl_seconds: int | None = None,
 ) -> dict:
-    """POST /api/agents/{id}/pages → PageRow dict (id/name/port/title/...).
+    """POST /api/keyed/v1/agents/{id}/pages → PageRow dict (id/name/port/title/...).
+
+    One key per call: transport-level retries share it, so the gateway
+    replays the original acceptance instead of replacing a newer page.
 
     `serve_dir`: directory the page server serves — recorded so agent boot
     can re-serve a dead page server after resurrect/restart. Only
@@ -482,15 +486,35 @@ def register_page(
         body["serve_dir"] = serve_dir
     if ttl_seconds is not None:
         body["ttl_seconds"] = ttl_seconds
-    resp = post(f"/api/agents/{agent_id}/pages", body)
+    resp = post(
+        f"/api/keyed/v1/agents/{agent_id}/pages",
+        body,
+        idempotency_key=uuid.uuid4().hex,
+        idempotency_scope=PRINCIPAL_SCOPE,
+    )
     raise_from_response(resp)
     return resp.json()
 
 
-def close_page(agent_id: int, name: str) -> None:
-    """DELETE /api/agents/{id}/pages/{name}. 404 → httpx.HTTPStatusError."""
-    resp = _delete(f"/api/agents/{agent_id}/pages/{name}")
+def close_page(agent_id: int, name: str) -> bool:
+    """Close the agent's open page `name`; False when no such page is open.
+
+    Observes the open page list first, then closes exactly that registry row
+    through POST /api/keyed/v1/agents/{id}/pages/{name}/close. A registration
+    that replaces the observed row in between fails the close with 409
+    (httpx.HTTPStatusError) instead of closing the newer page.
+    """
+    observed = next((p for p in list_open_pages(agent_id) if p["name"] == name), None)
+    if observed is None:
+        return False
+    resp = post(
+        f"/api/keyed/v1/agents/{agent_id}/pages/{name}/close",
+        {"expected_page_id": observed["id"]},
+        idempotency_key=uuid.uuid4().hex,
+        idempotency_scope=PRINCIPAL_SCOPE,
+    )
     raise_from_response(resp)
+    return True
 
 
 def list_open_pages(agent_id: int) -> list[dict]:

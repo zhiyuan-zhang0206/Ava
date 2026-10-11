@@ -15,8 +15,8 @@ caller observed. Both require a valid 1–128 character `Idempotency-Key`, exact
 verification. Authentication runs again on every request; a receipt does not
 bypass revoked credentials. Keys are scoped by that principal, HTTP method and
 actual versioned path. Deliberate new operations use new keys; a retry keeps
-its original path, key and validated body. Never downgrade an uncertain guarded
-request to a legacy path.
+its original path, key and validated body. Never resend an uncertain request under a
+new key without re-observing the registry.
 
 `page_operation_receipts` stores a canonical validated request fingerprint and
 the original `PageRow` acceptance. It has no agent/page foreign key or expiry:
@@ -47,21 +47,15 @@ close receipt replay bypasses current target checks and returns the historical
 acceptance even after B appears or the target is removed. No fresh nonexistent
 agent is accepted.
 
-The public legacy paths and SDK signatures remain one-shot. Their HTTP page
-mutations join the same agent-page gate; registration now commits close and
-replacement together rather than exposing a separately committed close on
-failure. Both upgraded HTTP handlers close every `closed_at IS NULL` row,
-including expired rows, before registration. Thus even an expired same-name
-registration receives a new numeric ID; legacy HTTP previously revived that
-row in place. Raw SQL upsert/revival keeps its existing row-maintenance behavior. The existing committing SQL wrappers remain available; explicit
-`*_in_transaction` primitives leave commit ownership with their caller. Older
-gateways do not know the versioned paths and cannot execute them. This server
-slice does not activate SDK/UI guarded calls or automatic ambiguous retries;
-existing route retry gates remain conservative during mixed-version operation.
-The new-ID guarantee covers upgraded HTTP registration handlers. An older
-legacy handler or explicit raw upsert can still revive an expired row in place;
-numeric ID alone cannot fence that rewrite. Client activation needs a verified
-writer compatibility floor before promising safety across those mixed writers.
+These routes are the only page register and close surfaces. SDK
+`register_page` sends one fresh key per call; `close_page` reads the agent's open
+pages, then closes the observed row (409 when a newer registration replaced it,
+no request when no open page has that name). Registration closes every
+`closed_at IS NULL` row, expired rows included, before inserting, so even an
+expired same-name registration receives a new numeric ID. Explicit
+`*_in_transaction` primitives leave commit ownership with their caller. No
+automatic ambiguous retries are added: both routes keep
+`legacy_keyed_retry=False`.
 
 A `PageRow` proves registry acceptance, not server readiness or content delivery.
 The returned historical URL is still the existing name-based reverse-proxy URL:

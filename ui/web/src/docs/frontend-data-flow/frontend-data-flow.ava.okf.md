@@ -21,7 +21,8 @@ the matching 202 source receipt, before remote copy or agent execution; the
 Gateway recovery owner continues delivery. Byte progress is transport progress.
 `transport/upload-delivery.ts` rejects old/malformed receipts without resending
 or falling back. No client Outbox or retry UI is added. Silent native-image
-attachments retain `api.uploadFiles(..., deliver=false)` and their existing URLs.
+attachments use `api.uploadFiles`, which sends a fresh `Idempotency-Key` with
+`principal-v1` per call to the keyed silent-save route and returns the saved URLs.
 
 ## Stream ownership (`lib/sse-share.ts`)
 

@@ -569,17 +569,6 @@ class TestTransientHttpRetry:
         assert mock_client.get.call_count == 2
 
     @pytest.mark.usefixtures("retry_waits")
-    def test_delete_transient_5xx_retried(self, mock_client: MagicMock):
-        from ava.gateway_client.transport import _delete
-
-        ok = _transient_resp(204)
-        mock_client.delete.side_effect = [_transient_resp(503), ok]
-
-        resp = _delete("/api/presets/1")
-        assert resp is ok
-        assert mock_client.delete.call_count == 2
-
-    @pytest.mark.usefixtures("retry_waits")
     def test_429_retried(self, mock_client: MagicMock):
         from ava.gateway_client.transport import get
 
