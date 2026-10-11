@@ -197,12 +197,12 @@ def test_remote_home_machine_is_forwarded(
 
     with TestClient(app) as client:
         agent_id = client.post("/api/agents", json={}).json()["id"]
-        _set_agent_machine(db_conn, agent_id, "stale-wsl")
+        _set_agent_machine(db_conn, agent_id, "stale-runner")
         monkeypatch.setattr(forward_module, "enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
         resp = client.post(f"/api/agents/{agent_id}/terminate")
     assert resp.status_code == 200
     assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
-    assert captured["target"] == "stale-wsl"
+    assert captured["target"] == "stale-runner"
 
 
 def test_restart_overlay_is_validated_without_gateway_agent_domain(

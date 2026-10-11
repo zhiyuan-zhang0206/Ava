@@ -70,25 +70,25 @@ def test_idle_cluster_is_not_a_deploy_window() -> None:
 def test_a_paused_posture_is_a_deploy_window(monkeypatch: pytest.MonkeyPatch) -> None:
     """The signal is the machine's `host_deploy_state` posture row (R1, Task
     #1021): maintenance and stop write it outside the services they restart."""
-    _machines(monkeypatch, "win")
+    _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda _db: {"win": _posture("win", "paused", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db: {"runner-a": _posture("runner-a", "paused", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     window = dw.deploy_in_flight(_db())
     assert window.active is True
-    assert "machine 'win' is mid-deploy" in window.detail
+    assert "machine 'runner-a' is mid-deploy" in window.detail
     assert "host_deploy_state.posture=paused" in window.detail
 
 
 def test_an_idle_posture_is_not_a_deploy_window(monkeypatch: pytest.MonkeyPatch) -> None:
-    _machines(monkeypatch, "win")
+    _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda _db: {"win": _posture("win", "idle", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db: {"runner-a": _posture("runner-a", "idle", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
     assert dw.deploy_in_flight(_db()).active is False
 
@@ -134,15 +134,15 @@ def test_excluded_machines_stale_posture_does_not_block(
     excluded machine that would return the row to `idle`, so before the cohort
     filter this one row refused every update cluster-wide until the operator
     resumed the machine or learned to pass `--force`."""
-    _machines(monkeypatch, "win")
+    _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
         "base.cluster.machine_exclusions.list_excluded_machines",
-        lambda _db: [("win", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db: [("runner-a", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda _db: {"win": _posture("win", "paused", age_s=31 * 3600)},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db: {"runner-a": _posture("runner-a", "paused", age_s=31 * 3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     assert dw.deploy_in_flight(_db()).active is False
@@ -153,15 +153,15 @@ def test_an_excluded_machines_row_is_ignored_whatever_its_posture(
 ) -> None:
     """No lease outranks the exclusion any more: a `converging` row on an
     excluded machine is as stale as a `paused` one, and is ignored the same."""
-    _machines(monkeypatch, "win")
+    _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
         "base.cluster.machine_exclusions.list_excluded_machines",
-        lambda _db: [("win", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db: [("runner-a", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda _db: {"win": _posture("win", "converging", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db: {"runner-a": _posture("runner-a", "converging", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     assert dw.deploy_in_flight(_db()).active is False
@@ -171,16 +171,16 @@ def test_an_excluded_machine_does_not_hide_a_cohort_machine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The filter must not widen: only the excluded machine's row is withheld."""
-    _machines(monkeypatch, "win", "macmini")
+    _machines(monkeypatch, "runner-a", "macmini")
     monkeypatch.setattr(
         "base.cluster.machine_exclusions.list_excluded_machines",
-        lambda _db: [("win", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db: [("runner-a", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
         lambda _db: {  # pyright: ignore[reportUnknownArgumentType]
-            "win": _posture("win", "paused", age_s=31 * 3600),
+            "runner-a": _posture("runner-a", "paused", age_s=31 * 3600),
             "macmini": _posture("macmini", "paused", age_s=60),
         },
     )
@@ -217,21 +217,21 @@ def test_the_skip_line_names_exclusion_and_freshness(
     "not blocking" — the line carries the machine, the exclusion and its date and
     the posture's age, so "deliberately ignored" cannot be confused with "never
     read"."""
-    _machines(monkeypatch, "win")
+    _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
         "base.cluster.machine_exclusions.list_excluded_machines",
-        lambda _db: [("win", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db: [("runner-a", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda _db: {"win": _posture("win", "paused", age_s=3600)},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db: {"runner-a": _posture("runner-a", "paused", age_s=3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     assert dw.deploy_in_flight(_db()).active is False
     lines = [r["message"] for r in loguru_records if "[deploy-window]" in r["message"]]
     assert len(lines) == 1
-    assert "machine 'win'" in lines[0]
+    assert "machine 'runner-a'" in lines[0]
     assert "operator-excluded (paused since 2026-09-09T13:54:31+00:00)" in lines[0]
     assert "posture=paused" in lines[0]
     assert "60m ago" in lines[0]
@@ -247,11 +247,11 @@ def test_an_unreadable_exclusion_read_still_refuses(monkeypatch: pytest.MonkeyPa
         raise RuntimeError("db down")
 
     monkeypatch.setattr("base.cluster.machine_exclusions.list_excluded_machines", _fail)
-    _machines(monkeypatch, "win")
+    _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda _db: {"win": _posture("win", "paused", age_s=31 * 3600)},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db: {"runner-a": _posture("runner-a", "paused", age_s=31 * 3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     assert dw.deploy_in_flight(_db()).active is True

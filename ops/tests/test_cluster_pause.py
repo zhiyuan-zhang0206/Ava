@@ -70,7 +70,7 @@ class _StubBackend:
 
 
 def _state(posture: str) -> HostDeployState:
-    return HostDeployState(machine="win", posture=posture, updated_at=datetime.now(UTC))
+    return HostDeployState(machine="runner-a", posture=posture, updated_at=datetime.now(UTC))
 
 
 def test_is_paused_judges_a_pre_read_state_without_another_db_read(
@@ -285,9 +285,9 @@ def test_unpause_refuses_a_held_unit_whose_services_stopped(
     from base.deploy.maintenance.state import MaintenanceHold
 
     when = datetime(2026, 9, 10, tzinfo=UTC)
-    pause_owner.begin_maintenance("wsl:pid1", when)
+    pause_owner.begin_maintenance("runner-a:pid1", when)
     pause_owner.change_maintenance(
-        "wsl:pid1", when, MaintenanceHold(), MaintenanceHold(MaintenancePhase.STOPPING)
+        "runner-a:pid1", when, MaintenanceHold(), MaintenanceHold(MaintenancePhase.STOPPING)
     )
     monkeypatch.setattr("base.deploy.lifecycle.start_serving.is_serving", lambda: False)
 
