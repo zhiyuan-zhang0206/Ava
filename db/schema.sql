@@ -380,9 +380,6 @@ CREATE TABLE inbound_messages (
     -- gateway compute creation -> pickup latency (claimed_at - created_at),
     -- e.g. for the delivery watchdog / degraded-wake alerts.
     claimed_at TIMESTAMPTZ,
-    dispatch_count INT NOT NULL DEFAULT 0,
-    last_dispatch_at TIMESTAMPTZ,
-    poisoned_at TIMESTAMPTZ,
     target_generation UUID,
     target_owner UUID,
     applied_at TIMESTAMPTZ,
@@ -406,26 +403,6 @@ COMMENT ON COLUMN inbound_messages.claimed_at IS
 
 COMMENT ON COLUMN inbound_messages.client_message_id IS
     'Caller-generated id for one logical chat delivery. Non-NULL values are cluster-wide unique; same-id retries must match the original agent, content, source, kind, and payload.';
-
-CREATE TABLE delivery_watchdog_alerted (
-    inbound_id BIGINT PRIMARY KEY REFERENCES inbound_messages(id) ON DELETE CASCADE,
-    alerted_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-COMMENT ON TABLE delivery_watchdog_alerted IS
-    'Delivery watchdog stall-alert dedup: inbound ids already WARNINGed while pending. Persists the daemon''s in-memory alerted set across restarts so a restart does not re-report every still-stalled inbound (Task #945).';
-
-CREATE TABLE delivery_watchdog_attempts (
-    kind                 TEXT NOT NULL CHECK (kind IN ('resurrect', 'harvest', 'hosted_turn')),
-    agent_id             BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    last_attempt_at      TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    consecutive_failures INT NOT NULL DEFAULT 0,
-    suppress_count       INT NOT NULL DEFAULT 0,
-    PRIMARY KEY (kind, agent_id)
-);
-
-COMMENT ON TABLE delivery_watchdog_attempts IS
-    'Delivery watchdog recovery-loop state, one row per (loop kind, agent): last_attempt_at is the cooldown clock; consecutive_failures and suppress_count (resurrect only) are the wake-suppression escalation counters. Survives watchdog restarts.';
 
 CREATE TABLE maintenance_state (
     kind        TEXT PRIMARY KEY,
