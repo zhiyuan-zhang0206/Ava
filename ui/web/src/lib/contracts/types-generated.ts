@@ -6565,10 +6565,10 @@ export interface components {
             k: number;
             /**
              * Purpose
-             * @description why the query was issued: 'recall' (passive recall; the query is the recent conversation) or 'search' (an agent's own search); selects the relevance question
+             * @description why the query was issued: 'recall' (passive recall; the query is the recent conversation), 'search' (an agent's own search) or 'dedup' (the duplicate check on a note an agent just wrote; the query is that note); selects the ranking question
              * @enum {string}
              */
-            purpose: "recall" | "search";
+            purpose: "recall" | "search" | "dedup";
         };
         /**
          * MemorySearchResponse

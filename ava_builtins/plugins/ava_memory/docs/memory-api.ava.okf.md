@@ -1,7 +1,7 @@
 ---
 type: doc
 title: ava.memory — Long-term Memory Pool (Plugin Provided)
-description: '`ava.memory` is declared by the `ava_memory` plugin as an `SdkNamespace`. Disabling the plugin → the entire `ava.memory` becomes unavailable. Provides `PATH` (shared memory pool root directory), `search()` (semantic search ranked by a decision model), and `write()` (cwd-independent indexed memory authoring).'
+description: '`ava.memory` is declared by the `ava_memory` plugin as an `SdkNamespace`. Disabling the plugin → the entire `ava.memory` becomes unavailable. Provides `PATH` (shared memory pool root directory), `PERSONAL_PATH` (your own memory folder) and `search()` (semantic search ranked by a decision model). Notes are written with `ava.files`; a write check reminds the agent of format problems and likely duplicates.'
 tags:
 - plugin
 - memory
@@ -13,7 +13,7 @@ tags:
 
 ## Attribution
 
-**Provided by the `ava_memory` plugin**. Not a core module — disabling the plugin makes `ava.memory.PATH`, `ava.memory.search()`, and `ava.memory.write()` entirely unavailable.
+**Provided by the `ava_memory` plugin**. Not a core module — disabling the plugin makes `ava.memory.PATH`, `ava.memory.PERSONAL_PATH` and `ava.memory.search()` entirely unavailable, and stops the write check.
 
 ## What it is
 
@@ -21,7 +21,7 @@ A shared markdown note folder (`~/.ava/memory`), used by all agents. Notes are d
 
 Two types of memory, each serving different audiences:
 - **Shared pool** (`ava.memory.PATH`): notes visible to all agents. Write durable facts that other agents need when taking over your role — user preferences, hard constraints, long-term decisions.
-- **Per-agent memory** (`<workspace>/memory/`): your own durable state, maintained by yourself, surviving across compactions.
+- **Per-agent memory** (`ava.memory.PERSONAL_PATH`, `<workspace>/memory/`): your own durable state, maintained by yourself (the agent keeps its `MEMORY.md` index by hand), surviving across compactions.
 
 ### Inheritable blocks (personal store → descendants)
 
@@ -40,9 +40,9 @@ Standing guidance descendants should receive.
 
 ## Core API
 
-- `PATH: PosixPath` — shared memory pool root directory `~/.ava/memory`
+- `PATH: PosixPath` — shared memory pool root directory `~/.ava/memory`; its `help()` text is the note format an agent follows
+- `PERSONAL_PATH: PosixPath` — the agent's own memory folder, `<workspace>/memory`, resolved from the current SDK identity (an attached external lease first, then the process identity) when read; raises when no identity is bound
 - `search(query, k=5, *, timeout=None) → list[MemoryMatch]` — semantic search; returns up to `k` `MemoryMatch(path, description, tags, score, chunk)` named tuples, most relevant first. `path` is absolute, `score` is a decision model's probability (0..1) that the matched `chunk` (the note's best passage, or its description line) is relevant to the query, and every match is returned whatever its score — the caller decides what a weak match deserves. `timeout` bounds one attempt (default = the gateway's own search deadline + 3s, 18s), and a congested index answers 503 (`IndexerUnavailable`) in ~1s instead of queueing the call
-- `write(slug, content, *, title=None, description=None, tags=None, store="personal") → Path` — writes an absolute personal or shared entry, assembling the note's frontmatter (a block the content carries stays the note's only one, is completed with the missing fields, and has its bare values quoted where YAML would misread them) and upserting its index pointer (a shared topic-directory entry upserts the directory's own `index.md`, created when missing — its line never lands in the root `MEMORY.md`); the canonical writer, immune to `ava.cwd` drift
 - `MemoryMatch` — the result tuple above, exported in `__all_for_ava__` so `help(ava.memory)` renders its fields
 - `IndexerUnavailable` — exception when the indexer service is unavailable, or when the decision model that ranks results fails (search never falls back to unranked vector order)
 
@@ -54,21 +54,15 @@ ordered by the probability of yes. No text is generated. The gateway response co
 `score` and the matched `chunk`. The SDK resolves each path against the runner's memory root;
 the HTTP response has no duplicate bare-path list.
 
-Memory authoring and personal-index injection resolve the current SDK identity:
+Personal-index injection and `PERSONAL_PATH` resolve the current SDK identity:
 an attached external lease takes precedence over a hosted turn, then the process
 identity. External lease validity is checked before reading or creating memory
-files. Writes take effect on the filesystem immediately; they are not plugin
-state journal entries and do not wait for the impersonation handoff.
+files. A note written with `ava.files` takes effect on the filesystem immediately;
+it is not a plugin state journal entry and does not wait for the impersonation handoff.
 
-## Note Format
+## Writing a note
 
-```markdown
----
-type: Memory
-ava_agent: <your id>
----
-<!-- agent-<your id> @ <your machine>, YYYY-MM-DD HH:MM -->
-```
+There is no writer function: the agent writes the whole note, frontmatter included, with `ava.files.write` / `append` under `PATH` or `PERSONAL_PATH`, following the format in `help(ava.memory.PATH)`. `ava.files` stores the content as given. What happens afterwards (rule and duplicate reminders) is [[ava_builtins/plugins/ava_memory/docs/memory-write-check.ava.okf.md]].
 
 ## Key Dependencies
 
@@ -76,3 +70,4 @@ ava_agent: <your id>
 - [[services/docs/gateway_side/memory_indexer/memory-indexer.ava.okf.md]] — vector index service
 - [[services/docs/gateway_side/memory_search/memory-search.ava.okf.md]] — the vector store service
 - [[ava_builtins/plugins/ava_memory/docs/memory-recall.ava.okf.md]] — passive recall mechanism (provided by the same plugin)
+- [[ava_builtins/plugins/ava_memory/docs/memory-write-check.ava.okf.md]] — the reminders on notes written with `ava.files`

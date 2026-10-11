@@ -174,7 +174,12 @@ _EXPECTED = {
         ],
         "nofm.md": ["Missing YAML frontmatter (must start with ---)"],
         "notmap.md": ["Frontmatter must be a YAML mapping"],
-        "notype.md": ["EXC AttributeError"],
+        "notype.md": [
+            "Missing required field 'type'",
+            "Missing type tag — add exactly one of ['type/env', 'type/feedback', "
+            "'type/project', 'type/reference', 'type/role', 'type/user']",
+            "Tag at index 1 must be a string",
+        ],
         "nulls.md": [
             "Field 'ava_agent' must not be null",
             "Field 'tags' must be a list",
@@ -280,10 +285,108 @@ def test_file_validator_reports_each_frontmatter_violation(bundle: Path) -> None
     validate_file = _validator().validate_file
     found: dict[str, list[str]] = {}
     for note in sorted(bundle.rglob("*.md")):
-        try:
-            errors = validate_file(note)
-        except AttributeError as exc:  # a non-string tag crashes the tag scan (pinned as-is)
-            errors = ["EXC " + type(exc).__name__]
+        errors = validate_file(note)
         if errors:
             found[str(note.relative_to(bundle))] = sorted(errors)
     assert found == _EXPECTED["validate_file"]
+
+
+# ── validate_note: the single-note rules a writer can check on its own ──
+
+
+def _note(tmp_path: Path, text: str, name: str = "n.md") -> Path:
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+_GOOD = (
+    "---\ntype: Memory\nava_agent: 7\nava_machine: box\ntimestamp: '2026-01-31T09:30:00+00:00'\n"
+    "title: A rule\ndescription: What it holds\ntags: [type/feedback]\n---\nBody.\n"
+)
+
+
+def test_validate_note_accepts_a_complete_note(tmp_path: Path) -> None:
+    assert _validator().validate_note(_note(tmp_path, _GOOD)) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (_GOOD.replace("ava_agent: 7\n", ""), ["Missing required field 'ava_agent'"]),
+        (
+            _GOOD.replace("tags: [type/feedback]\n", ""),
+            ["missing type/<x> tag (user ruling 2026-08-30 tag discipline)"],
+        ),
+        (
+            _GOOD.replace("[type/feedback]", "[type/feedback, type/user]"),
+            ["2 type tags (type/feedback, type/user) — exactly one"],
+        ),
+        (
+            _GOOD.replace("[type/feedback]", "[type/bogus]"),
+            [
+                "invalid type tag 'type/bogus' — use one of ['type/env', 'type/feedback', "
+                "'type/project', 'type/reference', 'type/role', 'type/user']"
+            ],
+        ),
+        (_GOOD.replace("[type/feedback]", "[type/feedback, repo]"), ["junk tag 'repo' — drop it"]),
+        (
+            _GOOD.replace("[type/feedback]", "[type/feedback, 1]"),
+            ["Tag at index 1 must be a string"],
+        ),
+        ("no frontmatter\n", ["Missing YAML frontmatter (must start with ---)"]),
+    ],
+)
+def test_validate_note_reports_each_single_note_rule(
+    tmp_path: Path, text: str, expected: list[str]
+) -> None:
+    assert sorted(_validator().validate_note(_note(tmp_path, text))) == sorted(expected)
+
+
+def test_validate_note_applies_the_character_cap(tmp_path: Path) -> None:
+    validator = _validator()
+    cap = validator.note_char_cap()
+    assert cap == 8000
+    note = _note(tmp_path, _GOOD + "x" * (cap - len(_GOOD) + 1))
+    assert validator.validate_note(note) == [f"Note is {cap + 1} characters, over the {cap} cap"]
+    exact = _note(tmp_path, _GOOD + "x" * (cap - len(_GOOD)), "exact.md")
+    assert validator.validate_note(exact) == []
+
+
+def test_validate_note_cap_follows_the_hook_variable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    validator = _validator()
+    monkeypatch.setenv("AVA_MEMORY_NOTE_CAP", "50")
+    assert validator.note_char_cap() == 50
+    assert validator.validate_note(_note(tmp_path, _GOOD)) == [
+        f"Note is {len(_GOOD)} characters, over the 50 cap"
+    ]
+
+
+def test_validate_note_leaves_reserved_and_unreadable_files_to_validate_file(
+    tmp_path: Path,
+) -> None:
+    validator = _validator()
+    assert validator.validate_note(_note(tmp_path, "no frontmatter", "MEMORY.md")) == []
+    assert validator.validate_note(tmp_path / "gone.md") == [
+        f"File not found: {tmp_path / 'gone.md'}"
+    ]
+    binary = tmp_path / "bin.md"
+    binary.write_bytes(b"\xff\xfe")
+    assert validator.validate_note(binary) == ["File is not valid UTF-8"]
+
+
+def test_note_helpers(tmp_path: Path) -> None:
+    validator = _validator()
+    assert validator.is_note_name("topic.md")
+    assert not any(
+        validator.is_note_name(name)
+        for name in ("MEMORY.md", "index.md", "log.md", "AGENTS.md", "x.txt")
+    )
+    parts = validator.note_parts(_GOOD)
+    assert parts is not None
+    frontmatter, body = parts
+    assert frontmatter["description"] == "What it holds" and body == "Body.\n"
+    assert validator.note_parts("no frontmatter") is None
+    assert validator.note_parts("---\n: : :\n  - [\n---\nx\n") is None

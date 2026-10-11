@@ -56,9 +56,9 @@ class _Judge:
         self.failure: Exception | None = None
 
     async def __call__(
-        self, model: str, state: str, question: Any, *, catalog: ModelCatalog
+        self, model: str, state: str, question: Any, *, catalog: ModelCatalog, usage_kind: str
     ) -> float:
-        del catalog
+        del catalog, usage_kind
         self.calls.append((model, state, question))
         if self.failure is not None:
             raise self.failure
@@ -365,8 +365,8 @@ class TestRerank:
     ) -> None:
         self._pool(monkeypatch, tmp_path)
         self._backend(monkeypatch, [_hit(tmp_path / "a.md")])
-        questions = {}
-        for purpose in ("recall", "search"):
+        questions: dict[str, Any] = {}
+        for purpose in ("recall", "search", "dedup"):
             judge.calls.clear()
             with TestClient(app) as client:
                 resp = client.post(
@@ -374,7 +374,7 @@ class TestRerank:
                 )
             assert resp.status_code == 200
             questions[purpose] = judge.calls[0][2]
-        assert questions["recall"] != questions["search"]
+        assert len(set(questions.values())) == 3
 
     def test_backend_is_asked_for_the_configured_candidate_count(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

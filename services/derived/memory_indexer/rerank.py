@@ -3,9 +3,10 @@
 Vector search is a wide, cheap first pass: it returns each file's best-matching chunk, and
 proximity in embedding space is only a proxy for "is worth reading". This stage restores the
 text of every candidate chunk from the note file (with the same split rules the indexer used)
-and asks a decision model, once per candidate, whether that note is worth the agent reading for
-the query; results are ordered by the probability of "yes". No text is generated anywhere on
-this path.
+and asks a decision model, once per candidate, a yes/no question chosen by the search's purpose:
+whether that note is worth the agent reading (`recall`, `search`), or whether it records
+essentially the same knowledge as a note the agent just wrote (`dedup`). Results are ordered by
+the probability of "yes". No text is generated anywhere on this path.
 
 One request per candidate, each with its own state (the query plus that one note) and a single
 yes/no question, is the shape the score threshold of passive recall was calibrated on; the
@@ -35,8 +36,13 @@ from base.packages.docs.notes import parse_note
 from services.derived.memory_indexer.backends.base import ChunkHit
 from services.derived.memory_indexer.chunking import chunk_text
 
-USAGE_KIND = "memory_rerank"
-"""`llm_usage.usage_kind` of the decision calls, so rerank spend is separable from chat spend."""
+USAGE_KINDS: dict[MemorySearchPurpose, str] = {
+    "recall": "memory_rerank",
+    "search": "memory_rerank",
+    "dedup": "memory_write_dedup",
+}
+"""`llm_usage.usage_kind` of the decision calls per purpose, so rerank spend is separable from
+chat spend and the duplicate check of written notes is separable from search."""
 
 _MAX_CONCURRENT_DECISIONS = 30
 """Decision requests in flight at once for one search. At the default of 30 candidates every
@@ -67,13 +73,37 @@ _QUESTIONS: dict[MemorySearchPurpose, YesNo] = {
         true_if="The note helps answer the search query in this situation.",
         false_if="The note does not help answer the search query.",
     ),
+    "dedup": YesNo(
+        question=(
+            "The existing memory note excerpt records essentially the same knowledge as the new "
+            "note: the same rule, fact, ruling or procedure, so that the new note should be "
+            "merged into the existing one (or replace it) instead of being kept as a second "
+            "note. Sharing a topic or keywords is not enough: a note that adds a different rule, "
+            "a different scope, or a different decision about the same subject is not the same "
+            "knowledge."
+        ),
+        true_if="The new note duplicates what the existing note already records.",
+        false_if="The new note records knowledge the existing note does not.",
+    ),
 }
-"""The relevance question per purpose (variant A of the calibration benchmark)."""
+"""The question per purpose. `recall` and `search` are variant A of the calibration benchmark;
+`dedup` is not calibrated (its threshold is `memory_write_dedup_threshold`)."""
 
-_STATE_HEADERS: dict[MemorySearchPurpose, str] = {
-    "recall": "Recent conversation of an AI agent (most recent last):",
-    "search": "Search query the agent issued against its memory notes:",
+_STATE_TEMPLATES: dict[MemorySearchPurpose, tuple[str, str]] = {
+    "recall": (
+        "Recent conversation of an AI agent (most recent last):",
+        "Candidate memory note:",
+    ),
+    "search": (
+        "Search query the agent issued against its memory notes:",
+        "Candidate memory note:",
+    ),
+    "dedup": (
+        "New memory note an AI agent has just written:",
+        "Existing memory note:",
+    ),
 }
+"""Per purpose, the lead-in of the query and the lead-in of the candidate note in the state."""
 
 
 class RankedChunk(NamedTuple):
@@ -104,7 +134,9 @@ class _Candidate:
 # ── the decision-model contract (the only code that touches base.lm.catalog.decide.call) ──
 
 
-async def ask_relevance(model: str, state: str, question: YesNo, *, catalog: ModelCatalog) -> float:
+async def ask_relevance(
+    model: str, state: str, question: YesNo, *, catalog: ModelCatalog, usage_kind: str
+) -> float:
     """Probability of "yes" to `question` about `state`, from one decision call."""
     try:
         decisions = await decide(
@@ -112,7 +144,7 @@ async def ask_relevance(model: str, state: str, question: YesNo, *, catalog: Mod
             state,
             {"relevant": question},
             catalog=catalog,
-            usage_kind=USAGE_KIND,
+            usage_kind=usage_kind,
             source="memory_search",
         )
     except DecisionError as exc:
@@ -158,12 +190,13 @@ def _load_candidates(hits: Sequence[ChunkHit], memory_root: Path) -> list[_Candi
 
 def _pair_state(query: str, candidate: _Candidate, purpose: MemorySearchPurpose) -> str:
     """The state shown to the decision model for one (query, candidate chunk) pair."""
+    query_header, note_header = _STATE_TEMPLATES[purpose]
     note = (
         f"path: {candidate.path}\n"
         f"description: {candidate.description or '(none)'}\n"
         f"excerpt:\n{candidate.chunk[:_EXCERPT_CHARS]}"
     )
-    return f"{_STATE_HEADERS[purpose]}\n{query}\n\nCandidate memory note:\n{note}"
+    return f"{query_header}\n{query}\n\n{note_header}\n{note}"
 
 
 # ── entry point ──
@@ -174,6 +207,7 @@ async def _score_all(
     states: list[str],
     question: YesNo,
     catalog: ModelCatalog,
+    usage_kind: str,
 ) -> list[float]:
     """One request per state, at most `_MAX_CONCURRENT_DECISIONS` at once; the first failure
     cancels the rest and is raised as itself."""
@@ -181,7 +215,9 @@ async def _score_all(
 
     async def score(state: str) -> float:
         async with permits:
-            return await ask_relevance(model, state, question, catalog=catalog)
+            return await ask_relevance(
+                model, state, question, catalog=catalog, usage_kind=usage_kind
+            )
 
     try:
         async with asyncio.TaskGroup() as group:
@@ -210,7 +246,7 @@ async def rerank(
     if not candidates:
         return []
     states = [_pair_state(query, candidate, purpose) for candidate in candidates]
-    scores = await _score_all(model, states, _QUESTIONS[purpose], catalog)
+    scores = await _score_all(model, states, _QUESTIONS[purpose], catalog, USAGE_KINDS[purpose])
     ranked = sorted(range(len(candidates)), key=lambda i: scores[i], reverse=True)[:k]
     return [
         RankedChunk(

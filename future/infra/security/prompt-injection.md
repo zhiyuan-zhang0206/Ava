@@ -28,10 +28,9 @@
 > the claim node (`agent/graph/claim/_dispatch.py`) in its own delta right behind the
 > flagged message — the agent host holds no findings buffer, because one process
 > interleaves many agents' turns; there is no side-channel file (user ruling
-> 2026-08-11). Memory writes have their own guard
-> in `ava/files.py`, stamping `injection-risk: flagged` on a note whose body
-> carries already-flagged content, which is candidate defense #3 below in its
-> cheap form.
+> 2026-08-11). Memory writes are not scanned or marked: `ava.files.write` stores
+> exactly what it is given, and a note's content is only checked for the pool's
+> format rules and for duplicates (the ava_memory write check).
 >
 > **Not built** — everything structural: the sandboxed deprivileged reader, egress
 > allowlisting, privilege separation. (On-install skill scanning **is** built —
@@ -143,10 +142,9 @@ it was actually about** — and that kind is still not built:
 What *was* built is a different thing the original list did not anticipate:
 
 - ✅ **Built:** a rule-based **scanner** at the ingestion boundary that flags
-  suspicious content, reports it out-of-band as a system note, and marks
-  memory writes derived from flagged content. It changes nothing about the
-  prompt and does not touch the content itself — it is detection + provenance,
-  not persuasion.
+  suspicious content and reports it out-of-band as a system note. It changes
+  nothing about the prompt and does not touch the content itself — it is
+  detection, not persuasion.
 
 The distinction matters because the two get conflated under "content layer": one
 tries to *instruct the model* out of being injected (rejected); the other *tells the

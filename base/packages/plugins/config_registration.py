@@ -482,8 +482,10 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "llm_stream_ttft_timeout_seconds": _range_validator(gt=0),
     "memory_recall_deadline_seconds": _range_validator(gt=0),
     "skill_recall_deadline_seconds": _range_validator(gt=0),
+    "memory_write_check_deadline_seconds": _range_validator(gt=0),
     # probabilities — [0, 1]
     "memory_recall_inject_threshold": _range_validator(ge=0, le=1),
+    "memory_write_dedup_threshold": _range_validator(ge=0, le=1),
     # fractions — (0, 1]
     "auto_compact_fraction": _range_validator(gt=0, le=1),
     "compact_reminder_fraction": _range_validator(gt=0, le=1),

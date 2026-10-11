@@ -55,12 +55,14 @@ class Prompt:
 
 @dataclass(frozen=True)
 class MemoryRecall:
-    """Passive memory recall, its injection threshold, and memory inheritance."""
+    """Passive memory recall, its injection threshold, memory write checks, and memory inheritance."""
 
     passive_memory_recall_enabled: bool
     memory_recall_inject_threshold: float
     memory_recall_inject_max: int
     memory_recall_deadline_seconds: float
+    memory_write_check_deadline_seconds: float
+    memory_write_dedup_threshold: float
     memory_inherit_depth: int
 
 

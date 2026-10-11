@@ -136,8 +136,9 @@ def memory_search(
     attempts behind it.
 
     `purpose` says why the query was issued ("recall": passive recall, the query is the recent
-    conversation; "search": an agent's own search), which selects the relevance question the
-    gateway's ranking model answers.
+    conversation; "search": an agent's own search; "dedup": the duplicate check on a note just
+    written, the query is that note), which selects the question the gateway's ranking model
+    answers.
 
     `timeout` overrides the per-attempt HTTP timeout (seconds). The default
     is the gateway's own search deadline plus a 3s margin (18s at default
