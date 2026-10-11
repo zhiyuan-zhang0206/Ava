@@ -19,7 +19,7 @@ Gateway-owned background daemon (`services/upkeep/events_maintenance/daemon.py`)
 - **Telemetry events replay**: the hourly mirror → `telemetry_events` pass — [[telemetry-replay.ava.okf.md]].
 - **Class resolution** (5m cadence) — counts the warning, error and critical rows of one fixed six-hour window in `telemetry_events` (the partial index `telemetry_events_anomaly_ts`; it emits no gauge when the newest recorded event is over 15 minutes old) (grouped by `category, level, event_name, source, process`; pre-dimension rows read as the empty label), subtracts active rows in `event_dismissals` (exact process match, or a wildcard `process = ''` row cancelling every process of its class — task #4329 B5), and emits the absolute `ava_resolution_status_unresolved_warnings_ratio` / `ava_resolution_status_unresolved_errors_ratio` / `ava_resolution_status_dismissed_warnings_ratio` / `ava_resolution_status_dismissed_errors_ratio` Prometheus gauges (with the dashboard `Warning` / `Error` tiles they render the total / resolved / net trio). The gateway's alert-class reads (`resolution.alert_classes` + `resolution.matching_dismissal`, `/api/stats/alert-classes`) apply the same dismissal match to the dashboard's selected window. Recorded events remain immutable: resolution never mutates a historical event. A second ten-minute read reopens a dismissal whose count exceeds `AVA_EVENTS_RESOLUTION_BURST_THRESHOLD` (default 5; exact rows watch their process, wildcards the base-wide sum). Manual API marking is primary; `AVA_EVENTS_AUTO_DISMISS_ENABLED` (off by default) is the daily stable-class scan. Each resolution loop owns its scan cadence: a successful history fetch consumes that date before dismissal writes; a fetch failure does not. Restarting the loop starts a fresh cadence.
 - **Checkpoint physical-size monitoring** (`services/upkeep/events_maintenance/blob_vacuum.py`) — each actual plain-vacuum pass measures `checkpoint_blobs`, `checkpoints`, and `checkpoint_writes` with `pg_total_relation_size` and emits the latest values through the existing OTLP metric path as absolute gauges. Grafana warns at 2.5 GiB and errors at 4 GiB for `checkpoint_blobs`; measurements refresh only in the 05:00-08:00 window or on a force run, so an alert lasts through the daily sampling gap. The alerts prompt an operator-led repack/capacity decision before the disk watermark; they do not change vacuum behavior.
-- **Configuration**: `services/upkeep/events_maintenance/daemon.py:events_maintenance_config` is the package's only `settings` read; it builds the frozen `EventsMaintenanceConfig` (`config.py`) and passes it to the loops and passes (`settings-read` gate).
+- **Configuration**: `services/upkeep/events_maintenance/daemon.py:events_maintenance_config` reads its required entry ConfigBoot at the original call point; it builds the frozen `EventsMaintenanceConfig` (`config.py`) and passes it to the loops and passes.
 - **Per-loop progress health**: dispatch and class resolution own separate progress trackers with hard deadlines; a timed-out worker wedges its tracker and makes the aggregate `/healthz` return 503 while the sibling loop stays healthy — [[progress-health.ava.okf.md]].
 
 ## Key dependencies
@@ -42,7 +42,7 @@ checkout move cannot relabel the running daemon. The daemon's existing startup,
 pidfile, work and bounded-exit order remains unchanged.
 
 The standalone rollup entry captures its own image and binds an explicit,
-non-exempt gate to `events_maintenance_db(gate=...)`. Argument rejection precedes
+non-exempt gate to `events_maintenance_db(config, gate=...)`. Argument rejection precedes
 capture and database access; the closed-day SQL and fold-watermark rules remain
 unchanged.
 
@@ -53,3 +53,10 @@ The work and logging database factory calls `db_config_from_boot` at each
 handle creation and retains the entry's gate and lazy machine host reader.
 Schema checks, health-before-pool ordering and shutdown stay at their original
 boundaries. Business-specific configuration slices keep their existing readers.
+
+The daemon's slice builder requires the same prepared `ConfigBoot` that its entry
+passes to `run`. The Grafana-credential branch constructs its `EventBusConfig`
+from that owner at the original conditional call point; units without the
+credential do not construct this bus. The standalone rollup entry passes its
+own existing boot owner to `events_maintenance_db`, whose live database slice is
+read at that call. These inputs do not redeliver environment or timezone state.

@@ -12,6 +12,7 @@ from psycopg.types.json import Jsonb
 from pydantic import SecretStr
 
 import base.db
+from base.config import ConfigBoot
 from base.daemon.loop_health import LoopProgress
 from base.db.code_version_gate import ProcessDbGate
 from services.upkeep.events_maintenance.alert_reconciler import (
@@ -25,9 +26,13 @@ from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 
 
-def _config() -> EventsMaintenanceConfig:
+def _config(
+    process_config: ConfigBoot,
+) -> EventsMaintenanceConfig:
     """The service's slice with a Grafana credential."""
-    return events_maintenance_config(grafana_admin_password=SecretStr("grafana-test-password"))
+    return events_maintenance_config(
+        process_config, grafana_admin_password=SecretStr("grafana-test-password")
+    )
 
 
 def _insert_alert(
@@ -183,7 +188,11 @@ def test_reconcile_open_grafana_alerts_resolves_only_snapshot_misses(
 
 @pytest.mark.asyncio
 async def test_reconcile_once_fetches_truth_and_publishes_resolved_rows(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    process_config: ConfigBoot,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     old = datetime.now(UTC) - timedelta(hours=1)
     missing_id = _insert_alert(
@@ -193,7 +202,7 @@ async def test_reconcile_once_fetches_truth_and_publishes_resolved_rows(
         updated_at=old,
     )
     db_conn.commit()
-    config = _config()
+    config = _config(process_config)
 
     def _grafana(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/alertmanager/grafana/api/v2/alerts"
@@ -234,6 +243,7 @@ def _seed_stale_alert(conn: psycopg.Connection) -> int:
     ids=["http-error", "not-json", "not-a-list", "incomplete-entry"],
 )
 async def test_a_grafana_that_cannot_give_a_snapshot_leaves_every_row_and_the_round_goes_on(
+    process_config: ConfigBoot,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     answer: httpx.Response,
@@ -248,7 +258,9 @@ async def test_a_grafana_that_cannot_give_a_snapshot_leaves_every_row_and_the_ro
     db_pool = base.db.pool(gate=database_gate)
     try:
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _r: answer)) as client:
-            await reconciliation_round(db_pool, client, published.extend, progress, _config())
+            await reconciliation_round(
+                db_pool, client, published.extend, progress, _config(process_config)
+            )
     finally:
         db_pool.close()
 
@@ -261,7 +273,11 @@ async def test_a_grafana_that_cannot_give_a_snapshot_leaves_every_row_and_the_ro
 
 @pytest.mark.asyncio
 async def test_an_unexpected_error_in_a_round_is_not_swallowed(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    process_config: ConfigBoot,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A bug (here a publisher that raises) ends the round and, through the loop,
     the service; only Grafana's own failures are tolerated."""
@@ -278,7 +294,11 @@ async def test_an_unexpected_error_in_a_round_is_not_swallowed(
         async with httpx.AsyncClient(transport=transport) as client:
             with pytest.raises(RuntimeError, match="publisher bug"):
                 await reconciliation_round(
-                    db_pool, client, publish, LoopProgress("alert-reconciliation", 180.0), _config()
+                    db_pool,
+                    client,
+                    publish,
+                    LoopProgress("alert-reconciliation", 180.0),
+                    _config(process_config),
                 )
     finally:
         db_pool.close()

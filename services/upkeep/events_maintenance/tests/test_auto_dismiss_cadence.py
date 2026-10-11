@@ -10,6 +10,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config import ConfigBoot
 from base.daemon.loop_health import LoopProgress
 from services.upkeep.events_maintenance import daemon, resolution
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
@@ -52,10 +53,12 @@ def _history(connection: psycopg.Connection[Any]) -> datetime:
 
 
 def test_fetch_failure_retries_but_write_failure_consumes_the_day(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     now = _history(db_conn)
-    config = events_maintenance_config(events_auto_dismiss_enabled=True, events_auto_dismiss_days=1)
+    config = events_maintenance_config(
+        process_config, events_auto_dismiss_enabled=True, events_auto_dismiss_days=1
+    )
     cadence = resolution.AutoDismissCadence()
     connection = _ScanConnection(db_conn)
     pool = cast(ConnectionPool, _Pool(cast(Any, connection)))
@@ -83,12 +86,14 @@ def test_fetch_failure_retries_but_write_failure_consumes_the_day(
 
 
 async def test_each_resolution_loop_owns_a_fresh_daily_scan(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _history(db_conn)
     connection = _ScanConnection(db_conn)
     pool = cast(ConnectionPool, _Pool(cast(Any, connection)))
-    config = events_maintenance_config(events_auto_dismiss_enabled=True, events_auto_dismiss_days=1)
+    config = events_maintenance_config(
+        process_config, events_auto_dismiss_enabled=True, events_auto_dismiss_days=1
+    )
     _capture_events(monkeypatch)
     monkeypatch.setattr(daemon.admission, "quiesced", lambda: False)
     passes = 0
@@ -117,13 +122,15 @@ async def test_each_resolution_loop_owns_a_fresh_daily_scan(
     assert db_conn.execute("SELECT count(*) FROM event_dismissals").fetchone() == (1,)
 
 
-def test_disabled_scan_does_not_consume_cadence(db_conn: psycopg.Connection[Any]) -> None:
+def test_disabled_scan_does_not_consume_cadence(
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any]
+) -> None:
     now = _history(db_conn)
     connection = _ScanConnection(db_conn)
     cadence = resolution.AutoDismissCadence()
     assert (
         resolution._stable_auto_classes(
-            now, connection, {_event_class(): 1}, events_maintenance_config(), cadence
+            now, connection, {_event_class(): 1}, events_maintenance_config(process_config), cadence
         )
         == set()
     )

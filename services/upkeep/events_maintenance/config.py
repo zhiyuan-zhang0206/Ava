@@ -1,8 +1,8 @@
 """Configuration slice of the events-maintenance daemon.
 
 Fields keep their flat registry names. `services/upkeep/events_maintenance/daemon.py` (the
-composition root) is the only module of the package that reads `settings`; it builds
-this slice and hands it to the loops and passes. See `future/infra/security/dependency-injection.md`.
+composition root) builds
+this slice from the supplied ConfigBoot and hands it to the loops and passes. See `future/infra/security/dependency-injection.md`.
 """
 
 from __future__ import annotations

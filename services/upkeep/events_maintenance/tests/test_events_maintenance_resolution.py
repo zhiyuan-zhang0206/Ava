@@ -10,6 +10,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config import ConfigBoot
 from services.upkeep.events_maintenance import resolution
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 
@@ -219,7 +220,7 @@ def test_matching_dismissal_prefers_the_exact_process_row_over_the_wildcard() ->
 
 
 def test_unresolved_math_excludes_active_classes(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dismissed_warning = _event_class(event_name="dismissed-warning")
     dismissed_error = _event_class(level="error", event_name="dismissed-error")
@@ -239,7 +240,7 @@ def test_unresolved_math_excludes_active_classes(
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
-        events_maintenance_config(),
+        events_maintenance_config(process_config),
         cadence=resolution.AutoDismissCadence(),
     )
 
@@ -260,7 +261,7 @@ def test_unresolved_math_excludes_active_classes(
 
 
 def test_burst_reopens_only_above_the_configured_threshold(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     hit = _event_class(event_name="hit")
     below = _event_class(event_name="below")
@@ -273,7 +274,7 @@ def test_burst_reopens_only_above_the_configured_threshold(
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
-        events_maintenance_config(events_resolution_burst_threshold=5),
+        events_maintenance_config(process_config, events_resolution_burst_threshold=5),
         cadence=resolution.AutoDismissCadence(),
     )
 
@@ -303,7 +304,7 @@ def test_burst_reopens_only_above_the_configured_threshold(
 
 
 def test_a_stale_record_or_a_failed_read_never_emits_a_gauge(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     emitted = _capture_events(monkeypatch)
     pool = cast(ConnectionPool, _Pool(db_conn))
@@ -311,7 +312,10 @@ def test_a_stale_record_or_a_failed_read_never_emits_a_gauge(
     # The newest recorded event is an hour old: an empty window may only mean a stalled writer.
     later = datetime.now(UTC) + timedelta(hours=1)
     result = resolution.run_resolution_slice(
-        pool, events_maintenance_config(), now=later, cadence=resolution.AutoDismissCadence()
+        pool,
+        events_maintenance_config(process_config),
+        now=later,
+        cadence=resolution.AutoDismissCadence(),
     )
     assert result is None
     assert emitted == []
@@ -321,20 +325,20 @@ def test_a_stale_record_or_a_failed_read_never_emits_a_gauge(
 
     monkeypatch.setattr(resolution, "class_counts", boom)
     result = resolution.run_resolution_slice(
-        pool, events_maintenance_config(), cadence=resolution.AutoDismissCadence()
+        pool, events_maintenance_config(process_config), cadence=resolution.AutoDismissCadence()
     )
     assert result is None
     assert emitted == []
 
 
 def test_an_empty_window_over_a_current_record_emits_zero_gauges(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     emitted = _capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
-        events_maintenance_config(),
+        events_maintenance_config(process_config),
         cadence=resolution.AutoDismissCadence(),
     )
 
@@ -343,6 +347,7 @@ def test_an_empty_window_over_a_current_record_emits_zero_gauges(
 
 
 def test_auto_dismiss_picks_the_classes_present_in_every_six_hour_slice(
+    process_config: ConfigBoot,
     db_conn: psycopg.Connection[Any],
 ) -> None:
     for slot in range(4):  # one day of six-hour slices
@@ -354,7 +359,9 @@ def test_auto_dismiss_picks_the_classes_present_in_every_six_hour_slice(
         _event_class(event_name="steady", process="p"): 1,
         _event_class(event_name="gappy", process="p"): 1,
     }
-    config = events_maintenance_config(events_auto_dismiss_enabled=True, events_auto_dismiss_days=1)
+    config = events_maintenance_config(
+        process_config, events_auto_dismiss_enabled=True, events_auto_dismiss_days=1
+    )
     cadence = resolution.AutoDismissCadence()
 
     stable = resolution._stable_auto_classes(now, db_conn, current, config, cadence)
@@ -363,7 +370,7 @@ def test_auto_dismiss_picks_the_classes_present_in_every_six_hour_slice(
 
 
 def test_auto_dismiss_is_off_by_default(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     stable = _event_class(event_name="stable-warning")
 
@@ -374,7 +381,7 @@ def test_auto_dismiss_is_off_by_default(
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
-        events_maintenance_config(events_auto_dismiss_enabled=False),
+        events_maintenance_config(process_config, events_auto_dismiss_enabled=False),
         cadence=resolution.AutoDismissCadence(),
     )
 
@@ -420,7 +427,7 @@ def test_level_splits_empty_and_unknown_levels() -> None:
 
 
 def test_daemon_emits_dismissed_gauges_alongside_unresolved(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """resolution_status carries the dismissed counts so Grafana can render
     the total / resolved / net trio (task #1935)."""
@@ -433,7 +440,7 @@ def test_daemon_emits_dismissed_gauges_alongside_unresolved(
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
-        events_maintenance_config(),
+        events_maintenance_config(process_config),
         cadence=resolution.AutoDismissCadence(),
     )
 
@@ -468,7 +475,7 @@ def test_process_scopes_dismissal_matching() -> None:
 
 
 def test_exact_dismissal_reopens_only_on_its_own_process_burst(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Its own process's burst reopens an exact dismissal; a different
     process's burst of the same base must not (task #4329 B5)."""
@@ -484,7 +491,7 @@ def test_exact_dismissal_reopens_only_on_its_own_process_burst(
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
-        events_maintenance_config(events_resolution_burst_threshold=5),
+        events_maintenance_config(process_config, events_resolution_burst_threshold=5),
         cadence=resolution.AutoDismissCadence(),
     )
 
@@ -500,7 +507,7 @@ def test_exact_dismissal_reopens_only_on_its_own_process_burst(
 
 
 def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A wildcard (process="") dismissal — every pre-dimension row's scope —
     watches the summed ten-minute count across processes."""
@@ -513,7 +520,7 @@ def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
-        events_maintenance_config(events_resolution_burst_threshold=5),
+        events_maintenance_config(process_config, events_resolution_burst_threshold=5),
         cadence=resolution.AutoDismissCadence(),
     )
 
@@ -555,7 +562,7 @@ def test_category_agnostic_matching_keeps_the_process_rules() -> None:
 
 
 def test_burst_valve_watches_the_base_across_the_category_split(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A wildcard row stored from log-era life reopens on the telemetry burst
     of its base (task #4964)."""
@@ -568,7 +575,7 @@ def test_burst_valve_watches_the_base_across_the_category_split(
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
-        events_maintenance_config(events_resolution_burst_threshold=5),
+        events_maintenance_config(process_config, events_resolution_burst_threshold=5),
         cadence=resolution.AutoDismissCadence(),
     )
 
@@ -578,7 +585,7 @@ def test_burst_valve_watches_the_base_across_the_category_split(
 
 
 def test_exact_burst_valve_watches_its_process_across_the_category_split(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An exact row stored from log-era life reopens on its own process's
     telemetry burst — and not on another process's (task #4964)."""
@@ -595,7 +602,7 @@ def test_exact_burst_valve_watches_its_process_across_the_category_split(
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, _Pool(db_conn)),
-        events_maintenance_config(events_resolution_burst_threshold=5),
+        events_maintenance_config(process_config, events_resolution_burst_threshold=5),
         cadence=resolution.AutoDismissCadence(),
     )
 

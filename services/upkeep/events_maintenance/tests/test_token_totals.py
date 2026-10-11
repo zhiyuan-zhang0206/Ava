@@ -17,6 +17,7 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
+from base.config import ConfigBoot
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
@@ -167,7 +168,10 @@ def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_wa
         def connect(self) -> Generator[psycopg.Connection]:
             yield db
 
-    def database(*, gate: ProcessDbGate, local_host: Callable[[], str]) -> _Database:
+    def database(
+        config: ConfigBoot, *, gate: ProcessDbGate, local_host: Callable[[], str]
+    ) -> _Database:
+        assert isinstance(config, ConfigBoot)
         assert isinstance(gate, ProcessDbGate)
         assert gate.application_name() == "ava:rollup-operator:v7"
         return _Database()

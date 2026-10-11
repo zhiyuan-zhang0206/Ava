@@ -17,6 +17,7 @@ from base.daemon.health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.events_maintenance import daemon
+from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 
 
@@ -72,6 +73,7 @@ async def test_late_failure_is_reported_without_reviving_the_loop(
 
 
 def _mock_service(
+    process_config: ConfigBoot,
     monkeypatch: pytest.MonkeyPatch,
     work: Callable[..., None],
     trackers: list[LivenessGroup],
@@ -102,7 +104,7 @@ def _mock_service(
     def pool(_self: object) -> Pool:
         return Pool()
 
-    config = events_maintenance_config(events_maintenance_pass_deadline_s=0.02)
+    config = events_maintenance_config(process_config, events_maintenance_pass_deadline_s=0.02)
 
     def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
         return False
@@ -125,7 +127,12 @@ def _mock_service(
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", sibling)
     monkeypatch.setattr(daemon.Database, "pool", pool)
     monkeypatch.setattr(daemon.admission, "quiesced", lambda: False)
-    monkeypatch.setattr(daemon, "events_maintenance_config", lambda: config)
+
+    def build_config(entry_config: ConfigBoot) -> EventsMaintenanceConfig:
+        assert entry_config is process_config
+        return config
+
+    monkeypatch.setattr(daemon, "events_maintenance_config", build_config)
 
 
 async def test_service_stop_cancels_expired_proxy_before_worker_returns(
@@ -148,7 +155,7 @@ async def test_service_stop_cancels_expired_proxy_before_worker_returns(
         finally:
             finished.set()
 
-    _mock_service(monkeypatch, blocking_pass, trackers, closed)
+    _mock_service(process_config, monkeypatch, blocking_pass, trackers, closed)
 
     async def wait_for_wedge() -> None:
         while not trackers or not trackers[0].snapshot()["dispatch"]["wedged"]:
