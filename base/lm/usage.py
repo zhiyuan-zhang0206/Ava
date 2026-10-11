@@ -110,6 +110,7 @@ def log_usage_fields(
     tok_reasoning: int = 0,
     latency_ms: float | None = None,
     usage_kind: str,
+    source: str | None = None,
     for_agent_id: int | None = None,
     catalog: ModelCatalog,
 ) -> tuple[int, float]:
@@ -124,6 +125,7 @@ def log_usage_fields(
         reasoning=tok_reasoning,
         latency_ms=latency_ms,
         usage_kind=usage_kind,
+        source=source,
         for_agent_id=for_agent_id,
         catalog=catalog,
     )

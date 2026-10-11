@@ -10,15 +10,23 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
 from base import paths
+from base.lm import provider_api
+from base.lm.catalog import provider_contract
 from base.lm.plugin_providers import build_model_catalog
-from base.lm.provider_api import ProviderBinding, ProviderContribution
+from base.lm.provider_api import (
+    DecisionModelSpec,
+    DecisionProviderContribution,
+    ProviderBinding,
+    ProviderContribution,
+)
 from base.lm.tests.providers.provider_plugin_support import provider_plugin as provider_plugin
 from base.packages.plugins.extensions import PluginContributions
-from base.packages.plugins.gate import ContributionMismatch
+from base.packages.plugins.gate import ContributionMismatch, check_manifest
 from base.packages.plugins.manifest import ManifestError
 
 
@@ -102,3 +110,71 @@ def test_the_declaration_is_attributed_by_prefix() -> None:
     (record,) = PluginContributions(providers=(contribution,)).as_records("rec_plugin")
 
     assert (record.surface, record.identifier, record.plugin) == ("providers", "rec-", "rec_plugin")
+
+
+def _decision_contribution() -> PluginContributions:
+    return PluginContributions(
+        decision_providers=(
+            DecisionProviderContribution(
+                prefix="dec-",
+                display_name="Dec",
+                key_env="DEC_KEY",
+                build=lambda _ctx: None,  # pyright: ignore[reportArgumentType]
+                models={"dec-1": DecisionModelSpec(context_window=10)},
+                pricing={},
+            ),
+        )
+    )
+
+
+def test_a_decision_declaration_is_attributed_by_prefix() -> None:
+    (record,) = _decision_contribution().as_records("dec_plugin")
+
+    assert (record.surface, record.identifier, record.plugin) == (
+        "decisionProviders",
+        "dec-",
+        "dec_plugin",
+    )
+
+
+@pytest.mark.parametrize(("declared", "agrees"), [(["dec-"], True), (["other-"], False)])
+def test_the_manifest_gates_the_decision_providers_key(
+    tmp_path: Path, declared: list[str], agrees: bool
+) -> None:
+    manifest = {
+        "apiVersion": 2,
+        "name": "dec_plugin",
+        "version": "1.0.0",
+        "engines": {"ava": ">=0.1.0"},
+        "contributions": {"decisionProviders": declared},
+    }
+    (tmp_path / "ava-plugin.json").write_text(json.dumps(manifest))
+
+    if agrees:
+        check_manifest("dec_plugin", tmp_path, _decision_contribution(), ("decisionProviders",))
+    else:
+        with pytest.raises(ContributionMismatch, match="decisionProviders"):
+            check_manifest("dec_plugin", tmp_path, _decision_contribution(), ("decisionProviders",))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "PROVIDER_API_VERSION",
+        "AttachPolicy",
+        "BuildContext",
+        "DecisionBuildContext",
+        "DecisionProviderContribution",
+        "InferenceSpeed",
+        "PricePeriod",
+        "PriceRates",
+        "PriceTier",
+        "PriceWindow",
+        "ProviderBinding",
+        "ProviderContribution",
+        "ProviderRegistrationError",
+        "ThinkingConfig",
+    ],
+)
+def test_provider_api_exposes_the_single_declaration_owner(name: str) -> None:
+    assert getattr(provider_api, name) is getattr(provider_contract, name)

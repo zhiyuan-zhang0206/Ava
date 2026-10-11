@@ -10,16 +10,24 @@ to provider consumers.
 The prefix map is flat: a duplicate prefix, or one that nests inside another (``foo-`` vs
 ``foo-bar-``), fails fast, as does a duplicate model id or stop vocabulary key — two claimants
 have no precedence order to resolve them.
+
+Decision models (``base/lm/catalog/decide``) live in parallel tables, ``decision_models`` and
+``decision_providers``, installed by the same builder. They never appear in ``models``, so no
+chat path (spawn validation, ``build_chat_model``, the model dropdown) can reach them. Prefix
+collisions are checked across both kinds, except that one plugin may hold a chat prefix and a
+decision prefix of the same vendor.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from functools import cached_property
 from types import MappingProxyType
 
+from base.lm.catalog.decide.types import DecisionModelSpec
 from base.lm.catalog.provider_contract import (
+    DecisionProviderContribution,
     ProviderBinding,
     ProviderContribution,
     ProviderRegistrationError,
@@ -37,6 +45,14 @@ class ModelCatalog:
     bindings: Mapping[str, ProviderBinding]
     stops: Mapping[str, StopSpec]
     prices: PriceBook
+    decision_models: Mapping[str, DecisionModelSpec] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    """Decision-model rows, keyed by id. Disjoint from ``models`` by construction."""
+    decision_providers: Mapping[str, DecisionProviderContribution] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    """Decision providers keyed by their id prefix."""
 
     @cached_property
     def supported_models(self) -> Mapping[str, list[str]]:
@@ -92,15 +108,38 @@ class ModelCatalog:
                 return binding.provider_key or prefix.rstrip("-")
         return None
 
+    def decision_provider_of(self, model: str) -> DecisionProviderContribution | None:
+        """The decision provider owning ``model`` by prefix, or None."""
+        for prefix, provider in self.decision_providers.items():
+            if model.startswith(prefix):
+                return provider
+        return None
+
 
 def _check_prefix(
-    prefix: str, plugin: str, existing_prefixes: Mapping[str, ProviderBinding]
+    prefix: str,
+    plugin: str,
+    existing_prefixes: Iterable[str],
+    other_kind_owners: Mapping[str, str],
 ) -> None:
+    """Reject a malformed, duplicate or nested prefix.
+
+    ``existing_prefixes`` are the same kind's prefixes (any owner);
+    ``other_kind_owners`` maps the other kind's prefixes to their plugins, and only another
+    plugin's prefix conflicts.
+    """
     if not prefix or not prefix.endswith("-"):
         raise ProviderRegistrationError(
             f"provider plugin {plugin!r}: prefix {prefix!r} must end with '-' "
             "(e.g. 'foo-'); dispatch is model.startswith(prefix)"
         )
+    for existing, owner in other_kind_owners.items():
+        if owner != plugin and (prefix.startswith(existing) or existing.startswith(prefix)):
+            raise ProviderRegistrationError(
+                f"provider plugin {plugin!r}: prefix {prefix!r} collides with prefix "
+                f"{existing!r} of plugin {owner!r} (chat and decision providers share one "
+                "prefix namespace across plugins)"
+            )
     for existing in existing_prefixes:
         if prefix == existing:
             raise ProviderRegistrationError(
@@ -124,6 +163,10 @@ class CatalogBuilder:
         self._bindings: dict[str, ProviderBinding] = {}
         self._stops: dict[str, StopSpec] = {}
         self._plugin_prices: dict[str, ModelPrice] = {}
+        self._decision_models: dict[str, DecisionModelSpec] = {}
+        self._decision_providers: dict[str, DecisionProviderContribution] = {}
+        self._chat_prefix_owner: dict[str, str] = {}
+        self._decision_prefix_owner: dict[str, str] = {}
         self._archive = load_archive()
 
     @property
@@ -144,7 +187,7 @@ class CatalogBuilder:
         binding = contribution.binding
         models = contribution.models
         pricing = contribution.pricing
-        _check_prefix(binding.prefix, plugin, self._bindings)
+        _check_prefix(binding.prefix, plugin, self._bindings, self._decision_prefix_owner)
         self._validate_model_declarations(plugin, contribution)
         prices = PriceBook(self._archive, self._plugin_prices)
         for model_id, spec in models.items():
@@ -194,6 +237,61 @@ class CatalogBuilder:
         if stop_spec is not None:
             self._stops[stop_spec.provider_key] = stop_spec
         self._bindings[binding.prefix] = binding
+        self._chat_prefix_owner[binding.prefix] = plugin
+
+    def install_decision(self, plugin: str, contribution: DecisionProviderContribution) -> None:
+        """Install one declared decision provider; a contract violation raises
+        `ProviderRegistrationError` and leaves the builder unchanged."""
+        prefix = contribution.prefix
+        _check_prefix(prefix, plugin, self._decision_providers, self._chat_prefix_owner)
+        if set(contribution.pricing) != set(contribution.models):
+            raise ProviderRegistrationError(
+                f"decision plugin {plugin!r}: every decision model needs exactly one price; "
+                f"models {sorted(contribution.models)!r}, priced {sorted(contribution.pricing)!r}"
+            )
+        for model_id in contribution.models:
+            if not model_id.startswith(prefix):
+                raise ProviderRegistrationError(
+                    f"decision plugin {plugin!r}: model id {model_id!r} must start with "
+                    f"the provider prefix {prefix!r}"
+                )
+            if model_id in self._decision_models:
+                raise ProviderRegistrationError(
+                    f"decision model id {model_id!r} is already registered by an earlier plugin"
+                )
+            if model_id in self._models:
+                raise ProviderRegistrationError(
+                    f"decision plugin {plugin!r}: model id {model_id!r} is also a chat model id — "
+                    "decision ids are separate so usage pricing and chat dispatch stay unambiguous"
+                )
+        try:
+            new_prices = {
+                model_id: plugin_model_price(
+                    model_id,
+                    cache_miss=price.cache_miss,
+                    cache_hit=price.cache_hit,
+                    output=price.output,
+                    source_url=price.source_url,
+                    source_checked_at=price.source_checked_at,
+                    vendor=price.vendor,
+                    periods=price.periods,
+                    cache_write_5m=price.cache_write_5m,
+                    cache_write_1h=price.cache_write_1h,
+                    plugin=plugin,
+                )
+                for model_id, price in contribution.pricing.items()
+            }
+        except ValueError as exc:
+            raise ProviderRegistrationError(str(exc)) from exc
+        clashing = new_prices.keys() & self._plugin_prices.keys()
+        if clashing:
+            raise ProviderRegistrationError(
+                f"decision plugin {plugin!r}: prices for {sorted(clashing)!r} already declared"
+            )
+        self._decision_models.update(contribution.models)
+        self._plugin_prices.update(new_prices)
+        self._decision_providers[prefix] = contribution
+        self._decision_prefix_owner[prefix] = plugin
 
     def _validate_model_declarations(self, plugin: str, contribution: ProviderContribution) -> None:
         """Reject declaration ownership collisions before changing the builder."""
@@ -225,6 +323,11 @@ class CatalogBuilder:
                     f"model id {model_id!r} is already registered by an earlier plugin — "
                     "model ids are flat and a duplicate is an error"
                 )
+            if model_id in self._decision_models:
+                raise ProviderRegistrationError(
+                    f"model id {model_id!r} is already a decision model id — "
+                    "chat and decision ids are disjoint"
+                )
 
     def build(self) -> ModelCatalog:
         """Validate the complete model graph and freeze it."""
@@ -243,4 +346,6 @@ class CatalogBuilder:
             bindings=MappingProxyType(dict(self._bindings)),
             stops=MappingProxyType(dict(self._stops)),
             prices=prices,
+            decision_models=MappingProxyType(dict(self._decision_models)),
+            decision_providers=MappingProxyType(dict(self._decision_providers)),
         )

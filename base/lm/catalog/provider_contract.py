@@ -13,6 +13,8 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NotRequired, TypedDict
 
+import httpx
+
 if TYPE_CHECKING:
     # Annotation-only reference (`ProviderBinding.build`): the registration
     # path must not import the LangChain chat-model stack (exec-child boot,
@@ -21,6 +23,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from base.host.env.agent_slices import ModelOverrides
+from base.lm.catalog.decide.types import DecisionBinding, DecisionModelSpec
 from base.lm.registry import ModelSpec
 from base.lm.stop import StopSpec
 
@@ -196,4 +199,35 @@ class ProviderContribution:
 
     binding: ProviderBinding
     models: Mapping[str, ModelSpec]
+    pricing: Mapping[str, PriceRates]
+
+
+@dataclass(frozen=True)
+class DecisionBuildContext:
+    """Construction inputs of a decision binding."""
+
+    model: str
+    spec: DecisionModelSpec
+    timeout: float | None
+    transport: httpx.AsyncBaseTransport | None = None
+    """HTTP transport override; absent means the real network (tests inject a mock)."""
+
+
+@dataclass(frozen=True)
+class DecisionProviderContribution:
+    """What one decision-model provider declares, parallel to ``ProviderContribution``.
+
+    Decision models never enter the chat catalog: no ``ModelSpec``, no ``build_chat_model``
+    dispatch, no spawn dropdown. ``prefix`` owns the ids in ``models`` and is checked for
+    collisions against chat prefixes of other plugins as well as other decision prefixes; a
+    plugin may contribute both a chat provider and a decision provider under the same vendor
+    prefix. ``build(ctx)`` is a pure function of ``ctx`` that raises immediately when the key
+    named by ``key_env`` is missing (``require_key``).
+    """
+
+    prefix: str
+    display_name: str
+    key_env: str
+    build: Callable[[DecisionBuildContext], DecisionBinding]
+    models: Mapping[str, DecisionModelSpec]
     pricing: Mapping[str, PriceRates]
