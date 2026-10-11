@@ -1,30 +1,49 @@
 """Memory search and graph HTTP contracts."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StringConstraints,
 )
+
+from base.api_contracts.memory_search import MemorySearchPurpose
 
 
 class MemorySearchRequest(BaseModel):
     """POST /api/memory/search request — semantic search query."""
 
-    query: str = Field(..., min_length=1, description="natural-language query")
-    k: int = Field(default=5, ge=1, le=100, description="top-k result count")
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = Field(
+        ..., description="natural-language query"
+    )
+    k: int = Field(default=5, ge=1, le=100, description="result count")
+    purpose: MemorySearchPurpose = Field(
+        ...,
+        description=(
+            "why the query was issued: 'recall' (passive recall; the query is the recent "
+            "conversation) or 'search' (an agent's own search); selects the relevance question"
+        ),
+    )
 
 
 class MemorySearchResultItem(BaseModel):
-    """A single search result: file path + the frontmatter a caller can judge the
-    hit by without opening it."""
+    """A single search result: file path, the chunk that matched, its relevance
+    score, and the frontmatter a caller can judge the hit by without opening it."""
 
     path: str = Field(..., description="relative path from memory pool root")
     description: str = Field(default="", description="frontmatter description field, or empty")
     tags: list[str] = Field(
         default_factory=list,
         description="frontmatter tags, including the note's `type/<x>`, or empty",
+    )
+    score: float = Field(
+        ..., ge=0, le=1, description="probability that the matched chunk is relevant to the query"
+    )
+    chunk: str = Field(
+        ...,
+        description="text of the note's best-matching chunk (or its description line), as indexed",
     )
 
 
@@ -35,7 +54,8 @@ class MemorySearchResponse(BaseModel):
     reconstruct absolute paths. fs-neutral makes mismatched gateway
     (e.g. /Users/x) and agent-runner (/home/y) filesystems work.
 
-    `results` carries path, description and tags for each match.
+    `results` carries path, description, tags, score and matched chunk for each
+    match, most relevant first.
     """
 
     results: list[MemorySearchResultItem]

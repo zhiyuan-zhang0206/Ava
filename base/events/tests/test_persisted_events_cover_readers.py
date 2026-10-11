@@ -159,7 +159,7 @@ def test_name_lists_the_readers_pass_are_persisted() -> None:
 
 def test_inspector_metrics_read_only_persisted_events() -> None:
     names = _inspector_names()
-    assert {"llm_usage", "turn_end", "passive_recall", "recall_filter"} <= names
+    assert {"llm_usage", "turn_end", "passive_recall"} <= names
     assert not _unpersisted(names), (
         f"inspector metrics over events without persist=True: {_unpersisted(names)}"
     )

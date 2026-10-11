@@ -2,23 +2,24 @@
 
 Where `memory_index_note` (this plugin's `notes.py`) keeps the standing index
 (MEMORY.md) permanently in front of the agent, passive recall reaches into the
-*rest* of the pool: before a turn woken by new inbound, it runs a semantic
-search keyed on the recent conversation and injects the top matches as a
-system-styled note. Each match carries the pool-relative path and the note's
-frontmatter description -- two of the three fields `ava.memory.search` returns;
-recall deliberately omits tags because the injected note is a pointer, not a tag
-list. The description is empty when the note has none and is never synthesized
-from title/body. The agent
-sees relevant durable notes surface on their own, without having to call
-`ava.memory.search`.
+*rest* of the pool: before a turn woken by new inbound, it searches the pool with
+the recent conversation as the query and injects the notes the gateway's ranking
+scores at or above `memory_recall_inject_threshold`, as a system-styled note.
+The search is the same one `ava.memory.search` runs -- vector retrieval of the
+best chunk of each candidate note, then a decision model that scores every chunk's
+relevance to the conversation -- so recall holds no model call of its own and no
+relevance judgement of its own. Each injected note carries its pool-relative
+path, its frontmatter description (empty when absent, never synthesized from
+title/body), its score and the passage that matched. The agent sees relevant
+durable notes surface on their own, without having to call `ava.memory.search`.
 
 A removable layer: gated by the agent's `passive_memory_recall_enabled` slice field (default
 on), and a no-op whenever the search does not come back with results -- index
-down, gateway erroring, feature off -- so the call site degrades to nothing
-rather than failing the turn. It runs before the LLM on every inbound turn, so a
-search failure that escaped would kill the agent process, not just the recall.
-Same-session dedup is the caller's job (it passes the already-injected paths in
-and persists the ones this call added).
+down, ranking model down, gateway erroring, feature off -- so the call site degrades
+to nothing rather than failing the turn (the next turn tries again). It runs before
+the LLM on every inbound turn, so a search failure that escaped would kill the agent
+process, not just the recall. Same-session dedup is the caller's job (it passes the
+already-injected paths in and persists the ones this call added).
 """
 
 from __future__ import annotations
@@ -31,7 +32,6 @@ from typing import NamedTuple
 
 from langchain_core.messages import AnyMessage, HumanMessage
 
-from agent.graph.recall._memory_filter import Candidate, filter_candidates
 from agent.graph.recall.conversation_query import build_conversation_query
 from agent.messages import NoteTag, system_note_message
 from ava import gateway_client
@@ -41,12 +41,18 @@ from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.paths import memory_dir
 
+# Which notes are injected is decided by score (`memory_recall_inject_threshold`) and bounded
+# by `memory_recall_inject_max`, because notes crowd the context they are meant to inform.
+# The gateway's search request limit on results; recall never asks for more.
+_SEARCH_K_CAP = 100
+
 # Agent-visible framing. Observational, no implementation detail (obeys the SDK
 # docstring discipline since the agent reads this text).
 _FRAMING = (
     "Memory notes related to the current conversation, retrieved "
-    "automatically. These point into your note pool at ava.memory.PATH -- read "
-    "a path in full when it looks relevant."
+    "automatically, each with the passage that matched and its relevance score. "
+    "These point into your note pool at ava.memory.PATH -- read a path in full "
+    "when it looks relevant."
 )
 
 
@@ -63,13 +69,15 @@ class PassiveRecall(NamedTuple):
 
 
 async def _search_or_none(
-    query: str, retrieve_k: int, ctx: AvaContext
+    query: str, k: int, ctx: AvaContext
 ) -> list[gateway_client.MemorySearchResult] | None:
     """The memory-pool search results, or None when the search is unavailable or failed."""
     import httpx  # deferred: stays off the child boot path
 
     try:
-        return await asyncio.to_thread(gateway_client.memory_search, query, retrieve_k, context=ctx)
+        return await asyncio.to_thread(
+            gateway_client.memory_search, query, k, purpose="recall", context=ctx
+        )
     except (GatewayUnavailable, IndexerUnavailable) as exc:
         # Recall is an enhancement; a memory-index outage must not crash the
         # turn. Skip this turn and let the next one retry. Debug level because
@@ -108,22 +116,43 @@ async def _search_or_none(
         return None
 
 
-def _local_candidates(
+def _qualifying(
     results: list[gateway_client.MemorySearchResult],
-) -> tuple[list[Candidate], dict[str, str]]:
-    """The search results whose file is on this machine, with their descriptions by path."""
+    *,
+    threshold: float,
+    already: Collection[str],
+    limit: int,
+) -> list[gateway_client.MemorySearchResult]:
+    """The results to inject: best score first, at or above `threshold`, not injected
+    before, present on this machine, at most `limit`.
+
+    Search can return a path not yet synced to this machine; it is skipped (it will
+    be recallable once it arrives).
+    """
     root = memory_dir()
-    candidates: list[Candidate] = []
-    by_path: dict[str, str] = {}
-    for item in results:
-        rel = item.path
-        if not (root / rel).is_file():
-            # Search can return a path not yet synced to this machine; skip it
-            # (it will be recallable once it arrives).
+    picked: list[gateway_client.MemorySearchResult] = []
+    for item in sorted(results, key=lambda r: r.score, reverse=True):
+        if item.score < threshold or len(picked) >= limit:
+            break
+        if item.path in already or not (root / item.path).is_file():
             continue
-        candidates.append(Candidate(path=rel, description=item.description, tags=list(item.tags)))
-        by_path[rel] = item.description
-    return candidates, by_path
+        picked.append(item)
+    return picked
+
+
+def _render_entry(item: gateway_client.MemorySearchResult) -> str:
+    """One injected note: path, description and score, then the passage that matched.
+
+    The passage is omitted when it is the description itself. Tags are left out: the
+    injected note is a pointer, not a tag list.
+    """
+    header = f"- {item.path} (score {item.score:.2f})"
+    if item.description:
+        header += f": {item.description}"
+    if not item.chunk or item.chunk == item.description:
+        return header
+    passage = "\n".join(f"  > {line}" if line else "  >" for line in item.chunk.splitlines())
+    return f"{header}\n{passage}"
 
 
 async def passive_memory_recall(
@@ -131,88 +160,62 @@ async def passive_memory_recall(
     *,
     agent: AgentSlices,
     context: AvaContext,
-    log_key: bytes,
     injected_paths: Collection[str] = frozenset(),
 ) -> PassiveRecall | None:
-    """Search the memory pool on the recent conversation and render the fresh
-    top matches as a note to inject, or `None` when there is nothing to add.
+    """Search the memory pool on the recent conversation and render the notes that
+    clear the score threshold as a note to inject, or `None` when there is nothing
+    to add.
 
     `None` when: the feature is disabled, the conversation yields no query, the
-    search failed (index unavailable, or the gateway answered with an error
-    status), or every match is already in `injected_paths` (or not present on
-    this machine yet). `injected_paths` and the returned `PassiveRecall.paths`
-    are memory-pool-relative. `log_key` keys the query HMAC the filter logs (`AvaContext.recall_log_key`).
+    search failed (index or ranking model unavailable, or the gateway answered with
+    an error status), or no match both reaches `memory_recall_inject_threshold`
+    and is new to this session and present on this machine. `injected_paths` and the
+    returned `PassiveRecall.paths` are memory-pool-relative.
 
     Never raises on a failed search: the caller is a before_llm hook, so an
     exception here ends the agent process rather than the recall.
     """
-    if agent.sandbox.eval_isolation or not agent.memory.passive_memory_recall_enabled:
+    memory = agent.memory
+    if agent.sandbox.eval_isolation or not memory.passive_memory_recall_enabled:
+        return None
+    if memory.memory_recall_inject_max == 0:
         return None
     query = build_conversation_query(messages)
     if not query:
         return None
-    retrieve_k = agent.memory.memory_recall_retrieve_k
+    already = set(injected_paths)
+    # Notes already injected still rank, so ask for enough results to fill the cap after
+    # they are set aside.
+    k = min(memory.memory_recall_inject_max + len(already), _SEARCH_K_CAP)
     search_started = time.monotonic()
-    results = await _search_or_none(query, retrieve_k, context)
+    results = await _search_or_none(query, k, context)
     if results is None:
         return None
+    search_ms = round((time.monotonic() - search_started) * 1000)
 
-    # Cheap local reject: a file that has not reached this machine yet is
-    # dropped before the filter is asked to judge it -- it cannot be injected
-    # either way. Already-injected paths are NOT dropped here: the filter must
-    # judge the full candidate set, or a second message close to the first
-    # would have its best matches pre-removed and inject unrelated notes that
-    # merely outranked the deduped ones. Dedup happens after the filter, on
-    # what the filter judged relevant.
-    candidates, by_path = _local_candidates(results)
-    if not candidates:
-        return None
-
-    search_ms = (time.monotonic() - search_started) * 1000
-    filter_started = time.monotonic()
-    picked = await filter_candidates(
-        query,
-        candidates,
-        agent.memory,
-        log_key,
-        catalog=context.require_catalog(),
-        overrides=agent.overrides,
-        llm_override=agent.read("lm", "llm_override"),
+    picked = _qualifying(
+        results,
+        threshold=memory.memory_recall_inject_threshold,
+        already=already,
+        limit=memory.memory_recall_inject_max,
     )
-    # Leg timings keep the recall pass diagnosable from its events alone: the
-    # search leg is the one a congested gateway stretches (a fleet wake queues
-    # searches behind the search endpoint's semaphore), the filter leg is a
-    # model call with its own bound. Both sit in front of the turn's first LLM.
+    # The search leg is the one a congested gateway stretches (a fleet wake queues
+    # searches behind the search endpoint's semaphore) and it now includes the ranking
+    # model's call; it sits in front of the turn's first LLM.
     logger.info(
         "[{label}] {body}",
         label="passive-recall",
-        body=f"search {search_ms:.0f}ms, filter {(time.monotonic() - filter_started) * 1000:.0f}ms",
+        body=f"search {search_ms}ms, {len(results)} result(s) -> {len(picked)} injected",
         event="passive_recall",
-        search_ms=round(search_ms),
-        filter_ms=round((time.monotonic() - filter_started) * 1000),
+        search_ms=search_ms,
+        injected=len(picked),
     )
     if not picked:
-        # The filter judged none of them relevant. Injecting nothing is the
-        # point: an unfiltered recall always had something to show.
         return None
 
-    # Dedup now, on what the filter judged relevant: a note already injected
-    # this session is dropped; if everything the filter picked is already in
-    # front of the agent, there is nothing new to add.
-    already = set(injected_paths)
-    fresh = [rel for rel in picked if rel not in already]
-    if not fresh:
-        return None
-
-    # Present path + frontmatter description -- two of the three fields
-    # ava.memory.search returns. Recall deliberately omits tags because the
-    # injected note is a pointer, not a tag list. The description stays empty
-    # when absent rather than being synthesized from title/body.
-    lines = [f"- {rel}: {by_path[rel]}" if by_path[rel] else f"- {rel}" for rel in fresh]
-    fresh_set = set(fresh)
     note = system_note_message(
-        content=f"{_FRAMING}\n\n" + "\n".join(lines),
+        content=f"{_FRAMING}\n\n" + "\n".join(_render_entry(item) for item in picked),
         tag=NoteTag.MEMORY,
         created_at=datetime.now(UTC),
     )
-    return PassiveRecall(note=note, paths=fresh_set)
+    return PassiveRecall(note=note, paths={item.path for item in picked})

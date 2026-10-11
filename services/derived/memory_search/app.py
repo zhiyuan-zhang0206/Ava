@@ -226,15 +226,15 @@ def build_app(store: MemoryStore, max_batch_rows: int, *, embedding_dim: int) ->
             return store.all_meta()
 
     @app.post("/search")
-    async def search(body: SearchBody) -> dict[str, list[str]]:
+    async def search(body: SearchBody) -> dict[str, list[dict[str, str | int | float]]]:
         vector = np.asarray(body.vector, dtype=np.float32)
         try:
             async with lock:
-                paths = store.search_topk(vector, body.k)
+                hits = store.search_topk(vector, body.k)
         except ValueError as exc:
             from fastapi import HTTPException
 
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"paths": paths}
+        return {"hits": [hit._asdict() for hit in hits]}
 
     return app

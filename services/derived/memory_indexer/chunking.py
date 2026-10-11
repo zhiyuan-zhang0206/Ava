@@ -110,3 +110,16 @@ def _file_rows(content: str) -> list[tuple[str, int, str]]:
     for i, chunk in enumerate(_chunk_body(body)):
         rows.append((KIND_BODY, i, chunk))
     return rows
+
+
+def chunk_text(content: str, kind: str, chunk_idx: int) -> str | None:
+    """The text of one indexed row of a file, restored from its current content.
+
+    `kind` and `chunk_idx` are the coordinates a search hit carries. Returns None
+    when the file no longer produces that row (it was edited since it was
+    indexed), so a caller never pairs a stale row with unrelated text.
+    """
+    for row_kind, row_idx, text in _file_rows(content):
+        if row_kind == kind and row_idx == chunk_idx:
+            return text
+    return None

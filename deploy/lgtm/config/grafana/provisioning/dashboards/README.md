@@ -50,8 +50,8 @@ restored by task #3689). All sections are **expanded by default**
    delivery-stalled total, SSE backlog, and the Max Agent ID growth curve
    (the events-maintenance service's 60s `agent_registry` gauge + its deriv rate, task #2010).
 5. **`ava_fleet`** — the task-completion-rate panel.
-6. **`ava_memory`** — recall-filter runs / empty ratio / error ratio /
-   failures plus the passive-recall search and filter latencies.
+6. **`ava_memory`** — passive-recall runs / empty ratio / deadline-skip ratio /
+   skips plus the search latency and the notes injected per pass.
 7. **`ava_syntax_fix`** — the syntax-fix metric panels: fix count (per minute)
    and fixes (window).
 8. **`Host & data plane`** — the former `ava-host-dataplane` panels: host
@@ -238,8 +238,8 @@ of mass-editing targets.
 
 Shipped examples: `ava_builtins/plugins/ava_syntax_fix/metrics.py` (syntax_fix
 trend/stat), `ava_builtins/plugins/ava_fleet/metrics.py` (task completion
-rate), `ava_builtins/plugins/ava_memory/metrics.py` (recall-filter runs /
-empty ratio / error ratio plus passive-recall search and filter latency).
+rate), `ava_builtins/plugins/ava_memory/metrics.py` (passive-recall runs /
+empty ratio / deadline-skip ratio plus search latency and notes injected).
 
 ## Layout
 

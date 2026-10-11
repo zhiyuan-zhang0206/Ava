@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Sequence
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 import numpy as np
 
@@ -39,6 +39,21 @@ _SEP = "\x1f"
 
 _PK_MAX_LENGTH = 2048
 """pk = path (≤1024) + sep + kind (≤16) + sep + chunk_idx — 2048 fits the worst case."""
+
+
+class ChunkHit(NamedTuple):
+    """The best-scoring chunk row of one file in a top-k search.
+
+    path: the file path as stored in the index.
+    kind: `KIND_DESC` or `KIND_BODY` — which row of the file scored best.
+    chunk_idx: the row's index within its kind (always 0 for `KIND_DESC`).
+    score: cosine similarity of the row to the query vector (higher is closer).
+    """
+
+    path: str
+    kind: str
+    chunk_idx: int
+    score: float
 
 
 def content_hash(text: str) -> str:
@@ -64,7 +79,7 @@ class MemorySearchBackend(Protocol):
 
     The write path is the indexer daemon's (`upsert` / `upsert_many` / `delete` /
     `all_meta`); the read path is the gateway's (`search_topk` returns
-    top-k **paths**, aggregated over chunk rows). Backends may implement
+    the top-k files as `ChunkHit`s — each file's best chunk row). Backends may implement
     the async variant with internal thread pooling — no true-async
     requirement beyond never blocking a caller's event loop. The factory
     owns construction; callers only `connect` / use / `close`.
@@ -129,8 +144,11 @@ class MemorySearchBackend(Protocol):
         ...
 
     # Read path (gateway).
-    def search_topk(self, query_vector: np.ndarray, k: int) -> list[str]: ...
+    def search_topk(self, query_vector: np.ndarray, k: int) -> list[ChunkHit]:
+        """The k best files, each represented by its best-scoring chunk row,
+        most similar first. Fewer than k when the index holds fewer files."""
+        ...
 
     async def search_topk_async(
         self, query_vector: np.ndarray, k: int, *, timeout: float
-    ) -> list[str]: ...
+    ) -> list[ChunkHit]: ...

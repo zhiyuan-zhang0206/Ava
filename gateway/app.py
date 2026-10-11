@@ -206,6 +206,8 @@ def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
         api_key=memory_api_key,
         acquire_timeout=lambda: config.view.services.memory_search_acquire_timeout_seconds,
         deadline=lambda: config.view.services.memory_search_deadline_seconds,
+        rerank_model=lambda: config.view.services.memory_rerank_model,
+        rerank_candidates=lambda: config.view.services.memory_rerank_candidates,
     )
     app.state.memory_graph_cache = memory_router.MemoryGraphCache()
     app.state.auth401_log = rejection_log.AuthRejectionLog()

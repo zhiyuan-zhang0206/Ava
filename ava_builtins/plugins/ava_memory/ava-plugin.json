@@ -16,13 +16,13 @@
       "memory_discipline_section"
     ],
     "metrics": [
-      "ava_memory_recall_filter_runs",
+      "ava_memory_recall_runs",
       "ava_memory_recall_search_latency_ms",
-      "ava_memory_recall_filter_latency_ms",
-      "ava_memory_recall_filter_empty_rate",
-      "ava_memory_recall_filter_anomaly_rate",
-      "ava_memory_recall_filter_failures",
-      "ava_memory_recall_filter_agent_runs"
+      "ava_memory_recall_injected_notes",
+      "ava_memory_recall_empty_rate",
+      "ava_memory_recall_deadline_skip_rate",
+      "ava_memory_recall_deadline_skips",
+      "ava_memory_recall_agent_runs"
     ],
     "config": {
       "schema": "default_config.py"

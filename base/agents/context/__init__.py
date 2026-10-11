@@ -14,8 +14,8 @@ dependencies as `runtime.context.X`:
 - **`identity`**: who the run acts as (`AgentIdentity`);
 - **`clients`**: the lazily-built connections the process holds (SQL, Redis, gateway HTTP, and the
   SDK layer's own), closed with `close()`.
-- **host-held state** the graph reads or writes across turns: `turn_progress`, `relays`,
-  `recall_log_key`. The host builds each once and hands the same object to every turn it runs;
+- **host-held state** the graph reads or writes across turns: `turn_progress`, `relays`.
+  The host builds each once and hands the same object to every turn it runs;
   a context built without them (the eval driver, a test) carries private ones.
 
 The exec child holds the same type. The host puts `describe()` of the turn's context in the exec
@@ -30,7 +30,6 @@ separate dataclass.
 
 from __future__ import annotations
 
-import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
@@ -216,11 +215,6 @@ class AvaContext:
     relays: RelaySupervision = field(default_factory=RelaySupervision)
     """The impersonation relays this process spawned and its start clock, read by the claim gate
     and the host's supervision."""
-
-    recall_log_key: bytes = field(default_factory=lambda: secrets.token_bytes(32))
-    """The key behind the passive-recall log's query HMAC. One per host process, so repeated
-    filter decisions can be joined within it without making low-entropy conversation text
-    dictionary-reversible from telemetry."""
 
     def require_db(self) -> Database:
         """The cluster database handle; a context built without one fails here."""

@@ -127,7 +127,7 @@ When other agents complete tasks, they may generate knowledge that needs to be w
 ### 4. Query Service
 
 Other agents can send queries via `send_message`:
-- "Search for notes about X" → run `ava.memory.search("X")`, return results
+- "Search for notes about X" → run `ava.memory.search("X")`, return the matches worth reading (path, score, matched chunk)
 - "Is there a record about Y?" → same as above
 - "Remember Z for me" → create a note
 

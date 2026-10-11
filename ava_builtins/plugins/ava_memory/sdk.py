@@ -10,7 +10,7 @@ import tempfile
 from collections.abc import Callable, Sized
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import NamedTuple, cast
 
 import yaml
 
@@ -22,7 +22,7 @@ from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.agents import IndexerUnavailable as IndexerUnavailable
 from base.paths import ava_home as _ava_home
 
-__all_for_ava__ = ["PATH", "search", "write"]
+__all_for_ava__ = ["PATH", "MemoryMatch", "search", "write"]
 
 
 _PATH_DOC = """When the pool spans machines, notes sync within about a day — a path `search`
@@ -62,19 +62,39 @@ def _pool_root() -> Path:
     return globals().get("PATH") or __getattr__("PATH")
 
 
-def _search(
-    query: str, k: int = 5, *, timeout: float | None = None
-) -> list[tuple[Path, str, list[str]]]:
-    """Find relevant shared memory notes.
+class MemoryMatch(NamedTuple):
+    """One search result: a note and the passage of it that matched.
 
-    Return (absolute path, description, tags) for each match; missing descriptions
-    are empty strings. Tags include the note's `type/<x>` tag. `timeout` bounds each
-    search attempt in seconds; omit it to use the configured limit."""
+    path: absolute path of the note.
+    description: the note's description; empty when it has none.
+    tags: the note's tags, including its `type/<x>` tag.
+    score: probability from 0 to 1 that the passage is relevant to the query.
+    chunk: the matched passage of the note, or its description line.
+    """
+
+    path: Path
+    description: str
+    tags: list[str]
+    score: float
+    chunk: str
+
+
+def _search(query: str, k: int = 5, *, timeout: float | None = None) -> list[MemoryMatch]:
+    """Find shared memory notes relevant to a query.
+
+    Return up to `k` matches, most relevant first. Each is judged on its best passage,
+    so a high score means that passage is relevant, not that the whole note is. Matches
+    are returned whatever their score; use `score` to decide how much weight a weak one
+    deserves. `timeout` bounds each search attempt in seconds; omit it to use the
+    configured limit."""
     query = coerce_str(query, "query")
     k = coerce_typed(k, "k", int)
     timeout = coerce_typed(timeout, "timeout", (int, float), allow_none=True)
-    results = _client.memory_search(query, k, timeout=timeout)
-    return [(_pool_root() / r.path, r.description, list(r.tags)) for r in results]
+    results = _client.memory_search(query, k, purpose="search", timeout=timeout)
+    return [
+        MemoryMatch(_pool_root() / r.path, r.description, list(r.tags), r.score, r.chunk)
+        for r in results
+    ]
 
 
 # Public binding — the plugin's wrap("memory.search", ...) replaces this name,
