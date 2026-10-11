@@ -88,14 +88,12 @@ def _self_evolution_names() -> set[str]:
 def _parameter_lists() -> dict[str, set[str]]:
     from base.telemetry.metrics import aggregate_sql
     from gateway.lgtm import telemetry_staleness
-    from services.upkeep.events_maintenance import observed_metrics
 
     return {
         "aggregate_sql.EXEC_FAILURE_EVENTS": set(aggregate_sql.EXEC_FAILURE_EVENTS),
         "aggregate_sql.LIFECYCLE_EVENTS": set(aggregate_sql.LIFECYCLE_EVENTS),
         "ops_series LLM error family": set(family_events(LLM_ERROR_FAMILY)),
         "telemetry_staleness.HEARTBEAT_EVENT": {telemetry_staleness.HEARTBEAT_EVENT},
-        "observed_metrics recovery scan": set(observed_metrics._EVENT_NAMES),
         "ava-self-evolution record.py": _self_evolution_names(),
     }
 

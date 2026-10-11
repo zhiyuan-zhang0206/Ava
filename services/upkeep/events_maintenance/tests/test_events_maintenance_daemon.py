@@ -14,13 +14,16 @@ monkeypatched, so these are pure asyncio-loop tests.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
@@ -238,7 +241,6 @@ def _instrument_maintenance_slices(
     fake results are the shapes the pass's logging branches read (empty/zero so
     nothing logs)."""
     rec = {
-        "observed_metrics": _CallRecorder(0),
         "telemetry_events": _CallRecorder(0),
         "rollup": _CallRecorder(
             SimpleNamespace(start_day=None, end_day=None, metrics_rows=0, tokens_rows=0)
@@ -247,7 +249,6 @@ def _instrument_maintenance_slices(
         "vacuum": _CallRecorder(SimpleNamespace(ran=False, summary=lambda: "")),
         "emit_sizes": _CallRecorder(None),
     }
-    monkeypatch.setattr(daemon, "recover_observations", rec["observed_metrics"])
     monkeypatch.setattr(daemon, "recover_telemetry_events", rec["telemetry_events"])
     monkeypatch.setattr(daemon, "compute_rollup", rec["rollup"])
     monkeypatch.setattr(daemon, "fold_totals", rec["fold"])
@@ -262,7 +263,7 @@ def test_maintenance_pass_runs_unconditional_slices(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The hourly pass always runs the metric and telemetry-event recoveries, the cost-ledger
+    """The hourly pass always runs the telemetry-event replay, the cost-ledger
     rollup, the size telemetry sample, and blob vacuum. Checkpoint pruning belongs only
     to the fast loop; the hourly pass must not run a second retention rule."""
     rec = _instrument_maintenance_slices(monkeypatch)
@@ -285,7 +286,6 @@ def test_maintenance_pass_runs_unconditional_slices(
     )  # every slice faked
 
     for name in (
-        "observed_metrics",
         "telemetry_events",
         "rollup",
         "fold",
@@ -293,8 +293,51 @@ def test_maintenance_pass_runs_unconditional_slices(
         "emit_sizes",
     ):
         assert rec[name].calls == 1, name
-    assert beats == 5  # one per slice group: both recoveries, rollup, sizes, vacuum
+    assert beats == 4  # one per slice group: the replay, rollup, sizes, vacuum
     assert progress.snapshot()["last_success_at"] is not None
+
+
+class _ConnPool:
+    """A pool lending one live connection without closing it."""
+
+    def __init__(self, conn: psycopg.Connection) -> None:
+        self._conn = conn
+
+    @contextmanager
+    def connection(self) -> Generator[psycopg.Connection]:
+        yield self._conn
+
+
+def test_maintenance_pass_does_not_rebuild_missed_observations(
+    db_conn: psycopg.Connection,
+    process_config: ConfigBoot,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    """An event the live projection missed stays absent from `agent_metric_observations`
+    however many maintenance passes run: nothing re-derives observations from
+    `telemetry_events`."""
+    agent = db_conn.execute("INSERT INTO agents(label) VALUES ('missed') RETURNING id").fetchone()
+    assert agent is not None
+    db_conn.execute(
+        "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
+        "category, event_name, level, source, attributes) VALUES (1, now(), %s, 'm', 'c', 'p', "
+        "'telemetry', 'llm_usage', 'info', 'test', %s::jsonb)",
+        (agent[0], json.dumps({"in_total": 5, "out_total": 2, "cost_usd": 0.25})),
+    )
+    db_conn.commit()
+    _instrument_maintenance_slices(monkeypatch)
+
+    for _ in range(2):
+        daemon._run_maintenance(
+            cast(ConnectionPool, _ConnPool(db_conn)),
+            LoopProgress("dispatch", timeout_s=60.0),
+            events_maintenance_config(process_config),
+            events_maintenance_db(process_config, local_machine=machine_identity),
+        )
+
+    assert db_conn.execute("SELECT count(*) FROM agent_metric_observations").fetchone() == (0,)
 
 
 def test_loop_components_report_fresh_loops_as_ok(monkeypatch: pytest.MonkeyPatch) -> None:
