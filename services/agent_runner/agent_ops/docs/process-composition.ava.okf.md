@@ -59,3 +59,9 @@ The shared machine-token acceptance policy and model-catalog bootstrap remain
 separate legacy readers. This change does not alter their security or initialization
 contracts. It removes this component's direct ambient endpoint/database/bus builders,
 not the three global Config baseline entries.
+
+The ops entry serves one health/RPC server. It does not construct startup DB/bus
+handles for a retired outbox loop or restore the old resident replay TaskGroup.
+The original primary-error and resource cleanup contract now applies to that
+single serving loop. Request-time lifecycle arms still borrow the explicit
+factory and authority at their original construction points.
