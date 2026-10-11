@@ -27,7 +27,7 @@ _PageName = Annotated[
 
 
 class PageRegisterRequest(BaseModel):
-    """POST /api/agents/{aid}/pages request body — SDK ava.ui.show / .serve call.
+    """POST /api/keyed/v1/agents/{aid}/pages request body — SDK ava.ui.show / .serve call.
 
     `host`: the agent-runner's reachable address (the agent self-reports
         it) — where the gateway's reverse proxy dials the page server

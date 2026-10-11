@@ -48,18 +48,27 @@ class FakeGateway:
         self.notices: list[dict[str, Any]] = []
         self.open_notices: list[dict[str, Any]] = []
         self.resolved: list[tuple[int, int, str, str | None]] = []
+        self.resolve_headers: list[dict[str, str]] = []
         self.resolve_failures = resolve_failures
         self._client = None
 
-    async def post(self, path: str, json: dict[str, Any] | None = None, **_: Any) -> Any:
+    async def post(
+        self,
+        path: str,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        **_: Any,
+    ) -> Any:
         if self.resolve_failures > 0:
             self.resolve_failures -= 1
             raise RuntimeError("resolve failed (notice already handled)")
         parts = path.split("/")
-        agent_id = int(parts[3])
-        notice_id = int(parts[5])
+        assert parts[:4] == ["", "api", "keyed", "v1"] and parts[4] == "agents"
+        agent_id = int(parts[5])
+        notice_id = int(parts[7])
         body = json or {}
         self.resolved.append((agent_id, notice_id, body["action"], body.get("reply")))
+        self.resolve_headers.append(headers or {})
         return _Resp(None)
 
 
@@ -223,6 +232,8 @@ async def test_reply_mode_window_resolves_notice(
         out = await bridge.handle_inbound("12345", "\u6211\u540c\u610f")
         assert out is not None
         assert gateway.resolved == [(7, 42, "answer", "\u6211\u540c\u610f")]
+        assert gateway.resolve_headers[0]["Idempotency-Scope"] == "principal-v1"
+        assert gateway.resolve_headers[0]["Idempotency-Key"]
         assert "12345" not in bridge._reply_modes
 
 

@@ -23,9 +23,10 @@ negotiation or a status-based substitute for source evidence.
 with explicit `principal-v1` scope on the fixed `compact-history` route. The
 202 canonical receipt must match that source. Retain this target/key after
 uncertainty; another observation can select different history and must not
-replace the original retry inputs. The SDK never falls back to legacy compact
-or retries an ambiguous response automatically. Connect-family transport
-retries keep the exact source and key. Separate intents use separate keys.
+replace the original retry inputs. The SDK never falls back to another compact
+route. Transport retries (connection failures and ambiguous outcomes) keep the
+exact source and key, and the gateway replays the original acceptance. Separate
+intents use separate keys.
 
 `status` targets the receipt's original command and validates the returned
 `CompactStatus`, including its matching immutable acceptance. The canonical

@@ -101,8 +101,10 @@ def test_resolve_posts_action(
 
     assert cmd_notices_resolve(notice_id=5, agent_id=7, action="read", reply=None) == 0
     url, kw = dial["post"][0]
-    assert url == "http://gw/api/agents/7/notices/5/resolve"
+    assert url == "http://gw/api/keyed/v1/agents/7/notices/5/resolve"
     assert kw["json"] == {"action": "read", "reply": None}
+    assert kw["headers"]["Idempotency-Key"]
+    assert kw["headers"]["Idempotency-Scope"] == "principal-v1"
     assert "resolved" in capsys.readouterr().out
 
 
@@ -136,7 +138,7 @@ def test_resolve_rejects_conflicts_without_claiming_success(
         cmd_notices_resolve(notice_id=5, agent_id=7, action=action, reply=reply)
 
     assert error.value.response.json() == {"detail": detail}
-    assert calls == ["http://gw/api/agents/7/notices/5/resolve"]
+    assert calls == ["http://gw/api/keyed/v1/agents/7/notices/5/resolve"]
     assert capsys.readouterr().out == ""
 
 
@@ -233,7 +235,7 @@ def test_clear_stale_resolves_only_terminated(monkeypatch: pytest.MonkeyPatch) -
     assert cmd_notices_clear(agent_id=None, force=True, stale=True) == 0
     assert len(posted) == 1
     url, body = posted[0]
-    assert url == "http://gw/api/agents/7/notices/1/resolve"
+    assert url == "http://gw/api/keyed/v1/agents/7/notices/1/resolve"
     assert body == {"action": "dismiss", "reply": None}
 
 

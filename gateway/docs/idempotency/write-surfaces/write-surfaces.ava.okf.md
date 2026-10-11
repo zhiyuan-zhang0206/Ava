@@ -16,8 +16,8 @@ Versioned routes: [[guarded-creation.ava.okf.md]], [[guarded-pages.ava.okf.md]] 
 [[guarded-notices.ava.okf.md]] and [[guarded-uploads.ava.okf.md]].
 
 Preset/schedule receipts are optional; their routes remain `NON_IDEMPOTENT`.
-Keyless calls stay legacy. Ambiguous retry activation awaits negotiation; older
-gateways may ignore keys.
+Keyless calls stay one-shot with no retry promise; a supplied key must carry
+`Idempotency-Scope: principal-v1`.
 Observed lifecycle routes: [[guarded-lifecycle.ava.okf.md]].
 Owners:
 [[gateway/routers/docs/resource-creation.ava.okf.md]] and
@@ -50,16 +50,10 @@ Owners:
 | `POST /api/agents/{agent_id}/resurrect` | one-shot | resurrection is not bound to the observed incarnation |
 | `POST /api/agents/{agent_id}/restart` | one-shot | a repeat dispatches another restart; HTTP intent has no durable receipt |
 | `POST /api/agents/{agent_id}/understanding/build` | natural | jobs and the pending rebuild merge into live ones; a repeat only records a build |
-| `POST /api/mcp/clients` | one-shot | client creation — plaintext token is revealed once |
 | `POST /api/mcp/clients/{client_id}/revoke` | natural | client revocation — guarded update; repeats cannot revoke twice |
 | `POST /api/memory/refresh` | natural | re-scan — repeats are harmless |
 | `POST /api/memory/search` | natural | pure read |
-| `POST /api/agents/{agent_id}/notices/{notice_id}/resolve` | keyed | operation receipt and reply inbound commit together; intentional later replies use new keys |
 | `POST /api/agents/{agent_id}/notices` | keyed | immutable request and original notice snapshot replay before mutable expiry/task checks |
-| `PATCH /api/agents/{agent_id}/notices/current` | one-shot | retry can edit a newer current notice |
-| `POST /api/agents/{agent_id}/notices/current/dismiss` | one-shot | retry can withdraw a newer current notice |
-| `POST /api/agents/{agent_id}/pages` | one-shot | replaces current page; replay may close newer work; no receipt |
-| `DELETE /api/agents/{agent_id}/pages/{name}` | one-shot | name-based close can affect a later registration |
 | `POST /api/presets` | one-shot | optional keyed creation receipt commits with the resource; replay returns original identity after rename/delete |
 | `PATCH /api/presets/{preset_id}` | natural | update — repeats are harmless |
 | `DELETE /api/presets/{preset_id}` | natural | delete — repeats are harmless |
@@ -75,4 +69,4 @@ Owners:
 | `POST /api/agents/{agent_id}/messages/reconcile` | natural | idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery |
 | `POST /api/agents/{agent_id}/system-note` | keyed | optional principal-scoped identity reuses one system-note inbound; changed payload or resurrection policy conflicts |
 | `PATCH /api/tasks/{task_id}` | keyed / transactional | receipt commits with task and notification; replay skips writes and wakes |
-| `POST /api/agents/{agent_id}/uploads` | one-shot | [upload acceptance owner](../../../routers/docs/upload-batches.ava.okf.md) |
+| `POST /api/agents/{agent_id}/uploads` | keyed / receipt | silent save under a required principal-v1 key; [upload acceptance owner](../../../routers/docs/upload-batches.ava.okf.md) |

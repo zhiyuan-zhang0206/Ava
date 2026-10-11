@@ -18,8 +18,10 @@ import http.server
 import socket
 import socketserver
 import threading
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import httpx
 import psycopg
@@ -39,6 +41,29 @@ from gateway.routers import pages as pages_router
 from tests.fixtures.unit.gateway_auth import without_credentials
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
+
+
+def _keyed_headers() -> dict[str, str]:
+    return {"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"}
+
+
+def _post_page(client: TestClient, agent_id: int, body: dict[str, Any]) -> Any:
+    """Register a page through the keyed route, one fresh operation key per call."""
+    return client.post(
+        f"/api/keyed/v1/agents/{agent_id}/pages", json=body, headers=_keyed_headers()
+    )
+
+
+def _close_page(client: TestClient, agent_id: int, name: str) -> Any:
+    """Observe the agent's open page `name`, then close exactly that registry row."""
+    opened = {
+        page["name"]: page["id"] for page in client.get(f"/api/agents/{agent_id}/pages").json()
+    }
+    return client.post(
+        f"/api/keyed/v1/agents/{agent_id}/pages/{name}/close",
+        json={"expected_page_id": opened[name]},
+        headers=_keyed_headers(),
+    )
 
 
 def test_machine_dial_host_cache_evicts_least_recently_used_machine() -> None:
@@ -140,10 +165,7 @@ def page_server(tmp_path: Path) -> Iterator[int]:
 
 
 def _register(client: TestClient, agent_id: int, name: str, port: int) -> None:
-    resp = client.post(
-        f"/api/agents/{agent_id}/pages",
-        json={"name": name, "port": port, "host": "127.0.0.1"},
-    )
+    resp = _post_page(client, agent_id, {"name": name, "port": port, "host": "127.0.0.1"})
     assert resp.status_code == 201
 
 
@@ -152,10 +174,7 @@ def test_proxy_serves_page_content(db_conn, page_server: int) -> None:
     nested path, and query string all work."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": page_server, "host": "127.0.0.1"},
-        )
+        resp = _post_page(client, aid, {"name": "p", "port": page_server, "host": "127.0.0.1"})
     assert resp.status_code == 201
     # The registered URL is the gateway's own — no host:port leak.
     assert resp.json()["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-p/"
@@ -222,7 +241,7 @@ def test_proxy_404_closed_page(db_conn, page_server: int) -> None:
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         _register(client, aid, "p", page_server)
-        client.delete(f"/api/agents/{aid}/pages/p")
+        _close_page(client, aid, "p")
         resp = client.get(f"/pages/{aid}-p/")
     assert resp.status_code == 404
 
@@ -325,10 +344,7 @@ def test_proxy_502_when_page_server_unreachable(db_conn) -> None:
     free_port = probe.getsockname()[1]
     probe.close()
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": free_port, "host": "127.0.0.1"},
-        )
+        resp = _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
         assert resp.status_code == 201
         resp = client.get(f"/pages/{aid}-p/")
     assert resp.status_code == 502
@@ -352,10 +368,7 @@ def test_proxy_502_friendly_copy_en_when_display_language_en(
     free_port = probe.getsockname()[1]
     probe.close()
     with TestClient(app) as client:
-        resp = client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": free_port, "host": "127.0.0.1"},
-        )
+        resp = _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
         assert resp.status_code == 201
         resp = client.get(f"/pages/{aid}-p/")
     assert resp.status_code == 502
@@ -386,10 +399,7 @@ def test_proxy_502_emits_structured_log_line(db_conn) -> None:
     sink_id = _loguru.add(_capture, level="WARNING")
     try:
         with TestClient(app) as client:
-            client.post(
-                f"/api/agents/{aid}/pages",
-                json={"name": "p", "port": free_port, "host": "127.0.0.1"},
-            )
+            _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
             client.get(f"/pages/{aid}-p/")
     finally:
         _loguru.remove(sink_id)
@@ -436,10 +446,7 @@ def test_proxy_504_timeout_friendly_copy_and_log(
     monkeypatch.setattr(httpx.AsyncClient, "send", _send_times_out)
     try:
         with TestClient(app) as client:
-            client.post(
-                f"/api/agents/{aid}/pages",
-                json={"name": "p", "port": free_port, "host": "127.0.0.1"},
-            )
+            _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
             resp = client.get(f"/pages/{aid}-p/")
     finally:
         _loguru.remove(sink_id)
@@ -477,10 +484,7 @@ def test_proxy_502_language_lookup_failure_falls_back_to_default(
     free_port = probe.getsockname()[1]
     probe.close()
     with TestClient(app) as client:
-        client.post(
-            f"/api/agents/{aid}/pages",
-            json={"name": "p", "port": free_port, "host": "127.0.0.1"},
-        )
+        _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
         resp = client.get(f"/pages/{aid}-p/")
     assert resp.status_code == 502
     assert resp.json()["detail"] == PAGE_SERVER_DOWN_BODY[PAGE_LANGUAGE_DEFAULT]

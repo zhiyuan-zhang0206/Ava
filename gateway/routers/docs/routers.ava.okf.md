@@ -62,7 +62,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 - **memory** (`/api/memory/search`, `/refresh`, `/graph`) — Memory pool search/refresh/graph
 - **commands** (`/api/commands`) — slash command list acceptable by composer
 - **auth** (`/api/auth/login|logout|check|sessions`) — opaque server-side session login, validation, listing, and per-session revocation
-- **uploads** (`/api/agents/{id}/uploads`) — [[upload-batches.ava.okf.md|keyed silent batch acceptance]] and legacy file upload; notifications name the machine owning each path. Remote runner pulls are tracked per filename; a failed pull retains the gateway location and authenticated download route without shifting another file's path.
+- **uploads** (`/api/agents/{id}/uploads`) — [[upload-batches.ava.okf.md|keyed silent batch acceptance]] and the saved-file download; delivery to the agent is the keyed `/api/keyed/v1/agents/{id}/uploads` route.
 
 ## Design principles
 

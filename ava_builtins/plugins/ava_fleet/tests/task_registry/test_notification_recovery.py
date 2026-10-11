@@ -9,6 +9,7 @@ from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
 from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
 from base import telemetry
+from base.api_contracts.idempotency import keyed_headers
 from base.db import fetch_one
 from base.db import pool as db_pool
 from gateway.app import app
@@ -72,7 +73,7 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
             client.patch(
                 f"/api/tasks/{task.id}",
                 json={"owner": new_owner},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             ).status_code
             == 500
         )
@@ -86,7 +87,7 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
             client.patch(
                 f"/api/tasks/{task.id}",
                 json={"owner": new_owner},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             ).status_code
             == 200
         )

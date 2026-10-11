@@ -62,7 +62,7 @@ async def _close_dead_show_pages(
     try:
         async with async_write_transaction(pool) as conn, conn.cursor() as cur:
             for name in names:
-                # CAS open->closed (the same UPDATE close_page uses).
+                # CAS open->closed.
                 await cur.execute(page_recovery.CLOSE_PAGE_SQL, (agent_id, name))
             if not await _recent_page_recovery_notice(cur, agent_id):
                 await cur.execute(

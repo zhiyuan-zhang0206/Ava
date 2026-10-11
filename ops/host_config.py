@@ -2,8 +2,8 @@
 
 Read this machine's host-scope config fields (sensitive values masked) and apply
 a validated all-or-nothing override write. One of the op clusters beside
-`ops.lifecycle`, `ops.cluster.operations`, `ops.inventory` and `ops.uploads`; each cluster
-is self-contained.
+`ops.lifecycle`, `ops.cluster.operations` and `ops.inventory`; each cluster is
+self-contained.
 
 Dispatched by the agent-runner ops server (`services/agent_runner/agent_ops/daemon.py`) and
 called by the gateway config router. `SENSITIVE_MASK` is re-imported by the

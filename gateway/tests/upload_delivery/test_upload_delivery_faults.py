@@ -223,7 +223,7 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
 
 
 @pytest.mark.asyncio
-async def test_unknown_remote_kind_holds_without_legacy_fallback(
+async def test_unknown_remote_kind_holds(
     uploaded_agent: tuple[TestClient, int],
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -255,7 +255,7 @@ async def test_unknown_remote_kind_holds_without_legacy_fallback(
             catalog=model_catalog,
         )
     assert status == OpStatus.FAILED and "unknown kind" in str(result["error"])
-    # Source does not reinterpret an unsupported version as legacy upload_receive.
+    # Source does not reinterpret an unsupported version as another op kind.
     recovery = worker.UploadRecovery(app.state.db_pool, app.state.db, app.state.bus)
 
     async def dispatch(*_args: Any, **_kwargs: Any):
@@ -478,76 +478,3 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
     assert len(calls) == 1 and calls[0][0] == unit.machine
     assert source.status(app.state.db_pool, agent, request.manifest.batch_id).state == "accepted"
     await recovery.close()
-
-
-@pytest.mark.parametrize("ready", [False, True])
-def test_legacy_remote_quota_counts_hidden_ready_and_receiving(
-    uploaded_agent: tuple[TestClient, int],
-    monkeypatch: pytest.MonkeyPatch,
-    ready: bool,
-    *,
-    config_authority: ConfigAuthority,
-):
-    from base.agents.upload_delivery import storage
-    from base.agents.upload_delivery.models import UploadQuotaExceededError
-    from ops import uploads
-
-    client, agent = uploaded_agent
-
-    def paused(*_args: Any) -> None:
-        raise OSError("paused")
-
-    if not ready:
-        monkeypatch.setattr(storage, "publish", paused)
-    assert post(client, agent).status_code == (202 if ready else 500)
-    monkeypatch.setattr(uploads, "MAX_AGENT_UPLOAD_BYTES", 5)
-
-    def flat_get(*_args: Any, **_kwargs: Any) -> httpx.Response:
-        return httpx.Response(
-            200, content=b"x", request=httpx.Request("GET", "http://gateway.test")
-        )
-
-    monkeypatch.setattr(uploads, "http_get", flat_get)
-    with pytest.raises(UploadQuotaExceededError):
-        dispatch_sync(
-            "upload_receive",
-            {"agent_id": agent, "name": "flat.txt"},
-            pool=app.state.db_pool,
-            db=app.state.db,
-            authority=config_authority,
-        )
-    assert not (source.agent_upload_dir(agent, create=False) / "flat.txt").exists()
-
-
-def test_legacy_remote_overwrite_net_quota_and_network_without_db_borrow(
-    uploaded_agent: tuple[TestClient, int],
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    config_authority: ConfigAuthority,
-):
-    from ops import uploads
-
-    _, agent = uploaded_agent
-    target = source.agent_upload_dir(agent) / "flat.txt"
-    target.write_bytes(b"12345")
-    monkeypatch.setattr(uploads, "MAX_AGENT_UPLOAD_BYTES", 5)
-    with app.state.db.pool(min_size=1, max_size=1) as pool:
-        pool.wait()
-
-        def fetch(*_args: Any, **_kwargs: Any):
-            with pool.connection() as conn:
-                assert conn.execute("SELECT 1").fetchone() == (1,)
-            return httpx.Response(
-                200, content=b"abcde", request=httpx.Request("GET", "http://gateway.test")
-            )
-
-        monkeypatch.setattr(uploads, "http_get", fetch)
-        status, result = dispatch_sync(
-            "upload_receive",
-            {"agent_id": agent, "name": "flat.txt"},
-            pool=pool,
-            db=app.state.db,
-            authority=config_authority,
-        )
-    assert status == OpStatus.COMPLETED and result == {"path": str(target)}
-    assert target.read_bytes() == b"abcde"

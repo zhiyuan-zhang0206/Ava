@@ -1,5 +1,7 @@
 """Unprotected writes must not be repeated after an ambiguous outcome."""
 
+import json
+
 import httpx
 import pytest
 
@@ -11,14 +13,8 @@ from base.agents import GatewayUnavailable
     ("method", "path"),
     [
         ("POST", "/api/agents/7/restart"),
-        ("POST", "/api/agents/7/pages"),
-        ("POST", "/api/agents/7/notices/1/resolve"),
         ("POST", "/api/schedules/1/restart"),
-        ("PATCH", "/api/tasks/1"),
         ("PATCH", "/api/unknown"),
-        ("DELETE", "/api/cluster/machines/host"),
-        ("DELETE", "/api/agents/7/pages/report"),
-        ("DELETE", "/api/unknown"),
     ],
 )
 @pytest.mark.parametrize("failure", ["timeout", "server_error"])
@@ -39,9 +35,7 @@ def test_unprotected_write_is_sent_once(method: str, path: str, failure: str) ->
         def send() -> transport.TransportResponse:
             if method == "POST":
                 return transport.post(path)
-            if method == "PATCH":
-                return transport.patch(path)
-            return transport._delete(path)
+            return transport.patch(path)
 
         if failure == "timeout":
             with pytest.raises(GatewayUnavailable, match="result unknown"):
@@ -49,13 +43,10 @@ def test_unprotected_write_is_sent_once(method: str, path: str, failure: str) ->
         else:
             assert send().status_code == 503
     assert len(requests) == 1
-    if path == "/api/tasks/1":
-        assert requests[0].headers["Idempotency-Key"]
 
 
-@pytest.mark.parametrize("method", ["PATCH", "DELETE"])
 @pytest.mark.usefixtures("retry_waits")
-def test_natural_idempotent_write_retries(method: str) -> None:
+def test_natural_idempotent_write_retries() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -66,17 +57,33 @@ def test_natural_idempotent_write_retries(method: str) -> None:
         httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
         transport.use_client(client),
     ):
-        response = (
-            transport.patch("/api/agents/1", {"label": "new"})
-            if method == "PATCH"
-            else transport._delete("/api/presets/1")
-        )
+        response = transport.patch("/api/agents/1", {"label": "new"})
     assert response.status_code == 200
     assert len(requests) == 2
 
 
+def _lost_response_handler(failure: str, requests: list[httpx.Request]):
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("response lost", request=request)
+        return httpx.Response(503)
+
+    return handler
+
+
+def _assert_one_logical_key(requests: list[httpx.Request], key: str | None = None) -> None:
+    """Every attempt of one keyed call repeats the same key and principal scope."""
+    assert len(requests) > 1
+    keys = {request.headers["Idempotency-Key"] for request in requests}
+    assert len(keys) == 1
+    assert key is None or keys == {key}
+    assert {request.headers["Idempotency-Scope"] for request in requests} == {"principal-v1"}
+
+
 @pytest.mark.parametrize("failure", ["timeout", "server_error"])
-def test_new_keyed_route_does_not_activate_ambiguous_retry(
+@pytest.mark.usefixtures("retry_waits")
+def test_keyed_route_retries_an_ambiguous_outcome_under_one_key(
     monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     from base.api_contracts import contracts
@@ -89,61 +96,59 @@ def test_new_keyed_route_does_not_activate_ambiguous_retry(
         RouteContract(Idempotency.AT_LEAST_ONCE_WITH_KEY),
     )
     requests: list[httpx.Request] = []
-
-    def older_gateway(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if failure == "timeout":
-            raise httpx.ReadTimeout("older server ignores key", request=request)
-        return httpx.Response(503)
-
     with (
         httpx.Client(
-            transport=httpx.MockTransport(older_gateway), base_url="http://gateway"
+            transport=httpx.MockTransport(_lost_response_handler(failure, requests)),
+            base_url="http://gateway",
         ) as client,
         transport.use_client(client),
     ):
         if failure == "timeout":
-            with pytest.raises(GatewayUnavailable, match="result unknown"):
+            with pytest.raises(GatewayUnavailable):
                 transport.post(path, idempotency_key="intent-1")
         else:
             assert transport.post(path, idempotency_key="intent-1").status_code == 503
-    assert len(requests) == 1
-    assert requests[0].headers["Idempotency-Key"] == "intent-1"
+    _assert_one_logical_key(requests, "intent-1")
 
 
 @pytest.mark.parametrize("failure", ["timeout", "server_error"])
-def test_task_patch_caller_key_survives_explicit_replay(failure: str) -> None:
+@pytest.mark.usefixtures("retry_waits")
+def test_keyed_patch_retries_an_ambiguous_outcome_under_the_caller_key(failure: str) -> None:
     requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if failure == "timeout":
-            raise httpx.ReadTimeout("old gateway ignored key", request=request)
-        return httpx.Response(503)
-
     with (
-        httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
+        httpx.Client(
+            transport=httpx.MockTransport(_lost_response_handler(failure, requests)),
+            base_url="http://gateway",
+        ) as client,
         transport.use_client(client),
     ):
-        for _ in range(2):
-            if failure == "timeout":
-                with pytest.raises(GatewayUnavailable, match="result unknown"):
-                    transport.patch(
-                        "/api/tasks/1",
-                        {"priority": "P1"},
-                        idempotency_key="original",
-                    )
-            else:
-                assert (
-                    transport.patch(
-                        "/api/tasks/1",
-                        {"priority": "P1"},
-                        idempotency_key="original",
-                    ).status_code
-                    == 503
-                )
-    assert len(requests) == 2
-    assert [request.headers["Idempotency-Key"] for request in requests] == ["original", "original"]
+        if failure == "timeout":
+            with pytest.raises(GatewayUnavailable):
+                transport.patch("/api/tasks/1", {"priority": "P1"}, idempotency_key="original")
+        else:
+            response = transport.patch(
+                "/api/tasks/1", {"priority": "P1"}, idempotency_key="original"
+            )
+            assert response.status_code == 503
+    _assert_one_logical_key(requests, "original")
+
+
+def test_keyed_post_and_patch_mint_a_key_when_none_is_pinned() -> None:
+    requests: list[httpx.Request] = []
+
+    def accept(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(accept), base_url="http://gateway") as client,
+        transport.use_client(client),
+    ):
+        transport.patch("/api/tasks/1", {"priority": "P1"})
+        transport.post("/api/agents/1/system-note", {})
+    for request in requests:
+        assert request.headers["Idempotency-Key"]
+        assert request.headers["Idempotency-Scope"] == "principal-v1"
 
 
 @pytest.mark.parametrize("key", ["", "x" * 129, 17])
@@ -166,15 +171,19 @@ def test_task_patch_rejects_invalid_caller_key_before_network(key: object) -> No
 @pytest.mark.parametrize("operation", ["register", "close"])
 @pytest.mark.parametrize("failure", ["timeout", "server_error"])
 @pytest.mark.usefixtures("retry_waits")
-def test_public_page_call_does_not_replay_an_ambiguous_effect(operation: str, failure: str) -> None:
+def test_public_page_call_retries_an_ambiguous_effect_under_one_key(
+    operation: str, failure: str
+) -> None:
     from ava.gateway_client import close_page, register_page
 
-    requests: list[httpx.Request] = []
+    writes: list[httpx.Request] = []
 
     def committed_then_response_failed(request: httpx.Request) -> httpx.Response:
-        # A real gateway may already have replaced/closed the page. Retrying
-        # would apply that old intent to whatever page is now current.
-        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json=[{"id": 5, "name": "report"}])
+        # A real gateway may already have replaced/closed the page; the keyed
+        # route replays that original acceptance instead of acting again.
+        writes.append(request)
         if failure == "timeout":
             raise httpx.ReadTimeout("page effect committed; response lost", request=request)
         return httpx.Response(503)
@@ -191,25 +200,54 @@ def test_public_page_call_does_not_replay_an_ambiguous_effect(operation: str, fa
                 register_page(7, name="report", port=8001, host="test-host", title=None)
             else:
                 close_page(7, "report")
-    assert len(requests) == 1
-    assert requests[0].method == ("POST" if operation == "register" else "DELETE")
-    assert "Idempotency-Key" not in requests[0].headers
+    _assert_one_logical_key(writes)
+    assert {write.method for write in writes} == {"POST"}
+    assert {write.url.path for write in writes} == {
+        "/api/keyed/v1/agents/7/pages"
+        if operation == "register"
+        else "/api/keyed/v1/agents/7/pages/report/close"
+    }
+    if operation == "close":
+        assert {json.loads(write.content)["expected_page_id"] for write in writes} == {5}
+
+
+def test_close_page_without_an_open_page_sends_no_write() -> None:
+    from ava.gateway_client import close_page
+
+    requests: list[httpx.Request] = []
+
+    def only_reads(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[])
+
+    with (
+        httpx.Client(
+            transport=httpx.MockTransport(only_reads), base_url="http://gateway"
+        ) as client,
+        transport.use_client(client),
+    ):
+        assert close_page(7, "report") is False
+    assert [request.method for request in requests] == ["GET"]
 
 
 @pytest.mark.parametrize("operation", ["edit", "dismiss"])
 @pytest.mark.parametrize("failure", ["timeout", "server_error"])
 @pytest.mark.usefixtures("retry_waits")
-def test_fleet_current_notice_call_does_not_repeat_old_intent(operation: str, failure: str) -> None:
+def test_fleet_current_notice_call_retries_its_observed_intent_under_one_key(
+    operation: str, failure: str
+) -> None:
     from ava_builtins.plugins.ava_fleet.plugin import dismiss_notice, edit_notice
     from tests.fixtures.pin_agent import pin_agent
 
     pin_agent(7)
-    requests: list[httpx.Request] = []
+    writes: list[httpx.Request] = []
 
     def response_lost(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json=[{"id": 11}])
+        writes.append(request)
         if failure == "timeout":
-            raise httpx.ReadTimeout("old notice changed; response lost", request=request)
+            raise httpx.ReadTimeout("response lost", request=request)
         return httpx.Response(503)
 
     with (
@@ -224,6 +262,56 @@ def test_fleet_current_notice_call_does_not_repeat_old_intent(operation: str, fa
                 edit_notice(title="Original edit")
             else:
                 dismiss_notice()
-    assert len(requests) == 1
-    assert requests[0].method == ("PATCH" if operation == "edit" else "POST")
-    assert "Idempotency-Key" not in requests[0].headers
+    _assert_one_logical_key(writes)
+    assert {write.method for write in writes} == {"PATCH" if operation == "edit" else "POST"}
+    assert {write.url.path for write in writes} == {
+        "/api/agents/7/notices/current"
+        + ("/guarded-v1" if operation == "edit" else "/dismiss/guarded-v1")
+    }
+    assert {json.loads(write.content)["observed_notice_id"] for write in writes} == {11}
+
+
+@pytest.mark.parametrize("operation", ["edit", "dismiss"])
+def test_fleet_current_notice_call_without_an_open_notice_sends_no_write(operation: str) -> None:
+    from ava_builtins.plugins.ava_fleet.plugin import dismiss_notice, edit_notice
+    from tests.fixtures.pin_agent import pin_agent
+
+    pin_agent(7)
+    requests: list[httpx.Request] = []
+
+    def only_reads(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[])
+
+    with (
+        httpx.Client(
+            transport=httpx.MockTransport(only_reads), base_url="http://gateway"
+        ) as client,
+        transport.use_client(client),
+    ):
+        if operation == "edit":
+            edit_notice(title="Nothing open")
+        else:
+            dismiss_notice()
+    assert [request.method for request in requests] == ["GET"]
+    assert requests[0].url.params["agent_id"] == "7"
+
+
+def test_keyed_patch_sends_the_principal_scope_with_the_caller_key() -> None:
+    requests: list[httpx.Request] = []
+
+    def accept(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(accept), base_url="http://gateway") as client,
+        transport.use_client(client),
+    ):
+        transport.patch(
+            "/api/agents/7/notices/current/guarded-v1",
+            {"observed_notice_id": 3, "title": "x"},
+            idempotency_key="intent-1",
+        )
+    assert requests[0].headers["Idempotency-Key"] == "intent-1"
+    assert requests[0].headers["Idempotency-Scope"] == "principal-v1"

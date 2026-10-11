@@ -1,4 +1,5 @@
 import type { AgentMessageEnqueued, ContentBlock } from "../contracts/types";
+import { keyedHeaders } from "../transport/operation-key";
 
 const MESSAGE_POST_TIMEOUT_MS = 10_000;
 const MESSAGE_RECONCILE_TIMEOUT_MS = 3_000;
@@ -26,10 +27,7 @@ export class MessageDeliveryUnknownError extends Error {
 
 const messageInit = (content: string | ContentBlock[], clientMessageId: string): RequestInit => ({
   method: "POST",
-  headers: {
-    "content-type": "application/json",
-    "Idempotency-Key": clientMessageId,
-  },
+  headers: { "content-type": "application/json", ...keyedHeaders(clientMessageId) },
   body: JSON.stringify({ content, source: "user" }),
 });
 

@@ -60,7 +60,7 @@ async def test_notice_owner_commits_original_target_once_with_or_without_respons
             IngressStatus.UNCERTAIN if lost_response else IngressStatus.ACCEPTED
         ), (result, responses)
         assert await native_weixin.adapter._handle_message(payload) == result
-    assert calls == [f"/api/agents/{native_weixin.agent_id}/notices/{notice}/resolve"]
+    assert calls == [f"/api/keyed/v1/agents/{native_weixin.agent_id}/notices/{notice}/resolve"]
     assert bridge.reply_target("peer-1", "new reply", account_id=account) == (
         native_weixin.agent_id,
         later,

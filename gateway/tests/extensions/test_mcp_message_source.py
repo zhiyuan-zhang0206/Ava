@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from base.config import settings
 from gateway.app import app
 from gateway.tests.extensions.test_mcp_endpoint import _initialize, _tool_call, _tool_result
+from tests.fixtures.gateway_config import create_mcp_client
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +22,7 @@ def _failed(result: dict[str, Any]) -> bool:
 
 
 def _client_and_agent(client: TestClient) -> tuple[dict[str, Any], int]:
-    credential = client.post("/api/mcp/clients", json={"name": "peer", "scope": "write"}).json()
+    credential = create_mcp_client(client, "peer", "write").json()
     _initialize(client, credential["token"])
     spawned = _tool_result(
         _tool_call(

@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
+from base.api_contracts.idempotency import keyed_headers
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -30,7 +31,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": 'Task #1 "t" is now assigned to you.'},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 201
         body = resp.json()
@@ -61,7 +62,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": 'Task #1 "t" is now assigned to you.'},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 201
         rows = _inbound_rows(db_conn, agent_id)
@@ -80,7 +81,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": 'Task #1 "t" was updated.', "resurrect": False},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 201
         rows = _inbound_rows(db_conn, agent_id)
@@ -94,7 +95,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "note_tag": "not_a_tag"},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
 
@@ -105,7 +106,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "note_tag": "heartbeat", "task_id": 42},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert "task_id requires note_tag='task'" in str(resp.json())
@@ -119,7 +120,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "task_id": 999_999},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert "task_id 999999 does not exist" in str(resp.json())
@@ -143,7 +144,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{recipient_id}/system-note",
                 json={"content": "x", "task_id": row[0]},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert "is not owned by agent" in str(resp.json())
@@ -247,7 +248,7 @@ class TestSystemNote:
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": "x", "source": "ui:web"},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
 

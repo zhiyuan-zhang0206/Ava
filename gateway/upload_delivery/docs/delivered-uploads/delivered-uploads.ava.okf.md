@@ -10,9 +10,9 @@ tags: [gateway, uploads]
 `POST /api/keyed/v1/agents/{id}/uploads` requires a verified credential, explicit
 `principal-v1` and caller `Idempotency-Key`. It always promises one user chat
 **after** confirmed copy. Browser file delivery uses this route with one key per
-submission; silent native-image attachments retain their separate upload path.
-SDK/MCP callers are not activated. Old gateways have no such write route; do not downgrade this intent
-onto synchronous legacy `POST /api/agents/{id}/uploads`. Agent IDs must be
+submission; silent native-image attachments use the separate keyed
+`POST /api/agents/{id}/uploads`, which never notifies the agent.
+SDK/MCP callers are not activated. Agent IDs must be
 positive signed BIGINT values, validated before native storage or database work.
 
 The original ordered display names, bytes/SHA-256, sizes and content types identify
@@ -48,7 +48,7 @@ The independently known Ops kind `upload-receive-v1` requires explicit integer
 protocol 1 (missing/bool/float/unknown refused), exact target unit and strict
 manifest. It receives no transport idempotency key and does not use uncertain
 RPC response caching. Unknown old consumers reject before effects; no fallback
-to overwriting `upload_receive`. Native source/copy metadata and quota admission
+to another op. Native source/copy metadata and quota admission
 commit first. Download and create-only publication borrow no DB connection;
 receiver commit follows actual verify/fsync. Network work has a bounded round.
 
@@ -90,6 +90,6 @@ rounds and drains actual shielded native futures before closing the pool; cancel
 an HTTP wait does not pretend its filesystem/DB thread ended. Ops retains its
 existing maintenance admission and native-worker drainage.
 
-See [silent upload owner](../../../routers/docs/upload-batches.ava.okf.md) for existing
-legacy and native-image compatibility. This is server Outbox recovery of one
+See [silent upload owner](../../../routers/docs/upload-batches.ava.okf.md) for the
+native-image silent save. This is server Outbox recovery of one
 upload domain, not a generic workflow or client Outbox.

@@ -14,6 +14,7 @@ from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.task_registry import TaskAssignment
 from base.agents import GatewayUnavailable
 from base.agents.context.identity import ExternalLease
+from base.api_contracts.idempotency import keyed_headers
 from gateway.agents import router as agent_router
 from gateway.agents.tests.test_task_assignments import HEADERS, PATH, SECRET
 from gateway.agents.tests.test_task_assignments import body as body
@@ -21,6 +22,7 @@ from gateway.agents.tests.test_task_assignments import client as client
 from gateway.app import app
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.pin_agent import pin_agent
+from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 
 def _response(response: Any) -> httpx.Response:
@@ -45,12 +47,14 @@ def _sdk(body: dict[str, Any], **overrides: Any) -> TaskAssignment:
     )
 
 
+@pytest.mark.usefixtures("retry_waits")
 def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
     client: TestClient, db_conn: psycopg.Connection, body: dict[str, Any]
 ) -> None:
     http = MagicMock()
     captured: list[tuple[str, dict[str, Any], dict[str, str]]] = []
     original: dict[str, Any] | None = None
+    lose = True
 
     def submit(path: str, **kwargs: Any) -> httpx.Response:
         nonlocal original
@@ -58,7 +62,7 @@ def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
         response = client.post(path, json=kwargs["json"], headers=kwargs["headers"])
         assert response.status_code == 201, response.text
         original = original or response.json()
-        if len(captured) == 1:
+        if lose:
             raise httpx.ReadTimeout("committed response lost", request=httpx.Request("POST", path))
         return _response(response)
 
@@ -66,16 +70,19 @@ def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
     with transport.use_client(http):
         with pytest.raises(GatewayUnavailable):
             _sdk(body)
-        assert len(captured) == 1
+        lost_attempts = len(captured)
+        assert lost_attempts > 1
+        lose = False
         assignment = _sdk(body)
     assert original is not None
     assert isinstance(assignment, TaskAssignment)
     task, agent_id = assignment
     assert assignment.task is task and assignment.agent_id == agent_id
     assert task.id == original["task"]["id"] and agent_id == original["agent_id"]
-    assert captured[0] == captured[1]
+    assert len(captured) == lost_attempts + 1
+    assert all(call == captured[0] for call in captured)
     assert captured[0][0] == PATH
-    assert captured[0][2] == {**HEADERS, "Idempotency-Key": "sdk-compound"}
+    assert captured[0][2] == {**HEADERS, **keyed_headers("sdk-compound")}
     assert db_conn.execute("SELECT count(*) FROM task_assignment_receipts").fetchone() == (1,)
 
 

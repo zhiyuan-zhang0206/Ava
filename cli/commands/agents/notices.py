@@ -8,6 +8,7 @@ fails fast (raise_for_status()) on any HTTP error.
   list                 GET /api/notices/open?include_awaiting=1
                        (--agent / --priority / --type filters)
   resolve <id> --agent <id> --action answer|read|dismiss [--reply TEXT]
+                       POST /api/keyed/v1/agents/<agent>/notices/<id>/resolve
   clear --agent <id>   resolve every open notice (read for FYI, dismiss for
                        decisions; --force skips the confirmation)
 """
@@ -17,7 +18,14 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
+from base.api_contracts.idempotency import keyed_headers
+
 _TIMEOUT_S = 15.0
+
+
+def _keyed_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Auth headers plus one fresh principal-v1 operation key for a resolve call."""
+    return {**headers, **keyed_headers(str(uuid4()))}
 
 
 def _dial() -> tuple[str, dict[str, str], Any, Any]:
@@ -146,9 +154,9 @@ def cmd_notices_resolve(*, notice_id: int, agent_id: int, action: str, reply: st
         return 2
     base, headers, _, dial_post = _dial()
     resp = dial_post(
-        f"{base}/agents/{agent_id}/notices/{notice_id}/resolve",
+        f"{base}/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve",
         timeout=_TIMEOUT_S,
-        headers={**headers, "Idempotency-Key": str(uuid4())},
+        headers=_keyed_headers(headers),
         json={"action": action, "reply": reply},
     )
     resp.raise_for_status()
@@ -162,9 +170,9 @@ def _resolve_all(notices: list[dict[str, Any]], base: str, headers: Any, dial_po
     for n in notices:
         action = "read" if not n["require_response"] else "dismiss"
         r = dial_post(
-            f"{base}/agents/{n['agent_id']}/notices/{n['id']}/resolve",
+            f"{base}/keyed/v1/agents/{n['agent_id']}/notices/{n['id']}/resolve",
             timeout=_TIMEOUT_S,
-            headers={**headers, "Idempotency-Key": str(uuid4())},
+            headers=_keyed_headers(headers),
             json={"action": action, "reply": None},
         )
         if r.status_code in (200, 201):

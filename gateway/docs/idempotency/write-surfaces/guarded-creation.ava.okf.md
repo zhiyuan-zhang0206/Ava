@@ -7,9 +7,9 @@ description: Versioned principal-scoped agent, launch and task acceptance routes
 # Guarded creation retry surfaces
 
 These fixed versioned paths require a valid caller `Idempotency-Key`,
-`Idempotency-Scope: principal-v1` and a verified principal. An older router fails
-without falling back to legacy creation. Same scoped key with changed semantic
-request conflicts; different verified principals have independent namespaces.
+`Idempotency-Scope: principal-v1` and a verified principal. Same scoped key with
+changed semantic request conflicts; different verified principals have
+independent namespaces.
 
 | Method and route | Retry policy | Transactional acceptance owner |
 |---|---|---|
@@ -18,10 +18,9 @@ request conflicts; different verified principals have independent namespaces.
 | `POST /api/keyed/v1/agents/{agent_id}/retry-launch` | keyed | observed attempt, original replacement attempt and pointer |
 | `POST /api/keyed/v1/task-assignments` | keyed | original agent/task pair, assignment inbound and audit facts |
 
-These routes use domain receipts and retain `legacy_keyed_retry=False` in the route
-contract. The SDK does not automatically retry an ambiguous failure merely
-because it supplies a key. Caller replay can recover original acceptance; it is
-not evidence of runner readiness or completed execution. Launch recovery and
+These routes use domain receipts, so the SDK retries an ambiguous failure under
+the same key and the retry recovers the original acceptance. Acceptance is not
+evidence of runner readiness or completed execution. Launch recovery and
 current observations remain in their native owners, outside the acceptance
 transaction. None of these routes makes an entire execute_code script atomic.
 

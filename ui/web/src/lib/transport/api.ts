@@ -91,7 +91,7 @@ import type { NoticesFeed,
 import { projectAgentStatus } from "../contracts/types";
 import { sendMessageWithReconciliation } from "../agents/message-delivery";
 import { submitUploadedFiles } from "./upload-delivery";
-import { newOperationKey } from "./operation-key";
+import { keyedHeaders, newOperationKey } from "./operation-key";
 
 export { MessageDeliveryUnknownError } from "../agents/message-delivery";
 export { API_BASE } from "./api-base";
@@ -225,14 +225,11 @@ const POST_JSON = (body: unknown): RequestInit => ({
 });
 
 function keyedJson(body: unknown, operationKey: string): RequestInit {
-  if (typeof operationKey !== "string" || !operationKey || operationKey.length > 128) {
-    throw new Error("idempotency key must contain 1 to 128 characters");
-  }
-  const init = POST_JSON(body);
-  const headers = new Headers(init.headers);
-  headers.set("Idempotency-Key", operationKey);
-  headers.set("Idempotency-Scope", "principal-v1");
-  return { ...init, headers };
+  return {
+    method: "POST",
+    headers: { "content-type": "application/json", ...keyedHeaders(operationKey) },
+    body: JSON.stringify(body),
+  };
 }
 
 async function draftAgent(
@@ -490,14 +487,7 @@ export const api = {
   ): Promise<{ status: string }> => {
     return f(
       `/api/keyed/v1/agents/${agentId}/notices/${noticeId}/resolve`,
-      {
-        ...POST_JSON(body),
-        headers: {
-          "content-type": "application/json",
-          "Idempotency-Key": idempotencyKey,
-          "Idempotency-Scope": "principal-v1",
-        },
-      },
+      keyedJson(body, idempotencyKey),
     ).then(ok<{ status: string }>);
   },
 
@@ -786,31 +776,27 @@ export const api = {
 
   submitUploadedFiles,
 
-  // `deliver=false` saves the files silently and returns their reference urls
-  // without notifying the agent — the native-image-attachment path, where the
-  // caller carries the returned url into the next multimodal message. The
-  // default (true) is the paperclip / drag-drop notify path for arbitrary files.
+  // Saves the files silently and returns their reference urls without notifying
+  // the agent — the native-image-attachment path, where the caller carries the
+  // returned url into the next multimodal message. Each call is one keyed
+  // operation (a fresh key unless the caller retries with its own); delivering
+  // arbitrary files to the agent is `submitUploadedFiles`.
   uploadFiles: (
     agentId: number,
     files: File[],
     onProgress?: (pct: number) => void,
-    deliver = true,
-    operationKey?: string,
+    operationKey: string = newOperationKey(),
   ): Promise<UploadedBatch> => {
-    if (operationKey !== undefined && (typeof operationKey !== "string" || !operationKey || operationKey.length > 128)) {
-      throw new Error("idempotency key must contain 1 to 128 characters");
-    }
-    if (deliver && operationKey !== undefined) throw new Error("keyed uploads currently require deliver=false");
-    const uploadKey = deliver ? undefined : (operationKey ?? newOperationKey());
+    const keyed = keyedHeaders(operationKey);
     const formData = new FormData();
     for (const file of files) {
       formData.append("files", file, file.name);
     }
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", url(`/api/agents/${agentId}/uploads?deliver=${deliver}`));
+      xhr.open("POST", url(`/api/agents/${agentId}/uploads`));
       xhr.withCredentials = true;
-      if (uploadKey !== undefined) xhr.setRequestHeader("Idempotency-Key", uploadKey);
+      for (const [name, value] of Object.entries(keyed)) xhr.setRequestHeader(name, value);
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && onProgress) {
           onProgress(Math.round((e.loaded / e.total) * 100));
@@ -945,16 +931,13 @@ export const api = {
   },
 
   createSchedule: (body: ScheduleCreate, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
-    const init = POST_JSON(body);
-    const headers = new Headers(init.headers);
-    headers.set("Idempotency-Key", operationKey);
-    return f("/api/schedules", { ...init, headers }).then(ok<ScheduleView>);
+    return f("/api/schedules", keyedJson(body, operationKey)).then(ok<ScheduleView>);
   },
 
   updateSchedule: (id: number, body: ScheduleUpdate, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
     return f(`/api/schedules/${id}`, {
       method: "PUT",
-      headers: { "content-type": "application/json", "Idempotency-Key": operationKey },
+      headers: { "content-type": "application/json", ...keyedHeaders(operationKey) },
       body: JSON.stringify(body),
     }).then(ok<ScheduleView>);
   },
@@ -964,15 +947,15 @@ export const api = {
   },
 
   startSchedule: (id: number, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
-    return f(`/api/schedules/${id}/start`, { ...POST, headers: { "Idempotency-Key": operationKey } }).then(ok<ScheduleView>);
+    return f(`/api/schedules/${id}/start`, { ...POST, headers: keyedHeaders(operationKey) }).then(ok<ScheduleView>);
   },
 
   stopSchedule: (id: number, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
-    return f(`/api/schedules/${id}/stop`, { ...POST, headers: { "Idempotency-Key": operationKey } }).then(ok<ScheduleView>);
+    return f(`/api/schedules/${id}/stop`, { ...POST, headers: keyedHeaders(operationKey) }).then(ok<ScheduleView>);
   },
 
   restartSchedule: (id: number, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
-    return f(`/api/schedules/${id}/restart`, { ...POST, headers: { "Idempotency-Key": operationKey } }).then(ok<ScheduleView>);
+    return f(`/api/schedules/${id}/restart`, { ...POST, headers: keyedHeaders(operationKey) }).then(ok<ScheduleView>);
   },
 
   scheduleLogs: (id: number, lines = 200): Promise<ScheduleLogsView> => {

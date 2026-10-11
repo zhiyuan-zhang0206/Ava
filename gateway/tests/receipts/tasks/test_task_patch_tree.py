@@ -6,6 +6,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.api_contracts.idempotency import keyed_headers
 from gateway.app import app
 from gateway.routers.tests.test_tasks_router import (
     _make_agent,
@@ -32,7 +33,7 @@ class TestParentClose:
             resp = client.patch(
                 f"/api/tasks/{parent}",
                 json={"status": "done"},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert resp.json()["detail"] == (
@@ -56,7 +57,7 @@ class TestParentClose:
             resp = client.patch(
                 f"/api/tasks/{parent}",
                 json={"status": "cancelled"},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert f"#{child}" in resp.json()["detail"]
@@ -83,7 +84,7 @@ class TestParentClose:
             resp = client.patch(
                 f"/api/tasks/{parent}",
                 json={"status": "done"},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
         assert resp.json()["status"] == "done"
@@ -106,7 +107,7 @@ class TestParent:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": parent},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
         assert _parent(db_conn, tid) == parent
@@ -120,7 +121,7 @@ class TestParent:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": parent},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
         assert _parent(db_conn, tid) == parent
@@ -128,7 +129,7 @@ class TestParent:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": None},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 200
         assert _parent(db_conn, tid) == root
@@ -152,7 +153,7 @@ class TestParent:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": parent},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert "closed parent" in resp.json()["detail"]
@@ -166,7 +167,7 @@ class TestParent:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": 999_999},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert "does not exist" in resp.json()["detail"]
@@ -178,7 +179,7 @@ class TestParent:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": tid},
-                headers={"Idempotency-Key": str(uuid4())},
+                headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 422
         assert "own parent" in resp.json()["detail"]
@@ -193,7 +194,7 @@ class TestParent:
                 client.patch(
                     f"/api/tasks/{b}",
                     json={"parent_id": a},
-                    headers={"Idempotency-Key": str(uuid4())},
+                    headers=keyed_headers(str(uuid4())),
                 ).status_code
                 == 200
             )
@@ -201,12 +202,12 @@ class TestParent:
                 client.patch(
                     f"/api/tasks/{c}",
                     json={"parent_id": b},
-                    headers={"Idempotency-Key": str(uuid4())},
+                    headers=keyed_headers(str(uuid4())),
                 ).status_code
                 == 200
             )
             resp = client.patch(
-                f"/api/tasks/{a}", json={"parent_id": c}, headers={"Idempotency-Key": str(uuid4())}
+                f"/api/tasks/{a}", json={"parent_id": c}, headers=keyed_headers(str(uuid4()))
             )
         assert resp.status_code == 422
         assert "descendant" in resp.json()["detail"]

@@ -926,7 +926,7 @@ describe("pasted image routing", () => {
     });
 
     await waitFor(() =>
-      expect(vi.mocked(api.uploadFiles)).toHaveBeenCalledWith(5, [image], undefined, false),
+      expect(vi.mocked(api.uploadFiles)).toHaveBeenCalledWith(5, [image]),
     );
     expect(await screen.findByTestId("composer-image-thumbnail")).toBeTruthy();
   });

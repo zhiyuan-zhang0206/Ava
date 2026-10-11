@@ -11,7 +11,7 @@ description: Raw draft intent and immutable first birth receipts for guide, sche
 `Idempotency-Scope: principal-v1` and a verified principal on every request,
 including replay. Their identities include the principal, POST and exact
 versioned path. Missing or invalid admission has no birth or launch effects.
-Automatic ambiguous transport retries remain disabled.
+The browser makes one fetch per submission and never retries automatically.
 The browser's Guide, Schedule Maker and Package Installer entries use these
 paths. Each submission gets one operation key; transport helpers also accept
 an explicit caller key for same-intent replay. They require a 200 receipt with

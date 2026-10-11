@@ -16,7 +16,7 @@ from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from gateway.tests.extensions.test_mcp_endpoint import _tool_call, _tool_result
 from ops.agents.creation_identity import creation_request_hash
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 PATH = "/api/keyed/v1/agents"
@@ -112,7 +112,7 @@ def test_preexisting_mcp_canonical_hash_replays_original_agent(
     monkeypatch.setattr(settings.gateway, "mcp_endpoint_enabled", True)
     # The MCP manager is built by lifespan, so re-enter with the flag enabled.
     with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as mcp:
-        credentials = mcp.post("/api/mcp/clients", json={"name": "prior", "scope": "write"}).json()
+        credentials = create_mcp_client(mcp, "prior", "write").json()
         token = credentials["token"]
         original = _tool_result(
             _tool_call(
@@ -152,8 +152,15 @@ def test_preexisting_mcp_canonical_hash_replays_original_agent(
 def test_scoped_creation_key_binds_the_principal_and_the_operation_path() -> None:
     from starlette.requests import Request
 
-    request = Request({"type": "http", "method": "POST", "path": "/mcp", "headers": []})
-    principal = AuthPrincipal("mcp_client", "42")
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/keyed/v1/agents",
+            "headers": [(b"idempotency-scope", b"principal-v1")],
+        }
+    )
+    principal = AuthPrincipal("cluster", "administrator")
     request.state.auth_principal = principal
     assert scoped_creation_key(request, "prior", operation_path=PATH) == principal_key(
         principal, "POST", PATH, "prior"

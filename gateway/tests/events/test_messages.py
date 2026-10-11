@@ -10,6 +10,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (
@@ -19,6 +20,8 @@ from base.daemon.schedules.completion_notices import (
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from tests.fixtures.model_catalog import AddModels
+
+UPLOAD_HEADERS = {"Idempotency-Key": "silent-upload", "Idempotency-Scope": "principal-v1"}
 
 
 def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
@@ -187,7 +190,7 @@ def test_reconcile_rejects_over_limit_after_timeout(db_conn: psycopg.Connection)
         resp = client.post(
             f"/api/agents/{tid}/messages/reconcile",
             json={"content": content, "source": "user"},
-            headers={"Idempotency-Key": "k1"},
+            headers=keyed_headers("k1"),
         )
     assert resp.status_code == 413
     assert _pending_rows(db_conn, tid) == []
@@ -316,7 +319,7 @@ class TestMultimodalMessage:
     def test_image_to_vision_model_stores_blocks(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A vision agent: upload silently (deliver=false), then a multimodal
+        """A vision agent: upload silently, then a multimodal
         message stores the text part in content + the blocks in payload."""
         from pathlib import Path
 
@@ -324,13 +327,14 @@ class TestMultimodalMessage:
         tid = _seed_vision_agent(db_conn)
         with TestClient(app) as client:
             up = client.post(
-                f"/api/agents/{tid}/uploads?deliver=false",
+                f"/api/agents/{tid}/uploads",
+                headers=UPLOAD_HEADERS,
                 files=[("files", ("shot.png", b"\x89PNG\r\n\x1a\npix", "image/png"))],
             )
             assert up.status_code == 200
             url = up.json()["files"][0]["url"]
-            assert url == f"/api/agents/{tid}/uploads/shot.png"
-            # deliver=false must not have queued any inbound.
+            assert url.startswith(f"/api/agents/{tid}/uploads/ava-upload-")
+            # A silent upload must not have queued any inbound.
             assert _pending_rows(db_conn, tid) == []
 
             resp = client.post(
@@ -386,7 +390,8 @@ class TestMultimodalMessage:
         tid = _seed_vision_agent(db_conn, model=model)
         with TestClient(app) as client:
             up = client.post(
-                f"/api/agents/{tid}/uploads?deliver=false",
+                f"/api/agents/{tid}/uploads",
+                headers=UPLOAD_HEADERS,
                 files=[("files", ("shot.png", b"\x89PNG\r\n\x1a\npix", "image/png"))],
             )
             assert up.status_code == 200

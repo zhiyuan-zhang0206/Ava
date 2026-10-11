@@ -17,7 +17,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config.service_read import ConfigAuthority
 from base.db import Database
-from ops import host_config, inventory, uploads
+from ops import host_config, inventory
 from ops.cluster import operations as cluster
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
@@ -28,7 +28,6 @@ from ops.rpc_schemas import (
     ShellCapturePayload,
     ShellKillPayload,
     ShellProbePayload,
-    UploadReceivePayload,
 )
 
 # The read-modify-write arms are serialized against each other: `config_write` and `inventory_write` both
@@ -94,13 +93,6 @@ def dispatch_sync(
                 ).model_dump(mode="json")
         case "shell_probe" | "shell_kill" | "shell_capture" | "agent_skill_view":
             return OpStatus.COMPLETED, _agent_arm(kind, payload, pool)
-        case "upload_receive":
-            ur = UploadReceivePayload.model_validate(payload)
-            if pool is None:
-                raise RuntimeError("upload receiver requires the native DB pool")
-            return OpStatus.COMPLETED, uploads.upload_receive_op(ur, pool=pool).model_dump(
-                mode="json"
-            )
         case _:
             return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
 

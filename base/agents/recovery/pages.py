@@ -17,7 +17,7 @@ NOTICE_PREFIX = "Page recovery:"
 # the agent; the interval is checked against the agent's own inbound history.
 MIN_INTERVAL_S = 6 * 3600
 
-# CAS open -> closed (the same UPDATE close_page uses).
+# CAS open -> closed.
 CLOSE_PAGE_SQL = (
     "UPDATE agent_pages SET closed_at = now() "
     "WHERE agent_id = %s AND name = %s AND closed_at IS NULL AND expired_at IS NULL"

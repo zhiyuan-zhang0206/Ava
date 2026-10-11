@@ -2,8 +2,8 @@
 
 Read this host's plugin / MCP enable inventory (each with metadata + a host
 capability verdict) and apply a validated all-or-nothing toggle write. One of
-the op clusters beside `ops.lifecycle`, `ops.cluster.operations`, `ops.host_config` and
-`ops.uploads`; each cluster is self-contained.
+the op clusters beside `ops.lifecycle`, `ops.cluster.operations` and `ops.host_config`;
+each cluster is self-contained.
 
 Plugins + MCP servers are an agent-runner-only concern — a gateway runs no
 agent, so every op here asserts the agent-runner capability and fails loud on a
