@@ -443,7 +443,7 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     assert event["kind"] == "lifecycle"
     forwarded = event["payload"]
     assert isinstance(forwarded, dict)
-    assert forwarded["path"] == f"/api/agents/{agent_id}/resurrect-if-pending-work-v2"
+    assert forwarded["path"] == f"/api/agents/{agent_id}/resurrect-if-pending-work"
     assert forwarded["trigger_inbound_id"] == trigger_id
     assert forwarded["trigger_inbound_kind"] == "chat"
     body = forwarded["body"]

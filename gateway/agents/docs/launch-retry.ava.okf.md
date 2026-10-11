@@ -12,9 +12,8 @@ tags: [gateway, agents, idempotency]
 principal and an explicit UUID `expected_prior_attempt_id`. Selected-agent
 `AgentSnapshot.last_launch_attempt_id` exposes the observed prior attempt;
 missing data from an older gateway supplies no evidence for strong admission.
-Every request authenticates again. An old gateway has no versioned route; an
-old runner rejects the new `launch-reconcile-v1` kind before effects. Neither
-failure authorizes fallback to the original HTTP path or `spawn-launch-v2`.
+Every request authenticates again. A runner that does not know the `launch-reconcile` kind rejects it before effects;
+that failure never authorizes fallback to the original HTTP path or `spawn-launch`.
 
 `ops.agents.launch_retry.accept_retry_launch` owns the transaction. It serializes
 the scoped key, looks up the receipt before mutable target state, then locks

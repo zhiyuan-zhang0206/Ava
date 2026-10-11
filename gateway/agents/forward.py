@@ -152,7 +152,7 @@ async def enqueue_lifecycle(
 async def forward_spawn_to_remote(
     db: Database, target: str, body: LaunchAgentRequest
 ) -> SpawnedAgent:
-    """POST a versioned launch op to the target machine's ops server.
+    """POST a launch op to the target machine's ops server.
 
     The target machine's ava-ops server dispatches in-process to
     `ops.lifecycle.launch_agent_op`. The gateway already committed the
@@ -170,7 +170,7 @@ async def forward_spawn_to_remote(
         result = await _cluster_rpc.dispatch_to_machine(
             db,
             target_machine=target,
-            kind="spawn-launch-v2",
+            kind="spawn-launch",
             payload=forward_body,
         )
     except _cluster_rpc.ClusterOpUnreachable as exc:

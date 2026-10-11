@@ -1,5 +1,5 @@
 """Billing batch-recovery wire models — the `POST /api/agents/resurrect-billing`
-request/response and its per-agent `resurrect-billing-v1` home action (task #3919).
+request/response and its per-agent `resurrect-billing` home action (task #3919).
 
 The `ops.rpc_schemas` door re-exports these names.
 """
@@ -52,7 +52,7 @@ class BillingResurrectRequest(BaseModel):
     billing-class halt candidates, the halted-but-alive survey, and the
     provider balance readout, nothing written. `execute=True` re-checks the
     provider balance and, when the gate passes, resurrects each candidate on
-    its home machine through the versioned `resurrect-billing-v1` op.
+    its home machine through the `resurrect-billing` op.
     """
 
     execute: bool = False
@@ -87,7 +87,7 @@ class BillingResurrectAgentOutcome(BaseModel):
 
 
 class BillingResurrectAgentResponse(BaseModel):
-    """Home-runner adjudication of `resurrect-billing-v1` for one agent.
+    """Home-runner adjudication of `resurrect-billing` for one agent.
 
     `spawned`: every billing-victim guard passed under the row lock;
         terminated -> idling + host wake.

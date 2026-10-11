@@ -1,4 +1,4 @@
-"""A versioned repeatable wake never falls through to old launch effects."""
+"""Launch reconciliation dispatches to its own repeatable handler, not the creation launch."""
 
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -44,7 +44,7 @@ async def test_reconcile_dispatch_uses_its_own_repeatable_handler(
     monkeypatch.setattr(launch_reconcile, "reconcile_launch_op", reconcile)
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", forbidden)
     status, result = await daemon._dispatch(
-        "launch-reconcile-v1",
+        "launch-reconcile",
         {"launch_attempt_id": str(attempt)},
         active_ops={},
         workers=set(),
@@ -58,5 +58,5 @@ async def test_reconcile_dispatch_uses_its_own_repeatable_handler(
     assert status == OpStatus.COMPLETED
     assert result == {"wake_published": True}
     assert calls == [(attempt, pool)]
-    assert "launch-reconcile-v1" not in rpc._NON_IDEMPOTENT_KINDS
-    assert {"spawn-launch-v2", "lifecycle"} <= rpc._NON_IDEMPOTENT_KINDS
+    assert "launch-reconcile" not in rpc._NON_IDEMPOTENT_KINDS
+    assert {"spawn-launch", "lifecycle"} <= rpc._NON_IDEMPOTENT_KINDS

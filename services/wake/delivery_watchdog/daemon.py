@@ -72,7 +72,7 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up.
 
 6. **Stalled crash-marked harvest request** (`stall_recovery`) — escalate a chat still `pending`
    past the stall threshold whose owner is a crash-marked idling corpse over
-   the internal `recover-crash-marked-v2` path (one request per owner, persisted 60s
+   the internal `recover-crash-marked` path (one request per owner, persisted 60s
    cooldown, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; Task #3618).
 
 Runs on the gateway, one per cluster. Kept alive by the root supervisor's health

@@ -1,4 +1,4 @@
-"""`recover-crash-marked-v2` — the stalled crash-marked harvest (task #3618).
+"""`recover-crash-marked` — the stalled crash-marked harvest (task #3618).
 
 Two layers: the home runner's adjudication (`_recover_crash_marked_blocking`,
 one row-locked transaction that harvests a crash-marked idling corpse into the
@@ -452,7 +452,7 @@ class TestRecoverCrashMarkedRequester:
             {
                 "target_machine": "home-a",
                 "kind": "lifecycle",
-                "payload": {"path": "/api/agents/7/recover-crash-marked-v2", "body": {}},
+                "payload": {"path": "/api/agents/7/recover-crash-marked", "body": {}},
             }
         ]
 
@@ -560,7 +560,7 @@ async def test_lifecycle_op_dispatches_the_recover_path(
     result = await lifecycle.lifecycle_op(
         database,
         event_bus,
-        "/api/agents/42/recover-crash-marked-v2",
+        "/api/agents/42/recover-crash-marked",
         {},
         MagicMock(),
         catalog=build_model_catalog(),  # type: ignore[arg-type]
