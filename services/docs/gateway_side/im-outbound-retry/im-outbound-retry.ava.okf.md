@@ -123,7 +123,8 @@ resumable chunk retries or automatic reconciliation yet.
 
 Native alerts share this worker: see [[native-alert-outbox]]. #4477 remains open
 for explicit notice/other Ops producers, provider verification, chunk progress
-and reconciliation/retention. Other immediate paths remain separate. The pre-existing `state.outbox.jsonl` is the
-user-to-Gateway inbound journal and is never used to dispatch provider output.
-No client Outbox, resend UI or deployment is introduced. Acceptance is not proof
+and reconciliation/retention. Other immediate paths remain separate. User-to-Gateway chat sends keep only the
+bounded same-key retries inside one `GatewayClient.send_message` call; when they
+are exhausted the sender is told the message was not delivered and nothing is
+persisted. No client Outbox, resend UI or deployment is introduced. Acceptance is not proof
 of delivery.

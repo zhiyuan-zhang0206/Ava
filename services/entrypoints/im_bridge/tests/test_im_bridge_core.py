@@ -774,9 +774,6 @@ class FakeFlakyWeixinAdapter(FakePlainAdapter):
 # --- Task #4252: push retry — bounded jitter backoff, exactly one retry ---
 
 
-# --- Task #1032: three P0s — watermark compare / inbound outbox / SSE log ---
-
-
 async def test_spawn_submission_forwards_adapter_event_key() -> None:
     async with owned_tasks() as _owned_tasks:
         from services.entrypoints.im_bridge.types import InboundMessage

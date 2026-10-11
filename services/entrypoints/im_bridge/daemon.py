@@ -319,7 +319,6 @@ async def run() -> None:
                 adapters = _load_adapters(core, frozenset(config.im_disabled_adapters))
                 if not adapters:
                     _log.warning("im_bridge: no adapters loaded — nothing to serve")
-                core.ensure_outbox_replay()
                 await core.restore_subscriptions()
                 loops.create_task(_liveness_loop(liveness))
                 loops.create_task(_notice_loop(core))

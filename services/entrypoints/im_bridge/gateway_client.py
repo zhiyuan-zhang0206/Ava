@@ -78,12 +78,11 @@ class GatewayClient:
     async def send_message(
         self, agent_id: int, text: str, *, idempotency_key: str | None = None
     ) -> None:
-        """POST /api/agents/{id}/messages — enqueue a chat inbound; retries with
-        backoff (an IM message must not drop once the platform offset moved).
-        AtLeastOnceWithKey: same Idempotency-Key on every retry, so the server
-        dedups — never a duplicate even after commit. Outbox replays pass
-        their persisted key (Task #1032), so a replay after a lost gateway
-        response stays a no-op server-side."""
+        """POST /api/agents/{id}/messages — enqueue a chat inbound with bounded
+        backoff retries inside this call. Every retry carries the same
+        Idempotency-Key, so the server dedups even after a lost response. Once
+        the retries are exhausted the error propagates; nothing is persisted
+        or replayed later."""
         key = idempotency_key or uuid.uuid4().hex
         for attempt, delay in enumerate(self._config.im_send_retry_delays, start=1):
             try:
