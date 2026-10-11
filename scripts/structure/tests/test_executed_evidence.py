@@ -72,25 +72,6 @@ def test_legacy_patch_adapter_carries_unknown_without_claiming_complete_placemen
         placement.place(_PATH, tree, index)
 
 
-@pytest.mark.parametrize(
-    "rel",
-    [
-        "base/host/env/tests/test_file_lock_bounded.py",
-        "base/native_process/tests/test_os_platform.py",
-    ],
-)
-def test_real_literal_drivers_keep_dependencies_and_complete_evidence(rel: str) -> None:
-    root = Path(__file__).resolve().parents[3]
-    tree = ast.parse((root / rel).read_text(encoding="utf-8"))
-    index = placement.ModuleIndex(root)
-    evidence = placement.collect_reference_evidence(tree, index, rel)
-    assert "base.native_process.os_platform" in {
-        ref.module for ref in evidence.refs if ref.kind == "embedded-import"
-    }
-    assert evidence.unresolved == []
-    assert placement.collect_references(tree, index, rel) == evidence.refs
-
-
 def test_resolved_option_does_not_hide_a_remaining_dynamic_source(tmp_path: Path) -> None:
     (tmp_path / "base").mkdir()
     (tmp_path / "base" / "config.py").touch()

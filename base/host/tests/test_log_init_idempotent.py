@@ -227,43 +227,7 @@ def test_init_gateway_process_emits_service_started() -> None:
 # dropped loguru's default handler, so that warning reaches stderr only if the
 # init opened the stderr sink before the import.
 
-_SETTINGS_BUILD_WARNING = r"""
-import sys
-sys.path.insert(0, sys.argv[1])
-import httpx
-from base.host.env import bootstrap
-def unreachable(*_args, **_kwargs):
-    raise httpx.ConnectError("connection refused")
-bootstrap.fetch_bootstrap_config = unreachable
-import base.log.process
-assert "base.config" not in sys.modules
-if sys.argv[2] == "init_cli_process":
-    pipelines = []
-    def producer():
-        from base.telemetry import EventPipeline
-        pipeline = EventPipeline(writer=lambda batch: None)
-        pipelines.append(pipeline)
-        return pipeline
-    try:
-        base.log.process.init_cli_process(name="probe", producer=producer, machine_reader=lambda: "probe-host")
-    finally:
-        for pipeline in pipelines:
-            pipeline.stop(timeout=1)
-else:
-    from pathlib import Path
-    from base.native_process.loaded_commit import LoadedCommit
-    pipelines = []
-    def producer():
-        from base.telemetry import EventPipeline
-        pipeline = EventPipeline(writer=lambda batch: None)
-        pipelines.append(pipeline)
-        return pipeline
-    try:
-        base.log.process.init_gateway_process(name="probe", producer=producer, machine_reader=lambda: "probe-host", image=LoadedCommit(Path(sys.argv[1]), None))
-    finally:
-        for pipeline in pipelines:
-            pipeline.stop(timeout=1)
-"""
+_SETTINGS_BUILD_WARNING = Path(__file__).with_name("_log_init_child.py")
 
 
 @pytest.mark.parametrize("init", ["init_cli_process", "init_gateway_process"])
@@ -302,8 +266,8 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
     )
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.update(AVA_HOME=str(home))
-    child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
-        [sys.executable, "-I", "-B", "-c", _SETTINGS_BUILD_WARNING, str(_REPO_ROOT), init],
+    child = subprocess.run(  # noqa: S603 — this interpreter, fixed child script, a private home
+        [sys.executable, "-I", "-B", str(_SETTINGS_BUILD_WARNING), str(_REPO_ROOT), init],
         cwd=tmp_path,
         env=env,
         capture_output=True,

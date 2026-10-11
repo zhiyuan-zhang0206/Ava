@@ -219,11 +219,11 @@ def test_spawned_child_reads_forwarded_timezone_without_env_key(
     child_env = dict(os.environ)
     child_env["AVA_HOME"] = str(tmp_path)  # a unit .env with no AVA_TIMEZONE
     child_env["AVA_TIMEZONE"] = "Asia/Shanghai"
-    out = subprocess.run(
+    out = subprocess.run(  # noqa: S603 -- fixed argv, this interpreter runs the child script
         [
             sys.executable,
-            "-c",
-            "from base.config import settings; print(settings.general.timezone)",
+            str(Path(__file__).with_name("_env_import_child.py")),
+            "forwarded_timezone",
         ],
         env=child_env,
         capture_output=True,
