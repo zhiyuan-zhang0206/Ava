@@ -19,9 +19,6 @@ loops under one `TaskGroup` (one that raises ends the process):
   Alertmanager no longer reports firing, for webhooks whose RESOLVE was lost
   (`services.upkeep.events_maintenance.alert_reconciler`).
 
-The checkpoint trim opt-in was retired on 2026-09-30 under the never-delete
-ruling. Its implementation remains in `checkpoint_reaper.py` but is not scheduled.
-
 Each loop reports independent progress, success, and errors in `/healthz`.
 Only completed bounded work or sleeps beat; exceeding a hard deadline fails
 healthz until the watchdog replaces the process and its orphaned worker thread.

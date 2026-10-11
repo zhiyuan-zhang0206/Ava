@@ -314,7 +314,6 @@ EVENTS: dict[str, EventSpec] = {
     "history_dump": telemetry_event(
         "history_dump", "pre-compact history dumped to workspace", tier="noise"
     ),
-    "checkpoint_trim": telemetry_event("checkpoint_trim", "checkpoint trimmed", tier="noise"),
     "recall_filter": telemetry_event(
         "recall_filter",
         "memory recall filter",

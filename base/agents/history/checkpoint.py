@@ -509,9 +509,8 @@ def load_checkpoint_messages_by_trace(
     the system prompt (the checkpoint's `messages` channel is the full
     conversation, not a window).
 
-    Returns (None, []) when no checkpoint carries the trace id — the trace's
-    checkpoints were compact/trim pruned (checkpoint_cleanup keeps only the
-    latest K), or the trace predates the link. The caller renders this as
+    Returns (None, []) when no checkpoint carries the trace id — the trace
+    predates the link. The caller renders this as
     "pruned" rather than an error: the span metadata in the mirror/events
     still exists, only the content is gone.
 

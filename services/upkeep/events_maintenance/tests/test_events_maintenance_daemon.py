@@ -5,8 +5,7 @@ The runtime guards the maintenance daemon needs and that are easy to regress:
   - blocking passes beat only after completion and permanently wedge on timeout;
   - a failed pass still waits a full interval before retrying, so a transient
     DB error does not become a tight hot-loop against Postgres;
-  - the hourly pass ALWAYS runs the rollup + blob vacuum, while the retired
-    checkpoint reaper is not scheduled.
+  - the hourly pass ALWAYS runs the rollup + blob vacuum.
 
 All driven directly (no DB): `_run_maintenance` / `_maintenance_with_liveness` are
 monkeypatched, so these are pure asyncio-loop tests.

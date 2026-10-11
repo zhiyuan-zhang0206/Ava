@@ -113,11 +113,8 @@ class EmptyCompactionSummaryError(RuntimeError):
     """The model returned no summary text; retry the explicit summary validation."""
 
 
-# Compaction keeps every pre-compact checkpoint: the never-delete ruling
-# (2026-09-12, task #3180) retired the former keep=1 trim (2026-08-10, Task
-# #1125) that dropped every non-boundary pre-compact row. The boundary stamp
-# below stays — it anchors the compaction segment for reads and audits (it no
-# longer carries a trim exemption: nothing is trimmed).
+# Compaction keeps every pre-compact checkpoint (never-delete ruling). The
+# boundary stamp below anchors the compaction segment for reads and audits.
 
 
 async def stamp_compact_boundary(
