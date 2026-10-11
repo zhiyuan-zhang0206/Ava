@@ -9,10 +9,12 @@ import httpx
 import psycopg
 import pytest
 
+from base.cluster.auth import API_TOKEN_ENV
 from base.config import settings
 from base.db import Database
 from ops.cluster.rpc import dispatch_to_machine
 from tests.components.base.poll_until import poll_until
+from tests.e2e._credentials import current_credentials
 from tests.e2e._db import wait_for_status
 from tests.e2e.fixture_environment import E2EEnv
 
@@ -41,8 +43,10 @@ def test_resurrect_brings_back_terminated_agent(
     assert original is not None and original[0] is not None
     assert command == [("done", True, True)]
     if explicit:
-        # Keep Playwright's event loop separate from the async ops RPC.
-        monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-cluster-secret")
+        # Keep Playwright's event loop separate from the async ops RPC. The dial is the
+        # gateway's: /ops accepts the write generation's machine tokens, never the human
+        # secret, so this test process presents the gateway-class token the gateway holds.
+        monkeypatch.setenv(API_TOKEN_ENV, current_credentials().gateway_token)
         with ThreadPoolExecutor(max_workers=1) as executor:
             response = executor.submit(
                 asyncio.run,
