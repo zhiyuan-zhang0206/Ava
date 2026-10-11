@@ -52,9 +52,6 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             # Display window defaults (task #3696) — served by gateway endpoints
             # (messages / timeline / notices / shell) for unparameterized reads.
             "display",
-            # The skills router (#3267) reads install_registry.resolved_policy(),
-            # which resolves per-package update defaults from settings.packages.
-            "packages",
         }
     ),
     # Agent host and exec children (kernel + SDK + builtin plugins). daemon is
@@ -74,10 +71,6 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "gateway",
             "services",
             "daemon",
-            # ava/skills/__init__.py imports base.packages.extensions.install_registry, whose
-            # resolved_policy() resolves per-package update defaults from
-            # settings.packages (#3267).
-            "packages",
         }
     ),
     # runner support daemons (ops / watchdog / browser / browser-mcp /
@@ -94,10 +87,6 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "lm",  # ops.lifecycle reads llm_model
             "sandbox",
             "observability",
-            # base.packages.extensions.install_registry.resolved_policy() is reachable from the
-            # runner closure and resolves per-package update defaults from
-            # settings.packages (#3267).
-            "packages",
         }
     ),
 }

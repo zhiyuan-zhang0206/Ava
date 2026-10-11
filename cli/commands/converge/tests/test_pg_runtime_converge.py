@@ -10,8 +10,11 @@ from typing import Any
 
 import pytest
 
+import base.config as config_facade
+from base.agents.context.clients import DatabaseFactory
 from base.cluster.dataplane import pg_runtime, runtime_binaries
-from base.config import settings
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 from base.telemetry import EventPipeline
 from cli.commands.converge._steps import _ensure_pg_binaries_step
 from cli.commands.converge.spec import ConvergeCtx
@@ -97,23 +100,59 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-
-    def remote(_self: object) -> bool:
-        return True
-
     def forbidden() -> None:
         pytest.fail("Remote-managed storage must not prepare a local server runtime")
 
-    monkeypatch.setattr(type(settings.data_plane), "is_remote", property(remote))
+    config = command_runtime.config
+    config.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/ava")
+    config.set_field("redis_url", "redis://127.0.0.1:6380/0")
     monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", forbidden)
     _ensure_pg_binaries_step(
         ConvergeCtx(
             tmp_path,
             tmp_path,
             frozenset({"gateway"}),
-            config=command_runtime.config,
+            config=config,
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
         )
     )
+
+
+def test_pg_admission_uses_each_owners_live_remote_verdict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: DatabaseFactory,
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", lambda: calls.append("local"))
+    monkeypatch.setattr(
+        config_facade.settings.data_plane, "db_url", "postgresql://ambient@192.0.2.20/other"
+    )
+    local, remote = ConfigBoot(), ConfigBoot()
+    contexts: list[ConvergeCtx] = []
+    for config, host in ((local, "127.0.0.1"), (remote, "192.0.2.10")):
+        config.set_field("db_url", f"postgresql://test:test@{host}:5433/ava")
+        config.set_field("redis_url", "redis://127.0.0.1:6380/0")
+        contexts.append(
+            ConvergeCtx(
+                tmp_path,
+                tmp_path,
+                frozenset({"gateway"}),
+                config=config,
+                database_factory=operator_database,
+                producer=operator_pipeline,
+                machine=machine_from_boot(config),
+            )
+        )
+    _ensure_pg_binaries_step(contexts[0])
+    _ensure_pg_binaries_step(contexts[1])
+    assert calls == ["local"]
+
+    local.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/ava")
+    remote.set_field("db_url", "postgresql://test:test@127.0.0.1:5433/ava")
+    _ensure_pg_binaries_step(contexts[0])
+    _ensure_pg_binaries_step(contexts[1])
+    assert calls == ["local", "local"]
