@@ -14,10 +14,8 @@ from base.agents.incarnation.hosted_force import install_hosted_force
 from base.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
-    ResourceBirth,
     ResourceEvidenceError,
     ResourceProcess,
-    admit_first_resources,
     attach_exec,
     decode_resources,
     freeze_resources,
@@ -34,13 +32,12 @@ def _process(pid: int, birth: float) -> ResourceProcess:
 
 def _admitted(conn: psycopg.Connection) -> RuntimeIncarnation:
     target = RuntimeIncarnation(create_agent(conn), uuid4(), uuid4())
-    birth = ResourceBirth(birth=uuid4())
+    admitted = IncarnationResources(generation=target.generation, owner=target.owner, requests={})
     conn.execute(
         "INSERT INTO agents_meta(id,status,machine,incarnation_resources) "
         "VALUES(%s,'idling','resource-test',%s)",
-        (target.agent_id, Jsonb(birth.model_dump(mode="json"))),
+        (target.agent_id, Jsonb(admitted.model_dump(mode="json"))),
     )
-    admit_first_resources(conn, target, birth.birth)
     conn.execute(
         "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s,runtime_kind='hosted',"
         "lease_expires_at=clock_timestamp()+interval '1 minute' WHERE id=%s",
