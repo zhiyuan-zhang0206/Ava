@@ -19,6 +19,7 @@ import pytest
 
 from base.cluster import authority
 from base.cluster.authority import delivery
+from base.db.code_version_gate import ProcessDbGate
 from base.db.connections import NoDatabaseAuthorityError, _guard_db_url
 from base.host.env import dotenv_boot
 
@@ -238,7 +239,11 @@ def test_a_urls_own_startup_options_survive_the_statement_ceiling() -> None:
 
 
 def test_a_database_handle_retains_its_boot_refusal_after_another_delivery(
-    boot: Path, seeded: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    boot: Path,
+    seeded: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A later admitted boot cannot authorize a previously refused handle."""
     del seeded
@@ -252,7 +257,7 @@ def test_a_database_handle_retains_its_boot_refusal_after_another_delivery(
         env_boot=result, data_plane={"db_url": _ENDPOINT, "redis_url": "redis://localhost:1"}
     )
     monkeypatch.setattr(db_config, "settings", first)
-    handle = Database.from_settings()
+    handle = Database.from_settings(gate=database_gate)
     _intent(boot, _REPO)
     dotenv_boot._enforce_cluster_env_authority(dotenv_boot.resolve_ava_home())
 

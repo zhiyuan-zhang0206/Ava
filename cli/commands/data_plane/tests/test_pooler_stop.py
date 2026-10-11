@@ -12,7 +12,7 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest.mock import Mock
 from urllib.parse import urlsplit
@@ -26,9 +26,12 @@ from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.config import settings
 from base.native_process.ownership import OwnedProcess
+from base.telemetry import EventPipeline
 from cli.commands.data_plane import _pooler_stop, maintenance_stop
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler, _native_birth
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="native POSIX pooler")
 
@@ -157,7 +160,10 @@ def native_pooler(
     ("preexisting_drain", "compensation_retry"), [(False, False), (False, True), (True, False)]
 )
 def test_repeated_normal_stop_preserves_waiting_transaction(
-    native_pooler: tuple[OwnedPooler, str, str], preexisting_drain: bool, compensation_retry: bool
+    native_pooler: tuple[OwnedPooler, str, str],
+    preexisting_drain: bool,
+    compensation_retry: bool,
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     custodian, pooled, direct = native_pooler
     with psycopg.connect(pooled) as client:
@@ -176,7 +182,7 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
                 if _attempt and compensation_retry:
                     pooler.stop_pgbouncer()
                 else:
-                    maintenance_stop.stop(0.5)
+                    maintenance_stop.stop(0.5, producer=operator_pipeline)
             except (RuntimeError, TimeoutError) as exc:
                 failure = exc
             assert custodian.identity.live(), "retry must not immediately abort the waiting pooler"

@@ -12,6 +12,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import base.db
+from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules import session_control
 from services.wake.schedule_manager import requests
 from services.wake.schedule_manager.manager import ScheduleManager
@@ -22,8 +23,8 @@ _REAL_WAIT = session_control.wait_consumed
 
 
 @pytest.fixture
-def pool() -> Iterator[ConnectionPool]:
-    p = base.db.pool(max_size=2)
+def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+    p = base.db.pool(max_size=2, gate=database_gate)
     try:
         yield p
     finally:

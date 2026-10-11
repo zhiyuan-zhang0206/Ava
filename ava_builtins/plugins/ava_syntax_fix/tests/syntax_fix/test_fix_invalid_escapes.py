@@ -31,6 +31,7 @@ from ava_builtins.plugins.ava_syntax_fix.tests.test_syntax_fix import _is_broken
 from base.agents.context import AvaContext
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 
@@ -123,14 +124,14 @@ class TestFixInvalidEscapes:
 
 class TestSyntaxFixBeforeExec:
     @staticmethod
-    def _runtime():
+    def _runtime(database_gate: ProcessDbGate):
         ctx = AvaContext(
             ops_pool=AsyncMock(),
             llm=MagicMock(),
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
         )
         return Runtime(context=ctx)
@@ -139,19 +140,23 @@ class TestSyntaxFixBeforeExec:
     def _config() -> RunnableConfig:
         return {"configurable": {"thread_id": "7"}}
 
-    async def test_no_ai_message_returns_none(self):
+    async def test_no_ai_message_returns_none(self, database_gate: ProcessDbGate):
         from langchain_core.messages import HumanMessage
 
         state = AgentState(messages=[HumanMessage(content="hello")])
-        result = await syntax_fix_before_exec(state, self._runtime(), self._config())
+        result = await syntax_fix_before_exec(
+            state, self._runtime(database_gate=database_gate), self._config()
+        )
         assert result is None
 
-    async def test_no_tool_calls_returns_none(self):
+    async def test_no_tool_calls_returns_none(self, database_gate: ProcessDbGate):
         state = AgentState(messages=[AIMessage(content="ok")])
-        result = await syntax_fix_before_exec(state, self._runtime(), self._config())
+        result = await syntax_fix_before_exec(
+            state, self._runtime(database_gate=database_gate), self._config()
+        )
         assert result is None
 
-    async def test_empty_code_returns_none(self):
+    async def test_empty_code_returns_none(self, database_gate: ProcessDbGate):
         state = AgentState(
             messages=[
                 AIMessage(
@@ -160,10 +165,14 @@ class TestSyntaxFixBeforeExec:
                 )
             ]
         )
-        result = await syntax_fix_before_exec(state, self._runtime(), self._config())
+        result = await syntax_fix_before_exec(
+            state, self._runtime(database_gate=database_gate), self._config()
+        )
         assert result is None
 
-    async def test_chinese_punctuation_fixed(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_chinese_punctuation_fixed(
+        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ):
         """Chinese comma should be fixed."""
 
         # Pin the flag: the assertion expects ruff_format spacing, which a host
@@ -183,7 +192,9 @@ class TestSyntaxFixBeforeExec:
                 )
             ]
         )
-        result = await syntax_fix_before_exec(state, self._runtime(), self._config())
+        result = await syntax_fix_before_exec(
+            state, self._runtime(database_gate=database_gate), self._config()
+        )
         assert result is not None
         assert "messages" in result
         fixed = result["messages"][0]
@@ -191,7 +202,9 @@ class TestSyntaxFixBeforeExec:
         # ruff_format (on by default) also normalizes spacing after the comma.
         assert "print(1, 2)" in code
 
-    async def test_ruff_format_applied_when_enabled(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_ruff_format_applied_when_enabled(
+        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ):
         """settings.sandbox.syntax_fix_ruff_format=True -> non-canonical style normalized."""
 
         monkeypatch.setattr(settings.sandbox, "syntax_fix_ruff_format", True)
@@ -203,11 +216,15 @@ class TestSyntaxFixBeforeExec:
                 )
             ]
         )
-        result = await syntax_fix_before_exec(state, self._runtime(), self._config())
+        result = await syntax_fix_before_exec(
+            state, self._runtime(database_gate=database_gate), self._config()
+        )
         assert result is not None
         assert result["messages"][0].tool_calls[0]["args"]["code"].strip() == "x = 1"  # pyright: ignore[reportUnknownMemberType]
 
-    async def test_ruff_format_skipped_when_disabled(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_ruff_format_skipped_when_disabled(
+        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ):
         """settings.sandbox.syntax_fix_ruff_format=False -> style left untouched.
 
         Uses a duplicate import so _ruff_fix always triggers a change (ruff
@@ -231,14 +248,16 @@ class TestSyntaxFixBeforeExec:
                 )
             ]
         )
-        result = await syntax_fix_before_exec(state, self._runtime(), self._config())
+        result = await syntax_fix_before_exec(
+            state, self._runtime(database_gate=database_gate), self._config()
+        )
         assert result is not None
         code = result["messages"][0].tool_calls[0]["args"]["code"]  # pyright: ignore[reportUnknownMemberType]
         # ruff format disabled: x=1 stays as-is, not reformatted to x = 1.
         assert "x = 1" not in code
         assert "x=1" in code
 
-    async def test_missing_import_added(self):
+    async def test_missing_import_added(self, database_gate: ProcessDbGate):
         """Missing import should be added."""
         state = AgentState(
             messages=[
@@ -254,12 +273,14 @@ class TestSyntaxFixBeforeExec:
                 )
             ]
         )
-        result = await syntax_fix_before_exec(state, self._runtime(), self._config())
+        result = await syntax_fix_before_exec(
+            state, self._runtime(database_gate=database_gate), self._config()
+        )
         assert result is not None
         code = result["messages"][0].tool_calls[0]["args"]["code"]  # pyright: ignore[reportUnknownMemberType]
         assert "import json" in code
 
-    async def test_syntax_error_injects_tool_message(self):
+    async def test_syntax_error_injects_tool_message(self, database_gate: ProcessDbGate):
         """Unfixable syntax error should inject ToolMessage + goto after_exec.
 
         LLM repair is explicitly patched to be unavailable (returns None), locking the deterministic fallback path,
@@ -283,7 +304,9 @@ class TestSyntaxFixBeforeExec:
             "ava_builtins.plugins.ava_syntax_fix.agent_runtime._llm_repair_syntax",
             new=AsyncMock(return_value=None),
         ):
-            result = await syntax_fix_before_exec(state, self._runtime(), self._config())
+            result = await syntax_fix_before_exec(
+                state, self._runtime(database_gate=database_gate), self._config()
+            )
         assert result is not None
         assert result.get("goto") == "after_exec"  # pyright: ignore[reportUnknownMemberType]
         assert "halted" in result
@@ -303,7 +326,7 @@ class TestSyntaxFixBeforeExec:
             ]
         )
 
-    async def test_llm_repair_success_silent_replacement(self):
+    async def test_llm_repair_success_silent_replacement(self, database_gate: ProcessDbGate):
         """LLM repair returns compilable code → silently replace with same ID, no ToolMessage, no goto."""
         broken = "x = 'unterminated\nprint(x)"
         repaired = "x = 'fixed'\nprint(x)"
@@ -312,14 +335,16 @@ class TestSyntaxFixBeforeExec:
             new=AsyncMock(return_value=repaired),
         ):
             result = await syntax_fix_before_exec(
-                self._broken_state(broken), self._runtime(), self._config()
+                self._broken_state(broken),
+                self._runtime(database_gate=database_gate),
+                self._config(),
             )
         assert result is not None
         assert "goto" not in result
         assert len(result["messages"]) == 1  # pyright: ignore[reportUnknownArgumentType]
         assert result["messages"][0].tool_calls[0]["args"]["code"] == repaired  # pyright: ignore[reportUnknownMemberType]
 
-    async def test_llm_repair_unavailable_falls_back(self):
+    async def test_llm_repair_unavailable_falls_back(self, database_gate: ProcessDbGate):
         """LLM repair unavailable / retries exhausted (returns None) → fall back to ToolMessage fallback path."""
         broken = "if True print('x')"
         with patch(
@@ -327,14 +352,16 @@ class TestSyntaxFixBeforeExec:
             new=AsyncMock(return_value=None),
         ):
             result = await syntax_fix_before_exec(
-                self._broken_state(broken), self._runtime(), self._config()
+                self._broken_state(broken),
+                self._runtime(database_gate=database_gate),
+                self._config(),
             )
         assert result is not None
         assert result.get("goto") == "after_exec"  # pyright: ignore[reportUnknownMemberType]
         assert len(result["messages"]) == 2  # pyright: ignore[reportUnknownArgumentType]
         assert "SyntaxError" in result["messages"][1].content  # pyright: ignore[reportUnknownMemberType]
 
-    async def test_valid_code_no_change_returns_none(self):
+    async def test_valid_code_no_change_returns_none(self, database_gate: ProcessDbGate):
         """Perfectly legal code is not modified, returns None."""
         state = AgentState(
             messages=[
@@ -350,7 +377,9 @@ class TestSyntaxFixBeforeExec:
                 )
             ]
         )
-        result = await syntax_fix_before_exec(state, self._runtime(), self._config())
+        result = await syntax_fix_before_exec(
+            state, self._runtime(database_gate=database_gate), self._config()
+        )
         # ruff may format, so it's not guaranteed to return None.
         # Just assert no exception.
         if result is not None:

@@ -30,6 +30,7 @@ from playwright.sync_api import ConsoleMessage, Page
 
 from base.agents import AgentStatus
 from base.config import settings
+from base.db import Database
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
 from tests.e2e._settings import pin_expand_runs_all
@@ -122,7 +123,9 @@ def _assert_no_unrecognized_alarm_after_compact(
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.compact_flow:build")
-def test_force_compact_renders_envelope_without_unrecognized_marker(e2e_env: E2EEnv) -> None:
+def test_force_compact_renders_envelope_without_unrecognized_marker(
+    e2e_env: E2EEnv, database: Database
+) -> None:
     page = e2e_env.page
     agent_id = e2e_env.agent_id
     unrecognized_warnings = _collect_unrecognized_console_warnings(page)
@@ -142,7 +145,7 @@ def test_force_compact_renders_envelope_without_unrecognized_marker(e2e_env: E2E
     wait_for_status(agent_id, AgentStatus.IDLING.value)
 
     # ── 2. force compact (native history-rendering fixture) ──
-    enqueue_compact_history_fixture(agent_id)
+    enqueue_compact_history_fixture(agent_id, database=database)
 
     # ── 3. compact ran: clean wipe + compact_request envelope ──
     items = _wait_kinds(e2e_env.gateway_url, agent_id, ["inbound_compact_request"])

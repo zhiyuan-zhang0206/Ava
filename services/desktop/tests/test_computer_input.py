@@ -14,6 +14,7 @@ import jsonschema
 import pytest
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 
 from ..computer.config import ComputerUseConfig
 from ..computer.mcp_daemon import ComputerMcpDaemon
@@ -22,13 +23,15 @@ from ..permissions_helper import client
 
 
 class Desktop:
-    def __init__(self) -> None:
+    def __init__(self, *, database_gate: ProcessDbGate) -> None:
         self.requests: list[dict[str, Any]] = []
         self.events: list[Any] = []
         self.capable = True
         self.denied: str | None = None
         self.daemon = ComputerMcpDaemon(
-            ComputerUseConfig(30, 0.01, 30, 60, 1), Database.from_settings(), sock="/unused"
+            ComputerUseConfig(30, 0.01, 30, 60, 1),
+            Database.from_settings(gate=database_gate),
+            sock="/unused",
         )
         self.daemon._scale = 2
 
@@ -130,8 +133,8 @@ class Desktop:
 
 
 @pytest.fixture
-def desktop(monkeypatch: pytest.MonkeyPatch) -> Iterator[Desktop]:
-    target = Desktop()
+def desktop(monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate) -> Iterator[Desktop]:
+    target = Desktop(database_gate=database_gate)
     errors: list[BaseException] = []
     stopped = threading.Event()
 

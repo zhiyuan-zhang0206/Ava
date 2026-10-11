@@ -12,6 +12,7 @@ from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import wake
@@ -42,10 +43,11 @@ def _park(
     pid: int | None = None,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> int:
     """Seed admission input or a terminated hosted incarnation without launching."""
     aid, _birth, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner="user",
         machine=machine_name(),
@@ -96,11 +98,16 @@ def test_resurrect_agent_hosted_flips_and_wakes(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """terminated -> idling + resurrect inbound + one wake; no launch, no
     pid-confirm polling."""
     aid = _park(
-        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        status="terminated",
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     out = wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
     assert out == aid
@@ -117,12 +124,17 @@ def test_resurrect_agent_hosted_clears_the_corpse_marker(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A reaper-terminated corpse keeps `last_turn_fatal_at` stamped; the
     resurrect transition must clear it or the reaper's next beat would
     re-terminate the freshly revived row (the marker is already past grace)."""
     aid = _park(
-        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        status="terminated",
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     db_conn.execute(
         "UPDATE agents_meta SET termination_source='reaper', "
@@ -144,11 +156,16 @@ def test_resurrect_agent_hosted_keeps_trigger_guard(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The auto-resurrect trigger CAS semantics are mode-independent: a stale
     trigger still refuses the transition."""
     aid = _park(
-        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        status="terminated",
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     with pytest.raises(wake.ResurrectTriggerStaleError):
         wake.resurrect_agent(
@@ -175,6 +192,7 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """An observed termination never revalidates its original runtime token."""
     from uuid import uuid4
@@ -188,7 +206,11 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     from base.db import insert_inbound_message
 
     aid = _park(
-        db_conn, status="idling", config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        status="idling",
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     if managed:
         db_conn.execute(
@@ -261,14 +283,22 @@ def _backdate_before_status(db: psycopg.Connection, aid: int, iid: int) -> None:
 
 
 def _reaped_crash_park(
-    db: psycopg.Connection, *, config_authority: ConfigAuthority, model_catalog: ModelCatalog
+    db: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> tuple[int, int]:
     """terminated + reaper source + retained crash marker + a leftover chat
     that predates the termination (the relaxed-trigger shape)."""
     from base.db import insert_inbound_message
 
     aid = _park(
-        db, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+        db,
+        status="terminated",
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     trigger = insert_inbound_message(
         db,
@@ -276,7 +306,7 @@ def _reaped_crash_park(
         "leftover work",
         "user",
         bus=EventBus.from_settings(),
-        database=Database.from_settings(),
+        database=Database.from_settings(gate=database_gate),
     )
     with db.cursor() as cur:
         cur.execute(
@@ -289,9 +319,9 @@ def _reaped_crash_park(
     return aid, trigger
 
 
-def _guarded_resurrect(aid: int, trigger: int) -> None:
+def _guarded_resurrect(aid: int, trigger: int, database_gate: ProcessDbGate) -> None:
     wake.resurrect_agent(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         aid,
         resurrected_by="system",
@@ -308,11 +338,15 @@ def test_reaped_crash_row_resumes_leftover_work(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A reaper death is not an operator decision, so a chat that predates it
     still qualifies as the pending-work trigger (task #3617, design section 6)."""
     aid, trigger = _reaped_crash_park(
-        db_conn, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
 
     assert (
@@ -337,13 +371,18 @@ def test_operator_death_still_refuses_leftover_work(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The crash marker alone never relaxes the fence: a user kill keeps its
     contract — the leftover chat cannot undo it."""
     from base.db import insert_inbound_message
 
     aid = _park(
-        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        status="terminated",
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     trigger = insert_inbound_message(
         db_conn, aid, "leftover work", "user", bus=event_bus, database=database
@@ -357,16 +396,23 @@ def test_operator_death_still_refuses_leftover_work(
     _backdate_before_status(db_conn, aid, trigger)
 
     with pytest.raises(wake.ResurrectTriggerStaleError):
-        _guarded_resurrect(aid, trigger)
+        _guarded_resurrect(aid, trigger, database_gate=database_gate)
     assert _row(db_conn, aid)[0] == "terminated"
 
 
 def test_suppressed_wakes_refuse_the_reaped_crash_trigger(
-    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The relaxed fence does not bypass an active automatic-wake suppression."""
     aid, trigger = _reaped_crash_park(
-        db_conn, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     db_conn.execute(
         "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
@@ -376,34 +422,48 @@ def test_suppressed_wakes_refuse_the_reaped_crash_trigger(
     db_conn.commit()
 
     with pytest.raises(wake.ResurrectTriggerStaleError):
-        _guarded_resurrect(aid, trigger)
+        _guarded_resurrect(aid, trigger, database_gate=database_gate)
     assert _row(db_conn, aid)[0] == "terminated"
 
 
 def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
-    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """After consecutive permanent provider rejections the automatic trigger is
     refused at the final CAS; the durable streak refuses even with no
     suppression window set (a claim clears the window by design)."""
     aid, trigger = _reaped_crash_park(
-        db_conn, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     db_conn.execute("UPDATE agents_meta SET permanent_reject_streak = 2 WHERE id = %s", (aid,))
     db_conn.commit()
 
     with pytest.raises(wake.ResurrectTriggerStaleError):
-        _guarded_resurrect(aid, trigger)
+        _guarded_resurrect(aid, trigger, database_gate=database_gate)
     assert _row(db_conn, aid)[0] == "terminated"
 
 
 def test_reaped_crash_row_keeps_the_failed_restart_fence(
-    db_conn: psycopg.Connection, *, config_authority: ConfigAuthority, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A failed-restart target keeps its hard fence even for a reaped crash
     row: the relaunch observation must settle first."""
     aid, trigger = _reaped_crash_park(
-        db_conn, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -424,7 +484,7 @@ def test_reaped_crash_row_keeps_the_failed_restart_fence(
     db_conn.commit()
 
     with pytest.raises(wake.ResurrectTriggerStaleError):
-        _guarded_resurrect(aid, trigger)
+        _guarded_resurrect(aid, trigger, database_gate=database_gate)
     assert _row(db_conn, aid)[0] == "terminated"
 
 
@@ -435,6 +495,7 @@ def test_reaped_crash_row_keeps_the_auto_resurrect_budget(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The relaxed fence is not a budget bypass: an exhausted auto-resurrect
     budget refuses even a reaper-marked leftover."""
@@ -442,7 +503,10 @@ def test_reaped_crash_row_keeps_the_auto_resurrect_budget(
     from base.db import insert_inbound_message
 
     aid, trigger = _reaped_crash_park(
-        db_conn, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     for _ in range(wake._auto_resurrect_max_attempts()):
         insert_inbound_message(
@@ -450,7 +514,7 @@ def test_reaped_crash_row_keeps_the_auto_resurrect_budget(
         )
 
     with pytest.raises(ResurrectBudgetExhausted):
-        _guarded_resurrect(aid, trigger)
+        _guarded_resurrect(aid, trigger, database_gate=database_gate)
     assert _row(db_conn, aid)[0] == "terminated"
 
 
@@ -462,12 +526,17 @@ def test_manual_resurrect_stays_exempt_from_the_gates(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A manual resurrect passes no trigger: the explicit human override
     bypasses both suppression and the tripped breaker (the breaker record —
     streak and suppression reason — is retained, auditable)."""
     aid = _park(
-        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        status="terminated",
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     db_conn.execute(
         "UPDATE agents_meta SET wake_suppressed_until = now() + interval '300 days', "
@@ -501,13 +570,18 @@ def test_historical_runtime_cannot_be_resurrected(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """An absent command pointer cannot adopt a historical or unknown runtime."""
     from base.agents import ResurrectRefused
     from base.db import insert_inbound_message
 
     aid = _park(
-        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        status="terminated",
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     db_conn.execute(
         "UPDATE agents_meta SET runtime_kind=%s, incarnation_resources=NULL, "
@@ -548,6 +622,7 @@ def test_incomplete_hosted_target_requires_cutover(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A hosted label alone cannot replace the retained incarnation authority."""
     from psycopg import sql
@@ -555,7 +630,11 @@ def test_incomplete_hosted_target_requires_cutover(
     from base.agents import ResurrectRefused
 
     aid = _park(
-        db_conn, status="terminated", config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        status="terminated",
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     db_conn.execute(
         sql.SQL("UPDATE agents_meta SET {}=%s WHERE id=%s").format(sql.Identifier(missing)),

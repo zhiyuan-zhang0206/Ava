@@ -16,6 +16,7 @@ from base.agents.observation.snapshot import select_one
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
@@ -29,8 +30,14 @@ def test_snapshot_retains_independent_probe_and_lease_clocks(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     now = datetime.now(UTC)
     probe = None if probe_age is None else now - timedelta(seconds=probe_age)
     lease = None if lease_offset is None else now + timedelta(seconds=lease_offset)
@@ -161,9 +168,18 @@ def test_launch_failure_remains_visible_without_a_fresh_host_probe() -> None:
 
 
 def test_launch_failure_projects_on_card_and_detail(
-    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db_conn: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET last_launch_failure_reason='launch_rejected', "

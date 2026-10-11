@@ -3,6 +3,7 @@
 import signal
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import DEFAULT, Mock
@@ -16,9 +17,12 @@ from base.cluster import ownership
 from base.cluster import postgres as pg
 from base.cluster.dataplane import pooler as base_pooler
 from base.native_process.ownership import OwnedProcess
+from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
 from tests._containers import redis_server
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 _UNUSED_ADMIN = "unused-admin-credential"
 
@@ -123,6 +127,7 @@ def test_pooler_birth_change_prevents_reload(
 
 def test_redis_maintenance_reconnect_cannot_shutdown_another_connection(
     monkeypatch: pytest.MonkeyPatch,
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     from base.config import settings
     from cli.commands.data_plane import maintenance_stop as plane
@@ -153,7 +158,7 @@ def test_redis_maintenance_reconnect_cannot_shutdown_another_connection(
             directory = Path(str(client.config_get("dir")["dir"]))  # pyright: ignore[reportUnknownMemberType] — redis stubs
             monkeypatch.setattr(ownership, "redis_data_dir", lambda: directory)
             with pytest.raises(RuntimeError, match="connection changed"):
-                plane.stop(3)
+                plane.stop(3, producer=operator_pipeline)
             assert client.ping(), "the server must survive lost connection custody"  # pyright: ignore[reportUnknownMemberType] — redis stubs
 
 
@@ -216,6 +221,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     retained_children: list[subprocess.Popen[bytes]],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     """The ordinary producer supplies all custody; no test-only receipt adoption."""
     import psycopg
@@ -232,12 +238,14 @@ def test_real_owned_postgres_resume_and_fast_stop(
             assert row is not None
             system_id = row[0]
             _assert_warm_pg_repeat(data, port, first, persisted, retained_children)
-            assert plane.stop(10, retained_children=retained_children) == ["postgres"]
+            assert plane.stop(
+                10, retained_children=retained_children, producer=operator_pipeline
+            ) == ["postgres"]
             assert not first.live() and ownership.postgres(data) is None
             assert pg.receipt_path(data).read_bytes() == persisted
             with pytest.raises(psycopg.OperationalError):
                 conn.execute("SELECT 1")
-        assert plane.stop(2, retained_children=retained_children) == []
+        assert plane.stop(2, retained_children=retained_children, producer=operator_pipeline) == []
         assert instance._start_pg(port, "", retained_children=retained_children) == 0
         second, _receipt = _assert_pg_birth(data, port)
         assert not first.same_birth(second)
@@ -258,6 +266,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
 def test_pg_native_signal_failure_is_not_reported_as_stopped(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     import asyncio
 
@@ -284,7 +293,14 @@ def test_pg_native_signal_failure_is_not_reported_as_stopped(
     client = AsyncRedis(port=_free_port())
     with pytest.raises(RuntimeError, match="native custody lost"):
         asyncio.run(
-            plane._request_stop("postgres", owner, client, plane.deadline_after(3), save=True)
+            plane._request_stop(
+                "postgres",
+                owner,
+                client,
+                plane.deadline_after(3),
+                save=True,
+                producer=operator_pipeline,
+            )
         )
     assert seen == [owner]
 

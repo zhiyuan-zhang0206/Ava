@@ -12,6 +12,7 @@ from psycopg_pool import ConnectionPool
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
@@ -37,6 +38,7 @@ def _make_idle(
     status: str = "idling",
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> int:
     """Spawn an agent and park it. `status_changed_s_ago` backdates
     status_changed_at via a timestamp-only UPDATE (the BEFORE-UPDATE-OF-status
@@ -50,7 +52,12 @@ def _make_idle(
     window. Returns the agent id."""
     if last_active_s_ago is None:
         last_active_s_ago = status_changed_s_ago
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = %s, "

@@ -11,22 +11,35 @@ from __future__ import annotations
 
 import urllib.error
 import urllib.request
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
 import base.db
 from base.cluster.authority.api import publish_telemetry_token, telemetry_token
 from base.config import settings
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.native_process import code_version
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
 from services.wake.heartbeat import station_probe as hc
 
 
 @pytest.fixture(autouse=True)
-def _clean_state() -> None:
+def _log_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hc, "init_gateway_process", Mock())
+    monkeypatch.setattr(hc, "build_pipeline", Mock(return_value=object()))
+
+
+@pytest.fixture(autouse=True)
+def _clean_state(*, database_gate: ProcessDbGate) -> None:
     """Reset the in-process probe state between tests (the module dict is
     process-global, same as the watchdog would hold it)."""
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with base.db.connect(gate=database_gate) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM machine_units WHERE machine_name LIKE 'station-test%'")
         conn.commit()
 
@@ -39,8 +52,10 @@ def _no_remote_observatory(monkeypatch: pytest.MonkeyPatch) -> None:
     publish_telemetry_token(ava_home(), "cluster-token")
 
 
-def _insert_station_unit(name: str = "station-test-a", url: str = "http://10.0.0.9:4318") -> None:
-    with base.db.connect() as conn, conn.cursor() as cur:
+def _insert_station_unit(
+    name: str = "station-test-a", url: str = "http://10.0.0.9:4318", *, database_gate: ProcessDbGate
+) -> None:
+    with base.db.connect(gate=database_gate) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_units "
             "(machine_name, home, serve_gateway, serve_agent_runner, "
@@ -60,18 +75,23 @@ def test_main_is_noop_without_remote_observatory(monkeypatch: pytest.MonkeyPatch
         calls.append(url)
         return False
 
+    create = Mock(side_effect=AssertionError("a no-op probe must not open its work database"))
+    monkeypatch.setattr(hc.Database, "from_settings", create)
     monkeypatch.setattr(hc, "_station_answers", _fail_if_called)
     hc.main()
     assert calls == []
+    create.assert_not_called()
 
 
-def test_resolve_target_uses_advertised_machine_units_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_target_uses_advertised_machine_units_url(
+    monkeypatch: pytest.MonkeyPatch, database: Database, *, database_gate: ProcessDbGate
+) -> None:
     """The probe target is the station's ADVERTISED machine_units url — the
     reachability contract — not the configured base."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
     monkeypatch.setattr(settings.observability, "telemetry_otlp_port", 4319)
-    _insert_station_unit()
-    target = hc.resolve_target()
+    _insert_station_unit(database_gate=database_gate)
+    target = hc.resolve_target(database=lambda: database)
     assert target is not None
     assert target.url == "http://10.0.0.9:4318"
     assert target.advertised is True
@@ -80,38 +100,39 @@ def test_resolve_target_uses_advertised_machine_units_url(monkeypatch: pytest.Mo
 
 def test_resolve_target_falls_back_to_configured_base_without_registration(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """AVA_OBSERVABILITY_URL set but no station unit registered -> warn loudly
     and probe the configured base + OTLP port (fail-open: still give signal)."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.46")
-    target = hc.resolve_target()
+    target = hc.resolve_target(database=lambda: database)
     assert target is not None
     assert target.url == "http://10.0.0.46:4318"
     assert target.advertised is False
 
 
 def test_resolve_target_skips_hybrid_gateway_station_units(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database: Database, *, database_gate: ProcessDbGate
 ) -> None:
     """A hybrid gateway+station unit advertises its GATEWAY url (unit_dial_url
     lets the gateway capability win), not the OTLP ingress — probing it would
     hit the gateway API and alert forever (QA #1156 NIT-2). Only units whose
     capability set identifies an ingress advertisement qualify."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.46")
-    _insert_station_unit(url="http://10.0.0.46:4318")
-    with base.db.connect() as conn, conn.cursor() as cur:
+    _insert_station_unit(url="http://10.0.0.46:4318", database_gate=database_gate)
+    with base.db.connect(gate=database_gate) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machine_units SET serve_gateway = true WHERE machine_name = 'station-test-a'"
         )
         conn.commit()
-    target = hc.resolve_target()
+    target = hc.resolve_target(database=lambda: database)
     assert target is not None
     assert target.url == "http://10.0.0.46:4318"
     assert target.advertised is False
 
 
-def test_resolve_target_none_without_observability_url() -> None:
-    assert hc.resolve_target() is None
+def test_resolve_target_none_without_observability_url(database: Database) -> None:
+    assert hc.resolve_target(database=lambda: database) is None
 
 
 def test_station_answers_bearer_otlp_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -178,12 +199,12 @@ def test_station_answers_without_a_published_token_warns_and_fails_open(
 
 
 def test_main_probes_advertised_station_and_does_not_raise(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """End-to-end: with a registered station, main() runs clean on a healthy
     probe and fails open on a failing one."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
-    _insert_station_unit()
+    _insert_station_unit(database_gate=database_gate)
     answers = [True, False]
 
     def probe(_url: str) -> bool:
@@ -193,3 +214,54 @@ def test_main_probes_advertised_station_and_does_not_raise(
     hc.main()
     hc.main()  # must not raise
     assert answers == []
+
+
+def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    image = LoadedCommit(tmp_path, "captured-before-checkout-moved")
+    capture = Mock(return_value=image)
+    count = Mock(return_value=7)
+    create = Mock(return_value=Mock(spec=Database))
+    target = Mock(url="http://station.invalid:4318")
+    received: list[object] = []
+
+    def resolve(*, database: Callable[[], Database]) -> Any:
+        received.append(database)
+        database()
+        return target
+
+    logging = Mock()
+    pipeline = Mock(return_value=object())
+    monkeypatch.setattr(LoadedCommit, "capture", capture)
+    monkeypatch.setattr(code_version, "first_parent_count", count)
+    monkeypatch.setattr(hc.Database, "from_settings", create)
+    monkeypatch.setattr(hc, "resolve_target", resolve)
+    monkeypatch.setattr(hc, "build_pipeline", pipeline)
+    monkeypatch.setattr(hc, "init_gateway_process", logging)
+    monkeypatch.setattr(hc, "_station_answers", Mock(return_value=True))
+    hc.main()
+
+    capture.assert_called_once_with()
+    count.assert_not_called()
+    factory = pipeline.call_args.kwargs["database"]
+    assert received == [factory]
+    assert logging.call_args.kwargs["image"] is image
+    assert logging.call_args.kwargs["producer"]() is pipeline.return_value
+    factory()
+    gates = [call.kwargs["gate"] for call in create.call_args_list]
+    assert len(gates) == 2 and gates[0] is gates[1]
+    assert isinstance(gates[0], ProcessDbGate)
+    assert gates[0].application_name() == "ava:station:v7"
+    count.assert_called_once_with(tmp_path, image.sha)
+    gates[0].observe_minimum(7)
+    assert not gates[0].min_read_due()
+
+
+def test_station_lookup_keeps_the_original_fail_open_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.observability, "observability_url", "http://station.invalid")
+    create = Mock(side_effect=RuntimeError("original database failure"))
+    assert hc.resolve_target(database=create) is None
+    create.assert_called_once_with()

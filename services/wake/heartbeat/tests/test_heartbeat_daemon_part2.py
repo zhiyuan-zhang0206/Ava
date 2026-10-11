@@ -13,6 +13,7 @@ starts the normal idle clock, so after the window expires the agent still waits
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 
 import psycopg
 import pytest
@@ -21,6 +22,8 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.daemon import (
     _reconcile_checkin_outcomes,
@@ -31,6 +34,17 @@ from tests.fixtures.units import spawn_agent
 
 # Explicit threshold so the assertions do not ride on the configured default.
 _THRESHOLD_S = 300.0
+
+
+@pytest.fixture
+def event_pipeline(database: Database) -> Iterator[telemetry.EventPipeline]:
+    """Own the process writer used by the service operation and mirror barrier."""
+    pipeline = telemetry.build_pipeline(database=lambda: database)
+    try:
+        telemetry.init_telemetry(process="test-wake-service", pipeline=pipeline)
+        yield pipeline
+    finally:
+        pipeline.stop(timeout=2)
 
 
 @pytest.fixture
@@ -51,6 +65,7 @@ def _make_idle(
     status: str = "idling",
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> int:
     """Spawn an agent and park it. `status_changed_s_ago` backdates
     status_changed_at via a timestamp-only UPDATE (the BEFORE-UPDATE-OF-status
@@ -64,7 +79,12 @@ def _make_idle(
     window. Returns the agent id."""
     if last_active_s_ago is None:
         last_active_s_ago = status_changed_s_ago
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = %s, "
@@ -174,6 +194,7 @@ class TestNudgeBackoffB7:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """last_heartbeat_at 10 min ago is due at the default 5 min cadence
         but not at level 2 (5 min * 4 = 20 min)."""
@@ -182,6 +203,7 @@ class TestNudgeBackoffB7:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -194,6 +216,7 @@ class TestNudgeBackoffB7:
         self._set_level(db_conn, aid, 2)
         assert aid not in _selected(pool)
 
+    @pytest.mark.usefixtures("event_pipeline")
     def test_reconcile_raises_level_after_n_consecutive_noops(
         self,
         pool: ConnectionPool,
@@ -201,12 +224,14 @@ class TestNudgeBackoffB7:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         noop: dict[int, int] = {aid: 2}
 
@@ -238,12 +263,14 @@ class TestNudgeBackoffB7:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -278,6 +305,7 @@ class TestNudgeBackoffB7:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -285,6 +313,7 @@ class TestNudgeBackoffB7:
             paused_until_s_ahead=3600,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         noop: dict[int, int] = {aid: 2}
 
@@ -307,6 +336,7 @@ class TestNudgeBackoffB7:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         from services.wake.heartbeat.daemon import _backoff_max_level
 
@@ -315,6 +345,7 @@ class TestNudgeBackoffB7:
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         max_level = _backoff_max_level(_THRESHOLD_S)
         self._set_level(db_conn, aid, max_level)
@@ -336,6 +367,7 @@ class TestNudgeBackoffB7:
             assert row is not None
             assert row[0] == max_level
 
+    @pytest.mark.usefixtures("event_pipeline")
     def test_sweep_resets_level_on_real_inbound(
         self,
         pool: ConnectionPool,
@@ -343,12 +375,14 @@ class TestNudgeBackoffB7:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -375,6 +409,7 @@ class TestNudgeBackoffB7:
         assert ev["attributes"]["previous_level"] == 2
         assert ev["attributes"]["reason"] == "real_inbound"
 
+    @pytest.mark.usefixtures("event_pipeline")
     def test_sweep_leaves_level_without_engagement(
         self,
         pool: ConnectionPool,
@@ -382,12 +417,14 @@ class TestNudgeBackoffB7:
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         aid = _make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
             config_authority=config_authority,
+            database_gate=database_gate,
         )
         with db_conn.cursor() as cur:
             cur.execute(

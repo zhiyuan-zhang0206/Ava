@@ -11,6 +11,7 @@ import pytest
 
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from ops.cluster.rpc import dispatch_to_machine
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import wait_for_status
@@ -20,7 +21,10 @@ from tests.e2e.fixture_environment import E2EEnv
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_resurrect:build")
 @pytest.mark.parametrize("explicit", [False, True])
 def test_resurrect_brings_back_terminated_agent(
-    e2e_env: E2EEnv, monkeypatch: pytest.MonkeyPatch, explicit: bool
+    e2e_env: E2EEnv,
+    monkeypatch: pytest.MonkeyPatch,
+    explicit: bool,
+    database_gate: ProcessDbGate,
 ) -> None:
     page, agent_id = e2e_env.page, e2e_env.agent_id
     page.goto(e2e_env.agent_url)
@@ -47,7 +51,7 @@ def test_resurrect_brings_back_terminated_agent(
             response = executor.submit(
                 asyncio.run,
                 dispatch_to_machine(
-                    Database.from_settings(),
+                    Database.from_settings(gate=database_gate),
                     target_machine=original[1],
                     kind="lifecycle",
                     payload={

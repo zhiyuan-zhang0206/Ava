@@ -20,6 +20,8 @@ from pydantic import SecretStr
 
 from base.config import ConfigBoot
 from base.daemon.health import Liveness
+from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from services.derived.memory_indexer import chunking, daemon
 from services.derived.memory_indexer.backends.base import content_hash
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
@@ -580,7 +582,7 @@ async def test_reconcile_retry_beats_between_failed_pass_and_batch(
 
 @pytest.mark.usefixtures("owned_config_environment")
 async def test_run_unknown_provider_fails_before_health_server(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], database: Database
 ) -> None:
     start_health_server = AsyncMock()
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
@@ -590,7 +592,7 @@ async def test_run_unknown_provider_fails_before_health_server(
     monkeypatch.setattr(boot.view.services, "embedding_backend", "unknown-provider")
 
     with pytest.raises(SystemExit) as exc:
-        await daemon.run(config=boot)
+        await daemon.run(config=boot, database=lambda: database, image=LoadedCommit(Path(), None))
 
     assert exc.value.code == 1
     assert "FATAL: unknown embedding provider 'unknown-provider'" in capsys.readouterr().err
@@ -601,6 +603,7 @@ async def test_run_unknown_provider_fails_before_health_server(
 async def test_run_arms_retry_when_startup_reconcile_incomplete(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    database: Database,
 ) -> None:
     from services.derived.memory_indexer.backends.probe import ProbeResult
 
@@ -642,7 +645,7 @@ async def test_run_arms_retry_when_startup_reconcile_incomplete(
     boot.set_field("gemini_api_key", SecretStr("root-key"))
 
     with caplog.at_level(logging.WARNING, logger="services.derived.memory_indexer.daemon"):
-        await daemon.run(config=boot)
+        await daemon.run(config=boot, database=lambda: database, image=LoadedCommit(Path(), None))
 
     assert provider_inputs == [("gemini", 17.0, "root-key")]
     reconcile.assert_called_once()

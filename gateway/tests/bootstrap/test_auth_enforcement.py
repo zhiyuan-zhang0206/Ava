@@ -22,24 +22,25 @@ from gateway.tests.bootstrap.test_auth import (
     _session_cookie,
 )
 from gateway.tests.bootstrap.test_auth import _patch_secret as _patch_secret
+from tests.fixtures.gateway_config import gateway_test_client
 
 # ── Unauthenticated requests get 401 ──────────────────────────────────
 
 
 def test_api_agents_rejects_no_auth() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/agents")
     assert resp.status_code == 401
 
 
 def test_api_status_rejects_no_auth() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/status")
     assert resp.status_code == 401
 
 
 def test_api_bootstrap_rejects_no_auth() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/bootstrap")
     assert resp.status_code == 401
 
@@ -55,7 +56,7 @@ def test_cors_preflight_on_protected_route_not_401() -> None:
     browser as "Failed to fetch". Regression guard for the resurrect /
     terminate / restart lifecycle buttons."""
     allowed_origin = cors_allowed_origins()[0]
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.options(
             "/api/agents/405/resurrect",
             headers={
@@ -119,7 +120,7 @@ def test_cookie_authenticated_post_allows_gateway_frontend_origin(
         "gateway_url",
         "http://10.0.0.72:8000",
     )
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         token = _login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -136,7 +137,7 @@ def test_cookie_authenticated_post_allows_gateway_frontend_origin(
 
 
 def test_cors_preflight_disallowed_origin_has_no_allow_origin_header() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.options(
             "/api/agents/405/resurrect",
             headers={
@@ -154,7 +155,7 @@ def test_unauthorized_response_carries_cors_headers() -> None:
     headers — CORSMiddleware is the OUTERMOST middleware, so a browser caller
     sees the real 401 instead of "Failed to fetch" (#187)."""
     allowed_origin = cors_allowed_origins()[0]
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get(
             "/api/agents",
             headers={"Origin": allowed_origin},
@@ -192,14 +193,14 @@ def test_cors_headers_omit_disallowed_origin(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_api_agents_accepts_bearer() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/agents", headers=_auth())
     assert resp.status_code == 200
 
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_api_bootstrap_accepts_bearer() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 200
 
@@ -208,7 +209,7 @@ def test_api_bootstrap_accepts_bearer() -> None:
 
 
 def test_api_agents_rejects_x_cluster_secret() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/agents", headers={"X-Cluster-Secret": _SECRET})
     assert resp.status_code == 401
 
@@ -217,14 +218,14 @@ def test_api_agents_rejects_x_cluster_secret() -> None:
 
 
 def test_api_agents_accepts_valid_cookie() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         token = _login(client)
         resp = client.get("/api/agents", headers=_session_cookie(token))
     assert resp.status_code == 200
 
 
 def test_api_agents_rejects_invalid_cookie() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/agents", headers=_session_cookie("bad-token"))
     assert resp.status_code == 401
 
@@ -237,7 +238,7 @@ def test_cookie_authenticated_post_rejects_disallowed_origin(
         "cors_allowed_origins",
         ["https://allowed.example"],
     )
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         token = _login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -262,7 +263,7 @@ def test_bearer_authenticated_post_allows_disallowed_origin(
         ["https://allowed.example"],
     )
 
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.post(
             "/api/frontend-telemetry",
             content=b"{}",
@@ -294,7 +295,7 @@ def test_cookie_authenticated_post_allows_gateway_own_origin(
         "gateway_url",
         "http://10.0.0.72:8000",
     )
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         token = _login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -319,7 +320,7 @@ def test_cookie_authenticated_post_allows_missing_origin(
         "cors_allowed_origins",
         ["https://allowed.example"],
     )
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         token = _login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -331,7 +332,7 @@ def test_cookie_authenticated_post_allows_missing_origin(
 
 
 def test_legacy_self_contained_hmac_cookie_is_rejected() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get(
             "/api/agents",
             headers=_session_cookie(_legacy_hmac_cookie()),
@@ -340,7 +341,7 @@ def test_legacy_self_contained_hmac_cookie_is_rejected() -> None:
 
 
 def test_revoke_endpoint_invalidates_another_session() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         first = _login(client)
         client.cookies.clear()
         second = _login(client)
@@ -359,7 +360,7 @@ def test_revoke_endpoint_invalidates_another_session() -> None:
 
 
 def test_revoke_endpoint_refuses_current_session() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         current = _login(client)
         response = client.post(f"/api/auth/sessions/{current}/revoke")
 
@@ -372,7 +373,7 @@ def test_revoke_endpoint_refuses_current_session() -> None:
 
 
 def test_revoke_endpoint_returns_404_for_missing_or_revoked_session() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         current = _login(client)
         client.cookies.clear()
         target = _login(client)
@@ -391,7 +392,7 @@ def test_revoke_endpoint_returns_404_for_missing_or_revoked_session() -> None:
 def test_middleware_touches_session_at_most_once_per_minute(
     db_conn: psycopg.Connection,
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         token = _login(client)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -432,7 +433,7 @@ def test_middleware_bounds_session_touch_bookkeeping(
     now = 10_000.0
     monkeypatch.setattr(config.settings.gateway, "session_ttl_seconds", 3600)
 
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         token = _login(client)
         last_touch = app.state.session_touch.last_touch
         last_touch["stale"] = now - 3601
@@ -451,7 +452,7 @@ def test_middleware_bounds_session_touch_bookkeeping(
 
 
 def test_api_agents_rejects_wrong_bearer_secret() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/agents", headers=bearer_header("wrong-secret"))
     assert resp.status_code == 401
 
@@ -466,7 +467,7 @@ def test_empty_secret_serves_without_auth(monkeypatch: pytest.MonkeyPatch) -> No
     so this never exposes an unauthenticated API to the LAN."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/agents")
     assert resp.status_code == 200
 
@@ -476,7 +477,7 @@ def test_gateway_starts_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     unauthenticated API (that is now a first-class configuration)."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/status")
     assert resp.status_code == 200
 
@@ -488,7 +489,7 @@ def test_gateway_starts_when_auth_disabled_without_secret(
     cluster keeps its secret (for internal service-to-service auth)."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", False)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/agents")
     assert resp.status_code == 200
 
@@ -501,7 +502,7 @@ def test_check_reports_authenticated_without_secret(
     the user to a login page that cannot succeed."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         resp = client.get("/api/auth/check")
     assert resp.status_code == 200
     assert resp.json()["authenticated"] is True
@@ -520,7 +521,7 @@ def test_login_succeeds_without_secret_and_bypasses_limiter(
     def _record_failure(ip: str) -> None:
         records.append(ip)
 
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         monkeypatch.setattr(app.state.login_limiter, "record_failure", _record_failure)
         resp = client.post("/api/auth/login", json={"password": ""})
     assert resp.status_code == 200

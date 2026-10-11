@@ -46,6 +46,8 @@ healthcheck (`services.supervision.healthchecks.computer_mcp`) probes the daemon
 action lock, so a slow desktop action cannot false-kill a busy daemon — and
 the watchdog respawns it on death.
 
+Entry-owned image and database: [[services/docs/agent_runner_side/computer-mcp/process-composition.ava.okf.md]].
+
 ## Wire path
 ```
 agent execute_code

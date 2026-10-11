@@ -19,7 +19,9 @@ from base import cluster
 from base.native_process.os_platform import file_lock
 from cli import init_intent, start_intent
 from cli import start_identity as identity
+from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.tests.bootstrap._init_identity import prepare_init_identity
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 @pytest.fixture(autouse=True)
@@ -599,9 +601,12 @@ def test_remote_input_cannot_redirect_libpq_identity(
 
 
 def test_public_start_holds_home_lock_through_runtime_start(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: OperatorDatabaseFactory,
 ) -> None:
 
+    producer = operator_event_pipeline(operator_database)
     from base.native_process.os_platform import LockTimeoutError
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
@@ -617,14 +622,26 @@ def test_public_start_holds_home_lock_through_runtime_start(
 
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     prepare_init_identity(_single_box())
-    assert start_intent.run_start(_start_args(), retained_children=[]) == 0
+    assert (
+        start_intent.run_start(
+            _start_args(),
+            retained_children=[],
+            database_factory=operator_database,
+            producer=producer,
+        )
+        == 0
+    )
 
 
 @pytest.mark.parametrize("result", [0, 1, 75])
 def test_public_start_publishes_boot_pid_only_after_complete_success(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, result: int
+    inputs: identity.IdentityInput,
+    monkeypatch: pytest.MonkeyPatch,
+    result: int,
+    operator_database: OperatorDatabaseFactory,
 ) -> None:
 
+    producer = operator_event_pipeline(operator_database)
     from cli.commands.lifecycle import root_driver
 
     calls: list[str] = []
@@ -638,14 +655,25 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     monkeypatch.setattr(root_driver, "complete_boot_start", lambda: calls.append("publish PID"))
     prepare_init_identity(_single_box())
-    assert start_intent.run_start(_start_args(), retained_children=[]) == result
+    assert (
+        start_intent.run_start(
+            _start_args(),
+            retained_children=[],
+            database_factory=operator_database,
+            producer=producer,
+        )
+        == result
+    )
     assert calls == ["complete wrapped start"] + (["publish PID"] if result == 0 else [])
 
 
 def test_failed_boot_publication_clears_serving_and_refuses_success(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: OperatorDatabaseFactory,
 ) -> None:
 
+    producer = operator_event_pipeline(operator_database)
     from base.deploy.lifecycle import start_serving
     from cli.commands.lifecycle import root_driver
 
@@ -664,5 +692,13 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
 
     monkeypatch.setattr(root_driver, "complete_boot_start", fail)
     prepare_init_identity(_single_box())
-    assert start_intent.run_start(_start_args(), retained_children=[]) == 1
+    assert (
+        start_intent.run_start(
+            _start_args(),
+            retained_children=[],
+            database_factory=operator_database,
+            producer=producer,
+        )
+        == 1
+    )
     assert calls == ["cleared"]

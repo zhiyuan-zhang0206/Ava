@@ -22,6 +22,7 @@ from ava_builtins.plugins.ava_syntax_fix.agent_runtime import (
 from base.agents.context import AvaContext
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 
@@ -98,14 +99,14 @@ class TestSyntaxFixEvents:
     lands in the event's `attributes`."""
 
     @staticmethod
-    def _runtime():
+    def _runtime(database_gate: ProcessDbGate):
         ctx = AvaContext(
             ops_pool=AsyncMock(),
             llm=MagicMock(),
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
         )
         return Runtime(context=ctx)
@@ -114,7 +115,9 @@ class TestSyntaxFixEvents:
     def _config() -> RunnableConfig:
         return {"configurable": {"thread_id": "7"}}
 
-    async def test_rough_fix_emits_before_only(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_rough_fix_emits_before_only(
+        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ):
         """A deterministic (rough) fix records fix_type=rough with the original
         source as `before` and no `after` — the after state is replayable via
         _apply_fix_pipeline(before)."""
@@ -138,7 +141,9 @@ class TestSyntaxFixEvents:
                 )
             ]
         )
-        result = await syntax_fix_before_exec(state, self._runtime(), self._config())
+        result = await syntax_fix_before_exec(
+            state, self._runtime(database_gate=database_gate), self._config()
+        )
         assert result is not None
         assert len(events) == 1  # pyright: ignore[reportUnknownArgumentType]
         ev = events[0]
@@ -169,7 +174,9 @@ class TestSyntaxFixEvents:
         assert captured["fixes"] == ["chinese_punct(1)"]
         assert "after" not in captured
 
-    async def test_lm_fix_emits_before_and_after(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_lm_fix_emits_before_and_after(
+        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ):
         """An LLM repair records fix_type=lm with both before (the
         deterministic-fixed source the LLM saw) and after (the repair)."""
         from ava_builtins.plugins.ava_syntax_fix import agent_runtime as _plugin
@@ -184,7 +191,7 @@ class TestSyntaxFixEvents:
         ):
             result = await syntax_fix_before_exec(
                 TestSyntaxFixEvents._broken_state(broken),
-                self._runtime(),
+                self._runtime(database_gate=database_gate),
                 self._config(),
             )
         assert result is not None
@@ -205,7 +212,9 @@ class TestSyntaxFixEvents:
             ]
         )
 
-    async def test_no_event_when_nothing_changed(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_no_event_when_nothing_changed(
+        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ):
         """Clean code that compiles as-is emits no syntax_fix event — the event
         stream records mutations only."""
         from ava_builtins.plugins.ava_syntax_fix import agent_runtime as _plugin
@@ -229,5 +238,7 @@ class TestSyntaxFixEvents:
                 )
             ]
         )
-        await syntax_fix_before_exec(state, self._runtime(), self._config())
+        await syntax_fix_before_exec(
+            state, self._runtime(database_gate=database_gate), self._config()
+        )
         assert events == []

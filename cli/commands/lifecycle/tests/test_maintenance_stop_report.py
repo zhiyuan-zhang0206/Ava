@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -40,6 +41,7 @@ from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop_support import written as written
 from tests.components.agent.test_maintenance import WHEN
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 pytestmark = [
     pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract"),
@@ -52,6 +54,7 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     process = launch(
         "private-terminal",
@@ -65,7 +68,13 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
     )
     assert status_journal.begin("stop")
     with pytest.raises(report.StopIncompleteError) as caught:
-        stop.close_terminals(time.monotonic() + 0.25, "private-stop", WHEN, direct_db=False)
+        stop.close_terminals(
+            time.monotonic() + 0.25,
+            "private-stop",
+            WHEN,
+            direct_db=False,
+            database_factory=operator_database,
+        )
     failure = caught.value
     assert identity.live(), "the survivor outlived its SIGKILL"
     assert failure.stage == "terminals"
@@ -91,6 +100,7 @@ def test_report_keeps_known_job_diagnostic_of_a_closed_session(
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     """The session's shell is gone but a job outlived the SIGKILL: the report names the
     known job and its session without failing stop."""
@@ -110,7 +120,13 @@ def test_report_keeps_known_job_diagnostic_of_a_closed_session(
             survivors=(closure.Survivor("private-terminal", child, "job"),),
         ),
     )
-    stop.close_terminals(time.monotonic() + 0.35, "private-stop", WHEN, direct_db=False)
+    stop.close_terminals(
+        time.monotonic() + 0.35,
+        "private-stop",
+        WHEN,
+        direct_db=False,
+        database_factory=operator_database,
+    )
     assert child.live()
     diagnostic = capsys.readouterr().err
     assert f"pid={child.pid}" in diagnostic

@@ -28,3 +28,13 @@ A gateway daemon with six jobs on four resident loops under one `TaskGroup` (use
 - Its degraded-WARNING doubles as a dispatcher-health signal: the per-agent 30s recheck warns when it fires, which only happens if the dispatcher is dead AND a wake was lost
 - After correcting the underlying delivery failure, manually resume watchdog dispatch with `UPDATE inbound_messages SET dispatch_count = 0, last_dispatch_at = NULL, poisoned_at = NULL WHERE id = <inbound_id>;`.
 - Manually clear an agent-level automatic-wake suppression with `UPDATE agents_meta SET wake_suppressed_until = NULL, wake_suppress_reason = NULL WHERE id = <agent_id>;`.
+
+
+## Process composition
+
+The executable entry captures one `LoadedCommit` and retains its `CodeVersion`
+and `ProcessDbGate`. The work database factory and the lazy telemetry producer
+share that gate, so new handles preserve the process admission read budget.
+Logging and the existing health endpoint receive the same captured image; a
+checkout move cannot relabel the running daemon. The daemon's existing startup,
+pidfile, work and bounded-exit order remains unchanged.

@@ -2,11 +2,13 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from base.config import ConfigBoot
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
+from base.telemetry import EventPipeline
 from cli.commands.converge import host
 from cli.commands.converge._os_jobs import (
     ensure_cluster_autostart,
@@ -17,11 +19,15 @@ from cli.commands.converge._os_jobs import (
     ensure_walg_job,
 )
 from cli.commands.converge.spec import ConvergeCtx, ConvergeStep
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_converge_constructs_one_lazy_owner_per_operation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     observed: list[ConvergeCtx] = []
 
@@ -31,7 +37,15 @@ def test_converge_constructs_one_lazy_owner_per_operation(
     monkeypatch.setattr(ConfigBoot, "prepare", unexpected_prepare)
     steps = (ConvergeStep("first", observed.append), ConvergeStep("second", observed.append))
     for _ in range(2):
-        host.converge_host(tmp_path, None, ava_home=tmp_path, services=frozenset(), steps=steps)
+        host.converge_host(
+            tmp_path,
+            None,
+            ava_home=tmp_path,
+            services=frozenset(),
+            steps=steps,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
     assert observed[0] is observed[1]
     assert observed[2] is observed[3]
     assert observed[0].config is not observed[2].config
@@ -41,6 +55,8 @@ def test_converge_constructs_one_lazy_owner_per_operation(
 def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     owner = ConfigBoot()
     for name, value in [
@@ -51,7 +67,14 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
         ("walg_config_file", tmp_path / "walg.json"),
     ]:
         owner.set_field(name, value)
-    ctx = ConvergeCtx(repo=tmp_path, ava_home=tmp_path, roles=None, config=owner)
+    ctx = ConvergeCtx(
+        repo=tmp_path,
+        ava_home=tmp_path,
+        roles=None,
+        config=owner,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
     readers: list[Callable[[], bool]] = []
     ticks: list[Callable[[], int]] = []
     hours: list[Callable[[], int]] = []
@@ -113,6 +136,8 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
     monkeypatch: pytest.MonkeyPatch,
     default_home: Path,
     platform: str,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     from types import SimpleNamespace
 
@@ -127,7 +152,14 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
         ("walg_config_file", default_home / "walg.json"),
     ]:
         owner.set_field(name, value)
-    ctx = ConvergeCtx(repo=default_home, ava_home=default_home, roles=None, config=owner)
+    ctx = ConvergeCtx(
+        repo=default_home,
+        ava_home=default_home,
+        roles=None,
+        config=owner,
+        database_factory=operator_database,
+        producer=operator_pipeline,
+    )
     monkeypatch.setattr(
         backend,
         "get_backend",

@@ -17,6 +17,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from ops import host_config, inventory, uploads
 from ops.cluster import operations as cluster
 from ops.rpc_schemas import (
@@ -53,6 +54,7 @@ def dispatch_sync(
     pool: ConnectionPool | None,
     db: Database,
     authority: ConfigAuthority,
+    image: LoadedCommit,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Run synchronous ops on the daemon's worker pool, never the event loop.
 
@@ -64,7 +66,9 @@ def dispatch_sync(
         case "upload-receive-v1":
             return _upload_arm(payload, pool)
         case "status_probe":
-            return OpStatus.COMPLETED, cluster.cluster_status_op(db, pool).model_dump(mode="json")
+            return OpStatus.COMPLETED, cluster.cluster_status_op(db, pool, image=image).model_dump(
+                mode="json"
+            )
         case "config_read":
             return OpStatus.COMPLETED, host_config.config_read_op(authority=authority).model_dump(
                 mode="json"

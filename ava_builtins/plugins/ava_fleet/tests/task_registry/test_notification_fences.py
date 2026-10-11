@@ -14,13 +14,14 @@ from base.agents.messages.inbound import InboundKind
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db import pool as db_pool
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
 from services.wake.delivery_watchdog.resurrect_retry import select_terminated_owners_with_pending
-from tests.components.ops.test_resurrection_admission import _status, _terminated
+from tests.components.ops.resurrection_support import status, terminated
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -32,21 +33,23 @@ def test_reassigned_task_refuses_delayed_home_wake(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """An in-flight selector/RPC cannot revive a recipient after reassignment."""
     actor = _seed_agent(db_conn)
     pin_agent(actor)
-    owner = _terminated(
+    owner = terminated(
         db_conn,
         ResourceBirth(birth=uuid4()).model_dump(mode="json"),
         config_authority=config_authority,
         model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     next_owner = _seed_agent(db_conn)
     task = task_registry.create(
         "fenced", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
     )
-    note_pool = db_pool()
+    note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
     selected = select_terminated_owners_with_pending(note_pool, 86400)
     assert len(selected) == 1
@@ -63,7 +66,7 @@ def test_reassigned_task_refuses_delayed_home_wake(
             trigger_inbound_id=selected[0][1],
             trigger_inbound_kind=InboundKind.SYSTEM_NOTE,
         )
-    assert _status(db_conn, owner)[0] == "terminated"
+    assert status(db_conn, owner)[0] == "terminated"
     assert select_terminated_owners_with_pending(note_pool, 86400) == []
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect'", (owner,)
@@ -71,8 +74,7 @@ def test_reassigned_task_refuses_delayed_home_wake(
 
 
 def test_assignment_deadline_has_inspectable_failure(
-    db_conn: psycopg.Connection,
-    root_task_id: int,
+    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor = _seed_agent(db_conn)
     pin_agent(actor)
@@ -85,7 +87,7 @@ def test_assignment_deadline_has_inspectable_failure(
         (owner,),
     )
     db_conn.commit()
-    note_pool = db_pool()
+    note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
     assert select_terminated_owners_with_pending(note_pool, 86400) == []
     assert dead_letter_stale_pending_terminated(note_pool, 86400) == 1
@@ -100,8 +102,7 @@ def test_assignment_deadline_has_inspectable_failure(
 
 
 def test_reminder_policy_never_resurrects_terminated_owner(
-    db_conn: psycopg.Connection,
-    root_task_id: int,
+    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor = _seed_agent(db_conn)
     pin_agent(actor)
@@ -124,6 +125,6 @@ def test_reminder_policy_never_resurrects_terminated_owner(
         ),
     )
     db_conn.commit()
-    note_pool = db_pool()
+    note_pool = db_pool(gate=database_gate)
     assert note_pool is not None
     assert select_terminated_owners_with_pending(note_pool, 86400) == []

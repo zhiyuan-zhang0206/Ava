@@ -16,6 +16,7 @@ from psycopg_pool import ConnectionPool
 import services.agent_runner.page_server.daemon as psd
 from base.cluster.machine import reset_identity, set_identity
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
@@ -148,8 +149,11 @@ def test_open_row_creates_persistent_page_session_and_persists_token(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_page_row(db_conn, agent_id, "My_Page", 12001, tmp_path)
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
     backoff: dict[tuple[int, str], float] = {}
@@ -183,6 +187,7 @@ def test_new_row_session_created_before_slow_housekeeping(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A freshly registered row's session is created BEFORE the pass's slow
     housekeeping (the process scan) — serve()'s wait is one poll, not one
@@ -190,7 +195,9 @@ def test_new_row_session_created_before_slow_housekeeping(
     through the rest of the pass (a stale scan would reap it as dead)."""
     from types import SimpleNamespace
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     key = (agent_id, "fast-lane")
     _insert_page_row(db_conn, agent_id, key[1], 12030, tmp_path)
     events: list[str] = []
@@ -233,13 +240,16 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Managed-row liveness comes from the pass's in-process pty record scan,
     not the backend's per-name has_session — a subprocess round-trip (~0.25s)
     per row that stretched a pass to tens of seconds."""
     from types import SimpleNamespace
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     key = (agent_id, "scan-live")
     page_session = f"ava-agent-{agent_id}-shell-9-page-scan-live"
     _insert_page_row(
@@ -283,8 +293,11 @@ def test_healthy_page_is_not_resent(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     page_session = f"ava-agent-{agent_id}-shell-3-page-live"
     backend.sessions.add(page_session)
     _insert_page_row(
@@ -315,8 +328,11 @@ def test_crashed_server_is_relaunched_in_same_session(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     page_session = f"ava-agent-{agent_id}-shell-3-page-crashed"
     backend.sessions.add(page_session)
     _insert_page_row(
@@ -353,12 +369,15 @@ def test_wedged_session_relaunch_failure_kills_and_recreates_the_session(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A session whose shell cannot run the server command — its host gone
     or wedged while the record still reads alive — is torn down and rebuilt
     fresh instead of backing off against the dead transport forever
     (task #2670: the page-server ghost record class)."""
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     page_session = f"ava-agent-{agent_id}-shell-3-page-wedged"
     backend.sessions.add(page_session)
     backend.send_error = RuntimeError("pty session host is not answering")
@@ -395,8 +414,11 @@ def test_windows_style_backend_recreates_the_session_when_it_cannot_send(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     page_session = f"ava-agent-{agent_id}-shell-3-page-windows"
     backend.sessions.add(page_session)
     backend.supports_send = False
@@ -427,8 +449,11 @@ def test_stale_server_in_its_page_session_replaces_that_session(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     key = (agent_id, "stale")
     page_session = f"ava-agent-{agent_id}-shell-3-page-stale"
     backend.sessions.add(page_session)
@@ -462,8 +487,11 @@ def test_foreign_port_occupant_is_left_alone_and_backed_off(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     page_session = f"ava-agent-{agent_id}-shell-3-page-foreign"
     backend.sessions.add(page_session)
     _insert_page_row(
@@ -496,8 +524,11 @@ def test_closed_row_kills_its_page_session(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     _insert_page_row(db_conn, agent_id, "closed", 12006, tmp_path)
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
@@ -519,12 +550,15 @@ def test_stale_snapshot_never_creates_session_for_closed_row(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The pass snapshot can be seconds stale (process scans, session spawns
     happen after the row read). A row closed after the snapshot must not get a
     session created for it — the next pass would reap the fresh session as an
     orphan, the user-visible serve 502 race (rows 1643/1667 incidents)."""
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     key = (agent_id, "stale-race")
     _insert_page_row(db_conn, agent_id, key[1], 12020, tmp_path)
     stale = psd._open_rows(sync_pool, _HOST)[0]
@@ -558,11 +592,14 @@ def test_stale_snapshot_skips_row_re_registered_mid_pass(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A row re-registered (port/serve_dir changed) after the snapshot must
     not be created from the obsolete state either — the new registration is
     adopted on the next pass instead."""
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     key = (agent_id, "re-registered")
     _insert_page_row(db_conn, agent_id, key[1], 12021, tmp_path)
     stale = psd._open_rows(sync_pool, _HOST)[0]
@@ -597,11 +634,14 @@ def test_session_rolled_back_when_row_expires_during_create(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A row that expires in the window between the liveness re-check and the
     session_name write is rolled back too — the UPDATE's liveness condition
     matches the re-check, so an expired row never keeps a ghost session."""
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     key = (agent_id, "mid-create-expire")
     _insert_page_row(db_conn, agent_id, key[1], 12024, tmp_path)
     stale = psd._open_rows(sync_pool, _HOST)[0]
@@ -634,12 +674,15 @@ def test_session_created_for_row_closed_during_create_is_rolled_back(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The row can still close in the narrow window between the liveness
     re-check and the session_name write. The just-created session is rolled
     back (killed) instead of lingering as a recordless ghost the next pass
     would reap as an orphan."""
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     key = (agent_id, "mid-create-close")
     _insert_page_row(db_conn, agent_id, key[1], 12023, tmp_path)
     stale = psd._open_rows(sync_pool, _HOST)[0]
@@ -666,9 +709,12 @@ def test_terminated_agent_keeps_daemon_page_session(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Agent termination does not close a daemon-supervised page row or shell."""
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     key = (agent_id, "persistent")
     _insert_page_row(db_conn, agent_id, key[1], 12016, tmp_path)
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
@@ -695,8 +741,11 @@ def test_daemon_restart_kills_the_persisted_session_of_a_closed_row(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     page_session = f"ava-agent-{agent_id}-shell-4-page-closed-after-restart"
     backend.sessions.add(page_session)
     _insert_page_row(

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import socket
 import stat
 import tempfile
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,7 +28,11 @@ from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import Clock, ClockConfig
 from base.config import ConfigBoot
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import DbConfig
 from base.lm.catalog import ModelCatalog
+from base.native_process import code_version
+from base.native_process.loaded_commit import LoadedCommit
 from services.derived.insights import daemon
 from services.derived.insights.app import build_app
 from services.derived.insights.config import InsightsConfig
@@ -255,6 +260,7 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
     class Store:
         def pool(self, *, max_size: int) -> Any:
             assert max_size == 4
+            assert (short_dir / "insights.pid").exists()
             return pool
 
     db = Store()
@@ -269,10 +275,9 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
 
     monkeypatch.setattr(daemon, "insights_pidfile", lambda: short_dir / "insights.pid")
     monkeypatch.setattr(daemon, "insights_socket", lambda: short_dir / "insights.sock")
-    monkeypatch.setattr(daemon.Database, "from_settings", lambda: db)
     monkeypatch.setattr(daemon, "build_model_catalog", lambda: model_catalog)
     monkeypatch.setattr(daemon.uvicorn, "Server", Server)
-    await daemon.run(config=boot)
+    await daemon.run(config=boot, database=lambda: cast(Database, db))
 
     assert len(apps) == 1
     assert apps[0].state.config.run_timeline_message_text_max == 37
@@ -295,3 +300,99 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
     assert closed == [True]
     assert not (short_dir / "insights.pid").exists()
     assert not (short_dir / "insights.sock").exists()
+
+
+def _assert_gate_matches_image(
+    gates: list[ProcessDbGate], reads: list[tuple[Path, str]], image: LoadedCommit
+) -> None:
+    assert len(gates) == 2 and gates[0] is gates[1]
+    if image.sha is None:
+        with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
+            gates[0].application_name()
+        assert reads == []
+    else:
+        assert gates[0].application_name() == gates[1].application_name() == "ava:insights:v42"
+        assert reads == [(image.source_root, image.sha)]
+
+
+def _run_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = asyncio.Runner()
+    monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
+    try:
+        daemon.main()
+    finally:
+        runner.close()
+
+
+@pytest.mark.parametrize("sha", ["captured-insights", None])
+@pytest.mark.usefixtures("owned_config_environment")
+def test_entry_shares_the_captured_gate_with_logging_and_work(
+    monkeypatch: pytest.MonkeyPatch, sha: str | None
+) -> None:
+    from base.deploy.schema import migrations
+
+    boot = ConfigBoot()
+    boot.set_field("machine_name", "insights-entry")
+    image = LoadedCommit(Path("/entry-insights"), sha)
+    stages: list[str] = []
+    gates: list[ProcessDbGate] = []
+    reads: list[tuple[Path, str]] = []
+    factories: list[Callable[[], Database]] = []
+    slices: list[DbConfig] = []
+    pipeline = object()
+
+    class Store:
+        def __init__(self, config: DbConfig, *, gate: ProcessDbGate) -> None:
+            gates.append(gate)
+            slices.append(config)
+
+    def capture() -> LoadedCommit:
+        stages.append("capture")
+        return image
+
+    def count(root: Path, commit: str) -> int:
+        reads.append((root, commit))
+        return 42
+
+    def build(*, database: Callable[[], Database]) -> object:
+        stages.append("producer")
+        factories.append(database)
+        return pipeline
+
+    def initialize(**inputs: Any) -> None:
+        stages.append("logging")
+        assert inputs["image"] is image
+        assert inputs["producer"]() is pipeline
+        assert inputs["machine_reader"]() == "insights-entry"
+        factories[0]()
+
+    async def work(*, config: ConfigBoot, database: Callable[[], Database]) -> None:
+        stages.append("run")
+        assert config is boot
+        assert database is factories[0]
+        config.set_field("db_pool_max_size", 37)
+        database()
+
+    def checked_schema(_url: str) -> None:
+        stages.append("schema")
+
+    def no_signal_handlers(_name: str) -> None:
+        pass
+
+    def exit_process(code: int) -> None:
+        stages.append(f"exit:{code}")
+
+    monkeypatch.setattr(daemon, "ConfigBoot", lambda: boot)
+    monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
+    monkeypatch.setattr(code_version, "first_parent_count", count)
+    monkeypatch.setattr(daemon, "Database", Store)
+    monkeypatch.setattr(daemon, "build_pipeline", build)
+    monkeypatch.setattr(daemon, "init_gateway_process", initialize)
+    monkeypatch.setattr(migrations, "assert_schema_current", checked_schema)
+    monkeypatch.setattr(daemon, "install_graceful_shutdown", no_signal_handlers)
+    monkeypatch.setattr(daemon, "run", work)
+    monkeypatch.setattr(daemon, "_hard_exit", exit_process)
+    _run_main(monkeypatch)
+    assert stages == ["capture", "schema", "producer", "logging", "run", "exit:0"]
+    assert len(slices) == 2 and slices[1].db_pool_max_size == 37
+    _assert_gate_matches_image(gates, reads, image)

@@ -6,11 +6,15 @@ import os
 import stat
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from base.config import ConfigBoot
+from base.telemetry import EventPipeline
 from cli.commands.converge import spec as converge_host
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 SKILL_NAME = "operating-ava-cluster"
 
@@ -65,10 +69,23 @@ def _write_source(repo: Path, *, body: str = "operator v1\n") -> Path:
     return source
 
 
-def _ctx(repo: Path, home: Path) -> converge_host.ConvergeCtx:
+def _ctx(
+    repo: Path,
+    home: Path,
+    *,
+    operator_database: Callable[[], Any],
+    producer: Callable[[], EventPipeline],
+) -> converge_host.ConvergeCtx:
     ava_home = home / ".ava"
     (ava_home / "configs").mkdir(parents=True, exist_ok=True)
-    return converge_host.ConvergeCtx(repo=repo, ava_home=ava_home, roles=None, config=ConfigBoot())
+    return converge_host.ConvergeCtx(
+        repo=repo,
+        ava_home=ava_home,
+        roles=None,
+        config=ConfigBoot(),
+        database_factory=operator_database,
+        producer=producer,
+    )
 
 
 def _target(client_home: Path) -> Path:
@@ -77,8 +94,16 @@ def _target(client_home: Path) -> Path:
     return target
 
 
-def _run(repo: Path, home: Path) -> None:
-    _bridge_module().converge_external_agent_skill(_ctx(repo, home), host_home=home)
+def _run(
+    repo: Path,
+    home: Path,
+    *,
+    operator_database: Callable[[], Any],
+    producer: Callable[[], EventPipeline],
+) -> None:
+    _bridge_module().converge_external_agent_skill(
+        _ctx(repo, home, operator_database=operator_database, producer=producer), host_home=home
+    )
 
 
 def _tree_snapshot(root: Path) -> dict[str, tuple[str, bytes]]:
@@ -96,17 +121,25 @@ def _temp_entries(skills_root: Path) -> list[Path]:
     return list(skills_root.glob(f".{SKILL_NAME}.ava-*"))
 
 
-def test_absent_client_homes_are_not_created(home: Path, tmp_path: Path) -> None:
+def test_absent_client_homes_are_not_created(
+    home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     repo = tmp_path / "repo"
 
-    _run(repo, home)
+    _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
 
     assert not (home / ".codex").exists()
     assert not (home / ".claude").exists()
 
 
 def test_present_codex_and_claude_homes_receive_complete_managed_copy(
-    home: Path, tmp_path: Path
+    home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     repo = tmp_path / "repo"
     source = _write_source(repo)
@@ -115,7 +148,7 @@ def test_present_codex_and_claude_homes_receive_complete_managed_copy(
         client_home.mkdir()
         (client_home / "settings.json").write_text(f"{client} settings\n")
 
-    _run(repo, home)
+    _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
 
     for client in (".codex", ".claude"):
         client_home = home / client
@@ -134,19 +167,30 @@ def test_present_codex_and_claude_homes_receive_complete_managed_copy(
         assert (client_home / "settings.json").read_text() == f"{client} settings\n"
 
 
-def test_second_converge_is_byte_and_timestamp_idempotent(home: Path, tmp_path: Path) -> None:
+def test_second_converge_is_byte_and_timestamp_idempotent(
+    home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     repo = tmp_path / "repo"
     _write_source(repo)
     client_home = home / ".codex"
     client_home.mkdir()
     module = _bridge_module()
 
-    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
+    module.converge_external_agent_skill(
+        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline),
+        host_home=home,
+    )
     target = _target(client_home)
     before = _tree_snapshot(target)
     mtimes = {path.relative_to(target): path.stat().st_mtime_ns for path in target.rglob("*")}
 
-    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
+    module.converge_external_agent_skill(
+        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline),
+        host_home=home,
+    )
 
     assert _tree_snapshot(target) == before
     assert {
@@ -156,14 +200,20 @@ def test_second_converge_is_byte_and_timestamp_idempotent(home: Path, tmp_path: 
 
 
 def test_unmodified_managed_copy_updates_and_removes_only_stale_target_content(
-    home: Path, tmp_path: Path
+    home: Path,
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     repo = tmp_path / "repo"
     source = _write_source(repo)
     client_home = home / ".claude"
     client_home.mkdir()
     module = _bridge_module()
-    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
+    module.converge_external_agent_skill(
+        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline),
+        host_home=home,
+    )
     unrelated = client_home / "skills" / "personal-skill" / "notes.txt"
     unrelated.parent.mkdir()
     unrelated.write_text("user owned\n")
@@ -171,7 +221,10 @@ def test_unmodified_managed_copy_updates_and_removes_only_stale_target_content(
     (source / "SKILL.md").write_text("operator v2\n")
     (source / "references" / "recovery.md").unlink()
     (source / "references" / "workspace.md").write_text("workspace lookup\n")
-    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
+    module.converge_external_agent_skill(
+        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline),
+        host_home=home,
+    )
 
     target = _target(client_home)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
@@ -182,7 +235,11 @@ def test_unmodified_managed_copy_updates_and_removes_only_stale_target_content(
 
 
 def test_ntfs_synthetic_modes_do_not_break_converge(
-    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     repo = tmp_path / "repo"
     source = _write_source(repo)
@@ -193,20 +250,24 @@ def test_ntfs_synthetic_modes_do_not_break_converge(
     monkeypatch.setattr(filesystem, "lstat", _ntfs_lstat(filesystem.lstat))
     monkeypatch.setattr(filesystem, "source_lstat", _ntfs_lstat(filesystem.source_lstat))
 
-    _run(repo, home)
+    _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
 
     target = _target(client_home)
     assert (target / "SKILL.md").read_text() == "operator v1\n"
 
     (source / "SKILL.md").write_text("operator v2\n")
-    _run(repo, home)
+    _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
 
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert _temp_entries(client_home / "skills") == []
 
 
 def test_unmanaged_preexisting_target_is_preserved_and_reported(
-    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     repo = tmp_path / "repo"
     _write_source(repo)
@@ -216,7 +277,7 @@ def test_unmanaged_preexisting_target_is_preserved_and_reported(
     (target / "SKILL.md").write_text("user version\n")
     before = _tree_snapshot(target)
 
-    _run(repo, home)
+    _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
 
     assert _tree_snapshot(target) == before
     assert "unmanaged" in capsys.readouterr().err
@@ -224,21 +285,31 @@ def test_unmanaged_preexisting_target_is_preserved_and_reported(
 
 
 def test_user_modified_managed_copy_is_preserved_and_reported(
-    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     repo = tmp_path / "repo"
     source = _write_source(repo)
     client_home = home / ".claude"
     client_home.mkdir()
     module = _bridge_module()
-    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
+    module.converge_external_agent_skill(
+        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline),
+        host_home=home,
+    )
     target = _target(client_home)
     (target / "SKILL.md").write_text("user customization\n")
     (target / "private-note.md").write_text("preserve me\n")
     (source / "SKILL.md").write_text("operator v2\n")
     before = _tree_snapshot(target)
 
-    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
+    module.converge_external_agent_skill(
+        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline),
+        host_home=home,
+    )
 
     assert _tree_snapshot(target) == before
     assert "user-modified" in capsys.readouterr().err
@@ -246,14 +317,21 @@ def test_user_modified_managed_copy_is_preserved_and_reported(
 
 
 def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
-    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     repo = tmp_path / "repo"
     source = _write_source(repo)
     client_home = home / ".codex"
     client_home.mkdir()
     module = _bridge_module()
-    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
+    module.converge_external_agent_skill(
+        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline),
+        host_home=home,
+    )
     target = _target(client_home)
     before = _tree_snapshot(target)
     unrelated = client_home / "skills" / ".someone-elses-staging"
@@ -269,12 +347,18 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
 
     monkeypatch.setattr(module, "rename_no_replace", fail_staged_activation)
 
-    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
+    module.converge_external_agent_skill(
+        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline),
+        host_home=home,
+    )
 
     assert _tree_snapshot(target) == before
     assert (unrelated / "keep").read_text() == "untouched\n"
     monkeypatch.setattr(module, "rename_no_replace", original_rename)
-    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
+    module.converge_external_agent_skill(
+        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline),
+        host_home=home,
+    )
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert _temp_entries(client_home / "skills") == []
 
@@ -295,7 +379,12 @@ def _write_deploy_source(repo: Path) -> Path:
 
 @pytest.mark.parametrize("client", [".codex", ".claude"])
 def test_both_operator_skills_install_and_update_independently(
-    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, client: str
+    home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    client: str,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     bridge = _bridge_module()
     monkeypatch.setattr(bridge, "_SKILL_NAMES", _DISTRIBUTED_SKILLS)
@@ -304,18 +393,18 @@ def test_both_operator_skills_install_and_update_independently(
     deploy = _write_deploy_source(repo)
     client_home = home / client
     client_home.mkdir()
-    _run(repo, home)
+    _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
     targets = client_home / "skills"
     operate_before = _tree_snapshot(targets / SKILL_NAME)
     for name in _DISTRIBUTED_SKILLS:
         marker = json.loads((targets / name / MARKER_NAME).read_text())
         assert marker["skill"] == name
     (deploy / "SKILL.md").write_text("deployment v2\n")
-    _run(repo, home)
+    _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
     assert (targets / "deploy-ava-cluster" / "SKILL.md").read_text() == "deployment v2\n"
     assert _tree_snapshot(targets / SKILL_NAME) == operate_before
     (operate / "SKILL.md").write_text("operator v2\n")
-    _run(repo, home)
+    _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
     assert (targets / SKILL_NAME / "SKILL.md").read_text() == "operator v2\n"
     assert (targets / "deploy-ava-cluster" / "SKILL.md").read_text() == "deployment v2\n"
     ledger_root = home / ".ava" / "configs" / "external-agent-skills"
@@ -325,7 +414,11 @@ def test_both_operator_skills_install_and_update_independently(
 
 
 def test_operator_conflict_does_not_block_deployment_update(
-    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     bridge = _bridge_module()
     monkeypatch.setattr(bridge, "_SKILL_NAMES", _DISTRIBUTED_SKILLS)
@@ -333,24 +426,30 @@ def test_operator_conflict_does_not_block_deployment_update(
     _write_source(repo)
     deploy = _write_deploy_source(repo)
     (home / ".codex").mkdir()
-    _run(repo, home)
+    _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
     target = _target(home / ".codex")
     (target / "SKILL.md").write_text("user customization\n")
     (deploy / "SKILL.md").write_text("deployment v2\n")
-    _run(repo, home)
+    _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
     assert (target / "SKILL.md").read_text() == "user customization\n"
     assert (target.parent / "deploy-ava-cluster" / "SKILL.md").read_text() == "deployment v2\n"
 
 
 def test_deployment_publication_crash_recovers_without_changing_operator(
-    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     bridge = _bridge_module()
     repo = tmp_path / "repo"
     _write_source(repo)
     _write_deploy_source(repo)
     (home / ".codex").mkdir()
-    _run(repo, home)  # Legacy one-skill installation, with its original ledger filename.
+    _run(
+        repo, home, operator_database=operator_database, producer=operator_pipeline
+    )  # Legacy one-skill installation, with its original ledger filename.
     operator_before = _tree_snapshot(_target(home / ".codex"))
     monkeypatch.setattr(bridge, "_SKILL_NAMES", _DISTRIBUTED_SKILLS)
     original_rename = bridge.rename_no_replace
@@ -362,9 +461,9 @@ def test_deployment_publication_crash_recovers_without_changing_operator(
 
     monkeypatch.setattr(bridge, "rename_no_replace", interrupt_publication)
     with pytest.raises(SystemExit, match="deployment publication"):
-        _run(repo, home)
+        _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
     monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
-    _run(repo, home)
+    _run(repo, home, operator_database=operator_database, producer=operator_pipeline)
     assert _tree_snapshot(_target(home / ".codex")) == operator_before
     assert (
         home / ".codex" / "skills" / "deploy-ava-cluster" / "SKILL.md"
@@ -422,7 +521,11 @@ def test_builtin_guide_installs_with_the_core_update_channel(
 
 
 def test_explicit_home_seam_never_calls_platform_home(
-    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     bridge = _bridge_module()
     repo = tmp_path / "repo"
@@ -433,5 +536,8 @@ def test_explicit_home_seam_never_calls_platform_home(
         raise AssertionError("tests must not resolve the real platform home")
 
     monkeypatch.setattr(bridge.Path, "home", real_home_forbidden)
-    bridge.converge_external_agent_skill(_ctx(repo, home), host_home=home)
+    bridge.converge_external_agent_skill(
+        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline),
+        host_home=home,
+    )
     assert _target(home / ".codex").is_dir()

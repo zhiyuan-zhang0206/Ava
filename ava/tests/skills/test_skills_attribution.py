@@ -15,6 +15,7 @@ from base import telemetry
 from base.agents.context import AvaContext
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.log import logger
 
@@ -410,6 +411,7 @@ def test_consuming_a_skill_lands_a_skill_invoked_row(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     """End to end with a real database: consuming a skill body leaves a
     `skill_invoked` row in `audit_events` for the consuming agent, carrying the
@@ -418,7 +420,9 @@ def test_consuming_a_skill_lands_a_skill_invoked_row(
     from tests.fixtures.units import spawn_agent
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
 
     def resolve_agent(_context: AvaContext | None = None) -> int:
         return agent_id

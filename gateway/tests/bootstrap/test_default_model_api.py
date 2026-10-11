@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
@@ -37,7 +38,9 @@ def withdrawn_model(add_models: AddModels, model_catalog: ModelCatalog) -> tuple
     return model, catalog
 
 
-def _spawn_agent(spawner: str = "test", *, config_authority: ConfigAuthority) -> int:
+def _spawn_agent(
+    spawner: str = "test", *, config_authority: ConfigAuthority, database_gate: ProcessDbGate
+) -> int:
     """Setup helper — a row with a stamped birth_config (the #1236 split: the
     row is created by create_agent_row; nothing launches, these tests only read
     the stamp)."""
@@ -45,7 +48,7 @@ def _spawn_agent(spawner: str = "test", *, config_authority: ConfigAuthority) ->
     from ops.agents.spawn import create_agent_row
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         spawner=spawner,
         machine=machine_name(),
@@ -162,10 +165,16 @@ class TestPut:
         assert row[0] is None
 
     def test_does_not_move_an_existing_agent(
-        self, db_conn: psycopg.Connection, *, config_authority: ConfigAuthority
+        self,
+        db_conn: psycopg.Connection,
+        *,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The panel control is safe to use on a live cluster."""
-        agent_id = _spawn_agent(spawner="test", config_authority=config_authority)
+        agent_id = _spawn_agent(
+            spawner="test", config_authority=config_authority, database_gate=database_gate
+        )
         with db_conn.cursor() as cur:
             cur.execute("SELECT birth_config FROM agents_meta WHERE id = %s", (agent_id,))
             row = cur.fetchone()

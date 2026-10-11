@@ -36,6 +36,7 @@ from agent.graph.exec._subprocess import _run_in_subprocess
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.host.proc import kill_process_tree
 from base.paths import logs_dir
 from tests._test_env_file import rewrite_line
@@ -68,6 +69,7 @@ async def _run(
     cancel_after: float | None = None,
     state: dict[str, Any] | None = None,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
+    database_gate: ProcessDbGate,
 ):
     cancel_event = asyncio.Event()
     cancel_task: asyncio.Task[None] | None = None
@@ -83,7 +85,7 @@ async def _run(
         # the exec node's delta/findings extraction; tests assert on the
         # result here.
         result, _payload = await _run_in_subprocess(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             code,
             exec_context(_AGENT_ID),
             cancel_event,
@@ -144,15 +146,17 @@ async def test_assert_tree_gone_rejects_pid_still_running_after_deadline(
         await _assert_tree_gone([12345], timeout_s=0.3)
 
 
-async def test_subprocess_done(tmp_path: Path) -> None:
-    result = await _run(tmp_path, "print('hello from child')")
+async def test_subprocess_done(tmp_path: Path, database_gate: ProcessDbGate) -> None:
+    result = await _run(tmp_path, "print('hello from child')", database_gate=database_gate)
     assert isinstance(result, _ExecDone)
     assert "hello from child" in result.output
     # envelopes cleaned up
     assert not list((tmp_path / "exec" / str(_AGENT_ID)).iterdir())
 
 
-async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Path) -> None:
+async def test_exec_child_disables_otlp_after_cluster_env_authority(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     env_path = Path(os.environ["AVA_HOME"]) / ".env"
     original_env = env_path.read_text()
     log_path = logs_dir() / f"agent-{_AGENT_ID}.log"
@@ -165,6 +169,7 @@ async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Pa
                 "from base.telemetry.otlp.telemetry_otlp import backend\n"
                 'print("OTLP_ENABLED_IN_CHILD:", backend._enabled())\n'
             ),
+            database_gate=database_gate,
         )
     finally:
         env_path.write_text(original_env)
@@ -176,7 +181,7 @@ async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Pa
 
 
 async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """A persisted coding cwd may itself be an old Ava checkout. Its
     top-level ``agent`` package must not shadow the exec-child entry, and
@@ -190,6 +195,7 @@ async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(
     result = await _run(
         tmp_path,
         ("import agent.execution.child as entry\nprint('exec-child', entry.__file__)\n"),
+        database_gate=database_gate,
     )
 
     assert isinstance(result, _ExecDone)
@@ -199,7 +205,7 @@ async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(
 
 
 async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """Isolated mode ignores Python encoding env vars, so the production
     child command itself must force UTF-8 on every platform, including Windows."""
@@ -214,6 +220,7 @@ async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(
             "print('stdout-encoding', sys.stdout.encoding)\n"
             "print('cjk', '\u5b50\u8fdb\u7a0b')\n"
         ),
+        database_gate=database_gate,
     )
 
     assert isinstance(result, _ExecDone)
@@ -222,29 +229,36 @@ async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(
     assert "cjk \u5b50\u8fdb\u7a0b" in result.output
 
 
-async def test_subprocess_merged_stream_preserves_order(tmp_path: Path) -> None:
+async def test_subprocess_merged_stream_preserves_order(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     """stderr=STDOUT at spawn level keeps print/traceback interleaving — the
     same chronological merge the old in-thread capture gave."""
     result = await _run(
         tmp_path,
         "import sys\nprint('one')\nprint('two', file=sys.stderr)\nprint('three')",
+        database_gate=database_gate,
     )
     assert isinstance(result, _ExecDone)
     assert result.output.index("one") < result.output.index("two") < result.output.index("three")
 
 
-async def test_subprocess_output_contains_only_agent_text(tmp_path: Path) -> None:
+async def test_subprocess_output_contains_only_agent_text(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     """Framework text must never leak into the child's output pipe — loguru's
     default stderr handler is removed before `import ava`, so a
     Settings-construction warning (AVA_TIMEZONE unset, as in CI) goes nowhere
     near the agent's exec output."""
-    result = await _run(tmp_path, "print('ok')")
+    result = await _run(tmp_path, "print('ok')", database_gate=database_gate)
     assert isinstance(result, _ExecDone)
     assert result.output == "ok\n"
 
 
-async def test_subprocess_crashed_carries_child_traceback(tmp_path: Path) -> None:
-    result = await _run(tmp_path, "raise ValueError('boom')")
+async def test_subprocess_crashed_carries_child_traceback(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
+    result = await _run(tmp_path, "raise ValueError('boom')", database_gate=database_gate)
     assert isinstance(result, _ExecCrashed)
     assert isinstance(result.exc, ExecChildError)
     assert "boom" in (result.exc.exc_msg or "")
@@ -253,17 +267,19 @@ async def test_subprocess_crashed_carries_child_traceback(tmp_path: Path) -> Non
     assert "ValueError: boom" in result.output  # agent-facing traceback in output
 
 
-async def test_subprocess_os_exit_without_envelope_is_crash(tmp_path: Path) -> None:
+async def test_subprocess_os_exit_without_envelope_is_crash(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     """The agent's own os._exit leaves no envelope; the parent must not round
     that up to a clean done."""
-    result = await _run(tmp_path, "import os\nos._exit(5)")
+    result = await _run(tmp_path, "import os\nos._exit(5)", database_gate=database_gate)
     assert isinstance(result, _ExecCrashed)
     assert "without writing a result envelope" in str(result.exc)
 
 
 @pytest.mark.parametrize("exit_code", [5, 124])
 async def test_abrupt_root_exit_stops_descendant_before_reader_cleanup(
-    tmp_path: Path, exit_code: int
+    tmp_path: Path, exit_code: int, database_gate: ProcessDbGate
 ) -> None:
     """Neither user ``os._exit`` nor the watchdog's 124 hard-exit may bypass
     the parent-owned tree barrier and leave a stdout holder behind."""
@@ -280,7 +296,7 @@ async def test_abrupt_root_exit_stops_descendant_before_reader_cleanup(
     )
     descendant_pid: int | None = None
     try:
-        result = await _run(tmp_path, code)
+        result = await _run(tmp_path, code, database_gate=database_gate)
         assert isinstance(result, _ExecCrashed)
         descendant_pid = int(pid_file.read_text(encoding="utf-8"))
         await _assert_tree_gone([descendant_pid])
@@ -302,7 +318,7 @@ async def test_abrupt_root_exit_stops_descendant_before_reader_cleanup(
     ],
 )
 async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
-    tmp_path: Path, fault: str, trigger: str
+    tmp_path: Path, fault: str, trigger: str, database_gate: ProcessDbGate
 ) -> None:
     """A real child that dies of a signal (not a mocked return code) comes back as
     a crash with its partial output; its descendant is reaped, and the next exec
@@ -319,7 +335,7 @@ async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
     )
     descendant_pid: int | None = None
     try:
-        result = await _run(tmp_path, code)
+        result = await _run(tmp_path, code, database_gate=database_gate)
         assert isinstance(result, _ExecCrashed)
         assert "without writing a result envelope" in str(result.exc)
         assert "before the fault" in result.output
@@ -329,7 +345,7 @@ async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
             thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
         )
 
-        after = await _run(tmp_path, "print('still serving')")
+        after = await _run(tmp_path, "print('still serving')", database_gate=database_gate)
         assert isinstance(after, _ExecDone)
         assert after.output == "still serving\n"
     finally:
@@ -339,24 +355,31 @@ async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
             kill_process_tree(descendant_pid, grace_s=0.0)
 
 
-async def test_subprocess_timeout(tmp_path: Path) -> None:
+async def test_subprocess_timeout(tmp_path: Path, database_gate: ProcessDbGate) -> None:
     # The deadline must not race child boot: `import ava` alone is ~2s on CI
     # (PR #256 round 4 went red with 1.0s — the group SIGTERM landed while the
     # child was still importing, so user code never ran). 10s fires comfortably
     # mid-sleep, and the parent's clock is wall-time-from-spawn by design.
     result = await _run(
-        tmp_path, "import time\nprint('started', flush=True)\ntime.sleep(60)", timeout=10.0
+        tmp_path,
+        "import time\nprint('started', flush=True)\ntime.sleep(60)",
+        timeout=10.0,
+        database_gate=database_gate,
     )
     assert isinstance(result, _ExecTimedOut)
     assert "started" in result.output  # partial output preserved
 
 
-async def test_subprocess_cancel(tmp_path: Path) -> None:
-    result = await _run(tmp_path, "import time\ntime.sleep(60)", cancel_after=0.4)
+async def test_subprocess_cancel(tmp_path: Path, database_gate: ProcessDbGate) -> None:
+    result = await _run(
+        tmp_path, "import time\ntime.sleep(60)", cancel_after=0.4, database_gate=database_gate
+    )
     assert isinstance(result, _ExecCancelled)
 
 
-async def test_natural_exit_reaps_ordinary_descendant_holding_stdout(tmp_path: Path) -> None:
+async def test_natural_exit_reaps_ordinary_descendant_holding_stdout(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     """Returning from agent code ends raw subprocesses in the disposable run;
     an inherited stdout fd cannot leave a process or reader behind."""
     pid_file = tmp_path / "natural-descendant.pid"
@@ -371,7 +394,7 @@ async def test_natural_exit_reaps_ordinary_descendant_holding_stdout(tmp_path: P
     )
     descendant_pid: int | None = None
     try:
-        result = await _run(tmp_path, code)
+        result = await _run(tmp_path, code, database_gate=database_gate)
         assert isinstance(result, _ExecDone)
         descendant_pid = int(pid_file.read_text(encoding="utf-8"))
         await _assert_tree_gone([descendant_pid])
@@ -440,7 +463,9 @@ async def test_outer_task_cancel_reaps_child_and_descendant(
                 os.waitpid(pids[0], 0)
 
 
-async def test_subprocess_streaming_chunks_published_incrementally(tmp_path: Path) -> None:
+async def test_subprocess_streaming_chunks_published_incrementally(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     """The 50ms poll loop publishes accumulated chunks while the child runs —
     the frontend streaming contract."""
     emitter = MagicMock()
@@ -450,13 +475,16 @@ async def test_subprocess_streaming_chunks_published_incrementally(tmp_path: Pat
         "import time\nfor i in range(5):\n    print(f'line {i}')\n    time.sleep(0.15)",
         timeout=30.0,
         chunk_publisher=publisher,
+        database_gate=database_gate,
     )
     assert isinstance(result, _ExecDone)
     # Chunks arrived before the final result (≥2 publishes = live streaming).
     assert emitter.emit.call_count >= 2
 
 
-async def test_subprocess_silent_child_publishes_keepalive(tmp_path: Path) -> None:
+async def test_subprocess_silent_child_publishes_keepalive(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     """A silent live child still publishes an empty keepalive frame."""
     emitter = MagicMock()
     publisher = ExecOutputChunkPublisher(emitter, agent_id=_AGENT_ID, item_id="7.0")
@@ -466,6 +494,7 @@ async def test_subprocess_silent_child_publishes_keepalive(tmp_path: Path) -> No
         "import time; time.sleep(1.3)",
         timeout=30.0,
         chunk_publisher=publisher,
+        database_gate=database_gate,
     )
 
     assert isinstance(result, _ExecDone)
@@ -503,12 +532,15 @@ def test_chunk_publisher_real_output_resets_keepalive_deadline(
     ]
 
 
-async def test_subprocess_state_snapshot_reaches_child(tmp_path: Path) -> None:
+async def test_subprocess_state_snapshot_reaches_child(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     state = {"messages": [HumanMessage(content="snapshot says hi")], "halted": False}
     result = await _run(
         tmp_path,
         "import ava\nprint(ava.state.messages[0].content)",
         state=state,
+        database_gate=database_gate,
     )
     assert isinstance(result, _ExecDone)
     assert "snapshot says hi" in result.output
@@ -526,10 +558,14 @@ def _self_lifecycle_code(action: str) -> str:
 
 
 @pytest.mark.usefixtures("runner_exec_env")
-async def test_subprocess_self_terminate_lifecycle_and_inbound(tmp_path: Path) -> None:
+async def test_subprocess_self_terminate_lifecycle_and_inbound(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     _seed_agent_for_self_lifecycle()
 
-    result = await _run(tmp_path, _self_lifecycle_code("ava.self.terminate()"))
+    result = await _run(
+        tmp_path, _self_lifecycle_code("ava.self.terminate()"), database_gate=database_gate
+    )
 
     assert isinstance(result, _ExecLifecycle)
     assert isinstance(result.exc, AgentTermination)
@@ -539,10 +575,14 @@ async def test_subprocess_self_terminate_lifecycle_and_inbound(tmp_path: Path) -
 
 
 @pytest.mark.usefixtures("runner_exec_env")
-async def test_subprocess_self_restart_lifecycle_and_inbound(tmp_path: Path) -> None:
+async def test_subprocess_self_restart_lifecycle_and_inbound(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     _seed_agent_for_self_lifecycle()
 
-    result = await _run(tmp_path, _self_lifecycle_code("ava.self.restart()"))
+    result = await _run(
+        tmp_path, _self_lifecycle_code("ava.self.restart()"), database_gate=database_gate
+    )
 
     assert isinstance(result, _ExecLifecycle)
     assert isinstance(result.exc, AgentRestart)
@@ -552,10 +592,16 @@ async def test_subprocess_self_restart_lifecycle_and_inbound(tmp_path: Path) -> 
 
 
 @pytest.mark.usefixtures("runner_exec_env")
-async def test_subprocess_self_compact_lifecycle_and_inbound(tmp_path: Path) -> None:
+async def test_subprocess_self_compact_lifecycle_and_inbound(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     _seed_agent_for_self_lifecycle()
 
-    result = await _run(tmp_path, _self_lifecycle_code("ava.self.compact('audit e2e summary')"))
+    result = await _run(
+        tmp_path,
+        _self_lifecycle_code("ava.self.compact('audit e2e summary')"),
+        database_gate=database_gate,
+    )
 
     assert isinstance(result, _ExecLifecycle)
     assert isinstance(result.exc, SystemHalt)
@@ -564,7 +610,9 @@ async def test_subprocess_self_compact_lifecycle_and_inbound(tmp_path: Path) -> 
     assert content == "audit e2e summary"
 
 
-async def test_subprocess_unknown_lifecycle_class_crashes(tmp_path: Path) -> None:
+async def test_subprocess_unknown_lifecycle_class_crashes(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     result = await _run(
         tmp_path,
         (
@@ -574,6 +622,7 @@ async def test_subprocess_unknown_lifecycle_class_crashes(tmp_path: Path) -> Non
             "        super().__init__(0)\n"
             "raise _MysteryLifecycle()\n"
         ),
+        database_gate=database_gate,
     )
 
     assert isinstance(result, _ExecCrashed)
@@ -583,7 +632,9 @@ async def test_subprocess_unknown_lifecycle_class_crashes(tmp_path: Path) -> Non
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
-async def test_subprocess_kills_process_group_on_timeout(tmp_path: Path) -> None:
+async def test_subprocess_kills_process_group_on_timeout(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     """A grandchild the agent spawned dies with the exec child — the SIGKILL
     goes to the whole process group (the guarantee the thread model lacked)."""
     pid_file = tmp_path / "grandchild.pid"
@@ -595,7 +646,7 @@ async def test_subprocess_kills_process_group_on_timeout(tmp_path: Path) -> None
     )
     # Same boot-headroom rule as test_subprocess_timeout: the deadline must
     # fire after the child spawned the grandchild (see that test's comment).
-    result = await _run(tmp_path, code, timeout=10.0)
+    result = await _run(tmp_path, code, timeout=10.0, database_gate=database_gate)
     assert isinstance(result, _ExecTimedOut)
     gc_pid = int(pid_file.read_text(encoding="utf-8"))
     # The grandchild may take a moment to be reaped — poll briefly.

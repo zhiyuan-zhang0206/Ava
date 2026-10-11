@@ -25,7 +25,8 @@ from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
-from services.agent_runner.agent_ops import daemon, outbox_flusher
+from base.native_process.loaded_commit import LoadedCommit
+from services.agent_runner.agent_ops import boot, daemon, outbox_flusher
 
 
 @pytest.fixture()
@@ -280,7 +281,7 @@ async def test_an_unreadable_config_ends_the_loop(
 
 
 async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, ops_database: Callable[[], Database], ops_image: LoadedCommit
 ) -> None:
     """The ops server and the outbox loop share one TaskGroup: when the loop raises,
     the server stops serving, `_main` leaves with the error (the supervisor restarts
@@ -309,6 +310,7 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
                 raise
 
     async def start_health(name: str, port: int, **kw: object) -> _Server:
+        assert kw["image"] is ops_image
         assert isinstance(kw["liveness"], LivenessGroup)
         assert set(kw["liveness"].snapshot()) == {"delivery-outbox"}  # type: ignore[union-attr]
         return _Server()
@@ -336,23 +338,32 @@ async def test_a_crashing_outbox_loop_ends_the_ops_server_and_releases_its_pool(
         return None
 
     monkeypatch.setattr(migrations, "assert_schema_current", schema_current)
-    monkeypatch.setattr(daemon, "_open_db_pool", _Pool)
-    monkeypatch.setattr(daemon, "_ops_acceptance", lambda: None)
+
+    def open_pool(*, database: Callable[[], Database]) -> _Pool:
+        assert database is ops_database
+        return _Pool()
+
+    monkeypatch.setattr(boot, "open_db_pool", open_pool)
+    monkeypatch.setattr(boot, "ops_acceptance", lambda: None)
 
     def bind_host(_acceptance: object) -> str:
         return "127.0.0.1"
 
-    monkeypatch.setattr(daemon, "_ops_bind_host", bind_host)
+    monkeypatch.setattr(boot, "ops_bind_host", bind_host)
     monkeypatch.setattr(daemon, "start_health_server", start_health)
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
-    monkeypatch.setattr(daemon, "_register_boot", lambda: None)
+
+    def register_boot(*, database: Callable[[], Database]) -> None:
+        assert database is ops_database
+
+    monkeypatch.setattr(boot, "register_boot", register_boot)
     monkeypatch.setattr(daemon.outbox_flusher, "outbox_loop", crashing_loop)
     assert (
         ServiceEndpoints.from_settings().of("ops").health_port
     )  # the port table still names the ops slot
 
     with pytest.raises(ExceptionGroup) as raised:
-        await daemon._main()
+        await daemon._main(database=ops_database, image=ops_image)
 
     assert [str(exc) for exc in raised.value.exceptions] == ["outbox loop crashed"]
     assert served_cancelled.is_set()

@@ -4,6 +4,8 @@ sequential round runner, the bounded fan-out, and the attempt clocks."""
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import psycopg
 import pytest
@@ -13,8 +15,10 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster.rpc import worst_case_dispatch_seconds
 from services.wake.delivery_watchdog import attempts, daemon, rounds
 
@@ -33,11 +37,20 @@ def _progress() -> LoopProgress:
 
 
 def _agent(
-    db: psycopg.Connection, *, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    db: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> int:
     from tests.fixtures.units import spawn_agent
 
-    return spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    return spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
 
 
 def _patch_loops(
@@ -82,6 +95,8 @@ async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     monkeypatch: pytest.MonkeyPatch,
     crashing: str,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     cancelled: list[str] = []
     _patch_loops(
@@ -91,7 +106,7 @@ async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     with pytest.raises(ExceptionGroup) as raised:
         await daemon._run_loops(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             LivenessGroup(),
             authority=config_authority,
@@ -102,7 +117,11 @@ async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
 
 
 async def test_each_loop_reports_its_own_progress(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, config_authority: ConfigAuthority
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     liveness = LivenessGroup()
     _patch_loops(monkeypatch, crashing="scan", cancelled=[], config_authority=config_authority)
@@ -110,7 +129,7 @@ async def test_each_loop_reports_its_own_progress(
     with pytest.raises(ExceptionGroup):
         await daemon._run_loops(
             pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             liveness,
             authority=config_authority,
@@ -125,8 +144,14 @@ def test_claim_hands_an_agent_out_once_per_cooldown(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    aid = _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority)
+    aid = _agent(
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+    )
 
     assert attempts.claim_attempts(pool, attempts.HARVEST, [aid], 60.0) == ([aid], 0)
     assert attempts.claim_attempts(pool, attempts.HARVEST, [aid], 60.0) == ([], 0)
@@ -148,11 +173,27 @@ def test_claim_limit_defers_the_ready_agents_it_leaves(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     first, second, third = (
-        _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority),
-        _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority),
-        _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority),
+        _agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+        ),
+        _agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+        ),
+        _agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+        ),
     )
     assert attempts.claim_attempts(pool, attempts.RESURRECT, [first], 60.0) == ([first], 0)
 
@@ -174,8 +215,14 @@ def test_finish_restarts_the_cooldown_clock(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
-    aid = _agent(db_conn, model_catalog=model_catalog, config_authority=config_authority)
+    aid = _agent(
+        db_conn,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+    )
     attempts.claim_attempts(pool, attempts.HOSTED_TURN, [aid], 600.0)
     db_conn.execute(
         "UPDATE delivery_watchdog_attempts SET last_attempt_at = now() - interval '1 hour' "
@@ -202,3 +249,39 @@ def test_the_job_deadline_is_derived_from_the_cluster_rpc_budget(
 
     monkeypatch.setattr(settings.gateway, "cluster_rpc_max_retries", 0)
     assert worst_case_dispatch_seconds() == pytest.approx(30.0)
+
+
+async def test_run_reports_the_captured_image_and_releases_resources_on_failure(
+    monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
+    image = LoadedCommit(Path(), "captured-before-checkout-moved")
+    failure = RuntimeError("original watchdog failure")
+    released: list[str] = []
+    pool = Mock()
+    pool.close.side_effect = lambda: released.append("pool")
+    health = object()
+    start = AsyncMock(return_value=health)
+
+    def stop_health(_server: object) -> None:
+        released.append("health")
+
+    stop = AsyncMock(side_effect=stop_health)
+    loops = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(daemon, "_is_running", lambda: False)
+    monkeypatch.setattr(daemon, "_write_pidfile", Mock())
+    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: released.append("pidfile"))
+    monkeypatch.setattr(daemon, "start_health_server", start)
+    monkeypatch.setattr(daemon, "stop_health_server", stop)
+    monkeypatch.setattr(daemon.Database, "pool", Mock(return_value=pool))
+    monkeypatch.setattr(daemon, "_run_loops", loops)
+
+    with pytest.raises(RuntimeError) as caught:
+        await daemon.run(database=lambda: database, image=image)
+
+    assert caught.value is failure
+    assert start.call_args.args[0] == "delivery_watchdog"
+    assert start.call_args.kwargs["image"] is image
+    assert set(start.call_args.kwargs) == {"image", "liveness"}
+    assert loops.call_args.args[0] is pool and loops.call_args.args[1] is database
+    stop.assert_awaited_once_with(health)
+    assert released == ["pool", "health", "pidfile"]

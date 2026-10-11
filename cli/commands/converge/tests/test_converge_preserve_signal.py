@@ -9,8 +9,10 @@ materializer's kept-local-edits loop (task #3871).
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -18,6 +20,7 @@ from base import db, paths
 from base.packages.extensions import materialize
 from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.extensions.materialize import materialize_cluster_extensions
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _capture_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
@@ -72,7 +75,7 @@ class _PoolStub:
 
 
 def test_extensions_kept_local_edits_report_converge_file_preserved(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
     """A kept local extension edit is reported next to its stderr warning."""
     emitted = _capture_emit(monkeypatch)
@@ -87,7 +90,7 @@ def test_extensions_kept_local_edits_report_converge_file_preserved(
 
     monkeypatch.setattr(materialize, "materialize_skills", kept_edit)
 
-    materialize_cluster_extensions()
+    materialize_cluster_extensions(database_factory=operator_database)
 
     assert emitted == [
         (

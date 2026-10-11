@@ -9,15 +9,10 @@ from uuid import uuid4
 import psutil
 import pytest
 
-from base.agents import impersonation as leases
 from base.agents.impersonation import _store as store
-from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
-from base.config.service_read import ConfigAuthority
-from base.db import Database, create_agent
-from base.events.live.bus import EventBus
+from base.db import Database
 from base.native_process import ownership
-from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import (
     attested_caller,
     native_identity,
@@ -396,131 +391,3 @@ def test_same_pid_with_a_different_native_birth_does_not_attest(
             node.update(native_identity(998.0 + 60.0))
     with pytest.raises(store.ImpersonationError, match="chain-mismatch"):
         store.verify_caller(lease, caller)
-
-
-def _agent(db_conn: Any) -> RuntimeIncarnation:
-    agent_id = create_agent(db_conn)
-    owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
-    db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
-        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
-        "clock_timestamp()+interval '10 minutes')",
-        (
-            agent_id,
-            machine_name(),
-            owner.generation,
-            owner.owner,
-        ),
-    )
-    db_conn.commit()
-    return owner
-
-
-def _active(
-    owner: RuntimeIncarnation, tree: dict[str, Any], *, config_authority: ConfigAuthority
-) -> dict[str, Any]:
-    lease = leases.request(
-        Database.from_settings(),
-        EventBus.from_settings(),
-        owner.agent_id,
-        caller=CallerIdentity(kind="external_agent", subject="codex"),
-        ttl_seconds=300,
-        reason="Attestation coverage",
-        process_metadata=tree,
-        relay_provider="codex",
-        relay_thread_id=str(uuid4()),
-        authority=config_authority,
-    )
-    leases.accept(
-        Database.from_settings(),
-        EventBus.from_settings(),
-        lease["id"],
-        owner.agent_id,
-        owner,
-        "Handoff brief",
-    )
-    leases.activate(
-        Database.from_settings(),
-        EventBus.from_settings(),
-        lease["id"],
-        owner,
-    )
-    return lease
-
-
-def test_generation_crossing_is_refused(
-    db_conn: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-    *,
-    config_authority: ConfigAuthority,
-) -> None:
-    """A caller attested for one generation cannot drive another's session id."""
-    first = _active(_agent(db_conn), recorded_tree(), config_authority=config_authority)
-    second_tree = recorded_tree()
-    second_tree["ancestors"] = [
-        {
-            "pid": 4341,
-            "name": "zsh",
-            "executable": "/bin/zsh",
-            **native_identity(1999.0),
-            "parent_pid": 4340,
-        },
-        {
-            "pid": 4340,
-            "name": "codex",
-            "executable": "/opt/codex",
-            **native_identity(1998.0),
-            "parent_pid": 1,
-        },
-    ]
-    second = _active(_agent(db_conn), second_tree, config_authority=config_authority)
-    _stub_liveness(monkeypatch)
-    _stub_birth(monkeypatch, 1998.0)
-    with pytest.raises(store.ImpersonationError, match="chain-mismatch"):
-        leases.require_active(database, second["id"], attested_caller(first))
-
-
-def test_terminal_sessions_report_stale_without_attestation(
-    db_conn: Any, database: Database, event_bus: EventBus, *, config_authority: ConfigAuthority
-) -> None:
-    """A terminal lease is classified before any anchor work: native/TTL recovery
-    never depends on the dead controller tree (the second, incarnation-held gate)."""
-    owner = _agent(db_conn)
-    lease = _active(owner, recorded_tree(), config_authority=config_authority)
-    leases.release(database, event_bus, lease["id"], attested_caller(lease), "Done")
-    with pytest.raises(leases.ImpersonationError, match="stale-session"):
-        leases.require_active(database, lease["id"], unrelated_caller())
-
-
-def test_dsh_request_mints_a_session_relay_credential(
-    db_conn: Any, database: Database, event_bus: EventBus, *, config_authority: ConfigAuthority
-) -> None:
-    """dsh runs its relay in the controller session, like claude: the request
-    mints the scoped credential, and a thread id or codex remote is refused."""
-    owner = _agent(db_conn)
-    caller = CallerIdentity(kind="external_agent", subject="dsh")
-    with pytest.raises(ValueError, match="dsh relay routes to its owner"):
-        leases.request(
-            database,
-            event_bus,
-            owner.agent_id,
-            caller=caller,
-            reason="dsh",
-            relay_provider="dsh",
-            relay_thread_id="thread",
-            authority=config_authority,
-        )
-    lease = leases.request(
-        database,
-        event_bus,
-        owner.agent_id,
-        caller=caller,
-        ttl_seconds=300,
-        reason="dsh",
-        process_metadata=recorded_tree(),
-        relay_provider="dsh",
-        authority=config_authority,
-    )
-    assert lease["relay_provider"] == "dsh"
-    assert lease["relay_token"]

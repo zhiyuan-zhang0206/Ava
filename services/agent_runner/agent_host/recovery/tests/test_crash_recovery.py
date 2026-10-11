@@ -15,13 +15,13 @@ import pytest
 
 from agent.ownership.corpse_reap import ReapedCorpse
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.recovery.crash import recover_reaped_corpses
 
 
 async def test_attempts_the_guarded_resurrect_per_wake(
-    monkeypatch: pytest.MonkeyPatch,
-    event_bus: EventBus,
+    monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
 ) -> None:
     calls: list[tuple[int, int, str]] = []
 
@@ -41,14 +41,16 @@ async def test_attempts_the_guarded_resurrect_per_wake(
     monkeypatch.setattr(ops.lifecycle, "resurrect_if_terminated", _attempt)
 
     await recover_reaped_corpses(
-        Database.from_settings(), event_bus, [ReapedCorpse(7, 101), ReapedCorpse(8, 102)]
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        [ReapedCorpse(7, 101), ReapedCorpse(8, 102)],
     )
 
     assert calls == [(7, 101, "chat"), (8, 102, "chat")]
 
 
 async def test_wake_less_entries_are_skipped(
-    monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+    monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
 ) -> None:
     async def _attempt(*args: object, **kwargs: object) -> str:
         raise AssertionError("a wake-less entry must not reach the resurrect")
@@ -57,14 +59,18 @@ async def test_wake_less_entries_are_skipped(
 
     monkeypatch.setattr(ops.lifecycle, "resurrect_if_terminated", _attempt)
 
-    await recover_reaped_corpses(Database.from_settings(), event_bus, [])
-    await recover_reaped_corpses(Database.from_settings(), event_bus, [ReapedCorpse(7, None)])
+    await recover_reaped_corpses(Database.from_settings(gate=database_gate), event_bus, [])
+    await recover_reaped_corpses(
+        Database.from_settings(gate=database_gate), event_bus, [ReapedCorpse(7, None)]
+    )
 
 
 async def test_an_attempt_failure_defers_without_stopping_the_next(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     attempted: list[int] = []
 
@@ -86,7 +92,9 @@ async def test_an_attempt_failure_defers_without_stopping_the_next(
     monkeypatch.setattr(ops.lifecycle, "resurrect_if_terminated", _attempt)
 
     await recover_reaped_corpses(
-        Database.from_settings(), event_bus, [ReapedCorpse(7, 101), ReapedCorpse(8, 102)]
+        Database.from_settings(gate=database_gate),
+        event_bus,
+        [ReapedCorpse(7, 101), ReapedCorpse(8, 102)],
     )
 
     assert attempted == [8]

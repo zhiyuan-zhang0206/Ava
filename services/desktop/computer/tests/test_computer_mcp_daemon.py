@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 
 from .. import mcp_daemon as daemon_mod
 from .. import ocr as ocr_mod
@@ -27,9 +28,11 @@ from ..protocol import Request, Response
 from .slices import computer_use_config
 
 
-def _daemon(**config: Any) -> ComputerMcpDaemon:
+def _daemon(*, database_gate: ProcessDbGate, **config: Any) -> ComputerMcpDaemon:
     return ComputerMcpDaemon(
-        computer_use_config(**config), Database.from_settings(), sock="/nonexistent-test.sock"
+        computer_use_config(**config),
+        Database.from_settings(gate=database_gate),
+        sock="/nonexistent-test.sock",
     )
 
 
@@ -185,8 +188,8 @@ async def _ok_result(
 # ── list_tools / ping ───────────────────────────────────────────────────────
 
 
-async def test_list_tools_and_ping() -> None:
-    d = _daemon()
+async def test_list_tools_and_ping(*, database_gate: ProcessDbGate) -> None:
+    d = _daemon(database_gate=database_gate)
     resp = await d._dispatch(_req("list_tools"))
     assert resp["ok"] is True
     names = {t["name"] for t in (resp["result"] or [])}
@@ -216,8 +219,8 @@ async def test_list_tools_and_ping() -> None:
     assert ping["result"] == "pong"
 
 
-async def test_unknown_method_and_tool() -> None:
-    d = _daemon()
+async def test_unknown_method_and_tool(*, database_gate: ProcessDbGate) -> None:
+    d = _daemon(database_gate=database_gate)
     assert (await d._dispatch(_req("nope")))["ok"] is False
     resp = await _call(d, "nope")
     assert resp["ok"] is False
@@ -230,9 +233,11 @@ async def test_click_executes_and_converts_coordinates(
     fake_helper: FakeHelper,
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     resp = await _call(d, "click", {"x": 100, "y": 200})
     assert resp["ok"] is True
     # physical -> logical: divide by the 2x backing scale
@@ -243,13 +248,15 @@ async def test_snapshot_returns_path_and_geometry(
     fake_helper: FakeHelper,
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-test.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     result = await _ok_result(d, "snapshot", {"include_ax": True})
     assert result["path"] == "/tmp/snap-test.png"  # noqa: S108
     assert result["screen"] == {"width": 1512.0, "height": 982.0, "scale": 2.0}
@@ -263,6 +270,8 @@ async def test_snapshot_and_click_measure_scale_not_helper_claim(
     fake_helper: FakeHelper,
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Regression (2026-08-30 probe): the helper reported scale=2 on a 1x
     display, and the daemon divided click coords by it — every click landed
@@ -277,7 +286,7 @@ async def test_snapshot_and_click_measure_scale_not_helper_claim(
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-1x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     snap = await _ok_result(d, "snapshot", {})
     assert snap["screen"] == {"width": 1920.0, "height": 1080.0, "scale": 1.0}
     assert snap["pixels"] == {"width": 1920, "height": 1080}
@@ -296,6 +305,8 @@ async def test_snapshot_measures_scale_on_2x_and_converts_ax(
     fake_helper: FakeHelper,
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A genuine Retina 2x capture keeps the measured scale at 2 and converts
     ax geometry into physical pixels (the click space)."""
@@ -305,7 +316,7 @@ async def test_snapshot_measures_scale_on_2x_and_converts_ax(
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-2x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     snap = await _ok_result(d, "snapshot", {"include_ax": True})
     assert snap["screen"]["scale"] == 2.0
     assert snap["pixels"] == {"width": 3024, "height": 1964}
@@ -318,12 +329,11 @@ async def test_snapshot_measures_scale_on_2x_and_converts_ax(
 
 
 async def test_click_before_any_snapshot_falls_back_to_helper_scale(
-    fake_helper: FakeHelper,
-    audit_log: list,
+    fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
     """Before the first snapshot the daemon has no measurement; it uses the
     helper's live screen report (also the only sane cold-start behavior)."""
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     await _call(d, "click", {"x": 100, "y": 200})
     assert ("click", {"x": 50.0, "y": 100.0, "double": False}) in fake_helper.calls
 
@@ -332,6 +342,8 @@ async def test_snapshot_include_ocr_adds_text_boxes(
     fake_helper: FakeHelper,
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
@@ -343,7 +355,7 @@ async def test_snapshot_include_ocr_adds_text_boxes(
         "ocr_image",
         lambda _path: [{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}],  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     result = await _ok_result(d, "snapshot", {"include_ocr": True})
     assert result["ocr"] == [{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}]
     assert "ocr_error" not in result
@@ -353,6 +365,8 @@ async def test_snapshot_include_ocr_failure_degrades(
     fake_helper: FakeHelper,
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
@@ -364,7 +378,7 @@ async def test_snapshot_include_ocr_failure_degrades(
         raise ocr_mod.OcrError("swiftc missing")
 
     monkeypatch.setattr(ocr_mod, "ocr_image", _boom)  # pyright: ignore[reportUnknownArgumentType]
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     result = await _ok_result(d, "snapshot", {"include_ocr": True})
     assert result["ocr"] == []
     assert result["ocr_error"] == "swiftc missing"
@@ -374,6 +388,8 @@ async def test_snapshot_without_include_ocr_skips_ocr(
     fake_helper: FakeHelper,
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
@@ -387,7 +403,7 @@ async def test_snapshot_without_include_ocr_skips_ocr(
         return []
 
     monkeypatch.setattr(ocr_mod, "ocr_image", _ocr)  # pyright: ignore[reportUnknownArgumentType]
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     result = await _ok_result(d, "snapshot", {})
     assert called == []
     assert "ocr" not in result
@@ -476,6 +492,8 @@ async def test_find_text_returns_matching_boxes(
     audit_log: list,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """find_text captures once, OCRs, and reports every match with
     physical-pixel geometry (the click space, no scale conversion)."""
@@ -484,7 +502,7 @@ async def test_find_text_returns_matching_boxes(
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     result = await _ok_result(d, "find_text", {"text": "search"})
     assert result["query"] == "search"
     assert result["match"] == "contains"
@@ -500,6 +518,8 @@ async def test_find_text_reuses_last_ocr_when_asked(
     audit_log: list,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """snapshot_fresh=false searches the OCR the snapshot include_ocr just
     produced — no second capture, and the result says fresh:false."""
@@ -508,7 +528,7 @@ async def test_find_text_reuses_last_ocr_when_asked(
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     snap = await _ok_result(d, "snapshot", {"include_ocr": True})
     assert len(snap["ocr"]) == 5
     result = await _ok_result(d, "find_text", {"text": "hello", "snapshot_fresh": False})
@@ -524,6 +544,8 @@ async def test_find_text_fresh_then_stale_share_one_capture(
     audit_log: list,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A fresh find_text fills the cache; the next snapshot_fresh=false call
     searches that same screen (fresh:false) without a new capture."""
@@ -532,7 +554,7 @@ async def test_find_text_fresh_then_stale_share_one_capture(
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     first = await _ok_result(d, "find_text", {"text": "search"})
     assert first["fresh"] is True
     second = await _ok_result(d, "find_text", {"text": "search", "snapshot_fresh": False})
@@ -547,6 +569,8 @@ async def test_find_text_stale_with_empty_cache_captures(
     audit_log: list,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """snapshot_fresh=false before any OCR ran has nothing to reuse — it
     falls back to a fresh capture (and reports fresh:true)."""
@@ -555,7 +579,7 @@ async def test_find_text_stale_with_empty_cache_captures(
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     result = await _ok_result(d, "find_text", {"text": "search", "snapshot_fresh": False})
     assert result["fresh"] is True
     assert result["count"] == 2
@@ -568,6 +592,8 @@ async def test_find_text_ocr_failure_is_an_error(
     audit_log: list,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """find_text is strict where snapshot is soft: a failed OCR is an error,
     never a silent empty list."""
@@ -577,7 +603,7 @@ async def test_find_text_ocr_failure_is_an_error(
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     fake_ocr.error = "swiftc missing"
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     resp = await _call(d, "find_text", {"text": "search"})
     assert resp["ok"] is False
     assert "ocr failed" in resp["error"]
@@ -585,10 +611,9 @@ async def test_find_text_ocr_failure_is_an_error(
 
 
 async def test_find_text_requires_text_argument(
-    fake_helper: FakeHelper,
-    audit_log: list,
+    fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     resp = await _call(d, "find_text", {})
     assert resp["ok"] is False
     assert "find_text requires argument 'text'" in resp["error"]
@@ -602,6 +627,8 @@ async def test_click_text_ocrs_locates_and_clicks(
     audit_log: list,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """click_text = fresh capture + OCR + one click at the best match's center
     (physical pixels converted by the capture's measured 2x scale)."""
@@ -610,7 +637,7 @@ async def test_click_text_ocrs_locates_and_clicks(
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     result = await _ok_result(d, "click_text", {"text": "search"})
     # topmost "Search" box (y=100): center (540, 112) physical → (270, 56) logical
     assert result["text"] == "Search"
@@ -626,13 +653,15 @@ async def test_click_text_index_selects_among_matches(
     audit_log: list,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     # index 1 = the lower "search" box (y=200): center (140, 212) → (70, 106)
     result = await _ok_result(d, "click_text", {"text": "search", "index": 1})
     assert result["text"] == "search"
@@ -648,13 +677,15 @@ async def test_click_text_failures_are_readable_and_never_click(
     audit_log: list,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     resp = await _call(d, "click_text", {"text": "zzz"})
     assert resp["ok"] is False
     assert "no on-screen text matching 'zzz'" in resp["error"]
@@ -676,13 +707,15 @@ async def test_click_text_audits_the_clicked_center(
     audit_log: list,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon()
+    d = _daemon(database_gate=database_gate)
     await _call(d, "click_text", {"text": "search"})
     actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
     assert len(actions) == 1  # pyright: ignore[reportUnknownArgumentType]

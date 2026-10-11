@@ -25,6 +25,7 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.impersonation import _send
 from tests.impersonation_support import attested_caller, recorded_tree
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 class _SingleConnectionPool:
@@ -43,6 +44,7 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     database: Database,
     event_bus: EventBus,
     publish_wake: Callable[[int, str], bool],
+    operator_database: Callable[[], Any],
 ) -> None:
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -110,7 +112,7 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
         content="CLI event-log delivery",
     )
     with pytest.raises(httpx.TransportError):
-        _send(args)
+        _send(args, database_factory=operator_database)
     entries = [
         entry
         for entry in (outbox._read(path) for path in outbox.journal_dir().glob("*.json"))

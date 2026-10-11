@@ -23,6 +23,7 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -43,12 +44,14 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
     monkeypatch: pytest.MonkeyPatch,
     ending: str,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     async with hosted_scope(
         expected_error=FatalProviderError if ending == "provider_failure" else None
     ) as resources:
         pool: ConnectionPool
-        incarnation, initial = await managed_work(db_conn, aops_pool)
+        incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
         _insert(db_conn, initial.agent_id)
         entered, release = asyncio.Event(), asyncio.Event()
         failure = FatalProviderError(
@@ -71,7 +74,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
             )
 
         graph, _saver, host, ctx = await _blocked_host(
-            aops_pool, model, model_catalog=model_catalog
+            aops_pool, model, model_catalog=model_catalog, database_gate=database_gate
         )
         faults = _install_faults(monkeypatch, initial.agent_id, "after_ack")
         running = asyncio.create_task(
@@ -140,7 +143,11 @@ def _assert_original_return_receipt(
 
 
 async def _blocked_host(
-    pool: AsyncConnectionPool[Any], model: Any, model_catalog: ModelCatalog
+    pool: AsyncConnectionPool[Any],
+    model: Any,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> tuple[Any, Any, AgentHost, AvaContext]:
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
@@ -158,14 +165,14 @@ async def _blocked_host(
         graph=graph,
         machine="claim-test",
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     ctx = AvaContext(
         ops_pool=pool,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
         clock_factory=configured_policy().clock_factory,

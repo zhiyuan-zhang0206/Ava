@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from base.agents.history.hierarchy.store import load_generation_costs, load_nodes
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 
 AGENT_A = 990_128_901  # node reads
 AGENT_B = 990_128_902  # call records
@@ -22,8 +23,10 @@ _INSERT_NODE = (
 )
 
 
-def test_load_nodes_returns_every_node_ordered_by_depth_then_position() -> None:
-    db = Database.from_settings()
+def test_load_nodes_returns_every_node_ordered_by_depth_then_position(
+    database_gate: ProcessDbGate,
+) -> None:
+    db = Database.from_settings(gate=database_gate)
     with db.write_transaction() as conn:
         parent = conn.execute(_INSERT_NODE, (AGENT_A, 2, 0, 9, T0, T1, "parent", None)).fetchone()
         assert parent is not None
@@ -40,8 +43,10 @@ def test_load_nodes_returns_every_node_ordered_by_depth_then_position() -> None:
     assert (rows[0].engine_version, rows[0].prompt_version) == ("chunk-0.2", "chunk-0.12")
 
 
-def test_generation_costs_are_summed_per_chunk_job_and_per_grouping_check() -> None:
-    db = Database.from_settings()
+def test_generation_costs_are_summed_per_chunk_job_and_per_grouping_check(
+    database_gate: ProcessDbGate,
+) -> None:
+    db = Database.from_settings(gate=database_gate)
     usage = '{"input_tokens": 5, "output_tokens": 2, "input_token_details": {"cache_read": 3}}'
     with db.write_transaction() as conn:
         job = conn.execute(
@@ -76,8 +81,8 @@ def test_generation_costs_are_summed_per_chunk_job_and_per_grouping_check() -> N
     assert checks["ck-1"].calls == 1 and checks["ck-1"].seconds == 2.0
 
 
-def test_a_node_names_the_job_and_the_check_that_wrote_it() -> None:
-    db = Database.from_settings()
+def test_a_node_names_the_job_and_the_check_that_wrote_it(database_gate: ProcessDbGate) -> None:
+    db = Database.from_settings(gate=database_gate)
     with db.write_transaction() as conn:
         conn.execute(_INSERT_NODE, (AGENT_A + 10, 1, 0, 4, T0, T1, "leaf", None))
         conn.execute(

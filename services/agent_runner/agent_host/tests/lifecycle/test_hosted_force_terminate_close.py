@@ -27,11 +27,12 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.exec._subprocess import _run_in_subprocess
 from agent.ownership import hosted
-from agent.tests.claim.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.context import AvaContext
 from base.agents.impersonation import ImpersonationError
 from base.agents.incarnation.hosted_force import install_hosted_force
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -44,7 +45,13 @@ from tests.fixtures.pin_agent import exec_context as ctx_of
 _FORCE_ERROR = "Native runtime no longer owns this agent"
 
 
-def _host(graph: Mock, pool: AsyncConnectionPool, model_catalog: ModelCatalog) -> AgentHost:
+def _host(
+    graph: Mock,
+    pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+) -> AgentHost:
     return AgentHost(
         policy=configured_policy(),
         pool=pool,
@@ -52,7 +59,7 @@ def _host(graph: Mock, pool: AsyncConnectionPool, model_catalog: ModelCatalog) -
         graph=graph,
         machine="claim-test",
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
 
@@ -98,13 +105,12 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     async with hosted_scope(expected_error=ImpersonationError) as resources:
-        agent_id = _agent(db_conn)
-        incarnation = await _admit(
-            aops_pool,
-            agent_id,
-        )
+        agent_id = agent_row(db_conn)
+        incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
         publisher = Mock()
         commands: list[int] = []
         failure = ImpersonationError(_FORCE_ERROR)
@@ -118,7 +124,7 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
 
         graph = Mock()
         graph.ainvoke = AsyncMock(side_effect=graph_return)
-        host = _host(graph, aops_pool, model_catalog=model_catalog)
+        host = _host(graph, aops_pool, model_catalog=model_catalog, database_gate=database_gate)
         host._runtimes[agent_id] = Mock()
         outcome = await host._invoke_until_done(
             agent_id,
@@ -127,7 +133,7 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
                     ops_pool=aops_pool,
                     event_publisher=publisher,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-                    db=Database.from_settings(),
+                    db=Database.from_settings(gate=database_gate),
                     bus=EventBus.from_settings(),
                     catalog=model_catalog,
                     clock_factory=configured_policy().clock_factory,
@@ -149,7 +155,7 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
         await close_hosted_turn(
             aops_pool,
             aops_pool,
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             event_bus,
             Mock(),
             incarnation,
@@ -171,7 +177,11 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
 
 
 async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The predicate reads the command, not the row (state-independence pin).
 
@@ -179,21 +189,20 @@ async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
     normally prevents this ordering; the classification stays correct across
     the race rather than claiming the ordering is routine.
     """
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)
     _resurrect_shape(db_conn, agent_id)
-    host = _host(_raising_graph(), aops_pool, model_catalog=model_catalog)
+    host = _host(
+        _raising_graph(), aops_pool, model_catalog=model_catalog, database_gate=database_gate
+    )
     outcome = await host._invoke_until_done(
         agent_id,
         replace(
             AvaContext(
                 ops_pool=aops_pool,
                 agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-                db=Database.from_settings(),
+                db=Database.from_settings(gate=database_gate),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
                 clock_factory=configured_policy().clock_factory,
@@ -207,24 +216,25 @@ async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
 
 
 async def test_the_turn_starting_under_the_force_closes_quietly(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Site host.py:683 — the turn starts already under the applied force."""
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)
     graph = _raising_graph()
-    host = _host(graph, aops_pool, model_catalog=model_catalog)
+    host = _host(graph, aops_pool, model_catalog=model_catalog, database_gate=database_gate)
     outcome = await host._invoke_until_done(
         agent_id,
         replace(
             AvaContext(
                 ops_pool=aops_pool,
                 agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-                db=Database.from_settings(),
+                db=Database.from_settings(gate=database_gate),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
                 clock_factory=configured_policy().clock_factory,
@@ -239,23 +249,26 @@ async def test_the_turn_starting_under_the_force_closes_quietly(
 
 
 async def test_a_cli_style_user_force_closes_quietly_too(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """No source whitelist: the durable shape, not the caller, classifies."""
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id, source="user")
-    host = _host(_raising_graph(), aops_pool, model_catalog=model_catalog)
+    host = _host(
+        _raising_graph(), aops_pool, model_catalog=model_catalog, database_gate=database_gate
+    )
     outcome = await host._invoke_until_done(
         agent_id,
         replace(
             AvaContext(
                 ops_pool=aops_pool,
                 agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-                db=Database.from_settings(),
+                db=Database.from_settings(gate=database_gate),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
                 clock_factory=configured_policy().clock_factory,
@@ -273,30 +286,32 @@ async def test_the_held_wake_force_guard_stops_quietly(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Site host.py:371 (held-controls probe) — the wake must not crash."""
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)
     monkeypatch.setattr(
         "services.agent_runner.agent_host.host.admit_hosted_runtime",
         AsyncMock(return_value=incarnation),
     )
-    host = _host(_raising_graph(), aops_pool, model_catalog=model_catalog)
+    host = _host(
+        _raising_graph(), aops_pool, model_catalog=model_catalog, database_gate=database_gate
+    )
     await host._run_held_controls(agent_id, "running", resources=None)  # must not raise
 
 
 async def test_an_observed_force_still_crashes(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
     command = _apply_force(db_conn, agent_id)
     db_conn.execute(
         "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' WHERE id=%s",
@@ -304,7 +319,9 @@ async def test_an_observed_force_still_crashes(
     )
     db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
     db_conn.commit()
-    host = _host(_raising_graph(), aops_pool, model_catalog=model_catalog)
+    host = _host(
+        _raising_graph(), aops_pool, model_catalog=model_catalog, database_gate=database_gate
+    )
     with pytest.raises(ImpersonationError):
         await host._invoke_until_done(
             agent_id,
@@ -313,7 +330,7 @@ async def test_an_observed_force_still_crashes(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-                    db=Database.from_settings(),
+                    db=Database.from_settings(gate=database_gate),
                     bus=EventBus.from_settings(),
                     clock_factory=configured_policy().clock_factory,
                 ),
@@ -325,17 +342,20 @@ async def test_an_observed_force_still_crashes(
 
 
 async def test_a_foreign_incarnation_force_still_crashes(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
     command = _apply_force(db_conn, agent_id)
     db_conn.execute("UPDATE inbound_messages SET target_owner=%s WHERE id=%s", (uuid4(), command))
     db_conn.commit()
-    host = _host(_raising_graph(), aops_pool, model_catalog=model_catalog)
+    host = _host(
+        _raising_graph(), aops_pool, model_catalog=model_catalog, database_gate=database_gate
+    )
     with pytest.raises(ImpersonationError):
         await host._invoke_until_done(
             agent_id,
@@ -344,7 +364,7 @@ async def test_a_foreign_incarnation_force_still_crashes(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-                    db=Database.from_settings(),
+                    db=Database.from_settings(gate=database_gate),
                     bus=EventBus.from_settings(),
                     clock_factory=configured_policy().clock_factory,
                 ),
@@ -356,18 +376,21 @@ async def test_a_foreign_incarnation_force_still_crashes(
 
 
 async def test_a_detached_pointer_still_crashes(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
     command = _apply_force(db_conn, agent_id)
     assert command
     db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
     db_conn.commit()
-    host = _host(_raising_graph(), aops_pool, model_catalog=model_catalog)
+    host = _host(
+        _raising_graph(), aops_pool, model_catalog=model_catalog, database_gate=database_gate
+    )
     with pytest.raises(ImpersonationError):
         await host._invoke_until_done(
             agent_id,
@@ -376,7 +399,7 @@ async def test_a_detached_pointer_still_crashes(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-                    db=Database.from_settings(),
+                    db=Database.from_settings(gate=database_gate),
                     bus=EventBus.from_settings(),
                     clock_factory=configured_policy().clock_factory,
                 ),
@@ -388,13 +411,14 @@ async def test_a_detached_pointer_still_crashes(
 
 
 async def test_a_non_impersonation_exception_still_crashes(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
 
     async def graph_return(*args: object, **kwargs: object) -> dict[str, object]:
         _apply_force(db_conn, agent_id)
@@ -402,7 +426,7 @@ async def test_a_non_impersonation_exception_still_crashes(
 
     graph = Mock()
     graph.ainvoke = AsyncMock(side_effect=graph_return)
-    host = _host(graph, aops_pool, model_catalog=model_catalog)
+    host = _host(graph, aops_pool, model_catalog=model_catalog, database_gate=database_gate)
     with pytest.raises(RuntimeError):
         await host._invoke_until_done(
             agent_id,
@@ -411,7 +435,7 @@ async def test_a_non_impersonation_exception_still_crashes(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-                    db=Database.from_settings(),
+                    db=Database.from_settings(gate=database_gate),
                     bus=EventBus.from_settings(),
                     clock_factory=configured_policy().clock_factory,
                 ),
@@ -423,7 +447,11 @@ async def test_a_non_impersonation_exception_still_crashes(
 
 
 async def test_a_superseded_older_force_cannot_classify(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The pointer anchors the decision (N4 pin).
 
@@ -432,11 +460,8 @@ async def test_a_superseded_older_force_cannot_classify(
     borrowed to classify — the fail-closed direction of the force-supersede
     shape.
     """
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)  # applied + unobserved, pointer -> this force
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) "
@@ -448,7 +473,9 @@ async def test_a_superseded_older_force_cannot_classify(
         "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (row[0], agent_id)
     )
     db_conn.commit()
-    host = _host(_raising_graph(), aops_pool, model_catalog=model_catalog)
+    host = _host(
+        _raising_graph(), aops_pool, model_catalog=model_catalog, database_gate=database_gate
+    )
     with pytest.raises(ImpersonationError):
         await host._invoke_until_done(
             agent_id,
@@ -457,7 +484,7 @@ async def test_a_superseded_older_force_cannot_classify(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-                    db=Database.from_settings(),
+                    db=Database.from_settings(gate=database_gate),
                     bus=EventBus.from_settings(),
                     clock_factory=configured_policy().clock_factory,
                 ),
@@ -469,20 +496,23 @@ async def test_a_superseded_older_force_cannot_classify(
 
 
 async def test_a_lapsed_lease_still_crashes(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Renewal is the host beat's job; a truly expired lease stays fail-closed."""
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at = now() - interval '5 minutes' WHERE id=%s",
         (agent_id,),
     )
     db_conn.commit()
-    host = _host(_raising_graph(), aops_pool, model_catalog=model_catalog)
+    host = _host(
+        _raising_graph(), aops_pool, model_catalog=model_catalog, database_gate=database_gate
+    )
     with pytest.raises(ImpersonationError):
         await host._invoke_until_done(
             agent_id,
@@ -491,7 +521,7 @@ async def test_a_lapsed_lease_still_crashes(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-                    db=Database.from_settings(),
+                    db=Database.from_settings(gate=database_gate),
                     bus=EventBus.from_settings(),
                     clock_factory=configured_policy().clock_factory,
                 ),
@@ -521,13 +551,15 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     from agent.graph.exec._result import _ExecCrashed
     from base.native_process.exec_domain import ExecProcessDomain
     from base.native_process.turn_identity import HostedTurnResources
 
-    agent_id = _agent(db_conn)
-    incarnation = await _admit(aops_pool, agent_id)
+    agent_id = agent_row(db_conn)
+    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
     original_close = ExecProcessDomain.close_confirmed
     failure = PermissionError("injected unverifiable domain closure")
     closed_domains: list[ExecProcessDomain] = []

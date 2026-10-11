@@ -6,22 +6,25 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from services.agent_runner.agent_host.tests.lifecycle.test_hosted_backlog_recovery import (
-    isolated_clocks as isolated_clocks,
-)
+from services.agent_runner.agent_host.tests.lifecycle.wake_recovery_setup import isolated_clocks
 from services.agent_runner.agent_host.tests.test_agent_host import _PendingScanPool
-from services.agent_runner.agent_host.tests.test_turn_dispatcher import _ScanScheduler
+from services.agent_runner.agent_host.tests.turn_dispatcher.scan_setup import ScanScheduler
 
 
 class TestHostedHostWakePacing:
     async def test_held_cohort_wakes_are_never_paced(
-        self, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        model_catalog: ModelCatalog,
+        *,
+        database_gate: ProcessDbGate,
     ) -> None:
         pool = _PendingScanPool([(17, False, False)])
         host = AgentHost(
@@ -31,7 +34,7 @@ class TestHostedHostWakePacing:
             graph=object(),  # pyright: ignore[reportArgumentType]
             machine="this-box",
             bus=EventBus.from_settings(),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
         )
 
@@ -48,7 +51,7 @@ class TestHostedHostWakePacing:
         assert [
             (wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(30)
         ] == [(17, False), (23, False)]
-        scheduler = _ScanScheduler()
+        scheduler = ScanScheduler()
         wake_dispatcher = InboundWakeDispatcher(
             EventBus.from_settings(),
             scheduler,
@@ -59,3 +62,6 @@ class TestHostedHostWakePacing:
         )
         await wake_dispatcher.scan_once()
         assert scheduler.woken == [17, 23]
+
+
+pytestmark = pytest.mark.usefixtures(isolated_clocks.__name__)

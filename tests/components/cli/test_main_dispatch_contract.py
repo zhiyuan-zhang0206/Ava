@@ -1,4 +1,4 @@
-"""Contract: scans the repository root for entry points that declare the database gate exemption."""
+"""Only the CLI database composition owner declares exempt admission."""
 
 from __future__ import annotations
 
@@ -6,7 +6,26 @@ import ast
 from pathlib import Path
 
 
-def test_only_the_cli_entry_point_declares_the_database_gate_exemption() -> None:
+def _declares_exempt_gate(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    name = (
+        func.id
+        if isinstance(func, ast.Name)
+        else func.attr
+        if isinstance(func, ast.Attribute)
+        else None
+    )
+    if name != "ProcessDbGate":
+        return False
+    return any(
+        arg.arg == "exempt" and isinstance(arg.value, ast.Constant) and arg.value.value is True
+        for arg in node.keywords
+    )
+
+
+def test_only_the_cli_database_owner_declares_exempt_admission() -> None:
     """A service that declared it would be the writer the gate exists to stop,
     running unchecked. Services start with `python -m <module>`, never through here."""
     root = Path(__file__).resolve().parents[3]
@@ -19,13 +38,9 @@ def test_only_the_cli_entry_point_declares_the_database_gate_exemption() -> None
             if "tests" in path.relative_to(root).parts:
                 continue  # a package's own `tests/` is not production code
             text = path.read_text()
-            if "exempt_from_db_gate" not in text:
+            if "ProcessDbGate" not in text:
                 continue
             for node in ast.walk(ast.parse(text)):
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "exempt_from_db_gate"
-                ):
+                if _declares_exempt_gate(node):
                     callers.add(path.relative_to(root).as_posix())
-    assert callers == {"cli/main.py"}
+    assert callers == {"cli/database.py"}

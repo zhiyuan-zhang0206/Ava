@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from base.config import settings
 from gateway.app import app
 from gateway.tests.extensions.test_mcp_endpoint import _initialize, _tool_call, _tool_result
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +43,7 @@ def _stored(db: psycopg.Connection, agent_id: int, content: str) -> list[tuple[A
 
 
 def test_send_message_defaults_to_the_user(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         credential, agent_id = _client_and_agent(client)
         args = {"agent_id": agent_id, "content": "as the user"}
         assert not _failed(_tool_call(client, credential["token"], "send_message", args))
@@ -52,7 +53,7 @@ def test_send_message_defaults_to_the_user(db_conn: psycopg.Connection) -> None:
 def test_send_message_as_external_agent_uses_the_client_identity(
     db_conn: psycopg.Connection,
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         credential, agent_id = _client_and_agent(client)
         args = {"agent_id": agent_id, "content": "as a peer", "as_external_agent": True}
         assert not _failed(_tool_call(client, credential["token"], "send_message", args))
@@ -75,7 +76,7 @@ def test_send_message_as_external_agent_uses_the_client_identity(
 def test_the_caller_cannot_choose_the_source(
     db_conn: psycopg.Connection, argument: str, as_external_agent: bool
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         credential, agent_id = _client_and_agent(client)
         args: dict[str, Any] = {
             "agent_id": agent_id,

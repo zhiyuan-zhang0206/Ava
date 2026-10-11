@@ -49,9 +49,11 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from base.agents.context.clients import DatabaseFactory
 from base.cluster import ensure_cluster_redis_acl, machine, ownership, port_preflight
 from base.cluster import postgres as owned_postgres
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
@@ -65,7 +67,6 @@ from base.cluster.dataplane.pg_tools import (
     pg_tz_args,
 )
 from base.config import ConfigBoot, settings
-from base.db import Database
 from base.db.pg_admin import pg_admin_url as _base_pg_admin_url
 from base.db.pg_admin import pg_socket_dir
 from base.host.net.url_secret import url_host
@@ -74,6 +75,7 @@ from base.host.system.backend import get_backend
 from base.native_process.child_env import daemon_process_env, inherited_process_env
 from base.native_process.os_platform import is_macos
 from base.paths import ava_home
+from base.telemetry import EventPipeline
 from cli.commands.data_plane.walg import warn_archive_inactive
 from services.backup.walg.archive import archive_pg_args
 
@@ -631,7 +633,7 @@ def _redis_reachable(redis_port: int, redis_host: str = "127.0.0.1") -> bool:
         client.close()
 
 
-def print_data_plane_status() -> None:
+def print_data_plane_status(*, database_factory: DatabaseFactory) -> None:
     """Print this cluster's own pg/redis reachability for `ava status`.
 
     Postgres is probed in two stages: `pg_isready` (the server accepts connections)
@@ -656,7 +658,7 @@ def print_data_plane_status() -> None:
         from .bringup import remote_pg_reachable, remote_redis_reachable
 
         print("  · data plane remote-managed — probing the URLs (no local instance)")
-        pg_ok, pg_line = remote_pg_reachable()
+        pg_ok, pg_line = remote_pg_reachable(database_factory=database_factory)
         print(f"  {'✓' if pg_ok else '✗'} {pg_line}")
         redis_ok, redis_line = remote_redis_reachable()
         print(f"  {'✓' if redis_ok else '✗'} {redis_line}")
@@ -673,9 +675,7 @@ def print_data_plane_status() -> None:
         print(f"  ✗ postgres ({pg_host}:{pg_port}) unreachable")
     else:
         try:
-            with (
-                Database.from_settings().connect() as conn
-            ):  # pooled front door (PgBouncer when enabled)
+            with database_factory().connect() as conn:  # pooled front door (PgBouncer when enabled)
                 conn.execute("select 1")
             print(f"  ✓ postgres ({pg_host}:{pg_port})")
         except Exception as exc:
@@ -713,6 +713,7 @@ def _print_pooler_status() -> None:
 def stop_cluster_instance(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    producer: Callable[[], EventPipeline],
 ) -> int:
     """Stop this cluster's own Postgres + Redis (data preserved on disk). The
     counterpart of ensure_cluster_storage for `ava stop` of a cluster running its
@@ -752,7 +753,7 @@ def stop_cluster_instance(
         retained_children=retained_children,
     )
     if escalation is not None:
-        report_postgres_stop_escalation(escalation)
+        report_postgres_stop_escalation(escalation, producer=producer)
     print("  ✓ postgres stopped")
     if port is not None:
         subprocess.run(

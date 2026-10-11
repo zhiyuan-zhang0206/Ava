@@ -3,7 +3,9 @@ Run end-to-end, no network. `unit_home` isolates ~/.ava.
 """
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,6 +17,7 @@ from cli.commands.extensions.plugins import (
     cmd_plugins_uninstall,
     cmd_plugins_upgrade,
 )
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -49,10 +52,13 @@ def _make_plugin_repo(root: Path) -> str:
 
 
 def test_install_skill_records_and_surfaces(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    operator_database: Callable[[], Any],
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
-    assert cmd_plugins_install(url, None, None) == 0
+    assert cmd_plugins_install(url, None, None, database_factory=operator_database) == 0
 
     pkg = reg.get("demo")
     assert pkg is not None and pkg.type == "skill" and pkg.source == url and pkg.enabled
@@ -63,32 +69,44 @@ def test_install_skill_records_and_surfaces(
     assert "demo" in {s["name"] for s in skills_mod.names()}
 
 
-def test_install_disabled_skill_hidden_from_scanner(unit_home: Path, tmp_path: Path) -> None:
+def test_install_disabled_skill_hidden_from_scanner(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     url = _make_skill_repo(tmp_path, "demo")
-    cmd_plugins_install(url, None, None)
+    cmd_plugins_install(url, None, None, database_factory=operator_database)
     reg.register(
         reg.InstalledPackage(name="demo", type="skill", source=url, ref=None, enabled=False)
     )
     assert "demo" not in {s["name"] for s in skills_mod.names()}
 
 
-def test_install_rejects_duplicate(unit_home: Path, tmp_path: Path) -> None:
+def test_install_rejects_duplicate(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     url = _make_skill_repo(tmp_path, "demo")
-    assert cmd_plugins_install(url, None, None) == 0
-    assert cmd_plugins_install(url, None, None) == 1  # already installed
+    assert cmd_plugins_install(url, None, None, database_factory=operator_database) == 0
+    assert (
+        cmd_plugins_install(url, None, None, database_factory=operator_database) == 1
+    )  # already installed
 
 
 def test_install_rejects_unrecognized(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    operator_database: Callable[[], Any],
 ) -> None:
     url = _make_plugin_repo(tmp_path)
-    assert cmd_plugins_install(url, None, None) == 1
+    assert cmd_plugins_install(url, None, None, database_factory=operator_database) == 1
     assert "unrecognized package" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.load().packages == []
 
 
 def test_install_bare_mcp_package_signposts_mcp_install(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    operator_database: Callable[[], Any],
 ) -> None:
     """A standalone MCP package (bare .mcp.json) points the user at `ava mcp install`."""
     repo = tmp_path / "mcp-src"
@@ -102,14 +120,18 @@ def test_install_bare_mcp_package_signposts_mcp_install(
     _git(repo, "config", "user.name", "t")
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init")
-    assert cmd_plugins_install(f"file://{repo}", None, None) == 1
+    assert (
+        cmd_plugins_install(f"file://{repo}", None, None, database_factory=operator_database) == 1
+    )
     assert "ava mcp install" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.load().packages == []
 
 
-def test_uninstall_removes_dir_and_entry(unit_home: Path, tmp_path: Path) -> None:
+def test_uninstall_removes_dir_and_entry(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     url = _make_skill_repo(tmp_path, "demo")
-    cmd_plugins_install(url, None, None)
+    cmd_plugins_install(url, None, None, database_factory=operator_database)
     assert cmd_plugins_uninstall("demo") == 0
     assert reg.get("demo") is None
     assert not (unit_home / "skills" / "demo").exists()
@@ -120,18 +142,25 @@ def test_uninstall_unknown_errors(unit_home: Path) -> None:
 
 
 def test_installed_lists_entries(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    operator_database: Callable[[], Any],
 ) -> None:
     assert cmd_plugins_installed() == 0
     assert "(none)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    cmd_plugins_install(_make_skill_repo(tmp_path, "demo"), None, None)
+    cmd_plugins_install(
+        _make_skill_repo(tmp_path, "demo"), None, None, database_factory=operator_database
+    )
     assert cmd_plugins_installed() == 0
     assert "demo" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_upgrade_refetches(unit_home: Path, tmp_path: Path) -> None:
+def test_upgrade_refetches(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     url = _make_skill_repo(tmp_path, "demo", description="v1")
-    cmd_plugins_install(url, None, None)
+    cmd_plugins_install(url, None, None, database_factory=operator_database)
     # mutate the source repo + commit, then upgrade
     repo = tmp_path / "demo-src"
     (repo / "SKILL.md").write_text(
@@ -211,10 +240,13 @@ def _make_claude_code_plugin_repo(
 
 
 def test_install_claude_code_plugin_from_subdir_surfaces_skill(
-    unit_home: Path, tmp_path: Path
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path)
-    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+    assert (
+        cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
+        == 0
+    )
 
     pkg = reg.get("pr-toolkit")
     assert pkg is not None
@@ -232,20 +264,32 @@ def test_install_claude_code_plugin_from_subdir_surfaces_skill(
 
 
 def test_install_claude_code_plugin_without_anything_refused(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    operator_database: Callable[[], Any],
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=False)
-    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 1
+    assert (
+        cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
+        == 1
+    )
     assert "nothing to" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.load().packages == []
 
 
 def test_install_claude_code_plugin_skills_only_surfaces(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    operator_database: Callable[[], Any],
 ) -> None:
     # superpowers shape: a Claude Code plugin shipping skills/ but no agents/ or .mcp.json
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=True)
-    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+    assert (
+        cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
+        == 0
+    )
 
     pkg = reg.get("pr-toolkit")
     assert pkg is not None and pkg.type == "plugin" and pkg.enabled
@@ -262,9 +306,11 @@ def test_install_claude_code_plugin_skills_only_surfaces(
     assert "brainstorming" in out and "writing-plans" in out
 
 
-def test_upgrade_claude_code_plugin_skills_only(unit_home: Path, tmp_path: Path) -> None:
+def test_upgrade_claude_code_plugin_skills_only(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=True)
-    cmd_plugins_install(url, None, "plugins/pr-toolkit")
+    cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
     # add a third skill to the source, commit, upgrade
     repo = tmp_path / "claude-code-src"
     new_skill = repo / "plugins" / "pr-toolkit" / "skills" / "debugging"
@@ -280,10 +326,16 @@ def test_upgrade_claude_code_plugin_skills_only(unit_home: Path, tmp_path: Path)
 
 
 def test_install_claude_code_plugin_reports_contributions(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    operator_database: Callable[[], Any],
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=True, mcp=True)
-    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+    assert (
+        cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
+        == 0
+    )
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     # the install message itemizes what the plugin folder contributed
     assert "contributes:" in out
@@ -294,11 +346,16 @@ def test_install_claude_code_plugin_reports_contributions(
     assert "/review-pr" in out
 
 
-def test_install_claude_code_plugin_with_bundled_mcp(unit_home: Path, tmp_path: Path) -> None:
+def test_install_claude_code_plugin_with_bundled_mcp(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     from ava.mcp_config import load_mcp_config
 
     url = _make_claude_code_plugin_repo(tmp_path, agents=True, mcp=True)
-    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+    assert (
+        cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
+        == 0
+    )
 
     # skill still materialized
     assert (unit_home / "plugins" / "pr-toolkit" / "skills" / "pr-toolkit" / "SKILL.md").is_file()
@@ -307,11 +364,16 @@ def test_install_claude_code_plugin_with_bundled_mcp(unit_home: Path, tmp_path: 
     assert "demo-server" in load_mcp_config()
 
 
-def test_install_claude_code_plugin_mcp_only(unit_home: Path, tmp_path: Path) -> None:
+def test_install_claude_code_plugin_mcp_only(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     from ava.mcp_config import load_mcp_config
 
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=True)
-    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+    assert (
+        cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
+        == 0
+    )
 
     pkg = reg.get("pr-toolkit")
     assert pkg is not None and pkg.type == "plugin" and pkg.enabled
@@ -323,14 +385,19 @@ def test_install_claude_code_plugin_mcp_only(unit_home: Path, tmp_path: Path) ->
     assert "pr-toolkit" not in {s["name"] for s in skills_mod.names()}
 
 
-def test_install_claude_code_plugin_commands_surface(unit_home: Path, tmp_path: Path) -> None:
+def test_install_claude_code_plugin_commands_surface(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     from ava.skills.composer_commands import discover_commands
 
     # commands-only plugin: no skills/agents/mcp, just commands/
     url = _make_claude_code_plugin_repo(
         tmp_path, agents=False, mcp=False, skills=False, commands=True
     )
-    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+    assert (
+        cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
+        == 0
+    )
 
     # commands/ copied verbatim into the overlay
     assert (unit_home / "plugins" / "pr-toolkit" / "commands" / "deploy.md").is_file()
@@ -342,17 +409,21 @@ def test_install_claude_code_plugin_commands_surface(unit_home: Path, tmp_path: 
     assert cmds["pr-toolkit:deploy"]["instruction_hint"] == "env"
 
 
-def test_uninstall_claude_code_plugin_removes_plugin_dir(unit_home: Path, tmp_path: Path) -> None:
+def test_uninstall_claude_code_plugin_removes_plugin_dir(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     url = _make_claude_code_plugin_repo(tmp_path)
-    cmd_plugins_install(url, None, "plugins/pr-toolkit")
+    cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
     assert cmd_plugins_uninstall("pr-toolkit") == 0
     assert reg.get("pr-toolkit") is None
     assert not (unit_home / "plugins" / "pr-toolkit").exists()
 
 
-def test_upgrade_claude_code_plugin_rematerializes(unit_home: Path, tmp_path: Path) -> None:
+def test_upgrade_claude_code_plugin_rematerializes(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     url = _make_claude_code_plugin_repo(tmp_path)
-    cmd_plugins_install(url, None, "plugins/pr-toolkit")
+    cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
     # add a third agent to the source, commit, upgrade
     repo = tmp_path / "claude-code-src"
     (repo / "plugins" / "pr-toolkit" / "agents" / "type-design-analyzer.md").write_text(
@@ -370,7 +441,10 @@ def test_upgrade_claude_code_plugin_rematerializes(unit_home: Path, tmp_path: Pa
 
 
 def test_install_failure_mid_materialize_leaves_nothing(
-    unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    unit_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """A failure while the plugin tree is being written must not leave a
     half-installed plugin behind: neither the final dir nor the staging dir
@@ -385,7 +459,7 @@ def test_install_failure_mid_materialize_leaves_nothing(
     monkeypatch.setattr(shutil, "copytree", boom)
 
     with pytest.raises(OSError, match="injected"):
-        cmd_plugins_install(url, None, "plugins/pr-toolkit")
+        cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
 
     plugins_root = unit_home / "plugins"
     assert not (plugins_root / "pr-toolkit").exists()
@@ -394,7 +468,10 @@ def test_install_failure_mid_materialize_leaves_nothing(
 
 
 def test_upgrade_failure_keeps_previous_version(
-    unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    unit_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
 ) -> None:
     """An upgrade whose new materialization fails must leave the previous
     complete version in place — never a missing or half-installed plugin —
@@ -402,7 +479,10 @@ def test_upgrade_failure_keeps_previous_version(
     import shutil
 
     url = _make_claude_code_plugin_repo(tmp_path, skills=True)
-    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+    assert (
+        cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
+        == 0
+    )
     v1_skill = unit_home / "plugins" / "pr-toolkit" / "skills" / "brainstorming" / "SKILL.md"
     assert v1_skill.is_file()
 
@@ -452,7 +532,10 @@ def test_dot_prefixed_plugin_dirs_are_not_mcp_sources(unit_home: Path) -> None:
 
 
 def test_install_refuses_dot_prefixed_plugin_name(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    operator_database: Callable[[], Any],
 ) -> None:
     """A manifest name starting with '.' is reserved for atomic-install
     staging/backup dirs — installing under it would be silently invisible to
@@ -471,12 +554,19 @@ def test_install_refuses_dot_prefixed_plugin_name(
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init")
 
-    assert cmd_plugins_install(f"file://{repo}", None, "plugins/pr-toolkit") == 1
+    assert (
+        cmd_plugins_install(
+            f"file://{repo}", None, "plugins/pr-toolkit", database_factory=operator_database
+        )
+        == 1
+    )
     assert "starts with" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.load().packages == []
 
 
-def test_install_sweeps_stale_backup_residue(unit_home: Path, tmp_path: Path) -> None:
+def test_install_sweeps_stale_backup_residue(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     """QA N4: install sweeps .name.backup-* / .name.staging left by an
     earlier hard-killed upgrade — filtering hides residue, this removes it."""
     plugins_root = unit_home / "plugins"
@@ -487,17 +577,25 @@ def test_install_sweeps_stale_backup_residue(unit_home: Path, tmp_path: Path) ->
     (plugins_root / ".pr-toolkit.staging" / "plugin.py").write_text("x = 1\n")
 
     url = _make_claude_code_plugin_repo(tmp_path)
-    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+    assert (
+        cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
+        == 0
+    )
 
     assert not (plugins_root / ".pr-toolkit.backup-999").exists()
     assert not (plugins_root / ".pr-toolkit.staging").exists()
     assert (plugins_root / "pr-toolkit" / "skills" / "pr-toolkit" / "SKILL.md").is_file()
 
 
-def test_uninstall_sweeps_stale_backup_residue(unit_home: Path, tmp_path: Path) -> None:
+def test_uninstall_sweeps_stale_backup_residue(
+    unit_home: Path, tmp_path: Path, operator_database: Callable[[], Any]
+) -> None:
     """QA N4: uninstall removes dot-prefixed residue for the plugin too."""
     url = _make_claude_code_plugin_repo(tmp_path)
-    assert cmd_plugins_install(url, None, "plugins/pr-toolkit") == 0
+    assert (
+        cmd_plugins_install(url, None, "plugins/pr-toolkit", database_factory=operator_database)
+        == 0
+    )
 
     plugins_root = unit_home / "plugins"
     stale = plugins_root / ".pr-toolkit.backup-999"

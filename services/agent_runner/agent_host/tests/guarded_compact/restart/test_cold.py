@@ -15,6 +15,7 @@ from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel, make_host
@@ -35,6 +36,8 @@ async def test_released_sigkill_original_restart_is_no_effect_not_successor_rest
     add_bindings: AddBindings,
     fence: str,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     agent = prepare_agent(db_conn)
     secret = "guarded-compact-test-secret"  # noqa: S105 -- isolated credential
@@ -99,6 +102,7 @@ async def test_released_sigkill_original_restart_is_no_effect_not_successor_rest
                 monkeypatch,
                 seed_history=False,
                 catalog=model_catalog,
+                database_gate=database_gate,
             )
             await host.run_turn(agent)
             progress = await asyncio.to_thread(

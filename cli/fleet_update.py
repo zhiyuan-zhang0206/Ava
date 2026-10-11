@@ -112,11 +112,11 @@ trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -f "$R"' EXIT
 git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; git -C "$S" worktree prune
 git cat-file -e "{new}^{{commit}}" || {{ echo "SKIPPED: {new} is not fetched on this host (a dry run does not fetch)"; exit 0; }}
 (umask 077; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c \\
-  'import json, sys; from cli.commands.management.schedules_verify import _read_schedule_rows as rows; json.dump(rows(), open(sys.argv[1], "w"))' "$R") \\
+  'import json, sys; from cli.database import operator_database_factory; from cli.commands.management.schedules_verify import _read_schedule_rows as rows; json.dump(rows(database_factory=operator_database_factory()), open(sys.argv[1], "w"))' "$R") \\
   || {{ echo "VERIFY_RC=2"; exit 0; }}
 git -C "$S" worktree add -q "$W" {new} || {{ echo "VERIFY_RC=2"; exit 0; }}
 cd "$W" && AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c \\
-  'import sys; from cli.commands.management.schedules_verify import cmd_schedules_verify as v; sys.exit(v(notify=False, rows_file=sys.argv[1]))' "$R"
+  'import sys; from cli.database import operator_database_factory; from cli.commands.management.schedules_verify import cmd_schedules_verify as v; sys.exit(v(database_factory=operator_database_factory(), notify=False, rows_file=sys.argv[1]))' "$R"
 echo "VERIFY_RC=$?"; exit 0"""
 
 

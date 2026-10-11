@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Log sinks
-description: 'The three loguru sink types the `base/log/__init__.py` init entry points assemble — stderr, the JSONL file and the unified event pipeline — how every sink is registered with `diagnose` off, and the stdlib interception that routes `logging.getLogger` records into them.'
+description: 'The three loguru sink types the `base/log/process.py` init entry points assemble — stderr, the JSONL file and the unified event pipeline — how every sink is registered with `diagnose` off, and the stdlib interception that routes `logging.getLogger` records into them.'
 tags:
 - base
 - library
@@ -12,7 +12,7 @@ tags:
 
 The sinks [[log.ava.okf.md|logging]]'s `init_*` entry points assemble per
 process type. `base/log/sinks.py` owns the file-sink mechanics and the stdlib
-interception; the event-pipeline sink stays in `base/log/__init__.py`.
+interception; the event-pipeline sink stays in `base/log/process.py`.
 
 ## Three sink types
 
@@ -34,7 +34,7 @@ interception; the event-pipeline sink stays in `base/log/__init__.py`.
 - **stderr opens first.** `init_gateway_process` and `init_cli_process` open
   it before importing `base.paths`, because that import builds Settings, and
   the build logs (a runner continuing on a stale bootstrap snapshot warns).
-  Importing `base/log/__init__.py` dropped loguru's default handler, so a record
+  Importing the lightweight `base.log` dropped loguru's default handler, so a record
   written before any sink exists is gone.
 
 ## Stdlib interception

@@ -23,6 +23,7 @@ from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     uploaded_agent as uploaded_agent,
 )
 from gateway.upload_delivery import worker
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.mark.parametrize("stage", ["before-link", "after-link"])
@@ -224,8 +225,6 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
 ):
     import time
 
-    from fastapi.testclient import TestClient
-
     from base.config import settings
     from gateway.tests.events.test_notices_endpoint import _seed_agent
     from gateway.tests.upload_delivery.test_upload_delivery_recovery import SECRET
@@ -247,7 +246,7 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
     )
     db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (unit.machine, agent))
     db_conn.commit()
-    with TestClient(app, headers={"Authorization": f"Bearer {SECRET}"}) as client:
+    with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as client:
         response = post(client, agent)
         assert response.status_code == 202
         deadline = time.monotonic() + 10
@@ -268,14 +267,21 @@ def test_overlapping_gateway_lifespans_stop_their_original_upload_workers(
 ) -> None:
     # Both existing HTTP fixture consumers nest TestClient(app). Shared state
     # exposes the newer worker, but each lifespan must drain its own TaskGroup.
-    with TestClient(app):
+    with gateway_test_client(app):
+        process = app.state.gateway_process
+        pipeline = process.event_pipeline()
         original = app.state.upload_recovery
         assert original.task is not None and not original.stopped.is_set()
-        with TestClient(app):
+        with gateway_test_client(app):
+            assert app.state.gateway_process is process
+            assert app.state.process_image is process.image
+            assert process.event_pipeline() is pipeline
             replacement = app.state.upload_recovery
             assert replacement is not original
             assert replacement.task is not None and not replacement.stopped.is_set()
+        assert not pipeline.stopped
         assert replacement.stopped.is_set() and replacement.task.done()
         assert not original.stopped.is_set() and not original.task.done()
+    assert pipeline.stopped
     assert original.stopped.is_set() and original.task.done()
     assert not original.calls and not replacement.calls

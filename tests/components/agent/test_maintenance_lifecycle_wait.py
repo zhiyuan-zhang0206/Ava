@@ -24,6 +24,7 @@ from base import telemetry
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
@@ -85,12 +86,20 @@ def _resolve_lifecycle_command(conn: psycopg.Connection[Any], command: int) -> N
 
 
 async def _live_member(
-    conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any], owner: UUID
+    conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    owner: UUID,
+    database_gate: ProcessDbGate,
 ) -> int:
     """An idling hosted agent under the live owner — preparation's original cohort."""
     agent = _agent(conn)
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent, machine_name(), owner, expected_from="idling", db=Database.from_settings()
+        aops_pool,
+        agent,
+        machine_name(),
+        owner,
+        expected_from="idling",
+        db=Database.from_settings(gate=database_gate),
     )
     assert incarnation is not None
     assert await settle_hosted_runtime(
@@ -104,10 +113,11 @@ async def test_member_collision_is_waitable_and_freezes_nothing(
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = uuid4()
-    agent = await _live_member(db_conn, aops_pool, owner)
-    other = await _live_member(db_conn, aops_pool, owner)
+    agent = await _live_member(db_conn, aops_pool, owner, database_gate=database_gate)
+    other = await _live_member(db_conn, aops_pool, owner, database_gate=database_gate)
     command = insert_inbound_message(
         db_conn, agent, "", "agent:6090", kind="terminate", bus=event_bus, database=database
     )
@@ -151,9 +161,10 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = uuid4()
-    agent = await _live_member(db_conn, aops_pool, owner)
+    agent = await _live_member(db_conn, aops_pool, owner, database_gate=database_gate)
     chat = insert_inbound_message(
         db_conn, agent, "in flight", "user", bus=event_bus, database=database
     )
@@ -202,9 +213,10 @@ async def test_prepare_aborts_when_collision_outlives_the_bound(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = uuid4()
-    agent = await _live_member(db_conn, aops_pool, owner)
+    agent = await _live_member(db_conn, aops_pool, owner, database_gate=database_gate)
     insert_inbound_message(
         db_conn, agent, "", "agent:6090", kind="terminate", bus=event_bus, database=database
     )
@@ -233,9 +245,10 @@ async def test_collision_free_prepare_is_unchanged(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = uuid4()
-    agent = await _live_member(db_conn, aops_pool, owner)
+    agent = await _live_member(db_conn, aops_pool, owner, database_gate=database_gate)
     _as_live_host(monkeypatch, owner)
     events = _events(monkeypatch)
 
@@ -252,9 +265,10 @@ async def test_maintenance_command_refuses_without_wait(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    database_gate: ProcessDbGate,
 ) -> None:
     owner = uuid4()
-    agent = await _live_member(db_conn, aops_pool, owner)
+    agent = await _live_member(db_conn, aops_pool, owner, database_gate=database_gate)
     insert_inbound_message(
         db_conn,
         agent,

@@ -41,6 +41,7 @@ from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.context import AvaContext
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
 from base.lm.catalog import ModelCatalog
@@ -51,13 +52,13 @@ from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
-def _host(*, catalog: ModelCatalog, **kwargs: Any) -> AgentHost:
+def _host(*, catalog: ModelCatalog, database_gate: ProcessDbGate, **kwargs: Any) -> AgentHost:
     """An `AgentHost` on this box with the handles the tests share."""
     return AgentHost(
         policy=kwargs.pop("policy", configured_policy()),
         machine="this-box",
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=catalog,
         **kwargs,
     )
@@ -389,7 +390,11 @@ def _stub_host_transitions(
 
 @pytest.fixture
 def wired(
-    monkeypatch: pytest.MonkeyPatch, host_plugin: dict[str, BaseModel], model_catalog: ModelCatalog
+    monkeypatch: pytest.MonkeyPatch,
+    host_plugin: dict[str, BaseModel],
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> _Build:
     """An `AgentHost` over fakes, with the per-agent build stubbed.
 
@@ -482,6 +487,7 @@ def wired(
             plugin_configs=host_plugin,
             catalog=model_catalog if catalog is None else catalog,
             policy=policy if policy is not None else configured_policy(),
+            database_gate=database_gate,
         )
         return host, graph, pool
 
@@ -493,13 +499,19 @@ def wired(
 
 class TestPendingInboundBackstop:
     async def test_stale_running_rows_qualified_by_the_scan(
-        self, *, model_catalog: ModelCatalog
+        self, *, model_catalog: ModelCatalog, database_gate: ProcessDbGate
     ) -> None:
         """The hosted dispatcher scans only this machine's runnable rows. A
         fresh pending inbound wakes its agent; database timestamps identify backlog, while current turn progress must
         independently authorize cancellation."""
         pool = _PendingScanPool([(17, True, False), (23, False, True)])
-        host = _host(catalog=model_catalog, pool=pool, checkpointer=object(), graph=object())
+        host = _host(
+            catalog=model_catalog,
+            pool=pool,
+            checkpointer=object(),
+            graph=object(),
+            database_gate=database_gate,
+        )
 
         candidates = await host.pending_inbound_wakes(180.0)
 
@@ -525,7 +537,7 @@ class TestPendingInboundBackstop:
         assert "pending.status = 'pending'" in pool.sql
 
     async def test_scan_uses_the_reserved_control_pool(
-        self, *, model_catalog: ModelCatalog
+        self, *, model_catalog: ModelCatalog, database_gate: ProcessDbGate
     ) -> None:
         """Turn-query saturation must not starve the durable recovery scan."""
 
@@ -540,6 +552,7 @@ class TestPendingInboundBackstop:
             control_pool=cast(AsyncConnectionPool[Any], control_pool),
             checkpointer=object(),
             graph=object(),
+            database_gate=database_gate,
         )
 
         candidates = await host.pending_inbound_wakes(180.0)
@@ -578,7 +591,9 @@ class TestSettlementReconciles:
         drive: _Drive,
         order: list[str],
     ) -> None:
-        host, _, _ = wired({1: _Row()})
+        host, _, _ = wired(
+            {1: _Row()},
+        )
 
         async def settle_and_stamp(
             _pool: object,
@@ -695,7 +710,9 @@ def _assert_sdk_context(expected: AvaContext | None, *, bound: bool) -> None:
 class TestConcurrentAgentIsolation:
     @pytest.mark.parametrize("sdk_bound", [False, True])
     async def test_two_overlapping_turns_each_see_their_own_everything(
-        self, wired: _Build, sdk_bound: bool
+        self,
+        wired: _Build,
+        sdk_bound: bool,
     ) -> None:
         """The load-bearing test of the whole hosted model.
 
@@ -711,7 +728,9 @@ class TestConcurrentAgentIsolation:
             11: _Row(overlay={"llm_model": "model-for-11", "marker": "plug-for-11"}),
             22: _Row(overlay={"llm_model": "model-for-22", "marker": "plug-for-22"}),
         }
-        host, graph, _ = wired(rows)
+        host, graph, _ = wired(
+            rows,
+        )
         graph.gate(11)
         graph.gate(22)
 
@@ -741,9 +760,14 @@ class TestConcurrentAgentIsolation:
         assert seen[11].publisher.agent_id == 11
         assert seen[22].publisher.agent_id == 22
 
-    async def test_nothing_leaks_after_a_turn_ends(self, wired: _Build) -> None:
+    async def test_nothing_leaks_after_a_turn_ends(
+        self,
+        wired: _Build,
+    ) -> None:
         """Host turns carry their identity explicitly and never change the shared SDK slot."""
-        host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
+        host, _, _ = wired(
+            {11: _Row(overlay={"llm_model": "model-for-11"})},
+        )
         child_context = getattr(ava, "context", None)
         await asyncio.wait_for(host.run_turn(11), 2)
         assert getattr(ava, "context", None) is child_context

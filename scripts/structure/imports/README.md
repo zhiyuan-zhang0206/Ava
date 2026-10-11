@@ -106,7 +106,10 @@ actual binding inputs, including Name stores and Attribute stores/deletes.
 `Scope` consumes this projection rather than relaying every inert literal,
 load name and context/operator node to its binding dispatcher. The projection
 uses the same AST child traversal and does not prune expression subtrees; the
-default public walk still yields all nodes in order.
+default public walk still yields all nodes in order. The binding projection
+retains Name stores but does not expand Name contexts, literal fields or
+fieldless nodes: none can contain another binding or call. Expression and
+annotation children still use the same lexical traversal.
 
 Within one analysis, `ModuleContext.scope()` reuses completed scopes by AST node,
 source path and lexical parent. The fact and execution-input visitors share these

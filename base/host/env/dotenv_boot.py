@@ -20,19 +20,41 @@ Callers:
     scripts/entrypoints/agent.py      - bootstrap root agent
 
 `load_dotenv` itself is idempotent + does not overwrite already-set
-os.environ keys; repeated calls have no side effects.
+os.environ keys; repeated calls have no side effects. Explicit startup boot also
+uses `apply_process_timezone` with its resolved authoritative timezone. Importing
+this module or reading an existing environment never applies that operation.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import time
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import dotenv_values, load_dotenv
+
+__all__ = [
+    "LAUNCHER_PROFILE_ENV_KEY",
+    "PLACEHOLDER_DB_URL",
+    "EnvBootResult",
+    "apply_process_timezone",
+    "deliver_unit_authority",
+    "enter_scratch_home",
+    "home_checkout_error",
+    "is_delivered_unit_login",
+    "launcher_context",
+    "load_ava_env",
+    "operator_db_delivery",
+    "read_database_delivery",
+    "resolve_ava_home",
+    "skip_config_fetch",
+    "watcher_runner_env",
+]
 
 # Planted as AVA_DB_URL when a boot has no cluster connection facts (the lite
 # boot's placeholders, `base/config/_lite.py`). A syntactically valid URL that
@@ -95,6 +117,30 @@ def read_database_delivery(environment: Mapping[str, str]) -> EnvBootResult:
     return EnvBootResult(
         db_authority_refusal="no database login was delivered by this process's startup entry"
     )
+
+
+def apply_process_timezone(name: str | None) -> None:
+    """Apply an explicitly resolved authoritative timezone at process startup.
+
+    The configuration owner validates raw input and decides whether it holds an
+    authoritative value. None leaves the host clock untouched. An invalid name
+    that bypassed that boundary also leaves it untouched, matching the existing
+    startup operation. A valid value is exported for children; POSIX also
+    refreshes the local clock, while Windows has no ``time.tzset``.
+
+    This operation never reads Settings, a field default or ``AVA_TIMEZONE``.
+    Read-only environment attachments must not call it.
+    """
+    if name is None:
+        return
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return
+    os.environ["TZ"] = name
+    tzset = getattr(time, "tzset", None)
+    if tzset is not None:
+        tzset()
 
 
 def resolve_ava_home() -> Path:

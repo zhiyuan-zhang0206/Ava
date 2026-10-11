@@ -55,6 +55,7 @@ from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -268,7 +269,7 @@ def test_plugin_state_still_allows_messages():
 
 
 async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
-    fake_cancel_event,
+    fake_cancel_event, database_gate: ProcessDbGate
 ):
     """A plugin that declared `messages` and wrote it this turn must not lose
     the exec ToolMessage: merge_exec_notes combines both deltas into the
@@ -294,7 +295,7 @@ async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
     )
     plugin_fields: dict[str, Any] = {"delta_test__sentinel": True}
     state = state_cls(messages=[_ai_message_with_code(code)], halted=False, **plugin_fields)
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(state, runtime, config)
 
@@ -442,7 +443,7 @@ def test_deepcopy_isolates_nested_pydantic_model():
 
 
 def _make_runtime_and_config(
-    redis_client: AsyncMock, pins: dict[str, Any] | None = None
+    redis_client: AsyncMock, pins: dict[str, Any] | None = None, *, database_gate: ProcessDbGate
 ) -> tuple[Runtime[AvaContext], RunnableConfig]:
     ctx = AvaContext(
         ops_pool=None,
@@ -451,7 +452,7 @@ def _make_runtime_and_config(
         agent=AgentSlices.resolve(
             pins, default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         clients=process_clients(),
         identity=AgentIdentity(agent_id=42, owns_loop=True),
@@ -478,7 +479,9 @@ def _ai_message_with_code(code: str) -> AIMessage:
     )
 
 
-async def test_exec_node_merges_plugin_state_update_into_command(fake_cancel_event):
+async def test_exec_node_merges_plugin_state_update_into_command(
+    fake_cancel_event, database_gate: ProcessDbGate
+):
     """user code writes ava.state_update[key]=value → Command(update) contains key:value."""
 
     class _StateWithPlugin(BaseAgentState):
@@ -489,7 +492,7 @@ async def test_exec_node_merges_plugin_state_update_into_command(fake_cancel_eve
         halted=False,
         plugin__counter=0,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(cast(BaseAgentState, state), runtime, config)
 
@@ -499,31 +502,37 @@ async def test_exec_node_merges_plugin_state_update_into_command(fake_cancel_eve
     assert "halted" in update
 
 
-async def test_exec_node_never_binds_the_slot_in_the_parent(fake_cancel_event):
+async def test_exec_node_never_binds_the_slot_in_the_parent(
+    fake_cancel_event, database_gate: ProcessDbGate
+):
     """The exec runs in a child process: the parent (host) process never has a bound slot,
     and reading `ava.state` there raises rather than returning None."""
     state = BaseAgentState(messages=[_ai_message_with_code("pass")], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     await _exec_node_impl(state, runtime, config)
     assert not ava.in_exec_turn()
 
 
-async def test_exec_node_leaves_parent_unbound_even_on_crash(fake_cancel_event):
+async def test_exec_node_leaves_parent_unbound_even_on_crash(
+    fake_cancel_event, database_gate: ProcessDbGate
+):
     """user code raises exception → exec_node takes the _ExecCrashed path, not raising —
     the parent still holds no slot."""
     state = BaseAgentState(
         messages=[_ai_message_with_code("raise RuntimeError('boom')")],
         halted=False,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(state, runtime, config)
     assert cmd is not None
     assert not ava.in_exec_turn()
 
 
-async def test_plugin_cannot_overwrite_base_field_via_ava_state(fake_cancel_event):
+async def test_plugin_cannot_overwrite_base_field_via_ava_state(
+    fake_cancel_event, database_gate: ProcessDbGate
+):
     """plugin changing ava.state.halted = True only affects the deepcopy copy — the real
     LangGraph state is unchanged, Command.update.halted is calculated by the framework
     (this _ExecDone case). The focus is not "halted is specially protected" but
@@ -545,7 +554,7 @@ async def test_plugin_cannot_overwrite_base_field_via_ava_state(fake_cancel_even
         halted=False,
         plugin__sentinel=False,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(cast(BaseAgentState, state), runtime, config)
 
@@ -569,7 +578,9 @@ async def test_plugin_cannot_overwrite_base_field_via_ava_state(fake_cancel_even
     # plugin writing any of these via state_update without declaring it raises.
     ["messages", "halted", "update_initiated", "compact", "memory"],
 )
-async def test_state_update_base_field_key_raises(fake_cancel_event, base_field):
+async def test_state_update_base_field_key_raises(
+    fake_cancel_event, base_field, database_gate: ProcessDbGate
+):
     """plugin missing prefix typo writes base field name into state_update → ValueError
     immediately blows up. Without this check, Python dict literal **spread would overwrite,
     plugin silently clobbers framework's base channel (messages / halted / compact / memory)
@@ -579,13 +590,13 @@ async def test_state_update_base_field_key_raises(fake_cancel_event, base_field)
         messages=[_ai_message_with_code(f"import ava\nava.state_update[{base_field!r}] = 'X'")],
         halted=False,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     with pytest.raises(ValueError, match=f"base field.*{base_field}"):
         await _exec_node_impl(state, runtime, config)
 
 
-async def test_state_update_unknown_key_raises(fake_cancel_event):
+async def test_state_update_unknown_key_raises(fake_cancel_event, database_gate: ProcessDbGate):
     """plugin writes unregistered key → ValueError listing known plugin fields, not
     entering Command(update=...) letting LangGraph silently drop."""
 
@@ -597,13 +608,15 @@ async def test_state_update_unknown_key_raises(fake_cancel_event):
         halted=False,
         plugin__known=0,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     with pytest.raises(ValueError, match=r"unregistered key.*plugin__typo"):
         await _exec_node_impl(cast(BaseAgentState, state), runtime, config)
 
 
-async def test_state_update_multiple_plugins_no_conflict(fake_cancel_event):
+async def test_state_update_multiple_plugins_no_conflict(
+    fake_cancel_event, database_gate: ProcessDbGate
+):
     """Two plugins writing different prefixed keys, both enter Command.update — no mutual overwrite."""
 
     class _State(BaseAgentState):
@@ -612,7 +625,7 @@ async def test_state_update_multiple_plugins_no_conflict(fake_cancel_event):
 
     code = "import ava\nava.state_update['plugin_a__x'] = 10\nava.state_update['plugin_b__y'] = 'hello'\n"
     state = _State(messages=[_ai_message_with_code(code)], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(cast(BaseAgentState, state), runtime, config)
 
@@ -621,7 +634,9 @@ async def test_state_update_multiple_plugins_no_conflict(fake_cancel_event):
     assert update.get("plugin_b__y") == "hello"  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_state_update_non_dict_raises_type_error(fake_cancel_event):
+async def test_state_update_non_dict_raises_type_error(
+    fake_cancel_event, database_gate: ProcessDbGate
+):
     """plugin inside the exec child sets ava.state_update to None / list /
     str → TypeError, not silent (`or {}` fallback against AGENTS.md fail-fast)."""
 
@@ -629,7 +644,7 @@ async def test_state_update_non_dict_raises_type_error(fake_cancel_event):
         messages=[_ai_message_with_code("import ava\nava.state_update = None")],
         halted=False,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     with pytest.raises(TypeError, match=r"plugin tampered with ava.state_update"):
         await _exec_node_impl(state, runtime, config)
@@ -647,7 +662,7 @@ async def test_state_update_non_dict_raises_type_error(fake_cancel_event):
 
 
 async def test_exec_node_preserves_state_update_on_cancel(
-    fake_cancel_event: asyncio.Event, tmp_path: Path
+    fake_cancel_event: asyncio.Event, tmp_path: Path, database_gate: ProcessDbGate
 ):
     """In the cancel path, the state_update written by the plugin before the cancel still merges into Command.
 
@@ -668,7 +683,7 @@ async def test_exec_node_preserves_state_update_on_cancel(
         "import time; time.sleep(30)\n"
     )
     state = _State(messages=[_ai_message_with_code(code)], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     node_task = asyncio.create_task(_exec_node_impl(cast(BaseAgentState, state), runtime, config))
     deadline = time.monotonic() + 20.0

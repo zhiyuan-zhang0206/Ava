@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from base.agents.context.clients import DatabaseFactory
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.cluster import session_name
 from base.cluster.machine import MachineRoles
@@ -19,6 +21,7 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 from base.paths import prod_service_checkout_error
+from base.telemetry import EventPipeline
 from cli.commands._repo import _repo_root
 from cli.commands._setup import SetupValues, _missing_setup_message
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
@@ -32,6 +35,7 @@ from ops.roster.service_spec import ServiceSpec
 def _ensure_gateway_data_plane(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    database_factory: DatabaseFactory,
 ) -> int:
     """Bring up this cluster's data plane — local instance or remote probe.
 
@@ -40,7 +44,9 @@ def _ensure_gateway_data_plane(
     """
     from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 
-    return ensure_gateway_data_plane(retained_children=retained_children)
+    return ensure_gateway_data_plane(
+        retained_children=retained_children, database_factory=database_factory
+    )
 
 
 def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
@@ -71,10 +77,10 @@ def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     return 1
 
 
-def _prepare_start_schema() -> int:
+def _prepare_start_schema(*, database_factory: DatabaseFactory) -> int:
     print("\n→ apply pending migrations")
     try:
-        cmd_migrations_apply()
+        cmd_migrations_apply(database_factory=database_factory)
     except Exception as e:
         print(f"  ✗ migrations apply failed: {e}", file=sys.stderr)
         return 1
@@ -87,6 +93,8 @@ def _prepare_cold_start(
     roster: tuple[ServiceSpec, ...],
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
 ) -> int:
     """Prepare storage/configuration only with no prior live application root."""
     import cli.commands._repo as _repo_commands
@@ -96,7 +104,11 @@ def _prepare_cold_start(
     # images). Memory initialization is explicit (`ava memory init`).
     try:
         converge_host.converge_host(
-            repo, roles, services=frozenset(spec.session for spec in roster)
+            repo,
+            roles,
+            services=frozenset(spec.session for spec in roster),
+            database_factory=database_factory,
+            producer=producer,
         )
     except Exception as e:
         print(f"  ✗ converge failed: {e}", file=sys.stderr)
@@ -107,7 +119,9 @@ def _prepare_cold_start(
     #    central node's DB/Redis). macOS: brew binaries via pg_ctl + redis-server;
     #    Linux: pg_ctl + redis-server. No docker on any POSIX platform.
     if "gateway" in roles:
-        rc = _ensure_gateway_data_plane(retained_children=retained_children)
+        rc = _ensure_gateway_data_plane(
+            retained_children=retained_children, database_factory=database_factory
+        )
         if rc != 0:
             return rc
         from cli.commands.data_plane.bringup import prepare_gateway_schema
@@ -116,14 +130,14 @@ def _prepare_cold_start(
     else:
         print("\n→ local services: skipped (agent-runner uses central node's DB/Redis)")
 
-    rc = _prepare_start_schema()
+    rc = _prepare_start_schema(database_factory=database_factory)
     if rc:
         return rc
 
     if "gateway" in roles:
         from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
-        complete_gateway_data_plane()
+        complete_gateway_data_plane(database_factory=database_factory)
     rc = _repo_commands._assert_schema_current_or_die()
     if rc != 0:
         return rc
@@ -143,8 +157,8 @@ def _prepare_cold_start(
     # Adopt first: a name this machine installed before the registry existed is
     # invisible to the materializer until it has a row, and sweeping first means
     # one pass leaves machine and cluster agreeing rather than two.
-    adopt_local_extensions()
-    materialize_cluster_extensions()
+    adopt_local_extensions(database_factory=database_factory)
+    materialize_cluster_extensions(database_factory=database_factory)
 
     return 0
 
@@ -259,11 +273,16 @@ def _roster_for(
     return _root_driver_commands.start_roster(roles, launch_skip)
 
 
-def _admit_start(state: _StartState, selection: _Selection) -> int | None:
+def _admit_start(
+    state: _StartState,
+    selection: _Selection,
+    *,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
+) -> int | None:
     """Admit the start (or prepare a cold one) and check the schema before anything launches."""
     import cli.commands._repo as _repo_commands
     import cli.commands.lifecycle.root_driver as _root_driver_commands
-    from base.db import Database
 
     # Resolve desired services without publishing changes before admission.
     roster = _roster_for(state.roles, selection, publish=False)
@@ -273,7 +292,12 @@ def _admit_start(state: _StartState, selection: _Selection) -> int | None:
         )
         if not state.live:
             rc = _prepare_cold_start(
-                state.repo, state.roles, roster, retained_children=state.retained_children
+                state.repo,
+                state.roles,
+                roster,
+                retained_children=state.retained_children,
+                database_factory=database_factory,
+                producer=producer,
             )
             if rc:
                 return rc
@@ -288,14 +312,13 @@ def _admit_start(state: _StartState, selection: _Selection) -> int | None:
     if state.live:
         from base import cluster
 
-        cluster.assert_checkpoint_schema_current(Database.from_settings().direct_url())
+        cluster.assert_checkpoint_schema_current(database_factory().direct_url())
     return None
 
 
-def _register_and_probe(state: _StartState) -> int | None:
+def _register_and_probe(state: _StartState, *, database_factory: DatabaseFactory) -> int | None:
     """Register this host centrally, and (pure runner) probe the gateway before bring-up."""
     import cli.commands._repo as _repo_commands
-    from base.db import Database
 
     # 3) UPSERT this host into the machines table. The table is informational
     # for ops (`ava cluster status`) + drives agent-runner self-update orchestration;
@@ -305,9 +328,7 @@ def _register_and_probe(state: _StartState) -> int | None:
     # agent-runner will also fail every subsequent `ava cluster status` and
     # The fleet update orchestration.
     print("\n→ register machine in central DB")
-    rc = _repo_commands._register_machine_or_die(
-        Database.from_settings(), state.resolved, state.roles
-    )
+    rc = _repo_commands._register_machine_or_die(database_factory(), state.resolved, state.roles)
     if rc != 0:
         return rc
 
@@ -384,6 +405,7 @@ def _readiness_verdict(launch: Any, wait: Any) -> int | None:
 @resume_after_start
 def _cmd_start_body(
     operation: PauseOwnerSnapshot | None,
+    database_factory: DatabaseFactory,
     disabled_services: tuple[str, ...] = (),
     only_services: tuple[str, ...] = (),
     *,
@@ -391,6 +413,7 @@ def _cmd_start_body(
     persist_services: bool = True,
     runtime: StartRuntime | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    producer: Callable[[], EventPipeline],
 ) -> int | StartDelegation:
     """Core start logic, shared by cmd_start and cmd_restart.
 
@@ -415,10 +438,10 @@ def _cmd_start_body(
         runtime, repo, resolved, roles, live=False, retained_children=retained_children
     )
     selection = _Selection(only_services, disabled_services, all_services, persist_services)
-    rc = _admit_start(state, selection)
+    rc = _admit_start(state, selection, database_factory=database_factory, producer=producer)
     if rc is not None:
         return rc
-    rc = _register_and_probe(state)
+    rc = _register_and_probe(state, database_factory=database_factory)
     if rc is not None:
         return rc
 
@@ -454,10 +477,9 @@ def _cmd_start_body(
 
     # The exact maintenance generation stays held through readiness. Its
     # authorized owner, or resume_after_start, alone may release admission.
-    from base.db import Database
     from base.deploy.state.host_deploy_state import set_posture
 
-    set_posture(Database.from_settings(), "paused" if admission.held() else "idle")
+    set_posture(database_factory(), "paused" if admission.held() else "idle")
 
     # Success requires real readiness for every launched service, frontend included.
     print("\n→ waiting for services to come up")
@@ -467,7 +489,7 @@ def _cmd_start_body(
     )
 
     print("\n→ status")
-    cmd_status()
+    cmd_status(database_factory=database_factory)
 
     # 7) gateway reachability hint.
     if any(spec.session == "gateway" for spec in started) and not wait.unready:
@@ -497,6 +519,8 @@ def cmd_start(
     runtime: StartRuntime | None = None,
     operation: PauseOwnerSnapshot | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
 ) -> int:
     """Converge one configured unit through storage, schema, root and readiness.
 
@@ -508,10 +532,12 @@ def cmd_start(
         raise ValueError("start requires its caller-owned PostgreSQL child retention")
     return _cmd_start_body(
         operation,
+        database_factory,
         disabled_services=disabled_services,
         only_services=only_services,
         all_services=all_services,
         persist_services=persist_services,
         runtime=runtime,
         retained_children=retained_children,
+        producer=producer,
     )

@@ -19,6 +19,7 @@ from gateway.agents import router as agent_router
 from gateway.agents.tests.creation.test_guarded_creation import PATH, SECRET
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 
@@ -91,7 +92,12 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
     row = db_conn.execute("SELECT id FROM agents").fetchone()
     assert row is not None
     original = row[0]
-    with TestClient(_older(), headers={"Authorization": f"Bearer {SECRET}"}) as old:
+    assert isinstance(client.app, FastAPI)
+    with gateway_test_client(
+        _older(),
+        process=client.app.state.gateway_process_input,
+        headers={"Authorization": f"Bearer {SECRET}"},
+    ) as old:
         target = old
         with pytest.raises(httpx.HTTPStatusError) as error:
             _sdk()
@@ -120,7 +126,12 @@ def test_old_router_never_accepts_or_falls_back(
     monkeypatch: pytest.MonkeyPatch,
     sdk_http: MagicMock,
 ) -> None:
-    with TestClient(_older(), headers={"Authorization": f"Bearer {SECRET}"}) as old:
+    assert isinstance(client.app, FastAPI)
+    with gateway_test_client(
+        _older(),
+        process=client.app.state.gateway_process_input,
+        headers={"Authorization": f"Bearer {SECRET}"},
+    ) as old:
         http = sdk_http
 
         def submit(path: str, **kwargs: Any) -> httpx.Response:

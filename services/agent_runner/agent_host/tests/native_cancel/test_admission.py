@@ -17,14 +17,15 @@ from base.agents.messages.native_cancel import (
     accept_native_cancel,
     observe_native_work,
 )
+from base.db.code_version_gate import ProcessDbGate
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 
 
 async def test_receipt_precedes_mutable_work_and_owner_state(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     pool: ConnectionPool
-    incarnation, target = await managed_work(db_conn, aops_pool)
+    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         assert await asyncio.to_thread(observe_native_work, pool, target.agent_id) == target
         accepted = await asyncio.to_thread(
@@ -57,10 +58,10 @@ async def test_receipt_precedes_mutable_work_and_owner_state(
 
 
 async def test_two_connections_first_key_owns_work(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     pool: ConnectionPool
-    _incarnation, target = await managed_work(db_conn, aops_pool)
+    _incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     with (
         ConnectionPool[psycopg.Connection](db_conn.info.dsn, min_size=2, max_size=2) as pool,
         ThreadPoolExecutor(2) as executor,
@@ -81,10 +82,12 @@ async def test_two_connections_first_key_owns_work(
 
 
 async def test_preparing_refused_and_cancel_claim_guard_leaves_chat_pending(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     pool: ConnectionPool
-    incarnation, target = await managed_work(db_conn, aops_pool, active=False)
+    incarnation, target = await managed_work(
+        db_conn, aops_pool, active=False, database_gate=database_gate
+    )
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         assert await asyncio.to_thread(observe_native_work, pool, target.agent_id) is None
         with pytest.raises(NativeCancelConflictError, match="not eligible"):
@@ -138,10 +141,10 @@ def test_protocol_cannot_be_inferred_from_a_missing_observation() -> None:
 
 
 async def test_same_key_two_real_connections_share_one_original_receipt(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     pool: ConnectionPool
-    _incarnation, target = await managed_work(db_conn, aops_pool)
+    _incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     with (
         ConnectionPool[psycopg.Connection](db_conn.info.dsn, min_size=2, max_size=2) as pool,
         ThreadPoolExecutor(2) as executor,

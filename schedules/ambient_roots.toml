@@ -1,3 +1,2 @@
-# The only modules here that may build the `db` handle from the live settings; the rest takes it
-# from them.
-db = ["adversarial-eval-weekly-schedule.py", "c9-daily-report-schedule.py", "debt-sweep-daily-schedule.py", "dev-ci-metrics-schedule.py", "memory-steward-schedule.py", "model-update-tracker-schedule.py", "self-evolution-daily-schedule.py", "self-evolution-weekly-schedule.py", "trace-ship-tempo-schedule.py"]
+# Direct Python execution owns construction; runner-hosted templates borrow its inputs.
+db = ["entry.py"]

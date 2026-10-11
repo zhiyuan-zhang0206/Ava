@@ -9,6 +9,7 @@ import subprocess
 import sys
 import textwrap
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -20,11 +21,12 @@ from psycopg_pool import ConnectionPool
 
 from base.config.service_read import ConfigAuthority
 from base.daemon.tests.fakes import pin_endpoints
+from base.db import Database
 from base.lm.catalog import ModelCatalog
-from services.agent_runner.agent_ops import daemon
+from base.native_process.loaded_commit import LoadedCommit
+from services.agent_runner.agent_ops import boot, daemon
 from services.agent_runner.agent_ops.tests.test_daemon import (
     _REPO,
-    _db,
     _fake_spawn_factory,
     _stub_pool,
 )
@@ -39,6 +41,8 @@ async def test_ops_route_non_json_values_degrade_to_str(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """A non-JSON-native value in a dispatch result degrades to its str() instead
     of raising in _ops_route's json.dumps and 500-ing the /ops control plane.
@@ -61,6 +65,8 @@ async def test_ops_route_non_json_values_degrade_to_str(
         executor: ThreadPoolExecutor,
         catalog: ModelCatalog,
         authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
     ) -> tuple[str, dict[str, object]]:
         return "completed", {"at": datetime(2026, 6, 11, 8, 30, 0, tzinfo=UTC)}
 
@@ -75,6 +81,8 @@ async def test_ops_route_non_json_values_degrade_to_str(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == 200
     assert ctype == "application/json"
@@ -89,6 +97,8 @@ async def test_ops_route_failed_status_is_still_http_200(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """A 'failed' dispatch is a semantic outcome the gateway re-raises, not an
     HTTP error — the envelope carries it at HTTP 200."""
@@ -105,6 +115,8 @@ async def test_ops_route_failed_status_is_still_http_200(
         executor: ThreadPoolExecutor,
         catalog: ModelCatalog,
         authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
     ) -> tuple[str, dict[str, object]]:
         return "failed", {"error": "boom"}
 
@@ -127,6 +139,8 @@ async def test_ops_route_failed_status_is_still_http_200(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == 200
     assert json.loads(body) == {"status": "failed", "result": {"error": "boom"}}
@@ -134,7 +148,11 @@ async def test_ops_route_failed_status_is_still_http_200(
 
 @pytest.mark.asyncio
 async def test_ops_route_malformed_body_400(
-    op_executor: ThreadPoolExecutor, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+    op_executor: ThreadPoolExecutor,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """Non-JSON body and a body missing `kind` both return 400 without dispatching."""
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
@@ -149,6 +167,8 @@ async def test_ops_route_malformed_body_400(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == 400
     assert "invalid JSON" in json.loads(body)["error"]
@@ -162,6 +182,8 @@ async def test_ops_route_malformed_body_400(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == 400
     assert "kind" in json.loads(body)["error"]
@@ -173,6 +195,8 @@ async def test_ops_route_crash_becomes_failed_result(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """A crash inside _dispatch is caught and returned as a failed result (HTTP 200),
     never leaks as a 500 the gateway can't interpret."""
@@ -189,6 +213,8 @@ async def test_ops_route_crash_becomes_failed_result(
         executor: ThreadPoolExecutor,
         catalog: ModelCatalog,
         authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
     ) -> tuple[str, dict[str, object]]:
         raise RuntimeError("kaboom")
 
@@ -211,6 +237,8 @@ async def test_ops_route_crash_becomes_failed_result(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     assert status == 200
     parsed = json.loads(body)
@@ -234,6 +262,8 @@ async def test_ops_route_semaphore_caps_concurrency(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """Concurrent /ops requests run at most ops_concurrency dispatches in parallel."""
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
@@ -253,6 +283,8 @@ async def test_ops_route_semaphore_caps_concurrency(
         executor: ThreadPoolExecutor,
         catalog: ModelCatalog,
         authority: ConfigAuthority,
+        database: Callable[[], Database],
+        image: LoadedCommit,
     ) -> tuple[str, dict[str, object]]:
         nonlocal in_flight, peak
         async with lock:
@@ -290,6 +322,8 @@ async def test_ops_route_semaphore_caps_concurrency(
                 executor=op_executor,
                 catalog=model_catalog,
                 authority=config_authority,
+                database=ops_database,
+                image=ops_image,
             )
             for b in bodies
         ]
@@ -316,7 +350,7 @@ def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> Non
         sys.path.insert(0, {str(_REPO)!r})
         from services.agent_runner.agent_ops import daemon
 
-        async def _boom():
+        async def _boom(*, database, image):
             raise RuntimeError("db pool exploded mid-loop")
 
         daemon.init_gateway_process = lambda **kw: None
@@ -338,12 +372,14 @@ def test_ops_binds_all_interfaces_only_when_authenticated() -> None:
     binds 0.0.0.0; the open posture binds loopback only — an unauthenticated
     control surface is never LAN-reachable. Which tokens /ops accepts is the
     write-generation matrix in tests/components/lifecycle/db_authority/test_api_tokens.py."""
-    assert daemon._ops_bind_host(frozenset({"d" * 64})) == "0.0.0.0"  # noqa: S104
-    assert daemon._ops_bind_host(frozenset()) == "0.0.0.0"  # noqa: S104
-    assert daemon._ops_bind_host(None) == "127.0.0.1"
+    assert boot.ops_bind_host(frozenset({"d" * 64})) == "0.0.0.0"  # noqa: S104
+    assert boot.ops_bind_host(frozenset()) == "0.0.0.0"  # noqa: S104
+    assert boot.ops_bind_host(None) == "127.0.0.1"
 
 
-def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_boot_announces_this_unit_up(
+    monkeypatch: pytest.MonkeyPatch, *, ops_database: Callable[[], Database]
+) -> None:
     """The daemon registers its OWN unit once it is serving — the same
     `register_self` write `ava start` makes, so the stop latch is cleared and
     `up_since_at` restamped by the process whose liveness the row stands for.
@@ -366,7 +402,7 @@ def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -
     pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     set_identity(name="wsl", role="agent-runner")
     try:
-        daemon._register_boot()
+        boot.register_boot(database=ops_database)
     finally:
         reset_identity()
 
@@ -374,7 +410,7 @@ def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_register_boot_failure_does_not_stop_the_daemon(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, ops_database: Callable[[], Database]
 ) -> None:
     """A failed registration refresh leaves dispatch entirely correct, so it is
     logged and swallowed. Exiting here would hand the watchdog a respawn loop and
@@ -382,7 +418,11 @@ def test_register_boot_failure_does_not_stop_the_daemon(
     """
     from base.cluster.machine import reset_identity, set_identity
 
-    def _boom(_db: object, *, url: str | None = None) -> None:
+    def _boom(
+        _db: object,
+        *,
+        url: str | None = None,
+    ) -> None:
         raise RuntimeError("central postgres unreachable")
 
     monkeypatch.setattr("base.cluster.machines.register_self", _boom)
@@ -397,14 +437,16 @@ def test_register_boot_failure_does_not_stop_the_daemon(
 
     set_identity(name="wsl", role="agent-runner")
     try:
-        daemon._register_boot()  # must not raise
+        boot.register_boot(database=ops_database)  # must not raise
     finally:
         reset_identity()
 
     assert logged and "boot registration failed" in logged[0]
 
 
-def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_boot_unstops_a_host_that_came_back(
+    monkeypatch: pytest.MonkeyPatch, *, ops_database: Callable[[], Database]
+) -> None:
     """The bug this call fixes, end to end against the real tables.
 
     A host that announced `ava stop` carries a `stopped_at` latch that only a
@@ -429,15 +471,19 @@ def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyP
 
     set_identity(name="came-back", role="agent-runner")
     try:
-        machines.register_self(_db(), url="http://10.0.0.9:8600")
-        machines.mark_stopping(_db(), "came-back", "~/.ava")
-        assert machines.list_agent_runners(_db()) == []  # dropped from the fan-out
-        assert machines.list_stopped_agent_runners(_db()) == [("came-back", "http://10.0.0.9:8600")]
+        machines.register_self(ops_database(), url="http://10.0.0.9:8600")
+        machines.mark_stopping(ops_database(), "came-back", "~/.ava")
+        assert machines.list_agent_runners(ops_database()) == []  # dropped from the fan-out
+        assert machines.list_stopped_agent_runners(ops_database()) == [
+            ("came-back", "http://10.0.0.9:8600")
+        ]
 
-        daemon._register_boot()  # the daemon comes up on its own
+        boot.register_boot(database=ops_database)  # the daemon comes up on its own
 
-        assert machines.list_agent_runners(_db()) == [("came-back", "http://10.0.0.9:8600")]
-        assert machines.list_stopped_agent_runners(_db()) == []
+        assert machines.list_agent_runners(ops_database()) == [
+            ("came-back", "http://10.0.0.9:8600")
+        ]
+        assert machines.list_stopped_agent_runners(ops_database()) == []
     finally:
         reset_identity()
 
@@ -449,6 +495,8 @@ async def test_ops_route_dedupes_by_envelope_key(
     ops_pool: ConnectionPool,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """End-to-end through _ops_route: an envelope carrying idempotency_key goes
     through the dedup path — two identical POSTs execute the op once."""
@@ -475,6 +523,8 @@ async def test_ops_route_dedupes_by_envelope_key(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     code2, payload2, _ = await daemon._ops_route(
         body,
@@ -486,6 +536,8 @@ async def test_ops_route_dedupes_by_envelope_key(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
 
     assert code1 == 200 and code2 == 200
@@ -501,6 +553,8 @@ async def test_ops_route_without_key_does_not_dedupe(
     ops_pool: ConnectionPool,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """An envelope WITHOUT idempotency_key takes the plain _dispatch path — no
     dedup row is written (idempotent ops have nothing to dedupe)."""
@@ -525,6 +579,8 @@ async def test_ops_route_without_key_does_not_dedupe(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
     await daemon._ops_route(
         body,
@@ -536,6 +592,8 @@ async def test_ops_route_without_key_does_not_dedupe(
         executor=op_executor,
         catalog=model_catalog,
         authority=config_authority,
+        database=ops_database,
+        image=ops_image,
     )
 
     assert calls["n"] == 2  # no key → no dedup → both execute
@@ -552,6 +610,8 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    ops_database: Callable[[], Database],
+    ops_image: LoadedCommit,
 ) -> None:
     """The 2026-08-12 incident in one assertion. A blocking op on the Windows
     runner stopped returning; because the arm ran inline on the
@@ -583,6 +643,8 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
             executor=op_executor,
             catalog=model_catalog,
             authority=config_authority,
+            database=ops_database,
+            image=ops_image,
         )
     )
     await asyncio.to_thread(started.wait, 10)

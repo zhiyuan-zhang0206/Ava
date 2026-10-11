@@ -311,7 +311,7 @@ def _register_machine_or_die(db: Database, resolved: SetupValues, roles: Machine
     Failure modes get targeted hints + non-zero exit (a half-registered host
     silently breaks cross-machine orchestration; we'd rather fail loud on
     `ava start`). The ops daemon's equivalent call is deliberately non-fatal
-    instead — see `services/agent_runner/agent_ops/daemon.py:_register_boot`.
+    instead — see `services/agent_runner/agent_ops/boot.py:register_boot`.
     """
     import psycopg
 

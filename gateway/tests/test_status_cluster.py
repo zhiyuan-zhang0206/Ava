@@ -19,6 +19,7 @@ from base.db import Database
 from gateway.app import app
 from gateway.cluster import roster_probe
 from gateway.cluster import status as status_router
+from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import StatusCache
 from ops.cluster import rpc as cluster_rpc
@@ -174,7 +175,9 @@ class TestClusterPanel:
         _ = stub_machine_identity
         fake_flag.write_text("")
         with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(database, cur, IdentityMismatchLog())
+            panel = status_router._get_cluster_status(
+                database, cur, IdentityMismatchLog(), image=LOADED_IMAGE
+            )
         assert panel.current_paused is True
 
     def test_machines_list_local_plus_remote(
@@ -581,7 +584,9 @@ class TestPanelCarriesNoFrozenPin:
 
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(database, cur, IdentityMismatchLog())
+            panel = status_router._get_cluster_status(
+                database, cur, IdentityMismatchLog(), image=LOADED_IMAGE
+            )
         body = panel.model_dump()
         assert "cluster_target_sha" not in body
         assert "cluster_last_known_good_sha" not in body

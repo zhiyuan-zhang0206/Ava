@@ -11,12 +11,15 @@ import argparse
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from base.host.env.dotenv_boot import home_checkout_error, resolve_ava_home
 from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.private_storage import ensure_private_dir
 from base.native_process.os_platform import file_lock
+from base.telemetry import EventPipeline
 from cli.start_identity import require_initialized
 from cli.start_runtime import StartRuntime
 
@@ -50,6 +53,8 @@ def run_start(
     *,
     runtime: StartRuntime | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    database_factory: Callable[[], Any],
+    producer: Callable[[], EventPipeline],
 ) -> int:
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
@@ -67,7 +72,7 @@ def run_start(
             _enter_home(home)
             from cli.main import _init_cli_logging
 
-            _init_cli_logging(["start"])
+            _init_cli_logging(["start"], producer=producer)
             from cli.commands.lifecycle.start import cmd_start
 
             result = cmd_start(
@@ -77,6 +82,8 @@ def run_start(
                 persist_services=args.persist_services,
                 runtime=runtime,
                 retained_children=retained_children,
+                database_factory=database_factory,
+                producer=producer,
             )
             if result == 0:
                 from base.deploy.lifecycle.start_serving import clear_serving

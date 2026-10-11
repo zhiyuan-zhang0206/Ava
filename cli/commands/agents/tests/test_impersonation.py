@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import sys
 from argparse import Namespace
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,9 +15,11 @@ from typing import Any
 import pytest
 
 from base.agents import impersonation as control
+from base.agents.context.clients import DatabaseFactory
 from base.agents.impersonation import sessions as sessions
 from cli.commands.agents import impersonation as cli
 from cli.parsers import build_parser
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _private_id(_db: object, agent_id: int, session_id: int) -> str:
@@ -50,7 +53,9 @@ def test_timeline_command_dispatches_to_the_timeline_reader(
 
 
 def test_request_uses_external_identity_without_delivering_a_credential(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     seen: dict[str, Any] = {}
 
@@ -84,7 +89,8 @@ def test_request_uses_external_identity_without_delivering_a_credential(
                 "thread-1",
                 "--batch-window",
                 "0",
-            )
+            ),
+            database_factory=operator_database,
         )
         == 0
     )
@@ -103,7 +109,9 @@ def test_request_uses_external_identity_without_delivering_a_credential(
 
 
 def test_request_without_steer_endpoint_does_not_acquire_a_lease(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     from unittest.mock import Mock
 
@@ -129,13 +137,15 @@ def test_request_without_steer_endpoint_does_not_acquire_a_lease(
         "--batch-window",
         "0",
     )
-    assert cli.cmd_impersonate(args) == 1
+    assert cli.cmd_impersonate(args, database_factory=operator_database) == 1
     request.assert_not_called()
     assert "Steer" in capsys.readouterr().err
 
 
 def test_request_records_the_shared_app_server_endpoint(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     seen: dict[str, Any] = {}
 
@@ -165,7 +175,8 @@ def test_request_records_the_shared_app_server_endpoint(
                 endpoint,
                 "--batch-window",
                 "0",
-            )
+            ),
+            database_factory=operator_database,
         )
         == 0
     )
@@ -175,8 +186,11 @@ def test_request_records_the_shared_app_server_endpoint(
 
 
 def test_claude_request_reports_the_relay_handoff(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
+
     def request(_db: object, _bus: object, agent_id: int, **kwargs: Any) -> dict[str, Any]:
         return {"id": "lease", "relay_token": "relay-token"}
 
@@ -197,7 +211,8 @@ def test_claude_request_reports_the_relay_handoff(
                 "claude",
                 "--batch-window",
                 "0",
-            )
+            ),
+            database_factory=operator_database,
         )
         == 0
     )
@@ -231,7 +246,9 @@ def test_request_requires_a_relay_provider(
 
 
 def test_ack_uses_explicit_processed_ids_only(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     seen: list[tuple[str, dict[str, Any], list[int]]] = []
 
@@ -246,7 +263,12 @@ def test_ack_uses_explicit_processed_ids_only(
         _private_id,
     )
     monkeypatch.setattr(control, "ack", ack)
-    assert cli.cmd_impersonate(_args("ack", "0", "11", "13", "--agent", "405")) == 0
+    assert (
+        cli.cmd_impersonate(
+            _args("ack", "0", "11", "13", "--agent", "405"), database_factory=operator_database
+        )
+        == 0
+    )
     assert seen[0][0] == "lease"
     assert seen[0][1]["pid"] > 0
     assert seen[0][2] == [11, 13]
@@ -254,7 +276,9 @@ def test_ack_uses_explicit_processed_ids_only(
 
 
 def test_classified_attestation_refusal_fails_without_leaking_state(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: Callable[[], Any],
 ) -> None:
     from base.agents.impersonation import ImpersonationError
 
@@ -263,13 +287,20 @@ def test_classified_attestation_refusal_fails_without_leaking_state(
 
     monkeypatch.setattr(sessions, "private_id", _private_id)
     monkeypatch.setattr(control, "get", deny)
-    assert cli.cmd_impersonate(_args("status", "0", "--agent", "405")) == 1
+    assert (
+        cli.cmd_impersonate(
+            _args("status", "0", "--agent", "405"), database_factory=operator_database
+        )
+        == 1
+    )
     output = capsys.readouterr()
     assert output.out == ""
     assert "chain-mismatch" in output.err
 
 
-def test_release_preserves_summary(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_release_preserves_summary(
+    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+) -> None:
     seen: list[str] = []
 
     def release(
@@ -287,7 +318,8 @@ def test_release_preserves_summary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("base.agents.impersonation.history.public_session", _public_session)
     assert (
         cli.cmd_impersonate(
-            _args("release", "0", "--agent", "405", "--summary", "Completed X.\nNext Y.")
+            _args("release", "0", "--agent", "405", "--summary", "Completed X.\nNext Y."),
+            database_factory=operator_database,
         )
         == 0
     )
@@ -475,7 +507,9 @@ def test_send_requires_session_agent_target_and_content() -> None:
 
 
 def test_send_delivers_as_the_borrowed_agent(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: DatabaseFactory,
 ) -> None:
     seen: list[tuple[int, str, str, int | None]] = []
 
@@ -492,6 +526,7 @@ def test_send_delivers_as_the_borrowed_agent(
     monkeypatch.setattr(control, "require_active", require_active)
     monkeypatch.setattr("cli.commands.agents.control.send_agent_message", deliver)
     args = _args("send", "0", "--agent", "405", "--to", "42", "--content", "hi")
+    args.database_factory = operator_database
     assert args.func(args) == 0
     assert seen == [(42, "hi", "agent:405", 405)]
     assert json.loads(capsys.readouterr().out) == {
@@ -632,7 +667,9 @@ def test_request_writes_the_resident_stub_when_scoped(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    operator_database: Callable[[], Any],
 ) -> None:
+
     def request(_db: object, _bus: object, agent_id: int, **kwargs: Any) -> dict[str, Any]:
         return {
             "id": "lease",
@@ -660,7 +697,8 @@ def test_request_writes_the_resident_stub_when_scoped(
                 "claude",
                 "--batch-window",
                 "0",
-            )
+            ),
+            database_factory=operator_database,
         )
         == 0
     )
@@ -677,6 +715,7 @@ def test_request_rejects_second_resident_relay_handoff_before_creating_a_lease(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     handoff_state: str,
+    operator_database: Callable[[], Any],
 ) -> None:
     from unittest.mock import Mock
 
@@ -706,7 +745,8 @@ def test_request_rejects_second_resident_relay_handoff_before_creating_a_lease(
                 "claude",
                 "--batch-window",
                 "0",
-            )
+            ),
+            database_factory=operator_database,
         )
         == 1
     )
@@ -723,7 +763,10 @@ def test_request_rejects_second_resident_relay_handoff_before_creating_a_lease(
 
 
 def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    operator_database: Callable[[], Any],
 ) -> None:
     from unittest.mock import Mock
 
@@ -732,12 +775,14 @@ def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
     monkeypatch.delenv("DSH_AVA_RELAY_STUB", raising=False)
     argv = ("request", "--name", "Fix", "--agent", "405", "--as", "dsh", "--ttl", "600")
     args = (*argv, "--provider", "dsh", "--batch-window", "0")
-    assert cli.cmd_impersonate(_args(*args)) == 1  # no plugin: refused before any lease
+    assert (
+        cli.cmd_impersonate(_args(*args), database_factory=operator_database) == 1
+    )  # no plugin: refused before any lease
     request.assert_not_called()
     assert "DSH_AVA_RELAY_STUB is unset" in capsys.readouterr().err
     stub = tmp_path / "session-1.env"
     monkeypatch.setenv("DSH_AVA_RELAY_STUB", str(stub))
-    assert cli.cmd_impersonate(_args(*args)) == 0
+    assert cli.cmd_impersonate(_args(*args), database_factory=operator_database) == 0
     output = capsys.readouterr()
     assert "relay_token" not in json.loads(output.out) and "tok-9" not in output.out + output.err
     assert stub.read_text() == (

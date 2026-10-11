@@ -38,6 +38,7 @@ from langchain_core.messages import AIMessage
 import services.derived.labeler.labeler as labeler_module
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -292,6 +293,7 @@ class TestGenerateLabelRejectsNonLabels:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:
         tid = create_agent(db_conn)
         monkeypatch.setattr(labeler_module, "build_chat_model", lambda _m, **_: _FakeLLM(raw))  # pyright: ignore[reportUnknownArgumentType]
@@ -300,7 +302,7 @@ class TestGenerateLabelRejectsNonLabels:
             tid,
             "a long agent brief",
             labeler_config(labeler_model="deepseek-v4-flash"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
@@ -321,6 +323,7 @@ class TestGenerateLabelRejectsNonLabels:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:
         """The other half of the contract: the classifier must not fire on a
         real label."""
@@ -337,7 +340,7 @@ class TestGenerateLabelRejectsNonLabels:
             tid,
             "a long agent brief",
             labeler_config(labeler_model="deepseek-v4-flash"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
@@ -361,6 +364,7 @@ async def test_generated_label_overwrites_stray_empty_string(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Regression: a stray label='' row was invisible to the CAS's `label IS
     NULL` predicate, so it could never be auto-labeled — empty string must be
@@ -379,7 +383,7 @@ async def test_generated_label_overwrites_stray_empty_string(
         tid,
         "a long agent brief",
         labeler_config(labeler_model="deepseek-v4-flash"),
-        labeler_db(),
+        labeler_db(database_gate=database_gate),
         event_bus,
         catalog=model_catalog,
         llm_override=config_authority.runtime.lm.llm_override,
@@ -400,6 +404,7 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The sticky bit still wins: label='' with label_user_set=TRUE means the
     user owns the (unset) label — the CAS must skip it just like it skips a
@@ -418,7 +423,7 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
         tid,
         "a long agent brief",
         labeler_config(labeler_model="deepseek-v4-flash"),
-        labeler_db(),
+        labeler_db(database_gate=database_gate),
         event_bus,
         catalog=model_catalog,
         llm_override=config_authority.runtime.lm.llm_override,
@@ -440,6 +445,7 @@ async def test_label_generation_logs_batch_usage_for_the_target_agent(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A labeler's daemon record must charge the label's agent, not the daemon."""
     agent_id = create_agent(db_conn)
@@ -465,7 +471,7 @@ async def test_label_generation_logs_batch_usage_for_the_target_agent(
             agent_id,
             "a long agent brief",
             labeler_config(labeler_model="deepseek-v4-flash"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,

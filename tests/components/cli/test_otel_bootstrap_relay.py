@@ -2,8 +2,10 @@
 
 import importlib
 import os
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -17,11 +19,17 @@ from base.config.service_read import ConfigAuthority
 from base.host.env import runtime_config
 from cli.commands.observability import otel_collector as collector
 from gateway.app import app
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 @pytest.mark.parametrize(("gateway_port", "local_port"), [(4318, 4319), (54318, 4318)])
 def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
-    db_conn, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, gateway_port: int, local_port: int
+    db_conn,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    gateway_port: int,
+    local_port: int,
+    operator_database: Callable[[], Any],
 ) -> None:
     """The current split and mirrored Windows/WSL migration both keep local ports."""
     (tmp_path / ".env").write_text(
@@ -75,7 +83,10 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     rendered = yaml.safe_load(
         collector.generate_config(
-            Path(__file__).resolve().parents[3], tmp_path, roles=frozenset({"agent-runner"})
+            Path(__file__).resolve().parents[3],
+            tmp_path,
+            roles=frozenset({"agent-runner"}),
+            database_factory=operator_database,
         )
     )
     assert settings.telemetry_otlp_endpoint == local

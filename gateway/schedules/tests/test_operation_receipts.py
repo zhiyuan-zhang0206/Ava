@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import base.db
+from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.schedules import router
 from tests.fixtures.gateway_config import gateway_test_client
@@ -17,10 +18,15 @@ def _create(client: TestClient) -> int:
     return client.post("/api/schedules", json={"name": "receipt", "script": "pass"}).json()["id"]
 
 
-def test_concurrent_restart_uses_one_desired_revision(db_conn: psycopg.Connection) -> None:
+def test_concurrent_restart_uses_one_desired_revision(
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+) -> None:
     with gateway_test_client(app) as client:
         sid = _create(client)
-    with base.db.pool(max_size=4) as pool, ThreadPoolExecutor(max_workers=4) as workers:
+    with (
+        base.db.pool(max_size=4, gate=database_gate) as pool,
+        ThreadPoolExecutor(max_workers=4) as workers,
+    ):
 
         def restart(_worker: int) -> tuple[tuple[Any, ...], bool]:
             return router._control_blocking(pool, sid, "restart", "one-restart")

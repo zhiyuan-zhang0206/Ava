@@ -17,12 +17,14 @@ from fastapi.testclient import TestClient
 
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.root_control import client as root_client
 from gateway.app import app
 from gateway.events import telemetry_rows
@@ -350,14 +352,18 @@ class TestStatusSnapshot:
         host_deploy_state.set_posture(database, "idle")
         start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
         # unpaused
-        snap = cluster_status.status_snapshot(database)
+        snap = cluster_status.status_snapshot(
+            database, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+        )
         assert snap.machine_name == "wsl"
         assert snap.serve_gateway is False
         assert snap.serve_agent_runner is True
         assert snap.paused is False
         # paused
         fake_flag.write_text("")
-        snap2 = cluster_status.status_snapshot(database)
+        snap2 = cluster_status.status_snapshot(
+            database, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+        )
         assert snap2.paused is True
 
     def test_snapshot_includes_head_sha(
@@ -370,21 +376,39 @@ class TestStatusSnapshot:
         it against the cluster pin."""
         set_machine_identity(role="agent-runner", name="wsl")
         monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "abc1234")
-        assert cluster_status.status_snapshot(database).head_sha == "abc1234"
+        assert (
+            cluster_status.status_snapshot(
+                database, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+            ).head_sha
+            == "abc1234"
+        )
 
+    @pytest.mark.parametrize("sha", ["def5678", None])
     def test_snapshot_includes_running_sha(
         self,
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
+        sha: str | None,
     ) -> None:
         """status_snapshot threads the commit the answering process froze at its
         own boot — distinct from head_sha (the checkout the pin verdict compares)
         so the roster can expose a node running stale code even when its checkout
         reads on-pin."""
         set_machine_identity(role="agent-runner", name="wsl")
-        monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: "def5678")
-        assert cluster_status.status_snapshot(database).running_sha == "def5678"
+
+        def unexpected_process_read(_root: Path) -> str | None:
+            raise AssertionError("snapshot must use its supplied image")
+
+        monkeypatch.setattr(
+            "base.native_process.loaded_commit.capture_commit", unexpected_process_read
+        )
+        assert (
+            cluster_status.status_snapshot(
+                database, image=LoadedCommit(source_root=Path(__file__).parent, sha=sha)
+            ).running_sha
+            == sha
+        )
 
     def test_snapshot_ignores_the_start_bookmark(
         self,
@@ -404,11 +428,12 @@ class TestStatusSnapshot:
         answers from the process, so the stale commit survives the bookmark's
         advance and the divergence every drift renderer keys on is there."""
         set_machine_identity(role="agent-runner", name="wsl")
-        monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: "0ld0ld0aaaa")
         monkeypatch.setattr("base.deploy.git.running_sha.get", lambda: "n3wn3w0bbbb")
         monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "n3wn3w0bbbb")
 
-        snap = cluster_status.status_snapshot(database)
+        snap = cluster_status.status_snapshot(
+            database, image=LoadedCommit(source_root=Path(__file__).parent, sha="0ld0ld0aaaa")
+        )
 
         assert snap.running_sha == "0ld0ld0aaaa"
         assert snap.head_sha == "n3wn3w0bbbb"
@@ -432,7 +457,12 @@ class TestStatusSnapshot:
             return object() if online else None
 
         monkeypatch.setattr(root_client, "root_process", inspect_root)
-        assert cluster_status.status_snapshot(database).supervisor_online is online
+        assert (
+            cluster_status.status_snapshot(
+                database, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+            ).supervisor_online
+            is online
+        )
 
 
 # ─── cluster endpoints via TestClient ─────────────────────────────────────────
@@ -682,12 +712,18 @@ def _seed_agent_on_machine(
     status: str = "idling",
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> int:
     """One live agent row homed on `machine` (test spawn helper + machine
     stamp; the row-creation path moved gateway-side, Task #1236 follow-up)."""
     from tests.fixtures.units import spawn_agent
 
-    aid = spawn_agent(spawner="user", catalog=model_catalog, authority=config_authority)
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET machine = %s, status = %s WHERE id = %s",

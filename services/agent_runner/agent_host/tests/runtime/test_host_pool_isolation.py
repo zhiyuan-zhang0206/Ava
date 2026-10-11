@@ -12,6 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.tests.test_agent_host import (
@@ -53,6 +54,7 @@ class TestPoolIsolation:
         *,
         database: Database,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:
         """A busy turn may use the work pool without consuming control capacity."""
         import services.agent_runner.agent_host.host as host_mod
@@ -111,6 +113,7 @@ class TestPoolIsolation:
             checkpointer=original._checkpointer,
             graph=graph,
             plugin_configs=original._plugin_configs,
+            database_gate=database_gate,
         )
 
         await host.run_turn(11)

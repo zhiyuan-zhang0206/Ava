@@ -38,6 +38,7 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample
+from base.native_process.loaded_commit import LoadedCommit
 from base.sessions.page_session import is_page_label
 from ops.cluster import pause as cluster_pause
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
@@ -497,7 +498,7 @@ def _supervisor_online() -> bool | None:
         return None
 
 
-def status_snapshot(db: Database, pool: Any | None = None) -> ClusterStatus:
+def status_snapshot(db: Database, pool: Any | None = None, *, image: LoadedCommit) -> ClusterStatus:
     """Assemble this host's cluster state — used by `/api/cluster/status`.
 
     When setup is missing, base/cluster/machine.py's machine_name /
@@ -506,7 +507,6 @@ def status_snapshot(db: Database, pool: Any | None = None) -> ClusterStatus:
     consumed by SDK).
     """
     from base.deploy.git.cluster_drift import prod_source_head_sha
-    from base.native_process import loaded_commit as _process_sha
 
     agent_host_alive = (
         check_pidfile(str(ServiceEndpoints.from_settings().of("agent_host").pidfile))[0]
@@ -537,7 +537,7 @@ def status_snapshot(db: Database, pool: Any | None = None) -> ClusterStatus:
         paused=paused_reason is not None,
         paused_reason=paused_reason,
         head_sha=prod_source_head_sha(),
-        running_sha=_process_sha.get(),
+        running_sha=image.sha,
         schema_mismatch=schema_status,
         shell_count=shell_count,
         agent_host_online=agent_host_alive,

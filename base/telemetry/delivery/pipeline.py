@@ -62,6 +62,14 @@ class EventPipeline:
         self._thread = threading.Thread(target=self._drain, daemon=True, name="event-emitter")
         self._thread.start()
 
+    @property
+    def stopped(self) -> bool:
+        """True only after requested shutdown has joined this owned worker.
+
+        Completion does not erase a terminal error; repeated stop collects it.
+        """
+        return self._stop_requested.is_set() and not self._thread.is_alive()
+
     def enqueue(self, event: Event) -> None:
         """Producer path: shed full, closed or failed admission without waiting on writes."""
         if not self._admit(event):
