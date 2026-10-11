@@ -32,6 +32,7 @@ from ava.sdk_surface.help import (
     _format_docstring,
     _format_documented_const_stub,
     _format_signature,
+    render,
 )
 from ava.sdk_surface.plugin_loader import load_plugin_module
 
@@ -60,8 +61,17 @@ def _render(target: object | list[object], *, compact_classes: bool = False) -> 
     targets = target if isinstance(target, list) else [target]
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        ava.help(*targets, compact_classes=compact_classes)
+        render(*targets, compact_classes=compact_classes)
     return buf.getvalue()
+
+
+def test_public_help_takes_only_targets() -> None:
+    """The render parameters belong to the framework's prompt builder, so the
+    agent-visible signature of `ava.help` carries targets and nothing else."""
+    assert list(inspect.signature(ava.help).parameters) == ["targets"]
+    out = _render(ava.help)
+    assert "compact_classes" not in out
+    assert "hidden_members" not in out
 
 
 def test_help_reads_updated_source_after_reload_in_place(

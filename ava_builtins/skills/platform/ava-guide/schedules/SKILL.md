@@ -105,7 +105,7 @@ def ensure_agent(label: str, prompt: str) -> int:
 ```
 
 **Actor caveat.** A schedule runs as `schedule:<id>`, not an agent. So
-`ava.agents.*`, `ava.DB`, `ava.shell`, and `ava.memory` all work, but the calls
+`ava.agents.*`, `ava.context.sql`, `ava.shell`, and `ava.memory` all work, but the calls
 that need an agent identity — `ava.self.*`, `ava.watcher.*`, `ava.ui.*` — do
 not. To surface something to the user, either let the schedule raise (recorded to
 `last_error`) or hand the work to an agent via `ensure_agent(...)` and let *it*

@@ -2,13 +2,13 @@
 
 `ava.agents.spawn` always carries a `machine` parameter, `list_machines` /
 `Machine` are always in `ava.agents.__all_for_ava__`, and `ava.self` always exports
-`MACHINE_SPEC` + `SELF_MACHINE_NAME`. The surface is no longer gated on any
+`MACHINE_SPEC`. The surface is no longer gated on any
 deployment flag — a single box is just the special case where every spawn
 targets the one registered machine.
 
 These assert in-process (the surface is not chosen at import time, so there is
-nothing to vary across subprocess envs). `MACHINE_SPEC` / `SELF_MACHINE_NAME`
-resolve machine_name() lazily from the session $AVA_HOME (tests/fixtures/env_bootstrap.py
+nothing to vary across subprocess envs). `MACHINE_SPEC`
+resolves machine_name() lazily from the session $AVA_HOME (tests/fixtures/env_bootstrap.py
 writes it), so the access succeeds.
 """
 
@@ -43,12 +43,10 @@ def test_machine_names_in_agents_all() -> None:
 
 
 def test_self_exports_machine_consts() -> None:
-    """ava.self exports both machine identity constants."""
+    """ava.self exports the machine identity constant."""
     assert "MACHINE_SPEC" in ava.self.__all_for_ava__
-    assert "SELF_MACHINE_NAME" in ava.self.__all_for_ava__
-    # Both resolve lazily via module __getattr__ against the session $AVA_HOME.
-    assert ava.self.MACHINE_SPEC is not None
-    assert isinstance(str(ava.self.SELF_MACHINE_NAME), str)
+    # Resolves lazily via module __getattr__ against the session $AVA_HOME.
+    assert isinstance(ava.self.MACHINE_SPEC.name, str)
 
 
 @pytest.mark.usefixtures("sdk_model_owner")

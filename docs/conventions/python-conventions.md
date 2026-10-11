@@ -375,6 +375,25 @@ sequence of one type, and a frozen dataclass when the record has many fields,
 optional fields or is expected to change. A constant of a `NamedTuple` type
 cannot be wrapped with `ava.const()`; document it with a PEP 224 docstring.
 
+## When a public SDK entry earns its place
+
+A public SDK function must meet at least one of two tests:
+
+1. It guards an invariant the underlying API cannot: a cross-process or gateway
+   protocol, authorization, an atomic multi-step operation, lifecycle, or
+   framework-internal state.
+2. It makes a frequent operation shorter or harder to misuse. The typical case
+   is a narrow signature: `ava.tasks.log` takes only a progress note, so an
+   agent cannot resend an already-written result through `update`;
+   `ava.tasks.create_and_assign` joins creating a task and assigning it into
+   one step.
+
+A function that meets neither and only renames another entry is deleted. A rule
+that can sit on the underlying API belongs there (the `skill_invoked`
+attribution rides on `files.read`), not behind a second entry point. Parameters
+used only by the framework stay out of the agent-visible signature; give the
+framework its own internal function.
+
 ## Import layering
 
 Which package may import which, and how it is enforced:
