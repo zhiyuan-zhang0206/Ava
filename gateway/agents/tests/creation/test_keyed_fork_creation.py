@@ -15,6 +15,7 @@ from gateway.agents import router as agent_router
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, PATH
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.agents.tests.creation.test_sdk_strong_creation import _response, _sdk
+from tests.fixtures.retry_waits import retry_waits as retry_waits
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 
@@ -27,6 +28,7 @@ def _checkpoint(conn: psycopg.Connection, agent_id: int, checkpoint_id: str) -> 
     conn.commit()
 
 
+@pytest.mark.usefixtures("retry_waits")
 @pytest.mark.parametrize("source_change", ["advanced", "empty"])
 def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
     client: TestClient,
@@ -47,8 +49,7 @@ def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
         nonlocal lose
         response = client.post(path, **kwargs)
         if lose:
-            lose = False
-            assert response.status_code == 201, response.text
+            assert response.status_code in (200, 201), response.text
             raise httpx.ReadTimeout("committed fork response lost")
         return _response(response)
 
@@ -56,7 +57,9 @@ def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
     with transport.use_client(http):
         with pytest.raises(GatewayUnavailable):
             _sdk(fork_from=parent_id, idempotency_key="fork-intent")
-        assert http.post.call_count == 1
+        lost_attempts = http.post.call_count
+        assert lost_attempts > 1
+        lose = False
         row = db_conn.execute(
             "SELECT id, fork_source_agent_id, fork_source_checkpoint_id, last_launch_attempt_id "
             "FROM agents_meta WHERE fork_source_agent_id=%s",
@@ -77,8 +80,8 @@ def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
         monkeypatch.setattr(agent_router, "spawn_prechecks_blocking", unexpected)
         assert _sdk(fork_from=parent_id, idempotency_key="fork-intent") == child_id
 
-    assert http.post.call_count == 2
-    assert http.post.call_args_list[0] == http.post.call_args_list[1]
+    assert http.post.call_count == lost_attempts + 1
+    assert all(call == http.post.call_args_list[0] for call in http.post.call_args_list)
     assert db_conn.execute(
         "SELECT checkpoint_id FROM checkpoints WHERE thread_id=%s", (str(child_id),)
     ).fetchall() == [("original-checkpoint",)]

@@ -53,9 +53,9 @@ pages, then closes the observed row (409 when a newer registration replaced it,
 no request when no open page has that name). Registration closes every
 `closed_at IS NULL` row, expired rows included, before inserting, so even an
 expired same-name registration receives a new numeric ID. Explicit
-`*_in_transaction` primitives leave commit ownership with their caller. No
-automatic ambiguous retries are added: both routes keep
-`legacy_keyed_retry=False`.
+`*_in_transaction` primitives leave commit ownership with their caller. SDK
+transport retries an ambiguous outcome under the same key; the receipt replays
+the original acceptance.
 
 A `PageRow` proves registry acceptance, not server readiness or content delivery.
 The returned historical URL is still the existing name-based reverse-proxy URL:

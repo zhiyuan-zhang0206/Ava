@@ -4,7 +4,7 @@ from ava.gateway_client import transport
 from ava.sdk_surface import agent_identity
 from ava.sdk_surface.validation import coerce_typed
 from base.agents.compaction.models import CompactAcceptance, CompactStatus, CompactTarget
-from base.api_contracts.idempotency import PRINCIPAL_SCOPE, validate_idempotency_key
+from base.api_contracts.idempotency import validate_idempotency_key
 
 __all_for_ava__ = ["observe", "status", "submit"]
 
@@ -43,7 +43,6 @@ def submit(target: CompactTarget, *, idempotency_key: str) -> CompactAcceptance:
         f"/api/keyed/v1/agents/{target.source.agent_id}/compact-history",
         target.model_dump(mode="json"),
         idempotency_key=key,
-        idempotency_scope=PRINCIPAL_SCOPE,
     )
     transport.raise_from_response(response)
     if response.status_code != 202:

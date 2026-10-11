@@ -8,6 +8,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from base.agents import ShellSessionKillTiming
+from base.api_contracts.idempotency import keyed_headers
 
 _TIMEOUT_S = 15.0
 
@@ -194,7 +195,7 @@ def send_agent_message(
 
     if tail_file is not None:
         content = _with_tail(content, tail_file)
-    headers = {**gateway_auth_headers(), "Idempotency-Key": str(uuid4())}
+    headers = {**gateway_auth_headers(), **keyed_headers(str(uuid4()))}
     body = {
         "content": content,
         "source": source,
@@ -234,11 +235,7 @@ def cmd_agents_cancel(agent_id: int) -> int:
         f"{root}/cancel-work",
         json=target.model_dump(mode="json"),
         timeout=_TIMEOUT_S,
-        headers={
-            **gateway_auth_headers(),
-            "Idempotency-Key": uuid4().hex,
-            "Idempotency-Scope": "principal-v1",
-        },
+        headers={**gateway_auth_headers(), **keyed_headers(uuid4().hex)},
     )
     resp.raise_for_status()
     accepted = NativeCancelAcceptance.model_validate(resp.json())
@@ -414,11 +411,7 @@ def cmd_agents_compact(agent_id: int) -> int:
         f"{root}/compact-history",
         json=target.model_dump(mode="json"),
         timeout=_TIMEOUT_S,
-        headers={
-            **gateway_auth_headers(),
-            "Idempotency-Key": uuid4().hex,
-            "Idempotency-Scope": "principal-v1",
-        },
+        headers={**gateway_auth_headers(), **keyed_headers(uuid4().hex)},
     )
     resp.raise_for_status()
     accepted = CompactAcceptance.model_validate(resp.json())

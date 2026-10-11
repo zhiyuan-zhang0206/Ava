@@ -19,9 +19,11 @@ from gateway.app import app
 from ops.lifecycle.launch import _validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.retry_waits import retry_waits as retry_waits
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 
+@pytest.mark.usefixtures("retry_waits")
 @pytest.mark.parametrize("rotate", [False, True])
 def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     db_conn: psycopg.Connection,
@@ -53,7 +55,6 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
         nonlocal lose
         response = target.post(path, **kwargs)
         if lose:
-            lose = False
             assert response.status_code == 201, response.text
             raise httpx.ReadTimeout("committed birth response lost")
         return _response(response)
@@ -63,7 +64,9 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
         with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as target:
             with pytest.raises(GatewayUnavailable):
                 _sdk()
-            assert http.post.call_count == 1
+            lost_attempts = http.post.call_count
+            assert lost_attempts > 1
+            lose = False
             row = db_conn.execute(
                 "SELECT agent_id, launch_attempt_id FROM agent_creation_snapshots"
             ).fetchone()
@@ -81,9 +84,11 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
         # A new lifespan owns fresh pools and no prior acceptance cache.
         with gateway_test_client(app, headers={"Authorization": f"Bearer {SECRET}"}) as target:
             assert _sdk() == agent_id
-    assert http.post.call_count == 2
-    assert http.post.call_args_list[0] == http.post.call_args_list[1]
-    assert len(launches) == (1 if rotate else 2)
+    assert http.post.call_count == lost_attempts + 1
+    assert all(call == http.post.call_args_list[0] for call in http.post.call_args_list)
+    # Each replay before the rotation re-offers the original launch; a replay
+    # after it finds the attempt superseded and offers nothing.
+    assert len(launches) == (lost_attempts if rotate else lost_attempts + 1)
     assert all(launch.launch_attempt_id == original for launch in launches)
     _assert_one_birth(db_conn, original)
 

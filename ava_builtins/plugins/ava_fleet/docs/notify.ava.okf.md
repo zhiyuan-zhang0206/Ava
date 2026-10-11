@@ -42,7 +42,7 @@ Push a notification, automatically superseding any previously unresolved notific
 
 ### `ava.ui.edit_notice(*, title=..., content=..., priority=..., blocking=...) -> None`
 
-Modify the current pending notice. Pass only changed fields. This selector has no receipt or observed notice ID; an ambiguous response is surfaced without automatic replay, which could edit a newer notice.
+Modify the current pending notice. Pass only changed fields. The call observes the open notice id first and edits exactly that row under one key; an ambiguous response is retried under the same key and replays the original acceptance, never editing a newer notice.
 
 - Cannot change `require_response` (to change it, dismiss + re-notify)
 - `content=None` clears the content

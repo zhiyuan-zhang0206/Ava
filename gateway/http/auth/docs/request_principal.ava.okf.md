@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Credential-Scoped Idempotency"
-description: "Server-bound credential principals and explicit versioned idempotency storage namespaces, independent of caller provenance."
+description: "Server-bound credential principals and the principal-scoped idempotency storage identity, independent of caller provenance."
 tags:
 - gateway
 - identity
@@ -31,31 +31,26 @@ no write generation, so `require_human_credential` admits only the human facts
 (`cluster_bearer`, `user_session`) there and answers 403 to a generation-bound
 one.
 
-Supplied keys must contain 1 to 128 characters in both legacy and scoped
-requests; invalid keys fail before durable writes. Missing keys retain each
-route's legacy one-shot behavior without an ambiguous-retry guarantee.
+Supplied keys must contain 1 to 128 characters, and every key arrives with
+`Idempotency-Scope: principal-v1`: a key without the header, or with another
+scope value, fails 422 before durable writes. Missing keys on an optional-key
+route retain that route's one-shot behavior without an ambiguous-retry
+guarantee.
 
-Requests explicitly choosing `Idempotency-Scope: principal-v1` namespace their
-key by verified principal, logical method/path, and caller key. The stored key
-is a bounded digest, never a credential. Delivery and reconciliation use the
-same logical message POST path. Unverified principals and unknown scope versions
-fail before claiming keys or writing inbounds.
+The stored key namespaces the verified principal, logical method/path, and
+caller key (`stored_key`, owned by `base.api_contracts.idempotency`); it is a
+bounded digest, never a credential, and no raw caller-key namespace exists, so
+a caller cannot address another principal's stored reply by submitting a
+computed key. Unverified principals fail before claiming keys or writing
+inbounds. Delivery and reconciliation of a chat message share one cluster-wide
+identity (`chat_message_key`); every other route uses its own method and path.
 
-Legacy REST callers retain raw-key behavior to preserve in-flight retries across an
-upgrade. The `principal-v1:` storage prefix is reserved and rejected as a raw
-legacy key, so a caller cannot bypass scoping by submitting a computed stored
-key. Existing callers that used this newly reserved prefix must choose a new
-logical request key; do not blindly retry an already committed side effect.
+## MCP credentials
 
-## Rollout boundary
-
-This server-side opt-in does not silently switch existing clients or repair
-historical global keys. Clients must positively negotiate this version before
-opting in; an old server can ignore an unknown HTTP header. Negotiated client
-activation is follow-up integration work. MCP send accepts an optional
-idempotency_key and ALWAYS derives its namespace from the already validated
-MCP client row ID. No opt-out header or global-key fallback exists for MCP
-credentials. Same key/body replays the same receipt; changed body conflicts.
-Revoked or unauthenticated clients fail authentication before key lookup.
-No new credential store, per-tool privilege boundary, or authorization policy
-is introduced. Provenance remains separate from credential identity.
+MCP send accepts an optional idempotency_key and ALWAYS derives its namespace
+from the already validated MCP client row ID. No opt-out header or global-key
+fallback exists for MCP credentials. Same key/body replays the same receipt;
+changed body conflicts. Revoked or unauthenticated clients fail authentication
+before key lookup. No new credential store, per-tool privilege boundary, or
+authorization policy is introduced. Provenance remains separate from credential
+identity.

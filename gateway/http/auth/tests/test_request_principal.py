@@ -58,37 +58,38 @@ def test_unverified_principal_is_rejected_without_downgrade() -> None:
         request_key(request, "k", method="POST", path="/api/a")
 
 
-def test_legacy_keys_remain_unchanged_except_reserved_storage_namespace() -> None:
-    request = _request(scope=None)
-    assert request_key(request, "existing-retry", method="POST", path="/api/a") == "existing-retry"
-    protected = principal_key(AuthPrincipal("mcp_client", "1"), "POST", "/api/a", "k")
-    with pytest.raises(PrincipalScopeError, match="reserved"):
-        request_key(request, protected, method="POST", path="/api/a")
+def test_missing_scope_is_rejected_for_every_principal() -> None:
+    for principal in (AuthPrincipal("cluster", "administrator"), AuthPrincipal("mcp_client", "42")):
+        with pytest.raises(PrincipalScopeError, match="requires the header"):
+            request_key(_request(None, principal), "k", method="POST", path="/api/a")
 
 
 @pytest.mark.parametrize("scope", ["", "source", "principal-v2", "human"])
 def test_unknown_scope_fails_loudly(scope: str) -> None:
+    principal = AuthPrincipal("cluster", "administrator")
     with pytest.raises(PrincipalScopeError, match="unsupported"):
-        request_key(_request(scope), "k", method="POST", path="/api/a")
+        request_key(_request(scope, principal), "k", method="POST", path="/api/a")
 
 
-def test_mcp_principal_cannot_opt_out_by_omitting_header() -> None:
-    principal = AuthPrincipal("mcp_client", "42")
-    request = _request(scope=None, principal=principal)
-    assert request_key(request, "k", method="POST", path="/api/a") == principal_key(
-        principal, "POST", "/api/a", "k"
-    )
+def test_stored_prefix_is_not_a_raw_namespace() -> None:
+    principal = AuthPrincipal("cluster", "administrator")
+    protected = principal_key(principal, "POST", "/api/a", "k")
+    assert request_key(
+        _request(principal=principal), protected, method="POST", path="/api/a"
+    ) == principal_key(principal, "POST", "/api/a", protected)
 
 
 @pytest.mark.parametrize("scope", [None, "principal-v1"])
 @pytest.mark.parametrize("key", ["", "x" * 129])
-def test_invalid_keys_fail_in_both_legacy_and_principal_scope(scope: str | None, key: str) -> None:
+def test_invalid_keys_fail_before_scope_is_consulted(scope: str | None, key: str) -> None:
     request = _request(scope, AuthPrincipal("cluster", "administrator"))
     with pytest.raises(PrincipalScopeError, match="1 to 128"):
         request_key(request, key, method="POST", path="/api/a")
 
 
-def test_legacy_key_boundary_is_compatible() -> None:
-    request = _request(scope=None)
+def test_maximum_length_key_is_accepted() -> None:
+    principal = AuthPrincipal("cluster", "administrator")
     key = "x" * 128
-    assert request_key(request, key, method="POST", path="/api/a") == key
+    assert request_key(
+        _request(principal=principal), key, method="POST", path="/api/a"
+    ) == principal_key(principal, "POST", "/api/a", key)
