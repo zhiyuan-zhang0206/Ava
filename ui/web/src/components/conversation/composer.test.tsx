@@ -121,6 +121,122 @@ describe("Composer placeholder", () => {
   });
 });
 
+describe("Composer reply suggestion", () => {
+  const SUGGESTION = "Yes, go ahead and deploy.";
+
+  function input(): HTMLTextAreaElement {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByTestId returns HTMLElement; narrowing to access .value
+    return screen.getByTestId("composer-input") as HTMLTextAreaElement;
+  }
+
+  it("shows the suggestion as the placeholder of the empty input", () => {
+    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+
+    expect(input().getAttribute("placeholder")).toBe(SUGGESTION);
+    expect(input().value).toBe("");
+  });
+
+  it("ArrowRight accepts it: the input holds the text and the caret is at the end", async () => {
+    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+
+    const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
+
+    expect(notPrevented).toBe(false);
+    await waitFor(() => {
+      expect(input().value).toBe(SUGGESTION);
+    });
+    await waitFor(() => {
+      expect(input().selectionStart).toBe(SUGGESTION.length);
+    });
+    expect(input().selectionEnd).toBe(SUGGESTION.length);
+  });
+
+  it("an accepted suggestion is an ordinary draft: Enter sends it", async () => {
+    const onSend = vi.fn(() => Promise.resolve(true));
+    render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestion={SUGGESTION} />);
+
+    fireEvent.keyDown(input(), { key: "ArrowRight" });
+    await waitFor(() => {
+      expect(input().value).toBe(SUGGESTION);
+    });
+    fireEvent.keyDown(input(), { key: "Enter" });
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(SUGGESTION, [], expect.any(String));
+    });
+  });
+
+  it("typing hides it, and emptying the input brings it back", () => {
+    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+
+    fireEvent.change(input(), { target: { value: "n" } });
+    expect(input().getAttribute("placeholder")).toBe("send a message");
+
+    fireEvent.change(input(), { target: { value: "" } });
+    expect(input().getAttribute("placeholder")).toBe(SUGGESTION);
+  });
+
+  it("ArrowRight in a non-empty input moves the caret as usual", () => {
+    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+    fireEvent.change(input(), { target: { value: "draft" } });
+
+    const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
+
+    expect(notPrevented).toBe(true);
+    expect(input().value).toBe("draft");
+  });
+
+  it.each([
+    ["Shift", { shiftKey: true }],
+    ["Ctrl", { ctrlKey: true }],
+    ["Alt", { altKey: true }],
+    ["Meta", { metaKey: true }],
+  ])("%s+ArrowRight does not accept it", (_name, modifier) => {
+    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+
+    const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight", ...modifier });
+
+    expect(notPrevented).toBe(true);
+    expect(input().value).toBe("");
+  });
+
+  it("ArrowRight during IME composition is left to the input method", () => {
+    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+
+    const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight", isComposing: true });
+
+    expect(notPrevented).toBe(true);
+    expect(input().value).toBe("");
+  });
+
+  it("without a suggestion ArrowRight does nothing special", () => {
+    render(<Composer {...baseProps} mode="idle" />);
+
+    const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
+
+    expect(notPrevented).toBe(true);
+    expect(input().value).toBe("");
+  });
+
+  it("a suggestion that goes away restores the normal placeholder", () => {
+    const { rerender } = render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+
+    rerender(<Composer {...baseProps} mode="idle" suggestion={null} />);
+
+    expect(input().getAttribute("placeholder")).toBe("send a message");
+  });
+
+  it("works while the agent is busy: the user may queue a reply", async () => {
+    render(<Composer {...baseProps} mode="busy" suggestion={SUGGESTION} />);
+
+    fireEvent.keyDown(input(), { key: "ArrowRight" });
+
+    await waitFor(() => {
+      expect(input().value).toBe(SUGGESTION);
+    });
+  });
+});
+
 describe("Composer button mode dispatch", () => {
   // Layout regression (task #714 + #715): the composer is width-capped and
   // centered inside the timeline column. The cap comes from the

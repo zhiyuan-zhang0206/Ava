@@ -182,6 +182,7 @@ vi.mock("@/lib/transport/api", () => ({
     uploadFiles: vi.fn().mockResolvedValue(undefined),
     submitUploadedFiles: vi.fn().mockResolvedValue(undefined),
     listPages: vi.fn().mockResolvedValue([]),
+    getReplySuggestion: vi.fn(),
   },
 }));
 
@@ -235,7 +236,9 @@ vi.mock("@/components/conversation/composer", () => {
     children,
     details,
     maxWidthCss,
+    suggestion,
   }: {
+    suggestion?: string | null;
     mode: string;
     onSend: (s: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
     onUploadFiles?: (files: File[]) => void;
@@ -259,6 +262,7 @@ vi.mock("@/components/conversation/composer", () => {
         data-testid="composer"
         data-mode={mode}
         data-max-width={maxWidthCss ?? "undefined"}
+        data-suggestion={suggestion ?? ""}
       >
         <textarea data-testid="composer-paste-target" onPaste={pasteImage} />
         {thumbnail ? <div data-testid="composer-image-thumbnail" data-url={thumbnail} /> : null}
@@ -362,6 +366,71 @@ beforeEach(() => {
   hooksState.setInspectorHours = vi.fn();
   hooksState.isLarge = true;
   hooksState.isDesktop = true;
+});
+
+describe("HomePage reply suggestion", () => {
+  const agentSpoke = [
+    { item_id: "1.0", kind: "inbound_chat", source: "user", payload: "deploy?" },
+    { item_id: "2.0", kind: "agent_chat", source: null, payload: "Deploy now?" },
+  ];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(api.getReplySuggestion).mockResolvedValue({ suggestion: "Yes, go ahead.", reason: null });
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
+    hooksState.timelineItems = agentSpoke;
+    hooksState.settings = { "display.timeline_width_ratio": 0.4, "behavior.replySuggestions": true };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("hands the drafted reply to the composer after the quiet period", async () => {
+    wrap(<HomePage />);
+    expect(screen.getByTestId("composer").getAttribute("data-suggestion")).toBe("");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(api.getReplySuggestion).toHaveBeenCalledWith(5, expect.any(AbortSignal));
+    expect(screen.getByTestId("composer").getAttribute("data-suggestion")).toBe("Yes, go ahead.");
+  });
+
+  it("never asks while the agent is running", async () => {
+    hooksState.agents = [makeAgent({ agent_id: 5, status: "running" })];
+    wrap(<HomePage />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(api.getReplySuggestion).not.toHaveBeenCalled();
+  });
+
+  it("never asks while the turn signal is active", async () => {
+    hooksState.turnActive = true;
+    wrap(<HomePage />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(api.getReplySuggestion).not.toHaveBeenCalled();
+  });
+
+  it("never asks when the user turned the setting off", async () => {
+    hooksState.settings = { "display.timeline_width_ratio": 0.4, "behavior.replySuggestions": false };
+    wrap(<HomePage />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(api.getReplySuggestion).not.toHaveBeenCalled();
+  });
 });
 
 describe("HomePage top-level render", () => {

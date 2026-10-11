@@ -40,6 +40,9 @@
   "confirmRestartDesc": "Show a confirmation dialog when restarting an agent",
   "confirmForceKill": "Confirm before force kill",
   "confirmForceKillDesc": "Show a confirmation dialog when force-killing (kill / SIGKILL) an agent",
+  "composer": "Composer",
+  "replySuggestions": "Reply suggestions",
+  "replySuggestionsDesc": "After an agent finishes a turn that waits for you, draft a reply as grey text in the empty input. Press the right arrow key to accept it; typing hides it. Uses a small model on the last messages of the conversation.",
   "modelPicker": "Model picker",
   "english": "English",
   "chinese": "中文"

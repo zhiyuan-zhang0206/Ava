@@ -40,6 +40,9 @@
   "confirmRestartDesc": "重启 agent 时显示确认对话框",
   "confirmForceKill": "强制结束前确认",
   "confirmForceKillDesc": "强制结束（kill / SIGKILL）agent 时显示确认对话框",
+  "composer": "输入框",
+  "replySuggestions": "回复建议",
+  "replySuggestionsDesc": "agent 的回合结束且在等你回复时，在空输入框里以灰色文字起草一条回复。按右方向键接受，开始打字即消失。会把对话最近的几条消息交给一个小模型。",
   "modelPicker": "模型选择器",
   "english": "English",
   "chinese": "中文"
