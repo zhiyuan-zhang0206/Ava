@@ -24,9 +24,10 @@ describe("gate login through the HTTPS browser entry", () => {
       username: { value: "admin" }, submit: {}, error: {},
     };
     const fetch = vi.fn().mockResolvedValue({ ok: true });
-    const location = { origin, href: "" };
+    const location = { origin, href: "", hash: "", pathname: "/login", search: "" };
     runInNewContext(loginScript, {
-      navigator: { language: "en" }, window: { location }, location, fetch,
+      navigator: { language: "en" }, window: { location }, location, fetch, URLSearchParams,
+      history: { replaceState: vi.fn() },
       document: { getElementById: (id: string) => elements[id] },
     });
     expect(submit).toBeDefined();

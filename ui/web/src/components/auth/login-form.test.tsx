@@ -24,6 +24,7 @@ beforeEach(() => {
   loginFn.mockReset();
   mockAuth.mockReturnValue({
     status: "unauthenticated",
+    loginNotice: null,
     login: loginFn,
     logout: vi.fn(),
   });
@@ -36,6 +37,17 @@ function typePassword(value: string) {
 }
 
 describe("LoginForm", () => {
+  it("explains a one-time login link that did not work", () => {
+    mockAuth.mockReturnValue({
+      status: "unauthenticated",
+      loginNotice: "ticket-rejected",
+      login: loginFn,
+      logout: vi.fn(),
+    });
+    render(<LoginForm />);
+    expect(screen.getByRole("alert").textContent).toMatch(/expired or was already used/);
+  });
+
   it("disables submit until a password is entered", () => {
     render(<LoginForm />);
     const button = screen.getByRole("button", { name: "Sign in" });
