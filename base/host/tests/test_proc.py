@@ -97,14 +97,12 @@ def test_hosting_supervised_session_uses_starttime_despite_wall_clock_drift(
 # exec runtime creates for every exec domain. A same-process call cannot join a
 # synthetic session, and the suite's ambient session must not decide these.
 
-_PREDICATE_SRC = (
-    "from base.host.proc import hosting_exec_domain\nprint(repr(hosting_exec_domain()))\n"
-)
+_HOSTING_CHILD = Path(__file__).with_name("_hosting_child.py")
 
 
 def _predicate_in_new_session(*argv_tail: str) -> str:
-    result = subprocess.run(  # noqa: S603 — fixed interpreter + test source, fixture argv
-        [sys.executable, "-c", _PREDICATE_SRC, *argv_tail],
+    result = subprocess.run(  # noqa: S603 — fixed interpreter + test child script, fixture argv
+        [sys.executable, str(_HOSTING_CHILD), "predicate", *argv_tail],
         capture_output=True,
         text=True,
         timeout=60,
@@ -136,29 +134,8 @@ def test_hosting_exec_domain_follows_the_session_through_a_broken_parent_chain(
     the session — membership still reads the exec domain, and the group that
     dies with the call with it."""
     out = tmp_path / "reparented.txt"
-    child_src = (
-        "import os, shlex, subprocess, sys, time\n"
-        "print(os.getpid(), flush=True)\n"
-        "inner = (\n"
-        "    'import os, sys, time\\n'\n"
-        "    'import psutil\\n'\n"
-        "    'from base.host.proc import hosting_exec_domain\\n'\n"
-        "    'time.sleep(1.0)\\n'\n"
-        "    'ancestors = {p.pid for p in psutil.Process().parents()}\\n'\n"
-        "    'print(hosting_exec_domain(), os.getsid(0), int(sys.argv[1]) in ancestors)\\n'\n"
-        ")\n"
-        "command = (\n"
-        "    'nohup ' + shlex.quote(sys.executable) + ' -c ' + shlex.quote(inner)\n"
-        "    + ' ' + shlex.quote(str(os.getpid())) + ' > ' + shlex.quote(sys.argv[1]) + ' 2>&1 &'\n"
-        ")\n"
-        "subprocess.run(['sh', '-c', command])\n"
-        "# Stay alive while the reparented child takes its reading: a live exec\n"
-        "# root is exactly the state the membership probe must see (the domain\n"
-        "# lives until the call's turn ends).\n"
-        "time.sleep(5.0)\n"
-    )
-    leader = subprocess.Popen(  # noqa: S603 — fixed interpreter + test source, fixture argv
-        [sys.executable, "-c", child_src, str(out), "agent.execution.child"],
+    leader = subprocess.Popen(  # noqa: S603 — fixed interpreter + test child script, fixture argv
+        [sys.executable, str(_HOSTING_CHILD), "reparent", str(out), "agent.execution.child"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

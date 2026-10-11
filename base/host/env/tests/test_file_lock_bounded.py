@@ -21,20 +21,13 @@ from base.host.env.dotenv_file import ENV_LOCK_TIMEOUT_S, env_lock_path
 from base.native_process.os_platform import LockTimeoutError, file_lock
 
 _REPO = Path(__file__).resolve().parents[4]
+_HOLDER = Path(__file__).with_name("_file_lock_holder.py")
 
 
 def _spawn_holder(target: Path, ready: Path, hold_s: float) -> subprocess.Popen[bytes]:
     """A separate interpreter that takes the lock, signals, and holds it."""
-    code = (
-        "import pathlib, sys, time\n"
-        "sys.path.insert(0, sys.argv[1])\n"
-        "from base.native_process.os_platform import file_lock\n"
-        "with file_lock(pathlib.Path(sys.argv[2]), timeout_s=60):\n"
-        "    pathlib.Path(sys.argv[3]).write_text('1')\n"
-        "    time.sleep(float(sys.argv[4]))\n"
-    )
     return subprocess.Popen(  # noqa: S603
-        [sys.executable, "-c", code, str(_REPO), str(target), str(ready), str(hold_s)],
+        [sys.executable, str(_HOLDER), str(_REPO), str(target), str(ready), str(hold_s)],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
