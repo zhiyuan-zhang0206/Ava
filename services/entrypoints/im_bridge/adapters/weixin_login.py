@@ -1,4 +1,4 @@
-"""The interactive iLink QR login of the WeChat adapter (``python -m ...weixin --login``).
+"""The interactive iLink QR login of the WeChat adapter (``python -m ...adapters.weixin_login --login``).
 
 Split out of `weixin.py` (the adapter itself): the login runs once, from the CLI, and persists
 the account the adapter later loads.
@@ -6,6 +6,7 @@ the account the adapter later loads.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import time
 from dataclasses import dataclass
@@ -19,8 +20,8 @@ from services.entrypoints.im_bridge.adapters.weixin import (
     EP_GET_QR_STATUS,
     ILINK_BASE_URL,
     QR_POLL_TIMEOUT_SECONDS,
-    _get_headers,
-    _get_str,
+    get_headers,
+    get_str,
     save_account,
 )
 
@@ -30,9 +31,7 @@ async def _qr_get(
 ) -> dict[str, Any] | None:
     """GET an iLink QR endpoint; None on any transient error (caller retries)."""
     try:
-        resp = await client.get(
-            f"{base_url.rstrip('/')}/{endpoint}?{query}", headers=_get_headers()
-        )
+        resp = await client.get(f"{base_url.rstrip('/')}/{endpoint}?{query}", headers=get_headers())
     except httpx.HTTPError as exc:
         logger.warning("weixin: {} failed: {}", endpoint, type(exc).__name__)
         return None
@@ -67,8 +66,8 @@ async def _refresh_qr(
     """Fetch a fresh QR after the previous one expired; None on failure."""
     logger.info("QR code expired, refreshing… ({}/3)", refresh_count)
     qr = await _qr_get(client, base_url, EP_GET_BOT_QR, "bot_type=3")
-    qrcode_value = _get_str(qr, "qrcode")
-    qrcode_url = _get_str(qr, "qrcode_img_content")
+    qrcode_value = get_str(qr, "qrcode")
+    qrcode_url = get_str(qr, "qrcode_img_content")
     if not qrcode_value:
         return None
     _show_qr(qrcode_value, qrcode_url)
@@ -77,10 +76,10 @@ async def _refresh_qr(
 
 def _confirmed_credentials(status: dict[str, Any]) -> dict[str, Any] | None:
     """Validate a "confirmed" status payload; persist and return credentials."""
-    account_id = _get_str(status, "ilink_bot_id")
-    bot_token = _get_str(status, "bot_token")
-    bot_base_url = _get_str(status, "baseurl") or ILINK_BASE_URL
-    user_id = _get_str(status, "ilink_user_id")
+    account_id = get_str(status, "ilink_bot_id")
+    bot_token = get_str(status, "bot_token")
+    bot_base_url = get_str(status, "baseurl") or ILINK_BASE_URL
+    user_id = get_str(status, "ilink_user_id")
     if not account_id or not bot_token:
         logger.error("weixin: QR confirmed but credential payload incomplete")
         return None
@@ -143,8 +142,8 @@ async def qr_login(
         client = httpx.AsyncClient(timeout=httpx.Timeout(QR_POLL_TIMEOUT_SECONDS))
     try:
         qr = await _qr_get(client, ILINK_BASE_URL, EP_GET_BOT_QR, "bot_type=3")
-        qrcode_value = _get_str(qr, "qrcode")
-        qrcode_url = _get_str(qr, "qrcode_img_content")
+        qrcode_value = get_str(qr, "qrcode")
+        qrcode_url = get_str(qr, "qrcode_img_content")
         if not qrcode_value:
             logger.error("weixin: QR response missing qrcode")
             return None
@@ -172,3 +171,26 @@ async def qr_login(
     finally:
         if owns_client:
             await client.aclose()
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry: ``python -m services.entrypoints.im_bridge.adapters.weixin_login --login``."""
+    parser = argparse.ArgumentParser(
+        prog="python -m services.entrypoints.im_bridge.adapters.weixin_login",
+        description="Weixin iLink adapter helper (login / debug)",
+    )
+    parser.add_argument(
+        "--login",
+        action="store_true",
+        help="Interactive QR login; credentials are written to $AVA_HOME/state/im_bridge/weixin_account.json",
+    )
+    args = parser.parse_args(argv)
+    if args.login:
+        creds = asyncio.run(qr_login())
+        return 0 if creds else 1
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

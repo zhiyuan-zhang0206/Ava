@@ -10,8 +10,7 @@ from http import HTTPStatus
 from typing import Any, NoReturn, TypedDict
 
 import httpx
-
-from services.entrypoints.im_bridge.outbound.types import PreparedOutboundSend
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SendNotStartedError(RuntimeError):
@@ -58,6 +57,32 @@ def raise_http_failure(status: int, message: str) -> NoReturn:
     if retryable_http_status(status):
         raise RetryableTransportError(message)
     raise RuntimeError(message)
+
+
+class OutboundAdapterKind(StrEnum):
+    TELEGRAM = "telegram-v1"
+    FEISHU = "feishu-v1"
+    WEIXIN = "weixin-v1"
+
+
+class OutboundChunk(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    text: str
+    fallback_text: str | None = None
+    html: bool = False
+
+
+class PreparedOutboundSend(BaseModel):
+    """Credential-free adapter-owned rendering, frozen before acceptance."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    adapter_kind: OutboundAdapterKind
+    account_id: str = Field(min_length=1)
+    chunks: tuple[OutboundChunk, ...] = Field(min_length=1)
+    markdown: bool
+    buttons: tuple[tuple[str, str], ...] | None = None
 
 
 @dataclass
