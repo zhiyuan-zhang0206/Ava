@@ -313,7 +313,7 @@ using that plugin's store, task surface, or hook.
 |---|---|---|---|
 | `# Invest in the future` | framework | `AVA_SYSTEM_PROMPT_INVEST_FUTURE` (default on) | The ONE cross-domain future-signal rule: trigger, three closing actions, over-capture bias, and closing presentation. |
 | `# Remembering across sessions` | `ava_memory` plugin | `AVA_SYSTEM_PROMPT_MEMORY` | Durable-knowledge domain instance: dual stores, fix stale, format, and verification; no generic rule restatement. |
-| `## Reduce context switch for the human` | `ava_fleet` plugin | `AVA_REDUCE_CONTEXT_SWITCH` (default on) | Human-attention default: queue-never-push + emergency-only push, one notice per manager updated in place, milestone cadence, decision/progress bisection. |
+| `## Reduce context switch for the human` | `ava_fleet` plugin | Fleet `reduce_context_switch` (default on) | Human-attention default: queue-never-push + emergency-only push, one notice per manager updated in place, milestone cadence, decision/progress bisection. |
 | Fleet task-interaction instance (PR2) | `ava_fleet` plugin | plugin enabled | Lands separately with task-specific interaction guidance. |
 
 Review every section with these questions:

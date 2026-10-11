@@ -480,11 +480,11 @@ def get_trace_checkpoint_messages(
     the whole conversation, not a window).
 
     `pruned` semantics: the checkpoint link is written by the agent after each
-    turn (`checkpoints.metadata.trace_id`), and checkpoint_cleanup keeps only
-    the latest K checkpoints per thread, so an old trace resolves to nothing —
-    the response is pruned=true with an empty list and the caller renders the
-    "trimmed" state. A trace id with no matching checkpoint is the same shape (the
-    link itself may predate the feature or the turn committed no checkpoint).
+    turn (`checkpoints.metadata.trace_id`). Checkpoints are never deleted, so
+    a trace id that resolves to nothing means no checkpoint carries it (the
+    link itself may predate the feature or the turn committed no checkpoint);
+    the response is then pruned=true with an empty list, which the caller
+    renders as absent content rather than an error.
 
     404: agent_id does not exist. 503: checkpoint store read failed.
     """
