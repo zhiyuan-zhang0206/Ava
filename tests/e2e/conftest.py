@@ -56,6 +56,7 @@ from tests._containers import runner_projection
 from tests.e2e._credentials import (
     current_credentials,
     forget_credentials,
+    install_browser_login,
     mint_credentials,
 )
 from tests.e2e._credentials import gateway_client_credentials as gateway_client_credentials
@@ -470,6 +471,7 @@ def playwright_runtime() -> Iterator[Playwright]:
 def playwright_browser(playwright_runtime: Playwright) -> Iterator[Browser]:
     headed = os.environ.get("HEADED") == "1"
     browser = playwright_runtime.chromium.launch(headless=not headed)
+    install_browser_login(browser)
     try:
         yield browser
     finally:
@@ -740,12 +742,6 @@ def spawned_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> 
 def playwright_context(playwright_browser: Browser) -> Iterator[BrowserContext]:
     ctx = playwright_browser.new_context(viewport={"width": 1280, "height": 800})
     try:
-        # Log the browser in as a user would: the session cookie the gateway sets is
-        # held by this context's cookie jar and sent with the page's API calls.
-        login = ctx.request.post(
-            f"{GATEWAY_URL}/api/auth/login", data={"password": current_credentials().secret}
-        )
-        assert login.ok, f"e2e browser login refused: {login.status}"
         yield ctx
     finally:
         ctx.close()

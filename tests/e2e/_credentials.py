@@ -27,17 +27,23 @@ import secrets
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 import pytest
+from playwright.sync_api import Browser, BrowserContext
 
 from base.cluster.auth import API_TOKEN_ENV, bearer_header
 from base.config import settings
 from tests.e2e._ports import GATEWAY_URL
 from tests.fixtures.unit.generation import seed_active_generation
 
-__all__ = ["E2ECredentials", "current_credentials", "mint_credentials"]
+__all__ = [
+    "E2ECredentials",
+    "current_credentials",
+    "install_browser_login",
+    "mint_credentials",
+]
 
 
 @dataclass(frozen=True)
@@ -101,3 +107,34 @@ def gateway_client_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None
 
     monkeypatch.setattr(httpx.Client, "send", send)
     yield
+
+
+def _gateway_serving() -> bool:
+    """True once the gateway answers HTTP. The retained listening socket accepts
+    connections before any process serves them, so only a response proves it."""
+    try:
+        return httpx.get(f"{GATEWAY_URL}/api/health", timeout=1.0).is_success
+    except httpx.HTTPError:
+        return False
+
+
+def install_browser_login(browser: Browser) -> None:
+    """Make every context this browser creates start logged in, as a user's browser is.
+
+    The gateway sets its session cookie on the login response; it lives in the
+    context's cookie jar and rides with the page's API calls. A context created while
+    no gateway serves (a test that stubs the API and never starts one) has nothing to
+    log in to and is left alone; once the gateway serves, a refused login fails loudly.
+    """
+    create = browser.new_context
+
+    def new_context(*args: Any, **kwargs: Any) -> BrowserContext:
+        context = create(*args, **kwargs)
+        if _gateway_serving():
+            login = context.request.post(
+                f"{GATEWAY_URL}/api/auth/login", data={"password": current_credentials().secret}
+            )
+            assert login.ok, f"e2e browser login refused: {login.status}"
+        return context
+
+    browser.new_context = new_context  # pyright: ignore[reportAttributeAccessIssue]
