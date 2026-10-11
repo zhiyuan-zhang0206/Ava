@@ -1,23 +1,9 @@
 """Export GitHub Actions run observability as re-emitted OTLP gauges.
 
-The daily sampler reads GitHub Actions and closed pull requests with ``gh api``
-GETs only. It recomputes the last 30 complete cluster-time days, so each
-absolute aggregate remains visible through Prometheus's 15-day retention even
-when the original day's process has exited. ``ci_runs_daily`` carries day
-aggregates, ``ci_workflow_window`` ranks workflows over the trailing window,
-and ``ci_runs_run`` is the API-budget breadcrumb.
-
-Persistence lives in ``$AVA_HOME/state/ci-runs/``, not the source checkout:
-one cache per repository survives source resets and lets a normal daily run
-re-read only the last 48 hours. A cold walk is bounded at ten 100-run pages per
-created-at cursor and normally costs hundreds of GETs; a warm run costs tens.
-The closed-PR list is authoritative for attribution, therefore any persistent
-GitHub failure aborts before cache writes or emission so old gauges remain.
-
-The labels below intentionally overlap: a failed retry can also be abandoned,
-for example. White-run share deduplicates only its three named classes, with
-instant skip taking precedence over superseded over abandoned. v1 does not
-aggregate failure signatures or job timing: those remain phase-two follow-ups.
+Read-only GitHub queries republish 30 cluster-time days as absolute gauges.
+Warm caches replay 48 hours; cold cursors cap at ten 100-run pages. Failed reads
+abort before cache writes or emission. White-run share deduplicates instant
+skip, superseded and abandoned in order; v1 excludes signatures/job timing.
 """
 
 from __future__ import annotations
@@ -30,6 +16,7 @@ import sys
 import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as day_time
@@ -715,17 +702,13 @@ def build_snapshot(
     }
 
 
-def emit_snapshot(snapshot: dict[str, Any]) -> None:
-    """Emit all absolute-state events after every repository has succeeded.
-
-    Initialising here gives both a manual invocation and a schedule invocation
-    the exporter process dimension: the schedule calls this module's ``main``
-    rather than emitting a second, schedule-named event stream.
-    """
+def emit_snapshot(snapshot: dict[str, Any], *, pipeline: Any) -> None:
+    """Emit absolute states after all repositories succeed, using the exporter
+    process dimension for both standalone and scheduled invocation."""
     from base import telemetry
     from base.telemetry.otlp import telemetry_otlp
 
-    telemetry.init_telemetry(process=PROCESS_NAME)
+    telemetry.init_telemetry(process=PROCESS_NAME, pipeline=pipeline)
     telemetry_otlp.warmup()
     for repo, payload in snapshot["repositories"].items():
         for day, fields in sorted(payload["days"].items()):
@@ -742,8 +725,7 @@ def emit_snapshot(snapshot: dict[str, Any]) -> None:
     telemetry.sync()
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Run the sampler, returning one on authoritative fetch failure."""
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument(
         "--repo", action="append", default=None, help="owner/name to sample (repeatable)"
@@ -764,6 +746,18 @@ def main(argv: list[str] | None = None) -> int:
     repos = args.repo or [DEFAULT_REPO]
     if len(set(repos)) != len(repos):
         parser.error("--repo values must be unique")
+    return args
+
+
+def main(argv: list[str] | None = None, *, producer: Callable[[], Any] | None = None) -> int:
+    """Run the sampler, returning one on authoritative fetch failure."""
+    args = _parse_args(argv)
+    repos = args.repo or [DEFAULT_REPO]
+    image = None
+    if not args.dry_run and producer is None:
+        from base.native_process.loaded_commit import LoadedCommit
+
+        image = LoadedCommit.capture(_REPO_ROOT)
     tz = cluster_tz()
     now = datetime.now(UTC)
     days = complete_days(now, args.window_days, tz)
@@ -783,7 +777,15 @@ def main(argv: list[str] | None = None) -> int:
         for item in collections:
             save_json(_cache_path(state_dir, item.repo), item.cache)
         save_json(state_dir / "snapshot.json", snapshot)
-        emit_snapshot(snapshot)
+        from scripts.ci.pull_requests.export_process import owned_event_pipeline
+
+        lifetime = (
+            nullcontext(producer())
+            if producer is not None
+            else owned_event_pipeline(PROCESS_NAME, image=image)
+        )
+        with lifetime as pipeline:
+            emit_snapshot(snapshot, pipeline=pipeline)
     if args.dry_run or args.print_snapshot:
         print(json.dumps(snapshot, indent=1, sort_keys=True))
     else:

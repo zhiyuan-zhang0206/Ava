@@ -193,33 +193,6 @@ def _store(
     )
 
 
-def admit_first_resources(
-    conn: psycopg.Connection, target: RuntimeIncarnation, birth: UUID
-) -> None:
-    """Consume a fresh server INSERT marker in the actual first admission TX.
-
-    This does not admit the runtime itself. The caller must complete normal
-    placement/session/admission checks and owner stamping in this transaction.
-    Historical NULL and previously admitted rows are deliberately ineligible.
-    """
-    _transaction(conn)
-    row = conn.execute(
-        "SELECT incarnation_resources,runtime_generation,runtime_owner,runtime_kind,pid,"
-        "started_at,lifecycle_command_id,status FROM agents_meta WHERE id=%s FOR UPDATE",
-        (target.agent_id,),
-    ).fetchone()
-    if row is None or row[1:7] != (None, None, None, None, None, None) or row[7] != "idling":
-        raise ResourceEvidenceError("first resource admission requires a never-admitted birth")
-    marker = decode_resources(row[0])
-    if not isinstance(marker, ResourceBirth) or marker.birth != birth:
-        raise ResourceEvidenceError("first resource admission lost its exact birth marker")
-    _store(
-        conn,
-        target,
-        IncarnationResources(generation=target.generation, owner=target.owner, requests={}),
-    )
-
-
 def register_exec(
     conn: psycopg.Connection, target: RuntimeIncarnation, entry: ExecAllocation
 ) -> None:

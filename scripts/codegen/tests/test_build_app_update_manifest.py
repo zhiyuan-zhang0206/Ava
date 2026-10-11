@@ -26,9 +26,8 @@ def _artifact(directory: Path, name: str, signature: str | None = None) -> None:
         (directory / f"{name}.sig").write_text(signature)
 
 
-def test_builds_tauri_static_manifest_for_universal_macos_and_nsis(tmp_path: Path) -> None:
+def test_builds_tauri_static_manifest_for_universal_macos(tmp_path: Path) -> None:
     _artifact(tmp_path, "Ava.app.tar.gz", "mac-signature\n")
-    _artifact(tmp_path, "Ava_0.4.1_x64-setup.nsis.zip", "windows-signature\n")
     # Installers and the Android download are release assets, not updater archives.
     _artifact(tmp_path, "Ava_0.4.1_aarch64.dmg")
     _artifact(tmp_path, "Ava_0.4.1.apk")
@@ -43,19 +42,15 @@ def test_builds_tauri_static_manifest_for_universal_macos_and_nsis(tmp_path: Pat
     assert set(manifest["platforms"]) == {
         "darwin-aarch64",
         "darwin-x86_64",
-        "windows-x86_64",
-        "windows-x86_64-nsis",
     }
     assert manifest["platforms"]["darwin-aarch64"] == {
         "url": "https://github.com/owner/Ava/releases/download/app-v0.4.1/Ava.app.tar.gz",
         "signature": "mac-signature",
     }
-    assert manifest["platforms"]["windows-x86_64-nsis"]["signature"] == ("windows-signature")
 
 
 def test_unsigned_build_still_emits_an_honest_empty_feed(tmp_path: Path) -> None:
     _artifact(tmp_path, "Ava.app.tar.gz")
-    _artifact(tmp_path, "Ava_0.4.1_x64-setup.nsis.zip")
 
     manifest = manifest_builder.build_manifest(
         tag="app-v0.4.1",

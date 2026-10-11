@@ -151,10 +151,9 @@ Related local commands:
 - **Recover by rerunning the half.** After a failure, fix the cause and rerun
   the whole half; both are idempotent. Unknown custody or a hold that is not a
   completed stop needs diagnosis, not raw signals or hand-edited state.
-- **Treat first adoption as a separate cutover.** A new mechanism cannot
-  protect the legacy deployment that introduces it. Inspect the currently
-  running implementation and follow the approved explicit cutover procedure.
-  Respect any explicit CI-only or no-local-cluster constraint.
+- **Inspect the running implementation first.** A new mechanism cannot protect
+  the deployment that introduces it. Respect any explicit CI-only or
+  no-local-cluster constraint.
 
 ## Resource Oversight (the SRE loop)
 

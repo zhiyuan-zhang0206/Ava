@@ -1,0 +1,2 @@
+# Operator commands share one explicit database constructor.
+db = ["database.py"]

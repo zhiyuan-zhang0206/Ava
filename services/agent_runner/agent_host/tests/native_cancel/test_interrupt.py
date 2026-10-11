@@ -22,6 +22,7 @@ from base.agents.incarnation.exec_owner_protocol import OwnerClosed
 from base.agents.incarnation.native_work_models import NativeCancelMarker
 from base.agents.messages.native_cancel import accept_native_cancel
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -42,9 +43,11 @@ async def test_real_managed_exec_abort_closes_resources_before_original_ack(
     tmp_path: Path,
     database: Database,
     hosted_resources: HostedTurnResources,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     pool: ConnectionPool
-    incarnation, target = await managed_work(db_conn, aops_pool)
+    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 100, [])
     scope = hosted_resources
     async with subscribe_interrupt(
@@ -101,9 +104,11 @@ async def test_real_model_watcher_discards_partial_then_claim_attributes_origina
     database: Database,
     model_catalog: ModelCatalog,
     hosted_resources: HostedTurnResources,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     pool: ConnectionPool
-    incarnation, target = await managed_work(db_conn, aops_pool)
+    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     entered, unwound = asyncio.Event(), asyncio.Event()
 
     async def stream():

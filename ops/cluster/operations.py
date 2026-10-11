@@ -21,6 +21,7 @@ from base.cluster.machines import mark_stopping
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.log import logger
+from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster_status import (
     ClusterStatus,
     agent_shell_sessions,
@@ -51,9 +52,11 @@ def cluster_stopping_op(db: Database, machine: str, home: str) -> dict[str, str]
     return {"machine": machine}
 
 
-def cluster_status_op(db: Database, pool: Any | None = None) -> ClusterStatus:
+def cluster_status_op(
+    db: Database, pool: Any | None = None, *, image: LoadedCommit
+) -> ClusterStatus:
     """Local snapshot — assembled by `status_snapshot()`."""
-    return status_snapshot(db, pool=pool)
+    return status_snapshot(db, pool=pool, image=image)
 
 
 def shell_probe_op(agent_id: int) -> ShellProbeResult:

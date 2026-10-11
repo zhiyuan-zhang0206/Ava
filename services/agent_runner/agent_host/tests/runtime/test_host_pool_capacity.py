@@ -19,6 +19,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from services.agent_runner.agent_host.pools import build_control_pool, build_shared_pool
 from tests._containers import postgres
 from tests.components.cli.test_pgbouncer_wire import (
@@ -141,7 +142,10 @@ async def _borrow_every_lease_then_release(
 
 
 async def test_more_than_twenty_workload_leases_share_bounded_backends(
-    record_property: Callable[[str, object], None], monkeypatch: pytest.MonkeyPatch
+    record_property: Callable[[str, object], None],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The default 64 leases fit; the 65th waits without blocking control.
 
@@ -151,8 +155,8 @@ async def test_more_than_twenty_workload_leases_share_bounded_backends(
         # The host pools dial the cluster's access URL, which is this pooler.
         monkeypatch.setattr(settings.data_plane, "db_url", pooled)
         async with (
-            build_shared_pool(Database.from_settings()) as workload,
-            build_control_pool(Database.from_settings()) as control,
+            build_shared_pool(Database.from_settings(gate=database_gate)) as workload,
+            build_control_pool(Database.from_settings(gate=database_gate)) as control,
             await psycopg.AsyncConnection[DictRow].connect(
                 _admin_console_url(pooled), autocommit=True, row_factory=dict_row
             ) as admin,
@@ -297,7 +301,10 @@ async def _settle_requests_across_pools(
 
 
 async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbouncer(
-    record_property: Callable[[str, object], None], monkeypatch: pytest.MonkeyPatch
+    record_property: Callable[[str, object], None],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Exercise six pool pairs without claiming a thousand full agent turns.
 
@@ -323,11 +330,15 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
                 )
             )
             workloads = [
-                await stack.enter_async_context(build_shared_pool(Database.from_settings()))
+                await stack.enter_async_context(
+                    build_shared_pool(Database.from_settings(gate=database_gate))
+                )
                 for _ in range(_RUNNERS)
             ]
             controls = [
-                await stack.enter_async_context(build_control_pool(Database.from_settings()))
+                await stack.enter_async_context(
+                    build_control_pool(Database.from_settings(gate=database_gate))
+                )
                 for _ in range(_RUNNERS)
             ]
             backend_ids = await _settle_requests_across_pools(

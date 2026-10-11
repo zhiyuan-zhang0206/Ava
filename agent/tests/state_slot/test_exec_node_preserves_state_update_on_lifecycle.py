@@ -22,9 +22,12 @@ from agent.tests.test_state_slot import (
     _reset_state_slot as _reset_state_slot,
 )
 from base.agents.messages.security_finding import SecurityFindingEntry
+from base.db.code_version_gate import ProcessDbGate
 
 
-async def test_exec_node_preserves_state_update_on_lifecycle(fake_cancel_event):
+async def test_exec_node_preserves_state_update_on_lifecycle(
+    fake_cancel_event, *, database_gate: ProcessDbGate
+):
     """Lifecycle (terminate) path: plugin's state_update written before raising still merges.
 
     Directly raise AgentTermination to avoid `ava.self.terminate()`'s internal db INSERT
@@ -44,7 +47,7 @@ async def test_exec_node_preserves_state_update_on_lifecycle(fake_cancel_event):
         "raise AgentTermination\n"
     )
     state = _State(messages=[_ai_message_with_code(code)], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(cast(BaseAgentState, state), runtime, config)
 
@@ -54,7 +57,9 @@ async def test_exec_node_preserves_state_update_on_lifecycle(fake_cancel_event):
     assert not ava.in_exec_turn()
 
 
-async def test_exec_node_commits_security_finding_to_graph_state(fake_cancel_event):
+async def test_exec_node_commits_security_finding_to_graph_state(
+    fake_cancel_event, *, database_gate: ProcessDbGate
+):
     """A finding raised inside the exec child rides the state update into
     `state.security_findings`; the exec node itself adds no note to its messages
     delta (the after_exec hook delivers it) and the host keeps no findings of its own."""
@@ -62,7 +67,7 @@ async def test_exec_node_commits_security_finding_to_graph_state(fake_cancel_eve
         messages=[_ai_message_with_code(_scan_flagged_code("shell.run"))],
         halted=False,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(state, runtime, config)
 
@@ -74,7 +79,9 @@ async def test_exec_node_commits_security_finding_to_graph_state(fake_cancel_eve
     ]
 
 
-async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(fake_cancel_event):
+async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(
+    fake_cancel_event, *, database_gate: ProcessDbGate
+):
     """Order in the exec's messages delta: ToolMessage, then the plugin's context
     notes — the tool_use adjacency is preserved — while the finding for the same
     context file goes to the graph-state channel."""
@@ -87,7 +94,7 @@ async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(fa
         + "ava.state_update['messages'] = [HumanMessage(content='project note', id='p1')]\n"
     )
     state = state_cls(messages=[_ai_message_with_code(code)], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(state, runtime, config)
 
@@ -101,7 +108,9 @@ async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(fa
     assert [f.source for f in update["security_findings"]] == ["context-file:/repo/AGENTS.md"]
 
 
-async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_path: Path):
+async def test_exec_node_checkpoints_child_attachment(
+    fake_cancel_event, tmp_path: Path, *, database_gate: ProcessDbGate
+):
     """A normal child registration drains into a media message in the exec update.
 
     User ruling 2026-08-26: the attach message lands right after the exec
@@ -119,7 +128,9 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
     image.write_bytes(b"png")
     code = f"import ava\nava.self.attach({str(image)!r}, label='render result')"
     state = BaseAgentState(messages=[_ai_message_with_code(code)], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock(), {"llm_model": "claude-sonnet-5"})
+    runtime, config = _make_runtime_and_config(
+        AsyncMock(), {"llm_model": "claude-sonnet-5"}, database_gate=database_gate
+    )
 
     cmd = await _exec_node_impl(state, runtime, config)
 
@@ -142,7 +153,9 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
     assert "render.png" in caption_block["text"]
 
 
-async def test_exec_node_compact_path_drops_notes_and_findings(fake_cancel_event, tmp_path: Path):
+async def test_exec_node_compact_path_drops_notes_and_findings(
+    fake_cancel_event, tmp_path: Path, *, database_gate: ProcessDbGate
+):
     """The compact path (SystemHalt) writes nothing back — claim REMOVE_ALLs
     the whole history — so neither plugin notes nor the child's findings may
     leak into the update (the findings channel is reset instead)."""
@@ -168,7 +181,9 @@ async def test_exec_node_compact_path_drops_notes_and_findings(fake_cancel_event
         halted=False,
         attach=AttachState(pending=[AttachEntry(path="/previous.png", label=None)]),
     )
-    runtime, config = _make_runtime_and_config(AsyncMock(), {"llm_model": "claude-sonnet-5"})
+    runtime, config = _make_runtime_and_config(
+        AsyncMock(), {"llm_model": "claude-sonnet-5"}, database_gate=database_gate
+    )
 
     cmd = await _exec_node_impl(state, runtime, config)
 

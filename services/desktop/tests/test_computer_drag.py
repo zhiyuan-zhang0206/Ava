@@ -10,6 +10,7 @@ import jsonschema
 import pytest
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 
 from ..computer.config import ComputerUseConfig
 from ..computer.mcp_daemon import ComputerMcpDaemon
@@ -60,7 +61,7 @@ class HelperSocket:
 
 
 @pytest.fixture
-def desktop(monkeypatch: pytest.MonkeyPatch) -> Desktop:
+def desktop(monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate) -> Desktop:
     requests: list[dict[str, Any]] = []
     events: list[Any] = []
 
@@ -76,7 +77,9 @@ def desktop(monkeypatch: pytest.MonkeyPatch) -> Desktop:
         record,
     )
     daemon = ComputerMcpDaemon(
-        ComputerUseConfig(30, 0.01, 30, 60, 1), Database.from_settings(), sock="/unused.sock"
+        ComputerUseConfig(30, 0.01, 30, 60, 1),
+        Database.from_settings(gate=database_gate),
+        sock="/unused.sock",
     )
     return daemon, requests, events
 

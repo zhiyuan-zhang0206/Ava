@@ -21,6 +21,7 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -99,10 +100,12 @@ async def test_original_invocation_settles_once_after_database_fault(
     site: str,
     database: Database,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     async with hosted_scope() as resources:
         pool: ConnectionPool
-        incarnation, initial = await managed_work(db_conn, aops_pool)
+        incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
         agent = initial.agent_id
         first = _insert(db_conn, agent)
         entered, release = asyncio.Event(), asyncio.Event()

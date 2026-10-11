@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
@@ -19,6 +20,8 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
     held: bool,
     fails: bool,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     from threading import Event
 
@@ -34,6 +37,7 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
         checkpointer=object(),
         graph=object(),
         catalog=model_catalog,
+        database_gate=database_gate,
     )
     expected = [PendingInboundWake(agent_id=17, stale=False, recovery=False)]
     monkeypatch.setattr(
@@ -71,7 +75,9 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
     try:
         async with asyncio.TaskGroup() as owner:
             activity = owner.create_task(
-                terminal_notices.run_notice_delivery(Database.from_settings(), "this-box")
+                terminal_notices.run_notice_delivery(
+                    Database.from_settings(gate=database_gate), "this-box"
+                )
             )
             assert await asyncio.to_thread(entered.wait, 5)
             await asyncio.wait_for(scan.scan_once(), timeout=1)

@@ -1,6 +1,6 @@
 # The only modules here that may build the `db` handle from the live settings; the rest takes it
 # from them.
-db = ["cluster/server.py", "app.py", "schedules/runner.py"]
+db = ["cluster/process_boot.py"]
 
 # The only module here that may build the `bus` handle from the live settings (the app lifespan);
 # every other gateway module reads `request.app.state.bus`.

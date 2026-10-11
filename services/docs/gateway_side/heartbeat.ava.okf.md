@@ -49,3 +49,12 @@ one `machine_status_snapshot` row for every unpaused agent-runner (rollout targe
 and staging/stopped hosts alike); judging and the failure signal stay with the rollout targets.
 The gateway's roster read renders from those rows (`gateway/cluster/snapshots.py`)
 and dials inline only a missing or stale one (`?fresh=true` dials everything).
+
+
+## Process composition
+
+The heartbeat executable and standalone station probe each capture one loaded
+image and retain their own `CodeVersion` / `ProcessDbGate`. Work and telemetry
+factories share the entry's gate. Heartbeat health reports the same captured
+image; the station probe passes its factory into `resolve_target(database=...)`
+and keeps the configured-target no-op and fail-open lookup/probe boundaries.

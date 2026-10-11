@@ -12,7 +12,7 @@ from base.agents.impersonation.notes import HandoffNotes
 from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity, roles_from_flags
 from base.config import ConfigBoot
-from base.log import init_gateway_process
+from base.log.process import init_gateway_process
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
 

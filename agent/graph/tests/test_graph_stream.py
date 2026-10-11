@@ -32,6 +32,7 @@ from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
 from base.host.env.agent_slices import AgentSlices
@@ -41,7 +42,11 @@ from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _make_runtime(
-    hosted_resources: HostedTurnResources, *, llm=None, event_publisher=None
+    hosted_resources: HostedTurnResources,
+    *,
+    llm=None,
+    event_publisher=None,
+    database_gate: ProcessDbGate,
 ) -> Runtime[AvaContext]:
     """test helper: assemble AvaContext into Runtime; ops_pool
     placeholders for nodes that don't actually borrow conns.
@@ -65,7 +70,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         clients=process_clients(),
         identity=AgentIdentity(agent_id=7, owns_loop=True),
@@ -94,6 +99,7 @@ async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
 async def test_llm_node_collects_chunks_into_final_message(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """llm_node merges streaming chunks into AIMessage into state.messages.
 
@@ -121,7 +127,7 @@ async def test_llm_node_collects_chunks_into_final_message(
 
     result = await llm_node(
         state,
-        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm),
+        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, database_gate=database_gate),
         config,
         ledger=LlmLedger(),
     )
@@ -138,6 +144,7 @@ def _executed_sql(ops_pool) -> list[str]:
 async def test_llm_node_stamps_last_active_at_with_text(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A completed turn that produced text writes both last_active_at (the
     heartbeat idle clock's real-activity anchor) and last_message_text in one
@@ -163,7 +170,7 @@ async def test_llm_node_stamps_last_active_at_with_text(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         identity=AgentIdentity(agent_id=7, owns_loop=True),
         catalog=build_model_catalog(),
@@ -185,6 +192,7 @@ async def test_llm_node_stamps_last_active_at_with_text(
 async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A tool-only turn (code, no text) is still real work: it writes
     last_active_at (without last_message_text, since there is no AI text)."""
@@ -215,7 +223,7 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         identity=AgentIdentity(agent_id=7, owns_loop=True),
         catalog=build_model_catalog(),
@@ -237,6 +245,7 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
 async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """ChatAnthropic + bind_tools real chunk shape (content is list-of-blocks,
     not string) goes through _stream loop → handler.process_chunk → publish full event stream.
@@ -291,7 +300,12 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
 
     await llm_node(
         state,
-        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, event_publisher=pub),
+        _make_runtime(
+            hosted_resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=pub,
+            database_gate=database_gate,
+        ),
         config,
         ledger=LlmLedger(),
     )
@@ -315,6 +329,7 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
 async def test_llm_node_publishes_reasoning_tokens(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """usage_metadata.output_token_details.reasoning rides through to the
     published TokenUsage event end-to-end (gemini/openai reasoning-token
@@ -342,7 +357,12 @@ async def test_llm_node_publishes_reasoning_tokens(
 
     await llm_node(
         state,
-        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, event_publisher=pub),
+        _make_runtime(
+            hosted_resources=hosted_resources,
+            llm=fake_llm,
+            event_publisher=pub,
+            database_gate=database_gate,
+        ),
         config,
         ledger=LlmLedger(),
     )
@@ -357,6 +377,7 @@ async def test_llm_node_publishes_reasoning_tokens(
 async def test_llm_node_preserves_usage_metadata(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """usage_metadata must be on the final AIMessage——evals / cost tracking all rely on this
     field. If someday llm_node falls back to only concatenating content without accumulating AIMessageChunk, this
@@ -383,7 +404,7 @@ async def test_llm_node_preserves_usage_metadata(
 
     result = await llm_node(
         state,
-        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm),
+        _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, database_gate=database_gate),
         config,
         ledger=LlmLedger(),
     )
@@ -397,6 +418,7 @@ async def test_llm_node_preserves_usage_metadata(
 async def test_exec_node_publishes_exec_start_and_output(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """exec_node's two events:
     - before executing publish `exec_start` (UI draws [executing] marker)
@@ -408,7 +430,11 @@ async def test_exec_node_publishes_exec_start_and_output(
 
     # exec_node actually runs subprocess (async) -- use simplest code to avoid side effects
     await exec_node(
-        state, _make_runtime(hosted_resources=hosted_resources, event_publisher=pub), config
+        state,
+        _make_runtime(
+            hosted_resources=hosted_resources, event_publisher=pub, database_gate=database_gate
+        ),
+        config,
     )
 
     events = [EVENT_ADAPTER.validate_json(c.args[0]) for c in pub.emit.call_args_list]
@@ -425,6 +451,7 @@ async def test_exec_node_publishes_exec_start_and_output(
 async def test_exec_node_output_uses_wrap_code_output_envelope(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
+    database_gate: ProcessDbGate,
 ) -> None:
     """exec_node after normal completion, appended HumanMessage uses wrap_code_output
     envelope('Code execution output:' prefix), no longer old '[exec output]\\n...'
@@ -438,9 +465,7 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
 
     result = await exec_node(
         state,
-        _make_runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         config,
     )
 
@@ -466,6 +491,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
     fake_cancel_event: asyncio.Event,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A real child exec cannot evict the previous output still in native context."""
     from agent.graph.exec import output
@@ -502,9 +528,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
     )
     result = await exec_node(
         state,
-        _make_runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         {"configurable": {"thread_id": "7"}},
     )
 

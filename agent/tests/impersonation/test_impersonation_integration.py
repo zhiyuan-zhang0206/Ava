@@ -41,6 +41,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
@@ -85,6 +86,7 @@ async def _prepare_graph(
     automatic: bool = False,
     config_authority: ConfigAuthority,
     clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> tuple[
     Any,
     AsyncPostgresSaver,
@@ -104,11 +106,16 @@ async def _prepare_graph(
     )
     db_conn.commit()
     owner = await admit_hosted_runtime(
-        aops_pool, agent_id, machine, uuid4(), expected_from="idling", db=Database.from_settings()
+        aops_pool,
+        agent_id,
+        machine,
+        uuid4(),
+        expected_from="idling",
+        db=Database.from_settings(gate=database_gate),
     )
     assert owner is not None
     requested = leases.request(
-        Database.from_settings(),
+        Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
@@ -180,7 +187,7 @@ async def _prepare_graph(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         clients=clients,
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
@@ -285,12 +292,18 @@ async def test_consent_exec_inbox_release_and_resume(
     *,
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> None:
     scope = hosted_resources
     # The real exec child boots this installed unit, whose identity is file-owned.
     config_authority.env_path.write_text(f"AVA_MACHINE_NAME={machine_name()}\n", encoding="utf-8")
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
-        db_conn, aops_pool, monkeypatch, config_authority=config_authority, clients=handoff_clients
+        db_conn,
+        aops_pool,
+        monkeypatch,
+        config_authority=config_authority,
+        clients=handoff_clients,
+        database_gate=database_gate,
     )
     agent_id = owner.agent_id
 
@@ -453,6 +466,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     *,
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> None:
     from base.agents.impersonation import history as history
 
@@ -463,6 +477,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
+        database_gate=database_gate,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -556,6 +571,7 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
     *,
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> None:
     graph, saver, ctx, config, _reset, owner, requested, calls = await _prepare_graph(
         db_conn,
@@ -564,6 +580,7 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
         automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
+        database_gate=database_gate,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     # Emulate a committed acceptance followed by a crash before claim's update.
@@ -610,6 +627,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     *,
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> None:
     from agent.impersonation_handoff import deliver_handoff
     from base.agents.impersonation import history as history
@@ -621,6 +639,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
+        database_gate=database_gate,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 
@@ -684,6 +703,7 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     *,
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
 ) -> None:
     """With every source sealed at release, the event log is complete before delivery."""
     from agent.impersonation_handoff import deliver_handoff
@@ -696,6 +716,7 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
         automatic=True,
         config_authority=config_authority,
         clients=handoff_clients,
+        database_gate=database_gate,
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
 

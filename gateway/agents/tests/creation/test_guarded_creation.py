@@ -143,7 +143,12 @@ def test_older_routing_rejects_guarded_path_without_creating_an_agent(
         route for route in agent_router.router.routes if getattr(route, "path", None) != PATH
     ]
     older.include_router(legacy_routes)
-    with TestClient(older, headers={"Authorization": f"Bearer {SECRET}"}) as old:
+    assert isinstance(client.app, FastAPI)
+    with gateway_test_client(
+        older,
+        process=client.app.state.gateway_process_input,
+        headers={"Authorization": f"Bearer {SECRET}"},
+    ) as old:
         assert old.post(PATH, json={}, headers=HEADERS).status_code in (404, 405)
         assert _count(db_conn) == 0
         assert old.post("/api/agents", json={"machine": "local-test"}).status_code == 201

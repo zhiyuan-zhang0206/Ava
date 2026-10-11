@@ -17,6 +17,7 @@ from base.agents.incarnation.native_work_models import (
     NativeWorkUncertainError,
 )
 from base.agents.messages.native_cancel import accept_native_cancel, finish_native_cancel
+from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from services.agent_runner.agent_host.invocation.native_work import (
     cold_cancel_checkpoint,
@@ -31,10 +32,10 @@ from services.agent_runner.agent_host.tests.native_cancel.helpers import managed
 
 
 async def test_checkpoint_flush_ack_and_retained_terminal_receipt(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     pool: ConnectionPool
-    incarnation, target = await managed_work(db_conn, aops_pool)
+    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     graph, saver, config, history = await _prepare_graph(aops_pool, target.agent_id, 100, [])
     saver.serde = JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
@@ -75,10 +76,10 @@ async def test_checkpoint_flush_ack_and_retained_terminal_receipt(
 
 
 async def test_superseded_checkpoint_cannot_ack_old_marker(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     pool: ConnectionPool
-    incarnation, target = await managed_work(db_conn, aops_pool)
+    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accepted = await asyncio.to_thread(
@@ -109,10 +110,10 @@ async def test_superseded_checkpoint_cannot_ack_old_marker(
 
 
 async def test_cold_original_without_marker_or_transfer_is_uncertain(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     pool: ConnectionPool
-    incarnation, target = await managed_work(db_conn, aops_pool)
+    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
     original = await graph.aget_state(config)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
@@ -132,20 +133,24 @@ async def test_cold_original_without_marker_or_transfer_is_uncertain(
 
 
 async def test_no_protected_command_never_adds_cold_startup_hold(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    incarnation, target = await managed_work(db_conn, aops_pool)
+    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     graph, saver, _config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
     assert await recover_native_cancel(aops_pool, saver, graph, incarnation, resources=None)
 
 
 async def test_empty_database_set_does_not_override_live_continuation_resource(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, tmp_path: Path
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    tmp_path: Path,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     pool: ConnectionPool
     from base.native_process.turn_identity import HostedTurnResources
 
-    incarnation, target = await managed_work(db_conn, aops_pool)
+    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accepted = await asyncio.to_thread(
@@ -165,7 +170,11 @@ async def test_empty_database_set_does_not_override_live_continuation_resource(
 
 @pytest.mark.parametrize("missing", [True, False])
 async def test_lost_or_misaligned_pointer_holds_pending_original_command(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, missing: bool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    missing: bool,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     pool: ConnectionPool
     from services.agent_runner.agent_host.invocation.native_work import (
@@ -173,7 +182,7 @@ async def test_lost_or_misaligned_pointer_holds_pending_original_command(
         prepare_native_invocation,
     )
 
-    incarnation, target = await managed_work(db_conn, aops_pool)
+    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         await asyncio.to_thread(accept_native_cancel, pool, "pointer-gap", target.agent_id, target)

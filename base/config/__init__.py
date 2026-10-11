@@ -111,9 +111,7 @@ their settings carry that agent's overlay. Enforced by
 from __future__ import annotations
 
 import os
-import time
 from typing import TYPE_CHECKING, Any, cast
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from base.config import _lite
 from base.config._lite import (
@@ -318,19 +316,9 @@ def apply_cluster_timezone() -> None:
     to apply, and forcing the field default ``America/Los_Angeles`` onto it
     would be wrong.
     """
-    _apply_timezone_name(cluster_tz_name())
+    from base.host.env.dotenv_boot import apply_process_timezone
 
-
-def _apply_timezone_name(name: str | None) -> None:
-    """Apply an explicitly resolved authoritative timezone to the process."""
-    if name is None:
-        return
-    try:
-        ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        return
-    os.environ["TZ"] = name
-    time.tzset()
+    apply_process_timezone(cluster_tz_name())
 
 
 # ── The stable `settings` object ──

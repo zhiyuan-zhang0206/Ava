@@ -10,9 +10,10 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.ownership.tests.test_lifecycle_intent import _command
-from agent.tests.claim.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS, Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from ops.lifecycle.termination import _force_terminate_transaction
 
@@ -24,9 +25,11 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
     applied: bool,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(aops_pool, agent_id)
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     first = _command(db_conn, agent_id, "restart")
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     if applied:

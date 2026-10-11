@@ -1,21 +1,8 @@
-"""Process-commit capture — the properties that make it process state.
+"""Immutable entry images and lazy versions retain the actually loaded generation.
 
-Two of these tests are the whole point of the module and are worth stating
-plainly, because a plausible-looking implementation passes everything else and
-still reproduces the bug it exists to prevent:
-
-- `get()` never reads git. An implementation that lazily resolves HEAD on first
-  read answers with whatever the checkout became, so a daemon that outlived a
-  rollout would report the *new* commit and look aligned.
-- `freeze()` keeps its first answer. The capture is meant to describe the code
-  the process loaded, which cannot change without a restart; a re-reading
-  `freeze()` would let a later caller overwrite that with a newer commit.
-
-The code version (`base.native_process.code_version`) is derived from that
-capture, so its tests live here too: the first-parent commit count follows the
-first-parent line only, comes from the commit the process loaded and not from
-whatever HEAD became, is computed once per process, and a tree with no git
-history fails fast instead of reporting 0.
+Image reads never resolve Git. Independent entries capture independently; an
+entry keeps its captured SHA when the checkout moves. Integer versions use and
+cache that same captured SHA, with honest unknowns and bounded Git failures.
 """
 
 from __future__ import annotations
@@ -38,44 +25,32 @@ _GIT_ENV_KEYS = (
 
 
 @pytest.fixture(autouse=True)
-def _fresh_capture():
-    """Each test starts from an unfrozen process and leaves one behind."""
-    loaded_commit._reset_for_tests()
-    yield
-    loaded_commit._reset_for_tests()
-
-
-@pytest.fixture(autouse=True)
 def _isolated_code_version(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Each test starts with no cached code version and no gate posture (both are
-    restored after), and git free of the ambient repository variables a hook sets."""
-    monkeypatch.setattr(code_version, "_version", None)
-    monkeypatch.setattr(code_version, "_db_gate_exempt", False)
+    """Keep Git free of the ambient repository variables a hook sets."""
     for key in _GIT_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
 
 
-def test_get_is_none_before_freeze() -> None:
-    """An unfrozen process reports unknown rather than resolving HEAD on demand.
+def test_image_is_none_before_capture() -> None:
+    """An entry with no captured SHA reports unknown without resolving HEAD.
 
     This is the guard against the original bug: any read path that can reach git
     is a read path that answers for the *current* checkout, not for the code the
     process is executing."""
-    assert loaded_commit.get() is None
+    assert loaded_commit.LoadedCommit(Path.cwd(), None).sha is None
 
 
-def test_get_never_shells_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Even with git available and a moved checkout, `get()` stays silent until
-    someone froze — it has no git call to make."""
+def test_image_never_shells_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Even with Git available and a moved checkout, an unknown fact stays silent."""
 
     def _explode(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("get() must not resolve git")
+        raise AssertionError("sha must not resolve Git")
 
     monkeypatch.setattr(subprocess, "run", _explode)
-    assert loaded_commit.get() is None
+    assert loaded_commit.LoadedCommit(Path.cwd(), None).sha is None
 
 
-def test_freeze_captures_this_trees_head() -> None:
+def test_capture_captures_this_trees_head() -> None:
     """The capture is the commit of the tree the module was loaded from — the
     checkout under test, resolved from `__file__` rather than the cwd."""
     expected = subprocess.run(
@@ -85,18 +60,16 @@ def test_freeze_captures_this_trees_head() -> None:
         text=True,
         check=True,
     ).stdout.strip()
-    assert loaded_commit.freeze() == expected
-    assert loaded_commit.get() == expected
+    image = loaded_commit.LoadedCommit.capture()
+    assert image.sha == expected
 
 
-def test_freeze_keeps_the_first_answer_when_the_checkout_moves(
+def test_capture_keeps_the_first_answer_when_the_checkout_moves(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A second freeze after the checkout advanced re-uses the first capture.
+    """Independent entry captures observe their own source generation.
 
-    Stand-in for the real sequence: a daemon boots on commit A, a rollout moves
-    the checkout to B, and something in-process calls freeze() again. The daemon
-    is still executing A, so A is the only honest answer."""
+    A later entry can load B while the first entry retains its immutable A fact."""
     shas = iter(["aaaaaaa1111", "bbbbbbb2222"])
 
     def _fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -105,12 +78,14 @@ def test_freeze_keeps_the_first_answer_when_the_checkout_moves(
         )
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert loaded_commit.freeze() == "aaaaaaa1111"
-    assert loaded_commit.freeze() == "aaaaaaa1111"
-    assert loaded_commit.get() == "aaaaaaa1111"
+    first = loaded_commit.LoadedCommit.capture()
+    second = loaded_commit.LoadedCommit.capture()
+    assert first.sha == "aaaaaaa1111"
+    assert second.sha == "bbbbbbb2222"
+    assert first.sha == "aaaaaaa1111"
 
 
-def test_freeze_is_none_outside_a_git_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_capture_is_none_outside_a_git_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
     """A tarball / installed-package deploy has no commit; that is unknown, not
     a crash, and not a guess."""
 
@@ -118,28 +93,28 @@ def test_freeze_is_none_outside_a_git_checkout(monkeypatch: pytest.MonkeyPatch) 
         return subprocess.CompletedProcess(args=[], returncode=128, stdout="", stderr="not a repo")
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert loaded_commit.freeze() is None
-    assert loaded_commit.get() is None
+    assert loaded_commit.LoadedCommit.capture().sha is None
+    assert loaded_commit.LoadedCommit(Path.cwd(), None).sha is None
 
 
-def test_freeze_survives_a_missing_git_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_capture_survives_a_missing_git_binary(monkeypatch: pytest.MonkeyPatch) -> None:
     """Capturing a commit is bookkeeping; it must never take a daemon down."""
 
     def _fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise FileNotFoundError("git")
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert loaded_commit.freeze() is None
+    assert loaded_commit.LoadedCommit.capture().sha is None
 
 
-def test_freeze_survives_a_hung_git(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_capture_survives_a_hung_git(monkeypatch: pytest.MonkeyPatch) -> None:
     """The capture is bounded — a wedged git cannot stall a daemon's boot."""
 
     def _fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(cmd="git", timeout=10)
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert loaded_commit.freeze() is None
+    assert loaded_commit.LoadedCommit.capture().sha is None
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -213,49 +188,41 @@ def test_an_unresolvable_revision_fails_fast(tmp_path: Path) -> None:
         code_version.first_parent_count(repo, "no-such-revision")
 
 
-def test_get_counts_from_the_frozen_commit_and_caches(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The version answers for the commit the process loaded (`freeze()`), asked of
-    this module's own tree, and one process asks git once."""
+def test_image_counts_from_the_frozen_commit_and_caches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The version answers for the commit the process loaded (`capture()`), asked of
+    this module's own tree, and one version owner asks Git once."""
     asked: list[tuple[Path, str]] = []
 
     def fake_count(repo: Path, rev: str = "HEAD") -> int:
         asked.append((repo, rev))
         return 41
 
-    monkeypatch.setattr(loaded_commit, "freeze", lambda: "abc123")
+    image = loaded_commit.LoadedCommit(Path.cwd(), "abc123")
+    version = code_version.CodeVersion(image)
     monkeypatch.setattr(code_version, "first_parent_count", fake_count)
 
-    assert code_version.get() == 41
-    assert code_version.get() == 41
-    assert asked == [(code_version._SOURCE_ROOT, "abc123")]
+    assert version.get() == 41
+    assert version.get() == 41
+    assert asked == [(image.source_root, "abc123")]
 
 
-def test_get_without_a_git_checkout_fails_fast_and_is_not_zero(
+def test_image_without_a_git_checkout_fails_fast_and_is_not_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(loaded_commit, "freeze", lambda: None)
-    with pytest.raises(code_version.CodeVersionError, match="git checkout"):
-        code_version.get()
+    image = loaded_commit.LoadedCommit(Path.cwd(), None)
+    with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
+        code_version.CodeVersion(image).get()
 
 
-def test_get_matches_git_for_this_checkout() -> None:
+def test_image_matches_git_for_this_checkout() -> None:
     """End to end against the checkout under test (shallow in CI, so only the
     agreement with git is asserted, never a magnitude)."""
-    expected = subprocess.run(
-        ["git", "rev-list", "--count", "--first-parent", "HEAD"],
-        cwd=code_version._SOURCE_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    assert code_version.get() == int(expected)
-    assert code_version.get() >= 1
-
-
-def test_the_database_gate_applies_until_a_process_exempts_itself() -> None:
-    assert code_version.db_gate_applies() is True
-    code_version.exempt_from_db_gate()
-    assert code_version.db_gate_applies() is False
+    image = loaded_commit.LoadedCommit.capture()
+    assert image.sha is not None
+    expected = _git(image.source_root, "rev-list", "--count", "--first-parent", image.sha)
+    version = code_version.CodeVersion(image)
+    assert version.get() == int(expected)
+    assert version.get() >= 1
 
 
 def test_explicit_loaded_image_survives_checkout_move_before_lazy_version(

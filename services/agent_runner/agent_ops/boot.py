@@ -1,20 +1,20 @@
 """ava-ops boot helpers — the leaf lookups `_main` needs before it can serve.
 
 Split out of `services/agent_runner/agent_ops/daemon.py` to keep that module inside the file-size
-budget. These four are leaves: the daemon calls them, they call nothing back, and
-nothing else in this package imports them. `daemon` re-imports them into its own
-namespace, so `daemon._register_boot` and friends stay the names the daemon's own
-callers (and its tests) address.
+budget. These operations receive the daemon's database factory at their original
+read points. The daemon calls this definition owner directly; helpers do not
+construct a process gate or discover a process image.
 
-- `_register_boot` — the boot-time `machine_units` re-announce.
-- `_ops_bind_host` / `_ops_acceptance` — where this daemon listens, and what it
+- `register_boot` — the boot-time `machine_units` re-announce.
+- `ops_bind_host` / `ops_acceptance` — where this daemon listens, and what it
   requires on the way in.
-- `_open_db_pool` — the shared pool every in-process op borrows a connection from.
+- `open_db_pool` — the shared pool every in-process op borrows a connection from.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 import psycopg
 from psycopg.rows import TupleRow
@@ -25,10 +25,12 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
 
+__all__ = ["open_db_pool", "ops_acceptance", "ops_bind_host", "ops_handles", "register_boot"]
+
 _log = logging.getLogger("services.agent_runner.agent_ops.daemon")
 
 
-def _register_boot() -> None:
+def register_boot(*, database: Callable[[], Database]) -> None:
     """Re-announce this unit as up, now that the ops daemon is actually serving.
 
     The `machine_units` row is a liveness record, and until this call the only
@@ -56,7 +58,7 @@ def _register_boot() -> None:
 
     try:
         url = unit_dial_url(machine_role())
-        register_self(Database.from_settings(), url=url)
+        register_self(database(), url=url)
     except Exception:
         _log.exception(
             "boot registration failed — this unit's machines row keeps its previous "
@@ -66,7 +68,7 @@ def _register_boot() -> None:
     _log.info("registered this unit as up at %s", url)
 
 
-def _ops_bind_host(acceptance: frozenset[str] | None) -> str:
+def ops_bind_host(acceptance: frozenset[str] | None) -> str:
     """The ops server's bind address — 0.0.0.0 when /ops is authenticated
     (`acceptance` is not None), loopback when it is not.
 
@@ -84,19 +86,21 @@ def _ops_bind_host(acceptance: frozenset[str] | None) -> str:
     return "127.0.0.1"
 
 
-def _ops_acceptance() -> frozenset[str] | None:
+def ops_acceptance() -> frozenset[str] | None:
     """SHA-256 digests of the bearers /ops accepts, or None for the open posture: the
     daemon acceptance of `base.cluster.machine.daemon_acceptance` (the gateway dials /ops with its
     gateway-class machine API token, a runner-class process of the unit with its runner token)."""
     return daemon_acceptance()
 
 
-def _ops_handles() -> tuple[Database, EventBus]:
+def ops_handles(*, database: Callable[[], Database]) -> tuple[Database, EventBus]:
     """The cluster handles every in-process lifecycle op works with, as the settings name them."""
-    return Database.from_settings(), EventBus.from_settings()
+    return database(), EventBus.from_settings()
 
 
-def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
+def open_db_pool(
+    *, database: Callable[[], Database]
+) -> ConnectionPool[psycopg.Connection[TupleRow]]:
     """The shared pool the in-process ops dispatch path borrows from.
 
     Sized for `ops_concurrency` plus a small margin — each lifecycle op holds a
@@ -121,7 +125,7 @@ def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
     # the first dispatch of the day dies with psycopg.OperationalError
     # 'the connection is closed' (Task #1027). The check discards the dead conn
     # and hands out a fresh one.
-    return Database.from_settings().pool(
+    return database().pool(
         min_size=0,  # an idle daemon holds no client connection; borrows open lazily
         max_size=max(2, settings.services.ops_concurrency + 2),
         check_connections=True,

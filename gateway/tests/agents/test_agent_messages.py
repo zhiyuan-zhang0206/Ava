@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 
 from base.db import create_agent
 from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture
@@ -31,7 +32,7 @@ def test_client(db_conn: psycopg.Connection):
     """TestClient + lifespan. db_conn's TRUNCATE runs before lifespan — the
     DB pool reuses the same test database (settings.data_plane.db_url is swapped by the
     conftest)."""
-    with TestClient(app) as client:
+    with gateway_test_client(app) as client:
         yield client
 
 
@@ -352,7 +353,7 @@ def test_checkpoint_read_failure_returns_503(
     monkeypatch.setattr(ckpt_mod.HistoryPostgresSaver, "get_tuple", fail_read)
     # raise_server_exceptions=False so FastAPI's error middleware turns the
     # HTTPException into a real HTTP 503 instead of re-raising into the test.
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with gateway_test_client(app, raise_server_exceptions=False) as client:
         resp = client.get(f"/api/agents/{tid}/messages")
     assert resp.status_code == 503, f"expected 503, got {resp.status_code}: {resp.text[:200]}"
     assert len(attempts) == 1

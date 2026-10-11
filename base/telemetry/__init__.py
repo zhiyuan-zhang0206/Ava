@@ -13,7 +13,8 @@ directly: `otlp/` (the OTLP export backend and its doc nodes), `tracing` and
 (the audit side of the event stream).
 
 This init intentionally pulls nothing beyond the emitter's own chain (events
-contract + observability + paths) and the docstring-only otlp subpackage init.
+contract + observability) and the docstring-only otlp subpackage init. Mirror
+paths are resolved inside their write/prune operations after entry admission.
 Internal details (module-level constants, counters, helpers the implementation
 reads as its own globals) live in `base/telemetry/emitter.py`; code that
 patches those internals must patch them on that module — a patch on a package

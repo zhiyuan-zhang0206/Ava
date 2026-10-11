@@ -43,45 +43,11 @@ state.
 
 ## Remaining implementation
 
-1. Finish native root and resource custody on each supported platform. Prove
-   deliberate shutdown does not fight OS restart policy, and test owner death,
-   interrupted spawn and unresponsive IPC. Windows terminal birth must originate
-   outside application Jobs through a registered resource owner; ordinary
-   execution cannot use that route as an untracked escape.
-2. Removed: candidate preparation, the durable release state machine and
-   fleet write authority were the image path's items; the decision replaced
-   them with the scripted source update. What it does not do (in-flight
-   workload rollback, automatic recovery) is an operator step in the runbook.
-3. Remove all superseded runtime paths and perform one explicit cutover. Temporary
-   manual database or host repair can belong to that cutover record, never to a
-   permanent compatibility layer. Record each host's approved executable search
-   directories as `AVA_SERVICE_PATH` in its home configuration before first start
-   with the new code; omit virtualenv directories. Do not derive this declaration
-   from a later recovery caller's PATH. Deployment is separate from PR merge.
-   The one-time home adoption and database-records repair tooling is removed:
-   no code adopts or converts an existing home or its database records.
-   Cutover preconditions and one-time repairs:
-   - Every cluster reads `deployment_state.managed_writer_evidence->'pending'
-     IS NULL` before this release is admitted. The retired updater's checked
-     publication recovery is gone, and no runtime command clears a recorded
-     pending publication; an operator's manual database repair clears exactly
-     the recorded value.
-   - `$AVA_HOME/installed_sha` has no reader or writer; the source-tree check
-     alerts only on checkout edits of a source-run home. Delete the file in the
-     cutover record.
-   - Do not remove `$AVA_HOME/run/deploy-pause-owner.json` on a host while a
-     legacy updater, rollout, cluster-restart or hold-recovery session, an `ava
-     stop` may still be alive there. No current
-     code spawns a legacy session, and no command clears a `paused` record one
-     left: once `ava status` shows no live owner, the operator
-     removes the journal by hand.
-   - `$AVA_HOME/run/updater-handoff.json`, `updater-handoff.lock`,
-     `updater-bootstrap-recovery.json` and `updater-spawn/` have no reader or
-     writer: recovery no longer refuses on them. Delete them in the cutover
-     record.
-   - `$AVA_HOME/deploy-state.json`, the retired updater's Gate marker, has no
-     reader or writer; Gate never renders an update page. Delete it in the
-     cutover record.
+- Finish native root and resource custody on each supported platform. Prove
+  deliberate shutdown does not fight OS restart policy, and test owner death,
+  interrupted spawn and unresponsive IPC. Windows terminal birth must originate
+  outside application Jobs through a registered resource owner; ordinary
+  execution cannot use that route as an untracked escape.
 
 ## Retired controller storage
 

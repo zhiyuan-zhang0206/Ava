@@ -11,6 +11,7 @@ from base.agents.incarnation.resources import IncarnationResources, ResourceBirt
 from base.cluster.machine import machine_name
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.plugin_providers import build_model_catalog
 from ops.agents.birth_transaction import insert_agent_birth
 from ops.agents.creation_identity import creation_request_hash
@@ -43,6 +44,7 @@ async def test_real_first_admission_consumes_birth_and_replay_preserves_resource
     aops_pool: AsyncConnectionPool,
     *,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ) -> None:
     machine = machine_name()
     digest = creation_request_hash({"machine": machine})
@@ -66,7 +68,7 @@ async def test_real_first_admission_consumes_birth_and_replay_preserves_resource
         machine,
         uuid4(),
         expected_from="idling",
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
     )
     assert admitted is not None
     before = db_conn.execute(

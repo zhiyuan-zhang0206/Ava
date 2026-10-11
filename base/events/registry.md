@@ -75,7 +75,6 @@ Emit sites and consumers: see the comments at each emit point.
 | `cancel` | in-flight turn cancelled | business | — | events |
 | `resurrect` | terminated agent woken | business | — | events |
 | `billing_resurrect` | billing batch recovery run: billing-class halt victims reinstated after the provider balance gate passed (task #3919) | business | — | events |
-| `restart_completed` | restart finished | business | — | events |
 | `hosted_legacy_adoption` | a hosted successor replaced a legacy NULL-resource owner before lease expiry on machine-local evidence (dead predecessor probe set) | business | — | events |
 | `compact` | agent context compacted | business | — | events |
 | `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue) | business | — | events |
@@ -95,7 +94,7 @@ Emit sites and consumers: see the comments at each emit point.
 
 ## 3. Telemetry events (category=telemetry)
 
-Telemetry-side event name resolution (`base/log/__init__.py`): **explicit `event=` →
+Telemetry-side event name resolution (`base/log/process.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
 (formatted full text) + exception traceback. `(L)` marks names currently produced via
 **label fallback** (no explicit event=); `(SQL)` marks writes that bypass loguru and
@@ -132,7 +131,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `checkpoint_write_failed` | checkpoint write failed | anomaly | — | — | events | — |
 | `trace` | otel span export | noise | — | — | events | — |
 | `history_dump` | pre-compact history dumped to workspace | noise | — | — | events | — |
-| `checkpoint_trim` | checkpoint trimmed | noise | — | — | events | — |
 | `recall_filter` | memory recall filter | noise | body, query_hmac_sha256, picked_paths | — | events | ✓ |
 | `passive_recall` | passive memory recall | noise | search_ms, filter_ms | — | events | ✓ |
 | `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events | — |
@@ -262,7 +260,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `launch_force_terminated` | launch force-terminated | anomaly | — | — | events | — |
 | `launch_force_terminated_skipped` | launch force-terminate skipped | noise | — | — | events | — |
 | `launch_retry` | launch retried | observation | — | — | events | — |
-| `idle_wake` | agent woken from idle | noise | degraded, elapsed_s, rounds, timeout_s, wake_state | — | events | ✓ |
 | `wake_degraded` | RedisInboundListener wake path degraded (instant pub/sub wake off) | anomaly | — | — | events | — |
 | `wake_restored` | RedisInboundListener wake path recovered (clean consume restored instant wake) | noise | — | — | events | — |
 | `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, unpriced, usage_kind, source, cache_mechanism, cache_scope | — | events | ✓ |
@@ -435,83 +432,7 @@ Under the unified model `event_name` is a globally unique event name (OTel
 
 ---
 
-## 7. Noise and governance record (by priority)
-
-### 7.1 [P0] Dynamic-label pseudo event_names — ✓ governed (W8, 2026-08-04)
-
-Before: `status (agent N)` (5,626), `idle wake (agent N)` (2,180), `claim (agent N)`
-(1,016) — label fallback spliced agent_id into the event name, exploding the event
-value space (468 distinct vs ~60 static), so any stats/alerts keyed by event_name
-broke.
-
-**Governance done (W8 · PR #1348)**:
-- the 3 dynamic labels in `agent/db/__init__.py` → explicit `event="status_change"` (×2,
-  payload carries from/to) and `event="idle_wake"` (payload carries
-  degraded/elapsed_s/rounds/timeout_s); label keeps its UI display role
-  (`status-change` / `idle-wake`).
-- `claim (agent N)` was already eliminated by the earlier #1186 refactor (no new
-  rows since 8/1); no residue.
-- existing historical rows (~75k) stay as-is; new data is all static event_name.
-
-**Re-run verification**: the event=/label= inventory from `scan_kinds.py --repo .`
-shows no dynamic concatenation left.
-
-### 7.2 [P0] Bare logs are 50.8% (3.07M / 6.04M rows)
-
-Open item from design doc §8.2: L2 only accepts WARNING+. Today INFO bare logs are
-pure filtering burden for metrics/rollup. **Governance**: downgrade the DB sink
-(INFO stays in JSONL), require explicit event=.
-
-### 7.3 [P1] Cross-category duplicates / naming inconsistencies — ✓ governed (W8, 2026-08-04)
-
-- `compact` (audit) vs the agent_events label fallback `compact` — **governed**:
-  agent_events now uses `compact_request`, audit keeps `compact`.
-- `resurrect` (audit) vs `agent_resurrected` (telemetry) overlap semantically —
-  **coordinated**: names were already distinct, kept apart by category.
-- Parenthesized names `llm(cancelled)` / `exec(timeout)` → `llm_cancelled` /
-  `exec_timeout` — **governed**.
-- Hyphenated names `recall-filter` / `checkpoint-trim` / `compact-reminder` →
-  `recall_filter` / `checkpoint_trim` / `compact_reminder` — **governed**.
-- `llm-provider-error` and `llm_provider_error` are two names for one fact —
-  **merged**: the label display name is unified as `llm_provider_error`, one event
-  name.
-
-### 7.4 [Resolved] Historical event_names with no producer
-
-`report_activity` (5,274 rows) and `report_breached` (14 rows) have no producer left
-in code; both are declared `retired`. Only pre-retirement rows carry them.
-
-### 7.5 [Resolved] skill_invoked parse/injection noise
-
-Both historical sources eliminated: `invocation_depth=prompt_injected` is no longer
-written; node parsing no longer records it since 2026-08-06 — the event is only
-produced when the SKILL.md body is first consumed (`help()` / `__doc__`), so the
-loaded semantics = the body was actually read.
-
-### 7.6 [Settled] Final event_name-category caliber (2026-08-05, tracker #762/#763)
-
-The `EVENTS` registry in `base/events/contract.py` (R2-C) is the final caliber for
-event_name and category; `_TELEMETRY_KINDS` in
-`base/telemetry/emitter.py` is a derived projection, no longer hand-maintained:
-
-- **`text`, `syntax_fix` → telemetry**: the whitelist previously missed these two
-  label-fallback event_names, so live data landed in log (30d). Now whitelisted +
-  historical rows (~103k) backfilled to telemetry by migration
-  `20260805T083741_kind-category-final`.
-- **`agent_restarted` → telemetry** (#763): whitelisted in W8; live and migration
-  agree.
-- **Historical/dead event_names stay log**: `claim`, `code(cancelled)`,
-  `exec(interrupt)`, `stream_corrupted_retry`,
-  `stream_corrupted_or_stalled_retry`, `watcher_resume_recovery`,
-  `report_overdue_nudged`, `report_paused` — no producer, no consumer, not
-  whitelisted (natural retirement at 30d).
-- **`recall_filter` panel fixed**: `ava_builtins/plugins/ava_memory/metrics.py`
-  previously queried the old spelling `recall-filter` (0 rows since the W8 rename),
-  now queries `recall_filter` + telemetry.
-
----
-
-## 8. Inventory method and coverage (reproducible)
+## 7. Inventory method and coverage (reproducible)
 
 1. **Registry**: the `EVENTS` in `base/events/contract.py`, merged from
    `base/events/declarations/`, is the single source of truth; this document is generated by `scripts/codegen/gen_event_registry.py` (the

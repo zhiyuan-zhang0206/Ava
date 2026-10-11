@@ -53,8 +53,6 @@ def _enabled_ui_declarations() -> list[tuple[str, dict[str, Any]]]:
                 status_code=500,
                 detail=f"plugin {name!r} has an invalid ava-plugin.json: {e}",
             ) from e
-        if manifest is None:
-            continue
         ui = manifest.contributions.get("ui")
         if ui is None:
             continue

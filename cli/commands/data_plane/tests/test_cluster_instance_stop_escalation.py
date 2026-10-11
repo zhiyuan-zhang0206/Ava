@@ -8,16 +8,22 @@ loud: stderr plus the `postgres_stop_escalated` event
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
 
 from base.cluster import postgres as owned_postgres
+from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_stop_cluster_instance_reports_an_escalation(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     escalation = owned_postgres.Escalation(
         detail="fast shutdown did not complete within 277s", killed=(4242,)
@@ -48,7 +54,7 @@ def test_stop_cluster_instance_reports_an_escalation(
     monkeypatch.setattr(instance.owned_postgres, "stop", fake_stop)
     monkeypatch.setattr("cli.commands.data_plane.pgbouncer.stop_pgbouncer", fake_pgbouncer_stop)
 
-    assert instance.stop_cluster_instance() == 0
+    assert instance.stop_cluster_instance(producer=operator_pipeline) == 0
 
     assert len(emitted) == 1
     (args, kwargs) = emitted[0]

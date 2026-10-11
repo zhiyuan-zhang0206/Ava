@@ -29,7 +29,12 @@ def _h_start(
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from cli.start_intent import run_start
 
-    return run_start(args, retained_children=retained_children)
+    return run_start(
+        args,
+        retained_children=retained_children,
+        database_factory=args.database_factory,
+        producer=args.producer,
+    )
 
 
 def _h_stop(
@@ -46,6 +51,8 @@ def _h_stop(
         force=args.force,
         timeout=args.timeout,
         retained_children=retained_children,
+        database_factory=args.database_factory,
+        producer=args.producer,
     )
 
 
@@ -58,7 +65,12 @@ def _h_restart(
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from cli.commands.lifecycle.stop import cmd_restart
 
-    return cmd_restart(mode=args.mode, retained_children=retained_children)
+    return cmd_restart(
+        mode=args.mode,
+        retained_children=retained_children,
+        database_factory=args.database_factory,
+        producer=args.producer,
+    )
 
 
 def _h_status(args: argparse.Namespace) -> int:
@@ -68,13 +80,13 @@ def _h_status(args: argparse.Namespace) -> int:
         return cmd_status_json()
     from cli.commands.lifecycle.status import cmd_status
 
-    return cmd_status()
+    return cmd_status(database_factory=args.database_factory)
 
 
 def _h_converge(_args: argparse.Namespace) -> int:
     from cli.commands.converge.host import cmd_converge
 
-    return cmd_converge()
+    return cmd_converge(database_factory=_args.database_factory, producer=_args.producer)
 
 
 def _h_firewall_status(_args: argparse.Namespace) -> int:
@@ -343,13 +355,23 @@ def _h_lgtm(
     from cli.commands.observability.lgtm import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
 
     if args.lgtm_cmd == "on":
-        return cmd_lgtm_on(retained_children=retained_children)
+        return cmd_lgtm_on(
+            retained_children=retained_children,
+            database_factory=args.database_factory,
+            producer=args.producer,
+        )
     if args.lgtm_cmd == "off":
-        return cmd_lgtm_off(retained_children=retained_children)
+        return cmd_lgtm_off(
+            retained_children=retained_children,
+            database_factory=args.database_factory,
+            producer=args.producer,
+        )
     if args.lgtm_cmd == "render":
         from cli.commands.observability.grafana_render import cmd_grafana_render
 
-        return cmd_grafana_render(force=args.force, repo_only=args.repo_only)
+        return cmd_grafana_render(
+            force=args.force, repo_only=args.repo_only, database_factory=args.database_factory
+        )
     return cmd_lgtm_status()
 
 

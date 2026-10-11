@@ -9,6 +9,7 @@ from base.agents.compaction.commands import accept
 from base.agents.compaction.execution import claim_attempt, pending
 from base.agents.compaction.tests.helpers import source
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 
 
@@ -18,9 +19,14 @@ async def test_concurrent_claim_returns_exact_one_first_provider_authority(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     incarnation, target, *_ = await source(
-        db_conn, aops_pool, config_authority=config_authority, model_catalog=model_catalog
+        db_conn,
+        aops_pool,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accept(pool, str(target.observation_id), target.source.agent_id, target)

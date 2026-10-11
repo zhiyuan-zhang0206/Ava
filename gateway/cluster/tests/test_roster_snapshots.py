@@ -17,8 +17,10 @@ import gateway.cluster.status as status_mod
 from base.api_contracts.status import MachineStatus
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.cluster import snapshots
+from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.snapshots import Snapshot
 from ops.cluster import rpc as cluster_rpc
@@ -77,14 +79,17 @@ def no_dial(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return dialed
 
 
-def _gather(rows: list[_ROW], snaps: dict[str, Snapshot] | None) -> list[MachineStatus]:
+def _gather(
+    rows: list[_ROW], snaps: dict[str, Snapshot] | None, database_gate: ProcessDbGate
+) -> list[MachineStatus]:
     return asyncio.run(
         status_mod.gather_cluster_status(
-            Database.from_settings(),
+            Database.from_settings(gate=database_gate),
             rows,
             "gateway",
             identity_log=IdentityMismatchLog(),
             snapshots=snaps,
+            image=LOADED_IMAGE,
         )
     )
 
@@ -108,8 +113,12 @@ def test_two_failed_passes_make_a_fresh_snapshot_known_down() -> None:
 # --- rendering from a snapshot ------------------------------------------------
 
 
-def test_a_fresh_reachable_snapshot_renders_online_with_its_age(no_dial: list[str]) -> None:
-    [machine] = _gather([_row()], {"wsl": _snap(status=_status(), status_age_s=12)})
+def test_a_fresh_reachable_snapshot_renders_online_with_its_age(
+    no_dial: list[str], database_gate: ProcessDbGate
+) -> None:
+    [machine] = _gather(
+        [_row()], {"wsl": _snap(status=_status(), status_age_s=12)}, database_gate=database_gate
+    )
 
     assert machine.online is True and machine.paused is False
     assert machine.running_sha == "def456" and machine.shell_count == 3
@@ -118,9 +127,13 @@ def test_a_fresh_reachable_snapshot_renders_online_with_its_age(no_dial: list[st
     assert no_dial == []  # nothing was dialed
 
 
-def test_one_dropped_probe_keeps_the_last_status_and_its_age(no_dial: list[str]) -> None:
+def test_one_dropped_probe_keeps_the_last_status_and_its_age(
+    no_dial: list[str], database_gate: ProcessDbGate
+) -> None:
     [machine] = _gather(
-        [_row()], {"wsl": _snap(reachable=False, failures=1, status=_status(), status_age_s=70)}
+        [_row()],
+        {"wsl": _snap(reachable=False, failures=1, status=_status(), status_age_s=70)},
+        database_gate=database_gate,
     )
 
     assert machine.online is True and machine.running_sha == "def456"
@@ -135,28 +148,34 @@ def test_one_dropped_probe_keeps_the_last_status_and_its_age(no_dial: list[str])
     ids=["two-failed-passes", "failed-and-never-answered"],
 )
 def test_a_machine_that_failed_its_passes_renders_offline(
-    no_dial: list[str], failures: int, answered: bool
+    no_dial: list[str], failures: int, answered: bool, database_gate: ProcessDbGate
 ) -> None:
     # Built here, not at collection: a snapshot is fresh only for a few pass intervals, and a
     # long run reaches this test long after parametrization.
     snapshot = _snap(reachable=False, failures=failures, status=_status() if answered else None)
-    [machine] = _gather([_row()], {"wsl": snapshot})
+    [machine] = _gather([_row()], {"wsl": snapshot}, database_gate=database_gate)
 
     assert machine.online is False and machine.paused is None
     assert no_dial == []
 
 
 def test_a_reachable_answer_that_is_not_a_cluster_status_is_online_unknown(
-    no_dial: list[str],
+    no_dial: list[str], database_gate: ProcessDbGate
 ) -> None:
-    [machine] = _gather([_row()], {"wsl": _snap(reachable=True, status=None)})
+    [machine] = _gather(
+        [_row()], {"wsl": _snap(reachable=True, status=None)}, database_gate=database_gate
+    )
 
     assert machine.online is True and machine.paused is None
     assert no_dial == []
 
 
-def test_a_snapshot_answered_by_another_host_renders_identity_mismatch(no_dial: list[str]) -> None:
-    [machine] = _gather([_row()], {"wsl": _snap(status=_status("somewhere-else"))})
+def test_a_snapshot_answered_by_another_host_renders_identity_mismatch(
+    no_dial: list[str], database_gate: ProcessDbGate
+) -> None:
+    [machine] = _gather(
+        [_row()], {"wsl": _snap(status=_status("somewhere-else"))}, database_gate=database_gate
+    )
 
     assert machine.identity_mismatch is True and machine.online is False
     assert no_dial == []
@@ -165,7 +184,9 @@ def test_a_snapshot_answered_by_another_host_renders_identity_mismatch(no_dial: 
 # --- when the gateway dials ---------------------------------------------------
 
 
-def test_a_machine_without_a_fresh_snapshot_is_dialed(no_dial: list[str]) -> None:
+def test_a_machine_without_a_fresh_snapshot_is_dialed(
+    no_dial: list[str], database_gate: ProcessDbGate
+) -> None:
     """The degraded fallback for a heartbeat service that is not running."""
     rows = [_row("fresh-one"), _row("stale-one"), _row("unknown-one")]
     snaps = {
@@ -173,20 +194,24 @@ def test_a_machine_without_a_fresh_snapshot_is_dialed(no_dial: list[str]) -> Non
         "stale-one": _snap(status=_status("stale-one"), age_s=3600),
     }
 
-    machines = _gather(rows, snaps)
+    machines = _gather(rows, snaps, database_gate=database_gate)
 
     assert sorted(no_dial) == ["stale-one", "unknown-one"]
     assert {m.name for m in machines} == {"fresh-one", "stale-one", "unknown-one"}
 
 
-def test_a_fresh_read_dials_every_runner_whatever_the_snapshot_says(no_dial: list[str]) -> None:
-    machines = _gather([_row("a"), _row("b")], None)
+def test_a_fresh_read_dials_every_runner_whatever_the_snapshot_says(
+    no_dial: list[str], database_gate: ProcessDbGate
+) -> None:
+    machines = _gather([_row("a"), _row("b")], None, database_gate=database_gate)
 
     assert sorted(no_dial) == ["a", "b"]
     assert all(m.online and m.observed_at is None for m in machines)  # live, no age
 
 
-def test_the_gateway_remembers_no_failure_between_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_gateway_remembers_no_failure_between_reads(
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+) -> None:
     """A host that fails a dial is dialed again by the next fresh read: there is no
     failure memory and no recovery thread in the gateway."""
     calls: list[str] = []
@@ -197,15 +222,15 @@ def test_the_gateway_remembers_no_failure_between_reads(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
 
-    first = _gather([_row()], None)
-    second = _gather([_row()], None)
+    first = _gather([_row()], None, database_gate=database_gate)
+    second = _gather([_row()], None, database_gate=database_gate)
 
     assert [m.online for m in first + second] == [False, False]
     assert calls == ["wsl", "wsl"]
 
 
 def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     """The dials run in parallel under one per-dial deadline, so five hosts that
     never answer cost about one budget, not five."""
@@ -219,7 +244,7 @@ def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
 
     started = time.monotonic()
-    machines = _gather([_row(f"h{i}") for i in range(5)], None)
+    machines = _gather([_row(f"h{i}") for i in range(5)], None, database_gate=database_gate)
     elapsed = time.monotonic() - started
 
     assert [m.online for m in machines] == [False] * 5

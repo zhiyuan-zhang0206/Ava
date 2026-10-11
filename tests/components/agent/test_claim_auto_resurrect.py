@@ -16,6 +16,7 @@ from agent.state import AgentState
 from agent.tests.claim.claim_support import _config, _insert_inbound_kind, _make_runtime
 from base.config.service_read import ConfigAuthority
 from base.db import Database, insert_inbound_message
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
@@ -28,6 +29,7 @@ async def running_agent(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """Admit a real hosted owner and bind it throughout each dispatch test."""
     from uuid import uuid4
@@ -35,7 +37,9 @@ async def running_agent(
     from agent.ownership.hosted import admit_hosted_runtime
     from base.cluster.machine import machine_name
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     incarnation = await admit_hosted_runtime(
         aops_pool,
         agent_id,
@@ -59,6 +63,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
 ):
     """A settled prior command, not marker recency, protects the real successor."""
 
@@ -73,7 +78,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     assert (
         await claim_node(
             AgentState(messages=[SystemMessage(content="sys")]),
-            _make_runtime(ops_pool=aops_pool),
+            _make_runtime(ops_pool=aops_pool, database_gate=database_gate),
             _config(
                 tid,
             ),
@@ -114,7 +119,8 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
         AgentState(messages=[SystemMessage(content="sys")]),
         Runtime(
             context=replace(
-                _make_runtime(ops_pool=aops_pool).context, original_incarnation=successor
+                _make_runtime(ops_pool=aops_pool, database_gate=database_gate).context,
+                original_incarnation=successor,
             )
         ),
         _config(tid),

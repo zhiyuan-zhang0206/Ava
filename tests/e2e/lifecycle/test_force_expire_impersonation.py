@@ -15,6 +15,7 @@ from base.agents.impersonation.relay import relay_get, relay_inbox
 from base.cluster.machine import set_identity
 from base.config import settings
 from base.db import Database, publish_inbound_wake
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
@@ -26,7 +27,9 @@ from tests.e2e.fakes.scenarios.force_expire import FIRST_REPLY, RESUMED_REPLY
 from tests.e2e.fixture_environment import E2EEnv
 
 
-def _seed_active_lease(agent_id: int, relay_token: str) -> tuple[UUID, int]:
+def _seed_active_lease(
+    agent_id: int, relay_token: str, database_gate: ProcessDbGate
+) -> tuple[UUID, int]:
     """Insert one already-active lease without publishing intermediate consent wakes."""
     lease_id = uuid4()
     with psycopg.connect(settings.data_plane.db_url) as conn:
@@ -48,7 +51,10 @@ def _seed_active_lease(agent_id: int, relay_token: str) -> tuple[UUID, int]:
         assert session_row is not None
         session_id = session_row[0]
     publish_inbound_wake(
-        Database.from_settings(), EventBus.from_settings(), agent_id, "impersonation"
+        Database.from_settings(gate=database_gate),
+        EventBus.from_settings(),
+        agent_id,
+        "impersonation",
     )
     bus = EventBus.from_settings()
     publish_impersonation_changed_sync(bus, agent_id)
@@ -56,12 +62,14 @@ def _seed_active_lease(agent_id: int, relay_token: str) -> tuple[UUID, int]:
     return lease_id, session_id
 
 
-def _exhaust_delivery_budget(env: E2EEnv, lease_id: UUID, relay_token: str) -> str:
+def _exhaust_delivery_budget(
+    env: E2EEnv, lease_id: UUID, relay_token: str, database_gate: ProcessDbGate
+) -> str:
     """Drive real relay reservations; leave the unanswered UI request for native recovery."""
     request = "Please keep this unanswered request when the external session ends."
     env.page.fill('[data-testid="composer-input"]', request)
     env.page.click('[data-testid="composer-send"]')
-    db, bus = Database.from_settings(), EventBus.from_settings()
+    db, bus = Database.from_settings(gate=database_gate), EventBus.from_settings()
     handle = str(lease_id)
     pending: list[int] = []
 
@@ -109,7 +117,7 @@ def _exhaust_delivery_budget(env: E2EEnv, lease_id: UUID, relay_token: str) -> s
 @pytest.mark.parametrize("exhaust_ack_budget", [False, True], ids=["ordinary", "ack-exhausted"])
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.force_expire:build")
 def test_sidebar_force_expires_takeover_and_agent_resumes(
-    e2e_env: E2EEnv, exhaust_ack_budget: bool
+    e2e_env: E2EEnv, exhaust_ack_budget: bool, database_gate: ProcessDbGate
 ) -> None:
     # The test-process relay driver uses the same machine as the real e2e host.
     set_identity(name=os.environ["AVA_MACHINE_NAME"])
@@ -142,9 +150,11 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
     poll_until(first_turn_committed, timeout=30.0, interval=0.5, what="first turn committed")
 
     relay_token = str(uuid4())
-    lease_id, session_id = _seed_active_lease(agent_id, relay_token)
+    lease_id, session_id = _seed_active_lease(agent_id, relay_token, database_gate=database_gate)
     request = (
-        _exhaust_delivery_budget(e2e_env, lease_id, relay_token) if exhaust_ack_budget else None
+        _exhaust_delivery_budget(e2e_env, lease_id, relay_token, database_gate=database_gate)
+        if exhaust_ack_budget
+        else None
     )
 
     timeline = httpx.get(

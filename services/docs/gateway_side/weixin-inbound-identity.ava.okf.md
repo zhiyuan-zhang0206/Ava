@@ -25,11 +25,8 @@ never recreates accepted work. A changed same-source body conflicts. The existin
 pending-inbound watchdog covers missed post-commit wakes; acceptance does not
 prove execution or agent readiness.
 
-Existing `weixin-chat-v1:` raw inbound receipts can be adopted atomically before
-current selection is considered, preserving the original target and inbound ID.
-Only an existing matching chat/user/body row proves that legacy acceptance.
-Deleted legacy receipts and unkeyed history cannot be reconstructed from text,
-provider time or ID ordering. New source tombstones outlive inbound retention.
+New source tombstones outlive inbound retention. Text, provider time or ID
+ordering never reconstruct deleted history.
 
 ## Honest command results
 
@@ -59,32 +56,24 @@ reconciliation worker. Reconcile an uncertain source against the actual domain
 owner's birth/notice/selection evidence; this PR provides no operator rerun or
 mark-success command. Keep the source retained if proof is unavailable.
 
-## Cursor and account cutover
+## Cursor and account binding
 
 `weixin_ingress_bindings` owns the current namespace/account and poll epoch;
-`weixin_ingress_cursors` owns each account's opaque cursor and cutover state.
+`weixin_ingress_cursors` owns each account's opaque cursor and admission state.
 Every admission, claim and checkpoint locks and verifies that epoch. An old
 in-flight poll cannot write or checkpoint after replacement. A batch checkpoints
 only after all items are durably retained as accepted, explicit terminal or
 uncertain; retained/claimed business attempts prevent advancing it. Source ACK
 means the source is retained, not that its business action executed.
 
-Both legacy JSON cursors and missing JSON start `held`: neither account binding
-nor file absence proves no prior processing. Before enabling this code in a
-running installation, an operator must stop/drain old producers, preserve the
-legacy cursor/history/journal and authorize the exact account/cursor binding.
-`WeixinIngressStore.begin_cutover(binding, expected_cursor=...)` is the explicit
-native owner action, using the configured gateway-side pool and current epoch.
-It moves `held` to quarantine-only `draining`, never directly to active.
-
-The existing poll loop retains **every** unproven legacy backlog item across
-multiple batches, executes no commands and emits no new chat during draining.
-Matching retained raw chat receipts may be adopted. Only a real provider
-response with an explicit empty `msgs` list and returned opaque cursor, committed
-together, changes the account to `active`. Missing `msgs`, missing cursor or a
-failed checkpoint is not empty-history proof. No timestamp/ID cutoff is guessed.
-This operator cutover protocol is also required for an installation without
-verified history; deployment/binding/draining is not performed by this PR.
+A new account binding starts `draining`: nothing proves what the provider
+already delivered, so the existing poll loop retains **every** unproven backlog
+item across multiple batches as `quarantined`, executes no commands and emits no
+new chat. Only a real provider response with an explicit empty `msgs` list and
+returned opaque cursor, committed together, changes the account to `active`.
+Missing `msgs`, missing cursor or a failed checkpoint is not empty-history
+proof. No timestamp/ID cutoff is guessed. Re-initializing an existing account
+keeps its stored cursor and state.
 
 Routing uses only the account-matching native selection. Unbound or other-account
 reply mode holds the source as quarantined and preserves the mode, never resolves
@@ -99,16 +88,11 @@ case borrows the new account. Human hints use the original adapter or are skippe
 
 Real Weixin requires account-proven selection. Registration of a replacement
 cancels old derived subscriptions/typing and clears their runtime agent, without
-deleting pending outbound intents, historical selections or legacy JSON. Native
+deleting pending outbound intents or historical selections. Native
 selection restoration and background synchronization cannot import peer-only
 state; the active poll loop reconstructs subscriptions only from matching
 canonical selection. Post-commit subscription failure leaves source acceptance
 intact and the same loop can recover it.
-
-Legacy Weixin `outbox.jsonl` entries lack provider/account proof and stay held
-with their original payload and key; no HTTP replay or minted identity occurs.
-Other channels continue their existing journal drain. An operator must retain
-and inspect those entries separately rather than treating new binding as proof.
 
 [Official client types](https://github.com/Tencent/openclaw-weixin/blob/main/src/api/types.ts)
 provide uint64 IDs, message states and the opaque cursor shape. They do not

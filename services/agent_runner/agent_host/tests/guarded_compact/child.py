@@ -15,6 +15,10 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 import ava
 from ava.sdk_surface.install import installed
 from base.agents.compaction.commands import observe
+from base.db.code_version_gate import ProcessDbGate
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry import process_name
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.invocation.compact import apply as compact_apply
 from services.agent_runner.agent_host.invocation.compact import execute as compact_execute
@@ -102,7 +106,7 @@ def install(
         raise ValueError("unknown actual child compact boundary")
 
 
-async def main() -> None:
+async def main(*, database_gate: ProcessDbGate) -> None:
     agent = int(os.environ["AVA_TEST_COMPACT_AGENT"])
     stage = os.environ["AVA_TEST_COMPACT_STAGE"]
     patch = pytest.MonkeyPatch()
@@ -119,7 +123,9 @@ async def main() -> None:
     async with AsyncConnectionPool[psycopg.AsyncConnection](
         os.environ["AVA_DB_URL"], open=False
     ) as pool:
-        host, _, _ = await make_host(pool, agent, 100, [], patch, catalog=catalog)
+        host, _, _ = await make_host(
+            pool, agent, 100, [], patch, catalog=catalog, database_gate=database_gate
+        )
         await host.run_turn(agent)
         with ConnectionPool[psycopg.Connection](os.environ["AVA_DB_URL"]) as sync:
             target = observe(sync, agent)
@@ -131,4 +137,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    database_gate = ProcessDbGate(version=version.get, process=process_name(), exempt=False)
+    asyncio.run(main(database_gate=database_gate))

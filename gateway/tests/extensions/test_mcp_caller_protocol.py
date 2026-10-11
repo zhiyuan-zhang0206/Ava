@@ -12,6 +12,7 @@ from agent.graph.claim._chat_inbound import build_chat_inbound
 from base.agents.messages.envelope import EnvelopeReadInputs
 from base.clock import Clock
 from base.config import settings
+from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.tests.extensions.test_mcp_endpoint import _ACCEPT, _initialize, _tool_call
 from tests.components.gateway.test_caller_protocol_path import (
@@ -34,9 +35,9 @@ def _failed(result: dict[str, Any]) -> bool:
 
 
 async def test_token_derived_mcp_source_reaches_real_claim(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    incarnation = await _admit(db_conn, aops_pool)
+    incarnation = await _admit(db_conn, aops_pool, database_gate=database_gate)
     _after_proven_old_writer_barrier(db_conn, incarnation)
     with TestClient(app) as client:
         response = client.post("/api/mcp/clients", json={"name": "not-authority", "scope": "write"})
@@ -78,9 +79,13 @@ async def test_token_derived_mcp_source_reaches_real_claim(
 
 @pytest.mark.parametrize("denial", ["revoked", "read", "source", "instance", "protocol0", "stale"])
 async def test_mcp_denials_insert_nothing(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, denial: str
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    denial: str,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    incarnation = await _admit(db_conn, aops_pool)
+    incarnation = await _admit(db_conn, aops_pool, database_gate=database_gate)
     if denial != "protocol0":
         _after_proven_old_writer_barrier(db_conn, incarnation)
     if denial == "stale":

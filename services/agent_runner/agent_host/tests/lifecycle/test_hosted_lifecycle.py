@@ -19,11 +19,12 @@ from agent.ownership.hosted import (
     settle_hosted_runtime,
 )
 from agent.ownership.tests.test_lifecycle_intent import _command
-from agent.tests.claim.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.context import AvaContext
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.config import settings
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -100,13 +101,12 @@ async def test_hosted_applies_only_after_continuation_returns(
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     async with hosted_scope() as resources:
-        agent_id = _agent(db_conn)
-        old = await _admit(
-            aops_pool,
-            agent_id,
-        )
+        agent_id = agent_row(db_conn)
+        old = await _admit(aops_pool, agent_id, database_gate=database_gate)
         inbound = _command(db_conn, agent_id, kind)
         entered, release = asyncio.Event(), asyncio.Event()
         host = AgentHost(
@@ -116,7 +116,7 @@ async def test_hosted_applies_only_after_continuation_returns(
             graph=_graph_blocked_until_released(kind, entered, release),
             machine="claim-test",
             bus=EventBus.from_settings(),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
         )
         host._runtimes[agent_id] = Mock()
@@ -136,7 +136,7 @@ async def test_hosted_applies_only_after_continuation_returns(
                         agent=AgentSlices.resolve(
                             default_reader=configured_policy().default_reader
                         ),
-                        db=Database.from_settings(),
+                        db=Database.from_settings(gate=database_gate),
                         bus=EventBus.from_settings(),
                         catalog=model_catalog,
                         clock_factory=configured_policy().clock_factory,
@@ -180,13 +180,12 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
     crash: str,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     async with hosted_scope() as resources:
-        agent_id = _agent(db_conn)
-        owner = await _admit(
-            aops_pool,
-            agent_id,
-        )
+        agent_id = agent_row(db_conn)
+        owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
         inbound = _command(db_conn, agent_id, "terminate")
         graph = Mock()
         graph.ainvoke = AsyncMock(
@@ -199,7 +198,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
             graph=graph,
             machine="claim-test",
             bus=EventBus.from_settings(),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
         )
         host._runtimes[agent_id] = Mock()
@@ -243,7 +242,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
                             agent=AgentSlices.resolve(
                                 default_reader=configured_policy().default_reader
                             ),
-                            db=Database.from_settings(),
+                            db=Database.from_settings(gate=database_gate),
                             bus=EventBus.from_settings(),
                             catalog=model_catalog,
                             clock_factory=configured_policy().clock_factory,
@@ -272,7 +271,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
                         agent=AgentSlices.resolve(
                             default_reader=configured_policy().default_reader
                         ),
-                        db=Database.from_settings(),
+                        db=Database.from_settings(gate=database_gate),
                         bus=EventBus.from_settings(),
                         catalog=model_catalog,
                         clock_factory=configured_policy().clock_factory,
@@ -295,12 +294,11 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     inbound = _command(db_conn, agent_id, "restart")
     assert [
         row.id
@@ -314,7 +312,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     wakes = await host.pending_inbound_wakes(stale_after_s=60)
@@ -367,6 +365,7 @@ async def _run_terminating_turn(
     *,
     incarnation: RuntimeIncarnation,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     async with hosted_scope() as resources:
         graph = Mock()
@@ -380,7 +379,7 @@ async def _run_terminating_turn(
             graph=graph,
             machine="claim-test",
             bus=EventBus.from_settings(),
-            db=Database.from_settings(),
+            db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
         )
         host._runtimes[agent_id] = Mock()
@@ -391,7 +390,7 @@ async def _run_terminating_turn(
                 hosted_resources=resources,
                 ops_pool=aops_pool,
                 agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-                db=Database.from_settings(),
+                db=Database.from_settings(gate=database_gate),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
                 clock_factory=configured_policy().clock_factory,
@@ -406,16 +405,21 @@ async def test_hosted_terminate_kills_requested_shell_sessions_after_commit(
     monkeypatch: pytest.MonkeyPatch,
     requested: bool,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = _agent(db_conn)
-    owner = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     _terminate_command(db_conn, agent_id, kill=requested)
     kills = _record_kills(monkeypatch)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
-    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner, model_catalog=model_catalog)
+    await _run_terminating_turn(
+        aops_pool,
+        agent_id,
+        incarnation=owner,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+    )
     # The kill ran after the last step returned, after `terminated` committed.
     assert kills == ([(agent_id, "terminated")] if requested else [])
     assert db_conn.execute(
@@ -428,14 +432,13 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The agent's own terminate won acceptance; the operator's kill-requesting
     terminate queued behind it still takes the sessions with the death."""
-    agent_id = _agent(db_conn)
-    owner = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     own = _terminate_command(db_conn, agent_id, source="self")
     _terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch)
@@ -443,7 +446,13 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
         row.id
         for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     ] == [own]
-    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner, model_catalog=model_catalog)
+    await _run_terminating_turn(
+        aops_pool,
+        agent_id,
+        incarnation=owner,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+    )
     assert kills == [(agent_id, "terminated")]
 
 
@@ -453,17 +462,22 @@ async def test_hosted_failed_kill_still_applies_the_termination(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A session-kill failure is an ERROR, never a crashed turn: the death applies."""
-    agent_id = _agent(db_conn)
-    owner = await _admit(
-        aops_pool,
-        agent_id,
-    )
+    agent_id = agent_row(db_conn)
+    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     _terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch, fail=True)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
-    await _run_terminating_turn(aops_pool, agent_id, incarnation=owner, model_catalog=model_catalog)
+    await _run_terminating_turn(
+        aops_pool,
+        agent_id,
+        incarnation=owner,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+    )
     assert kills == [(agent_id, "terminated")]
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
@@ -504,6 +518,8 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
     requested: bool,
     database: Database,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A step still draining past a force's kill may create a shell; the live
     host attempts older sessions again after recording its quiescent
@@ -511,7 +527,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
     monkeypatch.setattr(
         "services.agent_runner.agent_host.runtime.validate_model_config", _any_model
     )
-    agent_id = _agent(db_conn)
+    agent_id = agent_row(db_conn)
     host = AgentHost(
         policy=configured_policy(),
         pool=aops_pool,
@@ -519,7 +535,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     await admit_hosted_runtime(
@@ -548,8 +564,10 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
     tmp_path: Path,
     database: Database,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    agent_id = _agent(db_conn)
+    agent_id = agent_row(db_conn)
     old = AgentHost(
         policy=configured_policy(),
         pool=aops_pool,
@@ -557,7 +575,7 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
         graph=Mock(),
         machine="claim-test",
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     await admit_hosted_runtime(

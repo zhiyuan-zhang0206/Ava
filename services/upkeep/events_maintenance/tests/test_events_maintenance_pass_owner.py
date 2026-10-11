@@ -6,12 +6,15 @@ import asyncio
 import logging
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 
 from base.daemon.health import LivenessGroup, LoopProgress
+from base.db import Database
+from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.events_maintenance import daemon
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 
@@ -79,6 +82,7 @@ def _mock_service(
         *,
         liveness: LivenessGroup,
         components: Callable[[], list[dict[str, object]]],
+        image: LoadedCommit,
     ) -> object:
         trackers.append(liveness)
         return object()
@@ -113,6 +117,7 @@ def _mock_service(
 
 async def test_service_stop_cancels_expired_proxy_before_worker_returns(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     started = threading.Event()
     release = threading.Event()
@@ -135,7 +140,9 @@ async def test_service_stop_cancels_expired_proxy_before_worker_returns(
 
     before = asyncio.all_tasks()
     async with asyncio.TaskGroup() as tests:
-        service = tests.create_task(daemon.run())
+        service = tests.create_task(
+            daemon.run(database=lambda: database, image=LoadedCommit(Path(), None))
+        )
         probe = tests.create_task(wait_for_wedge())
         try:
             done, _ = await asyncio.wait({probe}, timeout=1.0)

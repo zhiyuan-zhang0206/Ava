@@ -1,0 +1,14 @@
+{
+  "apiVersion": 2,
+  "name": "ava_sdk_reminder",
+  "version": "1.0.0",
+  "engines": {
+    "ava": ">=2026.10.1"
+  },
+  "contributions": {
+    "hooks": [
+      "before_llm",
+      "after_exec"
+    ]
+  }
+}

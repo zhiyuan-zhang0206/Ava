@@ -13,6 +13,7 @@ from agent.tests.impersonation.test_impersonation import relays as relays
 from base.agents.incarnation.resources import ResourceProcess
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from tests.impersonation_support import attested_caller, recorded_tree
@@ -26,6 +27,8 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     exited_host: ResourceProcess,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Successor admission aligns accepted_* before release; native_status
     cannot restore the dead incarnation even before a held wake."""
@@ -35,7 +38,9 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     from base.cluster.machine import machine_name
     from tests.fixtures.units import spawn_agent
 
-    agent_id = spawn_agent(catalog=model_catalog, authority=config_authority)
+    agent_id = spawn_agent(
+        catalog=model_catalog, authority=config_authority, database_gate=database_gate
+    )
     first = await admit_hosted_runtime(
         aops_pool,
         agent_id,

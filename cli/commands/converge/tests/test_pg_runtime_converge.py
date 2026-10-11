@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import shlex
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from base.cluster.dataplane import pg_runtime, runtime_binaries
 from base.config import ConfigBoot, settings
+from base.telemetry import EventPipeline
 from cli.commands.converge._steps import _ensure_pg_binaries_step
 from cli.commands.converge.spec import ConvergeCtx
+from tests.path_scoped.cli_tests import operator_database as operator_database
+from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 @pytest.fixture
@@ -61,16 +66,31 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return bindir
 
 
-def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(installed: Path) -> None:
+def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
+    installed: Path,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
     _ensure_pg_binaries_step(
-        ConvergeCtx(installed.parent, installed.parent, frozenset({"gateway"}), config=ConfigBoot())
+        ConvergeCtx(
+            installed.parent,
+            installed.parent,
+            frozenset({"gateway"}),
+            config=ConfigBoot(),
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
     )
     assert pg_runtime.pg_tool("postgres") == installed / "postgres"
 
 
 def test_remote_managed_gateway_does_not_require_local_server_or_extension(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
+
     def remote(_self: object) -> bool:
         return True
 
@@ -80,5 +100,12 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
     monkeypatch.setattr(type(settings.data_plane), "is_remote", property(remote))
     monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", forbidden)
     _ensure_pg_binaries_step(
-        ConvergeCtx(tmp_path, tmp_path, frozenset({"gateway"}), config=ConfigBoot())
+        ConvergeCtx(
+            tmp_path,
+            tmp_path,
+            frozenset({"gateway"}),
+            config=ConfigBoot(),
+            database_factory=operator_database,
+            producer=operator_pipeline,
+        )
     )

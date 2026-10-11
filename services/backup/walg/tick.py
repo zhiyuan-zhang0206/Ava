@@ -169,11 +169,20 @@ def _drill(
     report: Report,
     now: Callable[[], datetime],
     *,
+    database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> bool:
     """Drill the newest backup now; records the outcome. Returns whether it succeeded."""
     previous = state.read_state().drill
-    record = drill.run_drill(target, backups[-1], previous, report, now, path_reader=path_reader)
+    record = drill.run_drill(
+        target,
+        backups[-1],
+        previous,
+        report,
+        now,
+        path_reader=path_reader,
+        database_for_url=database_for_url,
+    )
     state.update_state(drill=record)
     if record.ok:
         report(f"drill: ok in {record.seconds:.0f}s ({record.detail})")
@@ -188,11 +197,14 @@ def _weekly_drill(
     report: Report,
     now: Callable[[], datetime],
     *,
+    database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> None:
     """The drill when one is due. Its failure is recorded and reported, never raised."""
     if drill.drill_due(state.read_state().drill, backups, now()):
-        _drill(target, backups, report, now, path_reader=path_reader)
+        _drill(
+            target, backups, report, now, path_reader=path_reader, database_for_url=database_for_url
+        )
 
 
 def _verify(
@@ -232,6 +244,7 @@ def _run_steps(
     report: Report,
     now: Callable[[], datetime],
     *,
+    database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> str:
     """The steps in order; returns the one-line summary of a successful run."""
@@ -239,7 +252,9 @@ def _run_steps(
     try:
         before = _preflight(path_reader=path_reader)
         report(f"preflight: ok, {len(before)} backups listed")
-        _weekly_drill(target, before, report, now, path_reader=path_reader)
+        _weekly_drill(
+            target, before, report, now, path_reader=path_reader, database_for_url=database_for_url
+        )
         current = STEP_BACKUP
         after = _backup(target, before, report, now, path_reader=path_reader)
         current = STEP_VERIFY
@@ -286,6 +301,7 @@ def _locked_tick(
     report: Report,
     now: Callable[[], datetime],
     *,
+    database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> int:
     started = now()
@@ -310,7 +326,9 @@ def _locked_tick(
 
     state.update_state(tick=TickRecord(started_at=started))
     try:
-        summary = _run_steps(target, report, now, path_reader=path_reader)
+        summary = _run_steps(
+            target, report, now, path_reader=path_reader, database_for_url=database_for_url
+        )
     except StepFailedError as failure:
         return _record_failure(started, failure, report, now)
     state.update_state(
@@ -325,6 +343,7 @@ def run_tick(
     report: Report,
     *,
     now: Callable[[], datetime] = _now,
+    database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> int:
     """Run one tick; the exit code is non-zero only when a step failed."""
@@ -334,14 +353,20 @@ def run_tick(
     ensure_private_dir(state.walg_dir())
     try:
         with file_lock(state.lock_path(), timeout_s=0):
-            return _locked_tick(db, report, now, path_reader=path_reader)
+            return _locked_tick(
+                db, report, now, path_reader=path_reader, database_for_url=database_for_url
+            )
     except LockTimeoutError:
         report("another WAL-G tick is still running; nothing to do")
         return 0
 
 
 def _locked_drill(
-    report: Report, now: Callable[[], datetime], *, path_reader: Callable[[], Path | None]
+    report: Report,
+    now: Callable[[], datetime],
+    *,
+    database_for_url: Callable[[str], Database],
+    path_reader: Callable[[], Path | None],
 ) -> int:
     try:
         state.read_state()
@@ -356,11 +381,21 @@ def _locked_drill(
     if not backups:
         report("failed: no backup exists yet; run `ava backup walg run` first")
         return 1
-    return 0 if _drill(target, backups, report, now, path_reader=path_reader) else 1
+    return (
+        0
+        if _drill(
+            target, backups, report, now, path_reader=path_reader, database_for_url=database_for_url
+        )
+        else 1
+    )
 
 
 def run_drill_now(
-    report: Report, *, now: Callable[[], datetime] = _now, path_reader: Callable[[], Path | None]
+    report: Report,
+    *,
+    now: Callable[[], datetime] = _now,
+    database_for_url: Callable[[str], Database],
+    path_reader: Callable[[], Path | None],
 ) -> int:
     """Run the recovery drill on the newest backup now (the weekly one runs inside the tick).
 
@@ -372,7 +407,9 @@ def run_drill_now(
     ensure_private_dir(state.walg_dir())
     try:
         with file_lock(state.lock_path(), timeout_s=0):
-            return _locked_drill(report, now, path_reader=path_reader)
+            return _locked_drill(
+                report, now, path_reader=path_reader, database_for_url=database_for_url
+            )
     except LockTimeoutError:
         report("failed: a WAL-G tick or drill is still running")
         return 1

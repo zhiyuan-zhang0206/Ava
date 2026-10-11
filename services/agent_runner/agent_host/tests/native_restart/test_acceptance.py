@@ -16,6 +16,7 @@ from base.agents.messages.native_restart import (
     native_restart_progress,
 )
 from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 
@@ -29,8 +30,10 @@ async def test_same_key_concurrent_replay_survives_source_and_owner_cleanup(
     aops_pool: AsyncConnectionPool,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    _inc, target = await managed_work(db_conn, aops_pool)
+    _inc, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     request = NativeRestartRequest(target=target, config_overlay={"max_turns": 9})
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         with ThreadPoolExecutor(2) as executor:
@@ -100,8 +103,10 @@ async def test_raw_json_conflict_is_not_python_numeric_equality(
     changed: object,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    _inc, target = await managed_work(db_conn, aops_pool)
+    _inc, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     original = NativeRestartRequest(target=target, config_overlay={"limit": 1})
     changed_request = NativeRestartRequest(target=target, config_overlay={"limit": changed})
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
@@ -139,8 +144,10 @@ async def test_unknown_source_transition_is_not_execution_or_no_effect_proof(
     damage: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    _inc, target = await managed_work(db_conn, aops_pool)
+    _inc, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     request = NativeRestartRequest(target=target)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accepted = accept_native_restart(
@@ -194,6 +201,8 @@ async def test_actual_original_supersession_owner_retains_no_effect_fact(
     fence: str,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     from uuid import uuid4
 
@@ -204,7 +213,7 @@ async def test_actual_original_supersession_owner_retains_no_effect_fact(
     )
     from base.db.transaction import async_write_transaction
 
-    incarnation, target = await managed_work(db_conn, aops_pool)
+    incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     request = NativeRestartRequest(target=target)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accepted = accept_native_restart(

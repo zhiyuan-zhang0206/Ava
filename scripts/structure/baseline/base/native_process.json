@@ -1,7 +1,0 @@
-{
-  "ambient_state": {
-    "base/native_process/code_version.py::global-rebind:_db_gate_exempt": 1,
-    "base/native_process/code_version.py::global-rebind:_version": 1,
-    "base/native_process/loaded_commit.py::global-rebind:_frozen": 2
-  }
-}

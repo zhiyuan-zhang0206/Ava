@@ -75,7 +75,7 @@ def _read_declared_range(pkg: InstalledPackage) -> tuple[dict[str, object] | Non
     if root is None:
         return None, None
     try:
-        manifest = manifest_module.load_manifest(root)
+        manifest = manifest_module.load_optional_manifest(root)
     except manifest_module.ManifestError as e:
         return None, str(e)
     if manifest is None:

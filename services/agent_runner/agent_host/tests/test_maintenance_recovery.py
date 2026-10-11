@@ -29,6 +29,7 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.cluster.machine import machine_name
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
@@ -50,6 +51,8 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     agent = _agent(db_conn)
     old = AgentHost(
@@ -59,7 +62,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         graph=MagicMock(),
         machine=machine_name(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     incarnation = await admit_hosted_runtime(
@@ -94,7 +97,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         graph=MagicMock(),
         machine=machine_name(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     await successor.run_turn(agent)
@@ -194,6 +197,8 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     from unittest.mock import AsyncMock
 
@@ -226,7 +231,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         graph=graph,
         machine=machine_name(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     assert (
@@ -256,7 +261,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         graph=builder.compile(checkpointer=AsyncPostgresSaver(aops_pool)),
         machine=machine_name(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     ctx = AvaContext(
@@ -264,7 +269,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         event_publisher=MagicMock(),
         llm=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
         clock_factory=configured_policy().clock_factory,
@@ -307,6 +312,8 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     agent = _agent(db_conn)
     host = AgentHost(
@@ -316,7 +323,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
         graph=MagicMock(),
         machine=machine_name(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     incarnation = await admit_hosted_runtime(
@@ -447,6 +454,8 @@ def _host_driving_invoke_until_done(
     graph: Any,
     ctx: AvaContext,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> AgentHost:
     host = AgentHost(
         policy=configured_policy(),
@@ -455,7 +464,7 @@ def _host_driving_invoke_until_done(
         graph=graph,
         machine=machine_name(),
         bus=EventBus.from_settings(),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
@@ -498,6 +507,8 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     agent = maintenance_agent(db_conn)
     entered, finish = asyncio.Event(), asyncio.Event()
@@ -519,7 +530,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         event_publisher=MagicMock(),
         llm=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(),
+        db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         clients=process_clients(),
         identity=AgentIdentity(agent_id=agent, owns_loop=True),
@@ -530,7 +541,13 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         "services.agent_runner.agent_host.runtime.validate_model_config", MagicMock()
     )
     host = _host_driving_invoke_until_done(
-        monkeypatch, aops_pool, saver, graph, ctx, model_catalog=model_catalog
+        monkeypatch,
+        aops_pool,
+        saver,
+        graph,
+        ctx,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
     )
     work = asyncio.create_task(host.run_turn(agent))
     try:
@@ -566,6 +583,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
             builder.compile(checkpointer=AsyncPostgresSaver(aops_pool)),
             ctx,
             model_catalog=model_catalog,
+            database_gate=database_gate,
         )
         wakes = await successor.pending_inbound_wakes(stale_after_s=300)
         assert agent in [wake.agent_id for wake in wakes]

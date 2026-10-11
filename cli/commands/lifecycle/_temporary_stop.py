@@ -12,9 +12,9 @@ from datetime import datetime
 
 import psutil
 
+from base.agents.context.clients import DatabaseFactory
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.cluster.machine import MachineRoles, machine_role
-from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.status_journal import begin, finish, phase, status_path
 from base.deploy.maintenance import admission
@@ -22,6 +22,7 @@ from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.native_process.ownership import retain_processes
 from base.sessions.pty.paths import SERVICE_UNIT
+from base.telemetry import EventPipeline
 from cli.commands._repo import _repo_root, build_services, session_name
 from cli.commands.lifecycle.service_stop import (
     OwnedProcess,
@@ -314,6 +315,7 @@ def _stop_initialization(
     notes: list[str],
     clients: list[str],
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    producer: Callable[[], EventPipeline],
 ) -> None:
     """Close a proven pre-application attempt through the existing native owners."""
     _timed_phase(
@@ -333,6 +335,7 @@ def _stop_initialization(
                 notes=notes,
                 clients=clients,
                 retained_children=retained_children,
+                producer=producer,
             ),
         )
 
@@ -376,6 +379,8 @@ def _drain_and_stop(
     notes: list[str],
     clients: list[str],
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
 ) -> None:
     """Drain the agents, then stop the selected resources; each phase is timed into `phases`."""
     # Task #3270: an operator's own stop binds the hold to this
@@ -387,7 +392,7 @@ def _drain_and_stop(
         phases,
         "drain",
         lambda: pause_agents(
-            Database.from_settings(),
+            database_factory(),
             EventBus.from_settings(),
             remaining(deadline),
             driver=mint_driver(),
@@ -405,7 +410,7 @@ def _drain_and_stop(
 
         # A failed posture write leaves the drained phase retryable. The
         # stopped phase never dials a data plane that is already offline.
-        set_posture(Database.from_settings(), "paused")
+        set_posture(database_factory(), "paused")
         admission.set_phase(current.holder, current.acquired_at, MaintenancePhase.STOPPING)
     _timed_phase(phases, "quiesce", lambda: ops_quiescent(remaining(deadline)))
     # The pty-sessions service outlives the services phase: it closes the terminals
@@ -422,7 +427,13 @@ def _drain_and_stop(
         _timed_phase(
             phases,
             "terminals",
-            lambda: close_terminals(deadline, holder, acquired_at, direct_db="gateway" in roles),
+            lambda: close_terminals(
+                deadline,
+                holder,
+                acquired_at,
+                direct_db="gateway" in roles,
+                database_factory=database_factory,
+            ),
         )
         # Nothing is left in the service: stop it, and the root with it when nothing else is kept.
         _timed_phase(
@@ -442,6 +453,7 @@ def _drain_and_stop(
                 notes=notes,
                 clients=clients,
                 retained_children=retained_children,
+                producer=producer,
             ),
         )
         progress.data_plane_stopped = True
@@ -458,6 +470,8 @@ def stop(
     teardown_extras: bool,
     timeout: float = PAUSE_TIMEOUT_SECONDS,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
 ) -> int:
     """Drain via normal restart, then stop selected resources.
 
@@ -501,6 +515,7 @@ def stop(
                 notes=notes,
                 clients=clients,
                 retained_children=retained_children,
+                producer=producer,
             )
             return _finish_stop(owns_journal=owns_journal, notes=notes, clients=clients)
         _drain_and_stop(
@@ -516,6 +531,8 @@ def stop(
             notes=notes,
             clients=clients,
             retained_children=retained_children,
+            database_factory=database_factory,
+            producer=producer,
         )
     except (RuntimeError, TimeoutError, OSError, subprocess.TimeoutExpired) as exc:
         _report_incomplete(

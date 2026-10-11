@@ -21,6 +21,7 @@ from base.agents.labels import publish_label_updated
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -128,6 +129,7 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
 ) -> None:
     """A label response is accounted as a batch call before label validation.
 
@@ -176,7 +178,7 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
             1,
             "prompt",
             labeler_config(labeler_model="deepseek-v4-pro"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
@@ -206,6 +208,7 @@ class TestGenerateLabelAsync:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:
         tid = create_agent(db_conn)  # label NULL + label_user_set FALSE by default
         monkeypatch.setattr(
@@ -228,7 +231,7 @@ class TestGenerateLabelAsync:
             tid,
             "\u67e5\u4e00\u4e0b X \u6a21\u5757\u600e\u4e48\u8c03",
             labeler_config(labeler_model="deepseek-v4-pro"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
@@ -251,6 +254,7 @@ class TestGenerateLabelAsync:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:
         """When the user has already written a label via PATCH → LLM result should not overwrite."""
         tid = create_agent(db_conn)
@@ -278,7 +282,7 @@ class TestGenerateLabelAsync:
             tid,
             "\u539f\u59cb prompt",
             labeler_config(labeler_model="deepseek-v4-pro"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
@@ -297,6 +301,7 @@ class TestGenerateLabelAsync:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:
         """After user PATCH reset writes label back to NULL + label_user_set=TRUE, the LLM
         result should not hit again (blocked by `AND NOT label_user_set`). This is a critical race —
@@ -327,7 +332,7 @@ class TestGenerateLabelAsync:
             tid,
             "\u539f\u59cb prompt",
             labeler_config(labeler_model="deepseek-v4-pro"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
@@ -345,6 +350,7 @@ class TestGenerateLabelAsync:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:
         tid = create_agent(db_conn)
 
@@ -369,7 +375,7 @@ class TestGenerateLabelAsync:
             tid,
             "p",
             labeler_config(labeler_model="deepseek-v4-pro"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
@@ -387,6 +393,7 @@ class TestGenerateLabelAsync:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:
         """LLM returns blank / only quotes → _normalize returns "" → do not write to DB, do not publish."""
         tid = create_agent(db_conn)
@@ -404,7 +411,7 @@ class TestGenerateLabelAsync:
             tid,
             "p",
             labeler_config(labeler_model="deepseek-v4-pro"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
@@ -422,6 +429,7 @@ class TestGenerateLabelAsync:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:
         """content is list [thinking, text] -> only text block extracted, signature NOT in label."""
         tid = create_agent(db_conn)
@@ -443,7 +451,7 @@ class TestGenerateLabelAsync:
             tid,
             "migrate database schema",
             labeler_config(labeler_model="deepseek-v4-pro"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
@@ -461,6 +469,7 @@ class TestGenerateLabelAsync:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:
         """content is all thinking blocks with no text -> raw="" -> skip, label stays NULL.
 
@@ -496,7 +505,7 @@ class TestGenerateLabelAsync:
             tid,
             "p",
             labeler_config(labeler_model="deepseek-v4-pro"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
@@ -514,6 +523,7 @@ class TestGenerateLabelAsync:
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
     ) -> None:
         """Multiple text blocks -> joined with space.
 
@@ -546,7 +556,7 @@ class TestGenerateLabelAsync:
             tid,
             "p",
             labeler_config(labeler_model="deepseek-v4-pro"),
-            labeler_db(),
+            labeler_db(database_gate=database_gate),
             event_bus,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,

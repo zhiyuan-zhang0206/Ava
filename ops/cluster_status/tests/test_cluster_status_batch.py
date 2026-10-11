@@ -15,6 +15,7 @@ import pytest
 from base.db import Database
 from base.deploy.state.host_deploy_state import HostDeployState
 from base.host.resource_sample import ResourceSample
+from base.native_process.loaded_commit import LoadedCommit
 from ops import cluster_status
 from ops.cluster_status import schema_mismatch
 from ops.rpc_schemas import SessionInfo
@@ -86,7 +87,6 @@ def snapshot_dependencies(
     monkeypatch.setattr(cluster_status, "is_agent_runner", lambda: True)
     monkeypatch.setattr(cluster_status, "is_observability_station", lambda: False)
     monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_head_sha", lambda: None)
-    monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: None)
     return state
 
 
@@ -195,7 +195,9 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
     monkeypatch.setattr("base.host.resource_sample.resource_sample", _sample)
 
-    snapshot = cluster_status.status_snapshot(database)
+    snapshot = cluster_status.status_snapshot(
+        database, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+    )
 
     assert connect_calls == 1
     assert state_connections == [conn]
@@ -229,7 +231,9 @@ def test_status_snapshot_borrows_pool_once_with_a_bounded_timeout(
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
     monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
 
-    snapshot = cluster_status.status_snapshot(database, pool=pool)
+    snapshot = cluster_status.status_snapshot(
+        database, pool=pool, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+    )
 
     assert pool.timeouts == [2.0]
     assert state_connections == [conn]
@@ -263,8 +267,12 @@ def test_two_status_snapshots_do_not_cache_db_or_resource_reads(
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
     monkeypatch.setattr("base.host.resource_sample.resource_sample", _sample)
 
-    cluster_status.status_snapshot(database, pool=pool)
-    cluster_status.status_snapshot(database, pool=pool)
+    cluster_status.status_snapshot(
+        database, pool=pool, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+    )
+    cluster_status.status_snapshot(
+        database, pool=pool, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+    )
 
     assert pool.timeouts == [2.0, 2.0]
     assert state_reads == 2
@@ -283,7 +291,9 @@ def test_status_snapshot_degrades_when_the_pool_cannot_reach_db(
     pool = _Pool(object(), error=RuntimeError(f"DB down with {stored_posture} row"))
     monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
 
-    snapshot = cluster_status.status_snapshot(database, pool=pool)
+    snapshot = cluster_status.status_snapshot(
+        database, pool=pool, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+    )
 
     assert pool.timeouts == [2.0]
     assert snapshot.paused is True  # A missing DB snapshot cannot claim readiness.
@@ -316,7 +326,9 @@ def test_status_snapshot_preserves_invalid_real_catalog_diagnosis(
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied_migration_names)
     with db_conn.transaction(force_rollback=True):
         db_conn.execute("ALTER TABLE schema_migrations RENAME COLUMN name TO unexpected_name")
-        snapshot = cluster_status.status_snapshot(database, pool=pool)
+        snapshot = cluster_status.status_snapshot(
+            database, pool=pool, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+        )
         assert snapshot.schema_mismatch is not None
         assert snapshot.schema_mismatch.kind == "invalid-migration-layout"
         assert "unrecognized shape" in snapshot.schema_mismatch.detail
@@ -346,7 +358,9 @@ def test_resource_sample_failure_still_degrades_to_none_from_worker(
 
     monkeypatch.setattr("base.host.resource_sample.resource_sample", _sample_failure)
 
-    snapshot = cluster_status.status_snapshot(database, pool=pool)
+    snapshot = cluster_status.status_snapshot(
+        database, pool=pool, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+    )
 
     assert snapshot.resource is None
 
@@ -394,7 +408,9 @@ def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
     monkeypatch.setattr(cluster_status, "_count_local_agents", count)
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", read_state)
     monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)
-    snapshot = cluster_status.status_snapshot(database, pool=pool)
+    snapshot = cluster_status.status_snapshot(
+        database, pool=pool, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+    )
     assert snapshot.agent_count == 7
     assert seen == [conn]
     assert pool.timeouts == [2.0]
@@ -423,7 +439,9 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
 
     monkeypatch.setattr(cluster_status, "_read_deploy_snapshot", no_deploy)
     monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)
-    snapshot = cluster_status.status_snapshot(database)
+    snapshot = cluster_status.status_snapshot(
+        database, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+    )
     assert snapshot.agent_host_online is (True if runner else None)
     assert (str(ServiceEndpoints.from_settings().of("agent_host").pidfile) in probes) is runner
     assert "restarter_online" not in snapshot.model_dump()
@@ -479,7 +497,9 @@ def test_status_snapshot_paused_reason_names_the_first_true_clause(
     monkeypatch.setattr("base.deploy.lifecycle.start_serving.is_serving", lambda: serving)
     monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
 
-    snapshot = cluster_status.status_snapshot(database, pool=pool)
+    snapshot = cluster_status.status_snapshot(
+        database, pool=pool, image=LoadedCommit(source_root=Path(__file__).parent, sha=None)
+    )
 
     assert snapshot.paused is expected_paused
     assert snapshot.paused_reason == expected_reason

@@ -59,23 +59,15 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
 # isort: split
-# First import after stdlib, BEFORE the heavy `import ava` inside `_run`:
-# importing base.log runs `logger.remove()` (dropping loguru's default
-# stderr handler). Without this, a Settings-construction warning that fires
-# during the ava import chain (e.g. `_warn_when_timezone_unset` on a host
-# without AVA_TIMEZONE — base/config/domains/general.py logs it on loguru directly)
-# lands on stderr, which the parent pipes straight into the agent's exec
-# output. CI caught this leak twice (2026-08-21, PR #256 shard 1): once
-# unfixed, once after the import sorter silently moved the guard below the
-# heavy import — the split markers above and below pin the order.
-import base.log  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side effect is the point
-
+# The logger is lightweight and import preserves caller sinks. The executable
+# branch prepares logging before main loads SDK/configuration; embedded main
+# leaves its caller's logging intact.
 # isort: split
 # Envelope types the boot path references: a leaf module (stdlib + small shared
 # helpers, no serde — `loads_typed` stays deferred), so importing it here keeps
 # the child's early-import order intact.
 from agent.graph.exec.protocol import RequestPayload
-from base.log import init_subprocess_logger, logger
+from base.log import logger
 
 # Watchdog margin beyond (timeout + parent's kill grace) before the child
 # hard-exits — overridable so tests do not wait for the 5s default.
@@ -245,9 +237,11 @@ def _init_logger(
     `base.telemetry.otlp.telemetry_otlp_defer`). A failed sink registration skips the arm."""
     if agent_id is None:
         return
+    from base.log.process import init_subprocess_logger
+
     init_subprocess_logger(agent_id=agent_id)
     try:
-        from base.log import add_postgres_sink
+        from base.log.process import add_postgres_sink
 
         add_postgres_sink(
             process="agent-exec",
@@ -448,10 +442,10 @@ def _finalize_telemetry(*, clients: Any = None) -> None:
     """
     if "base.telemetry" not in sys.modules:
         return
-    import ava
     from base import telemetry
 
-    context = getattr(ava, "context", None)
+    sdk = sys.modules.get("ava")
+    context = None if sdk is None else getattr(sdk, "context", None)
     owned = clients if clients is not None else (None if context is None else context.clients)
     if owned is not None:
         owned_result = owned.sync_events()
@@ -763,4 +757,7 @@ def _format_current_traceback(exc: BaseException) -> str:
 
 
 if __name__ == "__main__":
+    from base.log import prepare_process_logging
+
+    prepare_process_logging()
     main()

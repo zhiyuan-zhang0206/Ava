@@ -59,6 +59,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 from gateway.agents import router as _agents_router
 from gateway.agents.delivery import deliver_chat_inbound
@@ -262,6 +263,7 @@ def _register_read_tools(
     *,
     catalog: ModelCatalog,
     default_model_reader: Callable[[], str],
+    image: LoadedCommit,
 ) -> None:
     """Read-side tools: list / inspect / cluster snapshot."""
     from mcp.server.mcpserver import MCPServer
@@ -305,7 +307,7 @@ def _register_read_tools(
     async def cluster_status() -> dict[str, Any]:
         from gateway.cluster.router import cluster_status_snapshot
 
-        snapshot = await cluster_status_snapshot(db)
+        snapshot = await cluster_status_snapshot(db, image=image)
         return snapshot.model_dump(mode="json")
 
 
@@ -526,7 +528,13 @@ def _register_fleet_tools(
 
 
 def _build_server(  # noqa: ANN202 — inferred from the lazy import
-    pool: Any, db: Database, bus: EventBus, *, catalog: ModelCatalog, authority: ConfigAuthority
+    pool: Any,
+    db: Database,
+    bus: EventBus,
+    *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
+    image: LoadedCommit,
 ):
     """Assemble the MCP server: one tool per gateway control route.
 
@@ -543,13 +551,20 @@ def _build_server(  # noqa: ANN202 — inferred from the lazy import
         db,
         catalog=catalog,
         default_model_reader=lambda: cast(str, authority.service_field_value("llm_model")),
+        image=image,
     )
     _register_fleet_tools(server, pool, db, bus, catalog=catalog, authority=authority)
     return server
 
 
 def build_manager(  # noqa: ANN201 — inferred from the lazy import
-    pool: Any, db: Database, bus: EventBus, *, catalog: ModelCatalog, authority: ConfigAuthority
+    pool: Any,
+    db: Database,
+    bus: EventBus,
+    *,
+    catalog: ModelCatalog,
+    authority: ConfigAuthority,
+    image: LoadedCommit,
 ):
     """Create the /mcp session manager (server + stateless HTTP transport).
 
@@ -559,7 +574,7 @@ def build_manager(  # noqa: ANN201 — inferred from the lazy import
     """
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-    server = _build_server(pool, db, bus, catalog=catalog, authority=authority)
+    server = _build_server(pool, db, bus, catalog=catalog, authority=authority, image=image)
     # The public path builds the manager too: streamable_http_app() constructs
     # it and stores it on the server; session_manager then hands it over. The
     # Starlette sub-app it returns is discarded — the gateway mounts the bare

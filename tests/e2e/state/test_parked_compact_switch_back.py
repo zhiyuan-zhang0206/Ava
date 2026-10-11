@@ -60,6 +60,7 @@ from playwright.sync_api import Page, expect
 
 from base.agents import AgentStatus
 from base.config import settings
+from base.db import Database
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
 from tests.e2e._settings import pin_compact_history_off, pin_expand_runs_all
@@ -127,7 +128,9 @@ def _sidebar_row(page: Page, agent_id: int):
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.parked_compact:build")
-def test_switch_back_after_parked_compact_shows_post_compact_state(e2e_env: E2EEnv) -> None:
+def test_switch_back_after_parked_compact_shows_post_compact_state(
+    e2e_env: E2EEnv, database: Database
+) -> None:
     page = e2e_env.page
     agent_a = e2e_env.agent_id
     gateway_url = e2e_env.gateway_url
@@ -166,7 +169,7 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(e2e_env: E2EE
         page.wait_for_function(f"location.href.includes('agent_id={agent_b}')", timeout=15_000)
 
         # ── 3. compact A while it is parked (same call as the UI button) ──
-        enqueue_compact_history_fixture(agent_a)
+        enqueue_compact_history_fixture(agent_a, database=database)
         _wait_kind(gateway_url, agent_a, "inbound_compact_request")
         wait_for_status(agent_a, AgentStatus.IDLING.value)
 

@@ -20,12 +20,13 @@ from typing import Any
 import pytest
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.state.host_deploy_state import HostDeployState
 from ops import deploy_window as dw
 
 
-def _db() -> Database:
-    return Database.from_settings()
+def _db(*, database_gate: ProcessDbGate) -> Database:
+    return Database.from_settings(gate=database_gate)
 
 
 @pytest.fixture(autouse=True)
@@ -63,11 +64,13 @@ def _machines(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
 # ─── the posture signal ──────────────────────────────────────────────────────
 
 
-def test_idle_cluster_is_not_a_deploy_window() -> None:
-    assert dw.deploy_in_flight(_db()).active is False
+def test_idle_cluster_is_not_a_deploy_window(*, database_gate: ProcessDbGate) -> None:
+    assert dw.deploy_in_flight(_db(database_gate=database_gate)).active is False
 
 
-def test_a_paused_posture_is_a_deploy_window(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_paused_posture_is_a_deploy_window(
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+) -> None:
     """The signal is the machine's `host_deploy_state` posture row (R1, Task
     #1021): maintenance and stop write it outside the services they restart."""
     _machines(monkeypatch, "win")
@@ -77,33 +80,35 @@ def test_a_paused_posture_is_a_deploy_window(monkeypatch: pytest.MonkeyPatch) ->
         lambda _db: {"win": _posture("win", "paused", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    window = dw.deploy_in_flight(_db())
+    window = dw.deploy_in_flight(_db(database_gate=database_gate))
     assert window.active is True
     assert "machine 'win' is mid-deploy" in window.detail
     assert "host_deploy_state.posture=paused" in window.detail
 
 
-def test_an_idle_posture_is_not_a_deploy_window(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_idle_posture_is_not_a_deploy_window(
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+) -> None:
     _machines(monkeypatch, "win")
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
         lambda _db: {"win": _posture("win", "idle", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert dw.deploy_in_flight(_db()).active is False
+    assert dw.deploy_in_flight(_db(database_gate=database_gate)).active is False
 
 
 def test_unreachable_machine_does_not_block_a_deploy_forever(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """With no posture row, an absent host is not a deploying host — otherwise
     one dead machine would read as a deploy forever."""
     _machines(monkeypatch, "gone")
-    assert dw.deploy_in_flight(_db()).active is False
+    assert dw.deploy_in_flight(_db(database_gate=database_gate)).active is False
 
 
 def test_a_legacy_converging_row_still_blocks_a_cohort_machine(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """The retired updater's `converging` posture is no longer written, but a row
     it left behind is any non-idle posture: it keeps the conservative reading
@@ -116,7 +121,7 @@ def test_a_legacy_converging_row_still_blocks_a_cohort_machine(
         lambda _db: {"macmini": _posture("macmini", "converging", age_s=2 * 86400)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    window = dw.deploy_in_flight(_db())
+    window = dw.deploy_in_flight(_db(database_gate=database_gate))
     assert window.active is True
     assert "converging" in window.detail
     assert "2d ago" in window.detail
@@ -126,7 +131,7 @@ def test_a_legacy_converging_row_still_blocks_a_cohort_machine(
 
 
 def test_excluded_machines_stale_posture_does_not_block(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """**The 2026-09-10 production refusal, replayed** (issue #2160). `win` was
     operator-excluded on 09-09 (paused 13:54:31Z, then stopped) and its posture
@@ -145,11 +150,11 @@ def test_excluded_machines_stale_posture_does_not_block(
         lambda _db: {"win": _posture("win", "paused", age_s=31 * 3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert dw.deploy_in_flight(_db()).active is False
+    assert dw.deploy_in_flight(_db(database_gate=database_gate)).active is False
 
 
 def test_an_excluded_machines_row_is_ignored_whatever_its_posture(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """No lease outranks the exclusion any more: a `converging` row on an
     excluded machine is as stale as a `paused` one, and is ignored the same."""
@@ -164,11 +169,11 @@ def test_an_excluded_machines_row_is_ignored_whatever_its_posture(
         lambda _db: {"win": _posture("win", "converging", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert dw.deploy_in_flight(_db()).active is False
+    assert dw.deploy_in_flight(_db(database_gate=database_gate)).active is False
 
 
 def test_an_excluded_machine_does_not_hide_a_cohort_machine(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """The filter must not widen: only the excluded machine's row is withheld."""
     _machines(monkeypatch, "win", "macmini")
@@ -185,13 +190,13 @@ def test_an_excluded_machine_does_not_hide_a_cohort_machine(
         },
     )
 
-    window = dw.deploy_in_flight(_db())
+    window = dw.deploy_in_flight(_db(database_gate=database_gate))
     assert window.active is True
     assert "machine 'macmini'" in window.detail
 
 
 def test_a_staging_machine_with_a_stale_posture_does_not_block(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
     """The third latch. A staging host is registered and visible but never a
     rollout target, and the flag carries no date column — the diagnostic reads
@@ -207,11 +212,14 @@ def test_a_staging_machine_with_a_stale_posture_does_not_block(
         lambda _db: {"stage": _posture("stage", "paused", age_s=86400)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert dw.deploy_in_flight(_db()).active is False
+    assert dw.deploy_in_flight(_db(database_gate=database_gate)).active is False
 
 
 def test_the_skip_line_names_exclusion_and_freshness(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Issue #2160 diagnostics: a skipped row is neither silent nor a bare
     "not blocking" — the line carries the machine, the exclusion and its date and
@@ -228,7 +236,7 @@ def test_the_skip_line_names_exclusion_and_freshness(
         lambda _db: {"win": _posture("win", "paused", age_s=3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert dw.deploy_in_flight(_db()).active is False
+    assert dw.deploy_in_flight(_db(database_gate=database_gate)).active is False
     lines = [r["message"] for r in loguru_records if "[deploy-window]" in r["message"]]
     assert len(lines) == 1
     assert "machine 'win'" in lines[0]
@@ -237,7 +245,9 @@ def test_the_skip_line_names_exclusion_and_freshness(
     assert "60m ago" in lines[0]
 
 
-def test_an_unreadable_exclusion_read_still_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_unreadable_exclusion_read_still_refuses(
+    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+) -> None:
     """The failure direction: the exclusion map can only withhold a refusal, so
     "could not read" must not come back as "nothing is excluded" — a Postgres
     hiccup degrades to the pre-#2160 reading (every non-idle posture blocks),
@@ -254,7 +264,7 @@ def test_an_unreadable_exclusion_read_still_refuses(monkeypatch: pytest.MonkeyPa
         lambda _db: {"win": _posture("win", "paused", age_s=31 * 3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert dw.deploy_in_flight(_db()).active is True
+    assert dw.deploy_in_flight(_db(database_gate=database_gate)).active is True
 
 
 # ─── never raises ────────────────────────────────────────────────────────────
@@ -268,7 +278,9 @@ def test_an_unreadable_exclusion_read_still_refuses(monkeypatch: pytest.MonkeyPa
         "ops.deploy_window._read_deploy_states",
     ],
 )
-def test_never_raises_when_a_signal_is_broken(broken: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_never_raises_when_a_signal_is_broken(
+    broken: str, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+) -> None:
     """Every caller is a refusal/suppression path: a traceback would block every
     deploy or break the alerting that reads the window."""
 
@@ -276,4 +288,4 @@ def test_never_raises_when_a_signal_is_broken(broken: str, monkeypatch: pytest.M
         raise RuntimeError("db gone")
 
     monkeypatch.setattr(broken, _raise)
-    assert dw.deploy_in_flight(_db()).active is False
+    assert dw.deploy_in_flight(_db(database_gate=database_gate)).active is False

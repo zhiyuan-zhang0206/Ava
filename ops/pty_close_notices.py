@@ -57,13 +57,17 @@ from psycopg import sql
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.cluster.machine import machine_name
 from base.db import Database, insert_inbound_message_in_transaction, publish_inbound_wake
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.log.sinks import add_sink
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.ownership import OwnedProcess, shown_name
 from base.sessions.pty import closure
 from base.sessions.pty.paths import close_notices_path
+from base.telemetry import process_name
 from ops.cluster_status import AGENT_SHELL_RE
 from ops.rpc_schemas import OpStatus
 
@@ -467,8 +471,11 @@ def main() -> int:
     if not notices:
         return 0
     try:
+        image = LoadedCommit.capture()
+        version = CodeVersion(image)
+        gate = ProcessDbGate(version=version.get, process=process_name(), exempt=False)
         failed = write_notices(
-            Database.from_settings(), EventBus.from_settings(), notices, direct=False
+            Database.from_settings(gate=gate), EventBus.from_settings(), notices, direct=False
         )
     except Exception as exc:  # no database settings: a failed child, not a service failure
         logger.error(

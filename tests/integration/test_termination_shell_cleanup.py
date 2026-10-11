@@ -12,8 +12,9 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import apply_hosted_lifecycle
-from agent.tests.claim.test_inbound_ownership import _admit, _agent
+from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.incarnation.hosted_force import original_host_force, recover_orphaned_hosted_forces
+from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -23,10 +24,10 @@ from services.agent_runner.agent_host.tests.lifecycle.test_hosted_lifecycle impo
 
 
 async def _prepare(
-    phase: str, conn: psycopg.Connection, pool: AsyncConnectionPool
+    phase: str, conn: psycopg.Connection, pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> tuple[RuntimeIncarnation, int]:
-    agent_id = _agent(conn)
-    owner = await _admit(pool, agent_id)
+    agent_id = agent_row(conn)
+    owner = await _admit(pool, agent_id, database_gate=database_gate)
     conn.execute("UPDATE agents_meta SET session_index=4 WHERE id=%s", (agent_id,))
     conn.commit()
     if phase == "graceful":
@@ -98,11 +99,13 @@ async def test_blocked_shell_cleanup_releases_row_lock_with_fixed_cutoff(
     event_bus: EventBus,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(
         "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
     )
-    owner, command = await _prepare(phase, db_conn, aops_pool)
+    owner, command = await _prepare(phase, db_conn, aops_pool, database_gate=database_gate)
     entered, release = asyncio.Event(), threading.Event()
     loop = asyncio.get_running_loop()
     cutoffs: list[int] = []
@@ -132,11 +135,13 @@ async def test_unknown_cleanup_error_keeps_original_exception_and_committed_rece
     event_bus: EventBus,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(
         "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
     )
-    owner, command = await _prepare(phase, db_conn, aops_pool)
+    owner, command = await _prepare(phase, db_conn, aops_pool, database_gate=database_gate)
     original = RuntimeError("unknown cleanup defect")
 
     def failed_kill(agent_id: int, cutoff: int) -> None:
@@ -155,8 +160,10 @@ async def test_publication_failure_still_attempts_cleanup_and_keeps_primary_erro
     event_bus: EventBus,
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
-    owner, command = await _prepare("graceful", db_conn, aops_pool)
+    owner, command = await _prepare("graceful", db_conn, aops_pool, database_gate=database_gate)
     original = RuntimeError("unknown event bus defect")
     secondary = RuntimeError("unknown cleanup defect")
     calls: list[tuple[int, int]] = []
