@@ -215,7 +215,7 @@ execution times or proof that a selected subset is faster.
 ## Selection modes and artifacts
 
 `TEST_SELECTION_MODE` in [ci.yml](../../../.github/workflows/ci.yml) is the single
-switch. The `test-select` job republishes its value as a job output — job-level
+switch. The `classify change` job republishes its value as a job output — job-level
 routing (`if`, `continue-on-error`) cannot read `env`, only `needs` — and every
 routing expression keys off it.
 
