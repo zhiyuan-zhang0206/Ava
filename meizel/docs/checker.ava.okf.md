@@ -1,14 +1,13 @@
 ---
 type: doc
-title: "scripts/meizel/ — Locality Checker"
+title: "meizel/ — Locality Checker"
 description: "Meizel models the repository as a nested dependency DAG declared in meizel.toml manifests and checks every first-party code dependency against it: commands, fact edges, the rule, restricted Python and failure conditions."
 tags:
-  - scripts
   - locality
   - tool
 ---
 
-# scripts/meizel/ — Locality Checker
+# meizel/ — Locality Checker
 
 ## What is it
 
@@ -16,17 +15,17 @@ Meizel judges one question: may file `f` use file `t`? Every directory declares
 a small DAG over its direct children in `meizel.toml`; the checker derives the
 facts from source and fails when a fact is not covered by a declaration. The
 decision and its rationale live in
-[the accepted decision](../../../docs/decisions/engineering/design/simplification/2026-10-11-meizel-nested-dag-locality.md).
+[the accepted decision](../../docs/decisions/engineering/design/simplification/2026-10-11-meizel-nested-dag-locality.md).
 
 The checker uses only the standard library and reads source without importing
 it. The node universe is `git ls-files -z`; facts come from tracked first-party
 `.py` files. Run from the repository root.
 
 ```
-python -m scripts.meizel check [paths...] [--limit N]
-python -m scripts.meizel explain <path>
-python -m scripts.meizel sync --prune
-python -m scripts.meizel bootstrap --out <dir>
+python -m meizel check [paths...] [--limit N]
+python -m meizel explain <path>
+python -m meizel sync --prune
+python -m meizel bootstrap --out <dir>
 ```
 
 `--repo <root>` selects another checkout; `--jobs N` sets parser processes
@@ -156,4 +155,4 @@ projects and judges; `graphs.py` holds components and cycles; `explain.py`,
 `sync.py` and `bootstrap.py` implement the other commands. Tests build
 throwaway git repositories in `tests/` and run in the static test environment.
 
-Parent: [[scripts/docs/scripts.ava.okf.md|scripts]].
+Parent: [[meizel/docs/meizel.ava.okf.md|meizel]].

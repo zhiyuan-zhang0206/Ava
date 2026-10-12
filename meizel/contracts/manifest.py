@@ -8,9 +8,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import cast
 
-from scripts.meizel.graphs import cycle_through, strongly_connected
-from scripts.meizel.model import Code, Diagnostic
-from scripts.meizel.universe import MANIFEST, Universe
+from meizel.graph.graphs import cycle_through, strongly_connected
+from meizel.graph.model import Code, Diagnostic
+from meizel.graph.universe import MANIFEST, Universe
 
 __all__ = ["Manifest", "load_manifests", "manifest_path"]
 

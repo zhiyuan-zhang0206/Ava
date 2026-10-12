@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from scripts.meizel.analysis import Analysis
-from scripts.meizel.model import Fact, MeizelError
-from scripts.meizel.universe import MANIFEST, parent_of
+from meizel.contracts.analysis import Analysis
+from meizel.graph.model import Fact, MeizelError
+from meizel.graph.universe import MANIFEST, parent_of
 
 __all__ = ["explain"]
 

@@ -18,6 +18,14 @@ application package. `scripts/` may import `meizel`; `meizel` never imports
 
 ## Contents
 
+- `graph/`, `language/` and `contracts/` are the checker, documented in
+  [[meizel/docs/checker.ava.okf.md|the checker node]]: `graph/` holds the model,
+  the universe of tracked files, graph algorithms, name scopes and import
+  access; `language/` the restricted Python forms, pytest fixture requests and
+  the file scanner that composes them with import access; `contracts/` the
+  `meizel.toml` manifests, the rule, analysis and the commands (`python -m
+  meizel`). The layers form a DAG: `contracts` -> `language` -> `graph`.
+
 - `lint_common.py` — the shared scan vocabulary of the standalone lints: the
   framework directory list, test-path detection, scan-root resolution and the
   `--only` changed-files mode. Changed-files runs widen to a full scan when

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from scripts.meizel.graphs import reachable
-from scripts.meizel.manifest import Manifest, manifest_path
-from scripts.meizel.model import Code, Diagnostic, Fact, FactKind
+from meizel.contracts.manifest import Manifest, manifest_path
+from meizel.graph.graphs import reachable
+from meizel.graph.model import Code, Diagnostic, Fact, FactKind
 
 __all__ = ["Projection", "is_private", "judge", "project"]
 

@@ -6,8 +6,8 @@ import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from scripts.meizel.model import Fact, FactKind
-from scripts.meizel.universe import Universe, parent_of
+from meizel.graph.model import Fact, FactKind
+from meizel.graph.universe import Universe, parent_of
 
 __all__ = ["FixtureRequest", "FixtureState", "fixture_facts", "is_test_file", "record_function"]
 

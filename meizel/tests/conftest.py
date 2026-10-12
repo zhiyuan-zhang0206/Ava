@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.meizel.tests.synthetic import RepoFactory, build_repo
+from meizel.tests.synthetic import RepoFactory, build_repo
 
 
 @pytest.fixture

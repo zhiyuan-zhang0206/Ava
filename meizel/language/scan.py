@@ -1,0 +1,299 @@
+"""Fact extraction from one first-party Python file, without importing it."""
+
+from __future__ import annotations
+
+import ast
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any, cast
+
+from meizel.graph.model import Fact, FactKind, MeizelError, Problem, Restricted
+from meizel.graph.scopes import Scope, collect_scope, dotted_chain, parameter_names
+from meizel.graph.universe import Universe
+from meizel.language import fixtures
+from meizel.language.restricted import EXTERNAL_FORMS, RestrictedForms, const_str
+
+__all__ = ["EXTERNAL_FORMS", "FileScan", "scan_file"]
+
+_PATCH_CALLS = {
+    "unittest.mock.patch": "patch",
+    "unittest.mock.patch.object": "object",
+    "unittest.mock.patch.multiple": "multiple",
+    "unittest.mock.patch.dict": "dict",
+}
+_MONKEYPATCH_METHODS = frozenset({"setattr", "delattr", "setitem", "delitem"})
+_PATCH_OPTIONS = frozenset({"spec", "create", "spec_set", "autospec", "new_callable"})
+_LEAVES = frozenset(
+    {
+        ast.Constant,
+        ast.Load,
+        ast.Store,
+        ast.Del,
+        ast.And,
+        ast.Or,
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.MatMult,
+        ast.Div,
+        ast.Mod,
+        ast.Pow,
+        ast.LShift,
+        ast.RShift,
+        ast.BitOr,
+        ast.BitXor,
+        ast.BitAnd,
+        ast.FloorDiv,
+        ast.Invert,
+        ast.Not,
+        ast.UAdd,
+        ast.USub,
+        ast.Eq,
+        ast.NotEq,
+        ast.Lt,
+        ast.LtE,
+        ast.Gt,
+        ast.GtE,
+        ast.Is,
+        ast.IsNot,
+        ast.In,
+        ast.NotIn,
+        ast.Pass,
+        ast.Break,
+        ast.Continue,
+    }
+)
+
+
+@dataclass(slots=True)
+class FileScan:
+    path: str
+    facts: list[Fact] = field(default_factory=list[Fact])
+    restricted: list[Restricted] = field(default_factory=list[Restricted])
+    problems: list[Problem] = field(default_factory=list[Problem])
+    fixtures: fixtures.FixtureState = field(default_factory=fixtures.FixtureState)
+    imported: set[str] = field(default_factory=set[str])
+
+
+class Scanner(RestrictedForms):
+    def __init__(self, universe: Universe, path: str, tree: ast.Module, *, walrus: bool) -> None:
+        super().__init__(universe, path, tree, walrus=walrus)
+        self.test_file = fixtures.is_test_file(path)
+        self.fixture_state = fixtures.FixtureState()
+        self.fn_depth = 0
+        self._handlers: dict[type[ast.AST], Callable[[Any], None]] = {
+            ast.Import: self.visit_import,
+            ast.ImportFrom: self.visit_import_from,
+            ast.Attribute: self.visit_attribute,
+            ast.Name: self.visit_name,
+            ast.Call: self.visit_call,
+            ast.Subscript: self.visit_subscript,
+            ast.FunctionDef: self.visit_function,
+            ast.AsyncFunctionDef: self.visit_function,
+            ast.ClassDef: self.visit_class_def,
+            ast.Assign: self.visit_assign,
+            ast.Expr: self.visit_expr,
+            ast.List: self.visit_sequence,
+            ast.Tuple: self.visit_sequence,
+        }
+
+    def run(self) -> FileScan:
+        self.children(self.tree)
+        return FileScan(
+            self.path,
+            facts=list(dict.fromkeys(self.facts)),
+            restricted=self.restricted,
+            problems=self.problems,
+            fixtures=self.fixture_state,
+            imported=self.imported,
+        )
+
+    # --- traversal -----------------------------------------------------------------
+
+    def visit(self, node: ast.AST) -> None:
+        handler = self._handlers.get(type(node))
+        if handler is None:
+            self.children(node)
+        else:
+            handler(node)
+
+    def children(self, node: ast.AST) -> None:
+        handlers = self._handlers
+        for name in node._fields:
+            value = getattr(node, name, None)
+            if isinstance(value, list):
+                for child in cast("list[object]", value):
+                    if isinstance(child, ast.AST) and type(child) not in _LEAVES:
+                        handler = handlers.get(type(child))
+                        handler(child) if handler else self.children(child)
+            elif isinstance(value, ast.AST) and type(value) not in _LEAVES:
+                handler = handlers.get(type(value))
+                handler(value) if handler else self.children(value)
+
+    def visit_attribute(self, node: ast.Attribute) -> None:
+        chain = dotted_chain(node)
+        if chain is None:
+            self.children(node)
+            return
+        base, attrs = chain
+        origin, _ = self.scope.find(base.id)
+        if origin is None:
+            return
+        self.restricted_attribute(origin, attrs, node.lineno)
+        self.module_uses(origin, attrs, node.lineno)
+
+    # --- scopes --------------------------------------------------------------------
+
+    def visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        args = node.args
+        for deco in node.decorator_list:
+            self.visit(deco)
+        for default in (*args.defaults, *(d for d in args.kw_defaults if d is not None)):
+            self.visit(default)
+        for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
+            if arg is not None and arg.annotation is not None:
+                self.visit(arg.annotation)
+        if node.returns is not None:
+            self.visit(node.returns)
+        fixtures.record_function(
+            self.fixture_state,
+            node,
+            self.dotted,
+            test_file=self.test_file,
+            top_level=self.fn_depth == 0,
+        )
+        parent = self.scope.parent if self.scope.is_class else self.scope
+        inner = Scope(parent)
+        inner.shadowed.update(parameter_names(args))
+        collect_scope(inner, node.body, self.package, walrus=self.walrus)
+        self.fn_depth += 1
+        self.enter(inner, node.body)
+        self.fn_depth -= 1
+
+    def visit_class_def(self, node: ast.ClassDef) -> None:
+        for outer in (*node.decorator_list, *node.bases, *node.keywords):
+            self.visit(outer)
+        inner = Scope(self.scope, is_class=True)
+        collect_scope(inner, node.body, self.package, walrus=self.walrus)
+        self.enter(inner, node.body)
+
+    def enter(self, inner: Scope, body: list[ast.stmt]) -> None:
+        outer, self.scope = self.scope, inner
+        for statement in body:
+            self.visit(statement)
+        self.scope = outer
+
+    # --- statements ----------------------------------------------------------------
+
+    def visit_expr(self, node: ast.Expr) -> None:
+        if const_str(node.value) is None:
+            self.children(node)
+
+    def visit_assign(self, node: ast.Assign) -> None:
+        at_module = self.scope.parent is None
+        if at_module and any(
+            isinstance(t, ast.Name) and t.id == "pytest_plugins" for t in node.targets
+        ):
+            names = fixtures.plugin_names(node.value)
+            if names is None:
+                self.restrict(node.lineno, "pytest_plugins that is not a literal")
+            else:
+                self.fixture_state.plugins.extend((n, node.lineno) for n in names)
+                for name in names:
+                    self.plugin_fact(name, node.lineno)
+        self.children(node)
+
+    def plugin_fact(self, dotted: str, line: int) -> None:
+        module = self.u.resolve_module(dotted) if self.u.is_first_party_name(dotted) else None
+        if module is not None and module.file is not None:
+            self.add(module.file, line, FactKind.PLUGIN, (), f"pytest_plugins {dotted}")
+
+    # --- calls ---------------------------------------------------------------------
+
+    def visit_call(self, node: ast.Call) -> None:
+        callee = self.dotted(node.func)
+        kind = _PATCH_CALLS.get(callee) if callee else None
+        if kind is not None:
+            self.patch_call(node, kind)
+        elif self.is_monkeypatch(node.func):
+            self.monkeypatch_call(node)
+        elif self.is_sys_modules_method(node.func):
+            self.sys_modules_call(node)
+        elif self.is_shell_call(callee):
+            self.shell_call(node)
+        fixtures.record_call(self.fixture_state, node, callee)
+        self.children(node)
+
+    @staticmethod
+    def is_monkeypatch(func: ast.expr) -> bool:
+        if not isinstance(func, ast.Attribute) or func.attr not in _MONKEYPATCH_METHODS:
+            return False
+        receiver = func.value
+        name = receiver.id if isinstance(receiver, ast.Name) else getattr(receiver, "attr", "")
+        return "monkeypatch" in name.lower()
+
+    def patch_call(self, node: ast.Call, kind: str) -> None:
+        first = node.args[0] if node.args else None
+        if kind == "patch" or const_str(first) is not None:
+            self.string_target(first, node.lineno)
+            if kind == "dict":
+                self.patched_sys_modules(node)
+        elif kind == "dict":
+            self.patched_sys_modules(node)
+        elif first is not None and kind in {"object", "multiple"}:
+            names = self.patched_names(node, kind)
+            self.patch_fact(first, names, node.lineno, f"patch.{kind}")
+
+    @staticmethod
+    def patched_names(node: ast.Call, kind: str) -> tuple[str, ...]:
+        if kind == "object":
+            name = const_str(node.args[1]) if len(node.args) > 1 else None
+            return (name,) if name else ()
+        return tuple(k.arg for k in node.keywords if k.arg and k.arg not in _PATCH_OPTIONS)
+
+    def patch_fact(self, target: ast.expr, names: tuple[str, ...], line: int, detail: str) -> None:
+        module = self.module_file(target)
+        if module is not None:
+            self.add(module, line, FactKind.PATCH, names, detail)
+
+    def monkeypatch_call(self, node: ast.Call) -> None:
+        if not node.args:
+            return
+        method = cast("ast.Attribute", node.func).attr
+        if method in {"setitem", "delitem"}:
+            if self.is_sys_modules(node.args[0]) and len(node.args) > 1:
+                self.fake_module(node.args[1], node.lineno)
+            return
+        if const_str(node.args[0]) is not None:
+            self.string_target(node.args[0], node.lineno)
+            return
+        name = const_str(node.args[1]) if len(node.args) > 1 else None
+        self.patch_fact(node.args[0], (name,) if name else (), node.lineno, "monkeypatch")
+
+    def string_target(self, target: ast.expr | None, line: int) -> None:
+        """A string patch target hides a dependency only when it names first-party code."""
+        text = None if target is None else self.string_value(target)
+        if text is None or self.u.is_first_party_name(text):
+            self.restrict(line, "string patch target", text or "")
+
+    def visit_subscript(self, node: ast.Subscript) -> None:
+        self.sys_modules_write(node)
+        self.children(node)
+
+    # --- python -c -----------------------------------------------------------------
+
+    def visit_sequence(self, node: ast.List | ast.Tuple) -> None:
+        self.python_c_in_sequence(node)
+        self.children(node)
+
+
+def scan_file(universe: Universe, path: str) -> FileScan:
+    full = universe.root / path
+    try:
+        source = full.read_bytes()
+        tree = ast.parse(source, filename=path)
+    except SyntaxError as error:
+        raise MeizelError(f"{path}:{error.lineno}: cannot parse: {error.msg}") from error
+    except (OSError, ValueError) as error:
+        raise MeizelError(f"{path}: cannot read: {error}") from error
+    return Scanner(universe, path, tree, walrus=b":=" in source).run()

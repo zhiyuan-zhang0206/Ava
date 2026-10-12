@@ -7,12 +7,12 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from scripts.meizel.analysis import Analysis, analyze
-from scripts.meizel.bootstrap import bootstrap
-from scripts.meizel.explain import explain
-from scripts.meizel.model import Diagnostic, MeizelError
-from scripts.meizel.sync import prune
-from scripts.meizel.universe import toplevel
+from meizel.contracts.analysis import Analysis, analyze
+from meizel.contracts.bootstrap import bootstrap
+from meizel.contracts.explain import explain
+from meizel.contracts.sync import prune
+from meizel.graph.model import Diagnostic, MeizelError
+from meizel.graph.universe import toplevel
 
 __all__ = ["main", "relative_target"]
 
@@ -63,7 +63,7 @@ def run_check(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m scripts.meizel", description=__doc__)
+    parser = argparse.ArgumentParser(prog="python -m meizel", description=__doc__)
     parser.add_argument(
         "--repo", type=Path, help="repository root (default: the cwd's git toplevel)"
     )

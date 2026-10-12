@@ -8,12 +8,12 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
-from scripts.meizel.analysis import Analysis, analyze
-from scripts.meizel.graphs import cycle_through, strongly_connected, transitive_reduction_size
-from scripts.meizel.manifest import manifest_path
-from scripts.meizel.model import Fact
-from scripts.meizel.rule import Projection
-from scripts.meizel.universe import parent_of
+from meizel.contracts.analysis import Analysis, analyze
+from meizel.contracts.manifest import manifest_path
+from meizel.contracts.rule import Projection
+from meizel.graph.graphs import cycle_through, strongly_connected, transitive_reduction_size
+from meizel.graph.model import Fact
+from meizel.graph.universe import parent_of
 
 __all__ = ["bootstrap", "is_test_path", "render_manifest"]
 
