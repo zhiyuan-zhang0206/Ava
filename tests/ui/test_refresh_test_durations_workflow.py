@@ -3,7 +3,6 @@
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,30 +19,21 @@ def _workflow(path: Path = _WORKFLOW) -> dict[object, Any]:
     return cast("dict[object, Any]", document)
 
 
-def test_schedule_backstop_and_trusted_ci_have_separate_measurement_routes() -> None:
+def test_schedule_backstop_and_dispatch_are_the_only_measurement_routes() -> None:
     workflow = _workflow()
     assert workflow[True]["schedule"] == [
         {"cron": "30 19 * * *"},
         {"cron": "30 21 * * *"},
     ]
-    assert workflow[True]["workflow_run"] == {
-        "workflows": ["CI"],
-        "types": ["completed"],
-        "branches": ["main"],
-    }
+    # Main runs no CI, so there is no completed main run to borrow timings from.
+    assert set(workflow[True]) == {"schedule", "workflow_dispatch"}
     jobs = workflow["jobs"]
-    guard = jobs["check-refresh"]
-    for requirement in (
-        "workflow_run.event == 'push'",
-        "workflow_run.conclusion == 'success'",
-        "workflow_run.head_branch == 'main'",
-        "workflow_run.head_repository.full_name == github.repository",
-    ):
-        assert requirement in guard["if"]
+    assert jobs["check-refresh"]["if"] == "github.ref == 'refs/heads/main'"
     for name in ("measure-backend", "measure-e2e"):
         assert jobs[name]["if"] == "needs.check-refresh.outputs.mode == 'measure'"
     refresh = jobs["refresh"]
-    assert "needs.check-refresh.outputs.mode == 'reuse'" in refresh["if"]
+    assert "needs.check-refresh.outputs.mode == 'measure'" in refresh["if"]
+    assert "reuse" not in refresh["if"]
     assert "needs.measure-backend.result == 'success'" in refresh["if"]
     assert "needs.measure-e2e.result == 'success'" in refresh["if"]
 
@@ -76,139 +66,16 @@ def _recording_step(suite: str) -> dict[str, Any]:
     return next(step for step in ci["jobs"][f"{suite}-shard"]["steps"] if step.get("name") == name)
 
 
-@pytest.mark.parametrize(
-    ("suite", "record", "group", "fail_first"),
-    [
-        ("backend", True, 1, True),
-        ("backend", False, 1, True),
-        ("backend", True, 8, True),
-        ("e2e", True, 2, False),
-        ("e2e", False, 2, False),
-    ],
-)
-def test_existing_ci_command_records_main_only_and_reseeds_before_retry(
-    tmp_path: Path,
-    suite: str,
-    record: bool,
-    group: int,
-    fail_first: bool,
-) -> None:
-    """Planning succeeds separately; fake pytest corrupts attempt 1's timing input."""
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    fake_timeout = fake_bin / "timeout"
-    fake_timeout.write_text('#!/bin/sh\nshift 2\nexec "$@"\n')
-    fake_timeout.chmod(0o755)
-    fake_uv = fake_bin / "uv"
-    fake_uv.write_text(
-        f"#!{sys.executable}\n"
-        + """
-import json
-import os
-import sys
-from pathlib import Path
-args = sys.argv[1:]
-if args[:2] == ['run', 'python']:
-    with Path('planning.jsonl').open('a') as output:
-        output.write(json.dumps({'args': args, 'script': sys.stdin.read()}) + '\\n')
-    sys.exit(0)
-assert args[:2] == ['run', 'pytest']
-log = Path('calls.jsonl')
-calls = len(log.read_text().splitlines()) if log.exists() else 0
-measurement = None
-if '--durations-path' in args:
-    path = Path(args[args.index('--durations-path') + 1])
-    measurement = json.loads(path.read_text())
-    path.write_text('{"partial::timing":999}')
-with log.open('a') as output:
-    output.write(json.dumps({'args': args, 'seed': measurement}) + '\\n')
-sys.exit(1 if os.environ['FAIL_FIRST'] == 'true' and calls == 0 else 0)
-"""
-    )
-    fake_uv.chmod(0o755)
-    seed = {"existing::timing": 3.0}
-    (tmp_path / ".test_durations").write_text(json.dumps(seed))
+@pytest.mark.parametrize("suite", ["backend", "e2e"])
+def test_ci_shards_never_record_or_upload_durations(suite: str) -> None:
+    """Timings come from the isolated nightly measurement, never from a CI run."""
     step = _recording_step(suite)
-    assert (
-        step["env"]["RECORD_DURATIONS"]
-        == "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
-    )
-    script = step["run"].replace("${{ matrix.group }}", str(group))
-    result = subprocess.run(  # noqa: S603 — execute the repository's recording step with fake pytest
-        ["bash", "-e", "-o", "pipefail", "-c", script],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=False,
-        env=os.environ
-        | {
-            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
-            "RECORD_DURATIONS": str(record).lower(),
-            "FAIL_FIRST": str(fail_first).lower(),
-            "GITHUB_OUTPUT": str(tmp_path / "output"),
-            "COVERAGE_FILE": "coverage-data",
-        },
-    )
-    assert result.returncode == (1 if group == 8 else 0), result.stderr
-    planning = tmp_path / "planning.jsonl"
-    if suite == "backend":
-        plans = [json.loads(line) for line in planning.read_text().splitlines()]
-        assert len(plans) == 1
-        assert plans[0]["args"] == ["run", "python", "-u", "-"]
-        assert '"--collect-only"' in plans[0]["script"]
-        assert '"--file-shard-count=16"' in plans[0]["script"]
-    else:
-        assert not planning.exists()
-    calls = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
-    assert len(calls) == (2 if suite == "backend" and group != 8 else 1)
-    _assert_calls(calls, suite=suite, record=record, group=group, seed=seed)
-    assert json.loads((tmp_path / ".test_durations").read_text()) == seed
-
-
-def _assert_calls(
-    calls: list[dict[str, Any]],
-    *,
-    suite: str,
-    record: bool,
-    group: int,
-    seed: dict[str, float],
-) -> None:
-    for call in calls:
-        assert call["seed"] == (seed if record else None)
-        args = call["args"]
-        assert args[args.index("-n") + 1] == ("4" if suite == "backend" else "2")
-        assert ("--store-durations" in args) is record
-        assert ("--clean-durations" in args) is record
-        if suite == "backend":
-            _assert_backend_group(args, group)
-        else:
-            assert args[args.index("--group") + 1] == str(group)
-            assert args[args.index("--splits") + 1] == "4"
-            assert args[args.index("--splitting-algorithm") + 1] == "least_duration"
-
-
-def _assert_backend_group(args: list[str], group: int) -> None:
-    assert f"--file-shard-group={group}" in args
-    assert "--file-shard-check=tmp/file-shards/plan.json" in args
-    assert "--file-shard-execute" in args
-    assert not {"--group", "--splits", "--splitting-algorithm"}.intersection(args)
-    assert "--omit-static-tests" in args
-    assert "--ignore=tests/e2e" in args
-    assert args[args.index("-m") + 1] == "not flaky"
-
-
-def test_main_duration_upload_failure_cannot_change_required_ci_gates() -> None:
+    assert "RECORD_DURATIONS" not in str(step)
+    assert "--store-durations" not in step["run"]
+    assert "--clean-durations" not in step["run"]
     ci = _workflow(_REPO_ROOT / ".github/workflows/ci.yml")
-    for suite in ("backend", "e2e"):
-        step = next(
-            step
-            for step in ci["jobs"][f"{suite}-shard"]["steps"]
-            if step.get("name") == f"Upload {suite} duration measurement"
-        )
-        assert step["continue-on-error"] is True
-        assert "success()" in step["if"]
-        assert "github.event_name == 'push'" in step["if"]
-        assert "github.ref == 'refs/heads/main'" in step["if"]
+    names = [str(item.get("name")) for item in ci["jobs"][f"{suite}-shard"]["steps"]]
+    assert not [name for name in names if "duration measurement" in name]
 
 
 def test_publisher_rebuilds_old_bot_branch_from_measured_generation(tmp_path: Path) -> None:

@@ -293,7 +293,6 @@ def test_publication_uses_pr_ci_without_dispatch_or_approval(
             "BRANCH": "ava-bot/test-durations",
             "SOURCE_SHA": _HEAD,
             "SOURCE_RUN_ID": "7",
-            "MODE": "reuse",
         },
         timeout=30,
         capture_output=True,

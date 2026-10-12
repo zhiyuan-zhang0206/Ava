@@ -260,7 +260,19 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
 # entry is an explicit, reviewable exemption keyed by (module, field); the
 # companion test below pins every entry to fallback code that actually
 # exists, so the registry can never outlive the code it excuses.
-_FALLBACK_CONSUMED_READS: dict[tuple[str, str], str] = {}
+_FALLBACK_CONSUMED_READS: dict[tuple[str, str], str] = {
+    # The gateway's reply-suggestion draft model builds `deepseek-flash`
+    # in-process; the gateway profile pops DEEPSEEK_API_KEY from os.environ
+    # (Task #856), so the plugin consumes this unit's `.env` file when the env
+    # var is absent — the same fallback spawn validation reads (Task #1562,
+    # base/lm/factory.py::_ensure_provider_key). The read is consume-only:
+    # the popped key never returns to os.environ.
+    ("ava_builtins/plugins/lm_deepseek/provider.py", "deepseek_api_key"): (
+        "gateway in-process drafts (reply-suggestion) need the deepseek key the "
+        "gateway profile popped; consume-only .env fallback in "
+        "_require_deepseek_key()"
+    ),
+}
 
 
 _GATEWAY_CLOSURE_PACKAGES = (

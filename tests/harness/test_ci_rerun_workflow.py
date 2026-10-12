@@ -151,9 +151,8 @@ def test_resolve_bash_requires_version_four_and_takes_the_first_match(
     assert _resolve_bash((str(old),)) is None
 
 
-@pytest.mark.parametrize("event", ["pull_request", "push"])
-def test_current_head_retries_once(tmp_path: Path, event: str) -> None:
-    result, calls = run_retry(tmp_path, RUN_EVENT=event)
+def test_current_head_retries_once(tmp_path: Path) -> None:
+    result, calls = run_retry(tmp_path)
     assert result.returncode == 0, result.stderr
     posts = [call for call in calls if "POST" in call]
     assert posts == [
@@ -192,8 +191,7 @@ def test_verified_fork_head_is_not_confused_with_base_repository(tmp_path: Path)
         {"RUN_ATTEMPT": "2"},
         {"RUN_CONCLUSION": "skipped"},
         {"NEWEST_RUN": "101"},
-        {"RUN_EVENT": "push", "CURRENT_SHA": OTHER_SHA},
-        {"RUN_EVENT": "push", "HEAD_REPO": "other/repo"},
+        {"RUN_EVENT": "push"},
         {"RUN_EVENT": "workflow_dispatch"},
     ],
 )
@@ -231,9 +229,9 @@ def _ci_concurrency_group(event_name: str, ref: str, sha: str) -> str:
 
 def test_pr_runs_share_one_group_across_shas_and_other_events_stay_per_sha() -> None:
     """A new PR push must land in the same group as the superseded run so
-    cancel-in-progress cancels it. Push/dispatch runs keep the SHA: a group
-    holds one pending run and a newer one replaces it, which would skip the
-    intermediate main runs that refresh-test-durations.yml relies on."""
+    cancel-in-progress cancels it. Manual dispatches keep the SHA: a group
+    holds one pending run and a newer one replaces it, which would drop a
+    dispatch of a different commit."""
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
     assert workflow["concurrency"]["cancel-in-progress"] == (
         "${{ github.event_name == 'pull_request' }}"
@@ -243,11 +241,10 @@ def test_pr_runs_share_one_group_across_shas_and_other_events_stay_per_sha() -> 
     new = _ci_concurrency_group("pull_request", ref, OTHER_SHA)
     assert old == new == "ci-refs/pull/42/merge"
     assert old != _ci_concurrency_group("pull_request", "refs/pull/43/merge", SHA)
-    for event in ("push", "workflow_dispatch"):
-        first = _ci_concurrency_group(event, "refs/heads/main", SHA)
-        second = _ci_concurrency_group(event, "refs/heads/main", OTHER_SHA)
-        assert first == f"ci-refs/heads/main-{SHA}"
-        assert second == f"ci-refs/heads/main-{OTHER_SHA}"
+    first = _ci_concurrency_group("workflow_dispatch", "refs/heads/main", SHA)
+    second = _ci_concurrency_group("workflow_dispatch", "refs/heads/main", OTHER_SHA)
+    assert first == f"ci-refs/heads/main-{SHA}"
+    assert second == f"ci-refs/heads/main-{OTHER_SHA}"
 
 
 def test_ci_flow_never_queries_job_conclusions(tmp_path: Path) -> None:
@@ -276,8 +273,7 @@ def test_dispatcher_prefilter_mirrors_the_first_guard_clauses() -> None:
         contains(fromJSON('["failure","timed_out","action_required","startup_failure","cancelled"]'),
                   github.event.workflow_run.conclusion)
         && github.event.workflow_run.run_attempt == 1
-        && (github.event.workflow_run.event == 'pull_request'
-            || github.event.workflow_run.event == 'push')
+        && github.event.workflow_run.event == 'pull_request'
         && !startsWith(github.event.workflow_run.head_branch, 'trunk-merge/')"""
     assert condition == " ".join(expected.split())
     assert "does not need a rerun" in retry_script()
