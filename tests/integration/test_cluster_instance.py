@@ -145,8 +145,8 @@ def isolated_cluster(
         for child in retained_children:
             child.wait(timeout=1)
         subprocess.run(  # noqa: S603
-            [ci._redis_cli_bin(), "-p", str(redis_port), "shutdown", "nosave"],
-            env=ci._redis_cli_env(_REDIS_ADMIN),  # never `-a` — argv is public
+            [ci.redis_cli_bin(), "-p", str(redis_port), "shutdown", "nosave"],
+            env=ci.redis_cli_env(_REDIS_ADMIN),  # never `-a` — argv is public
             check=False,
             capture_output=True,
         )
@@ -155,7 +155,7 @@ def isolated_cluster(
 def _admin(pg_port: int, database: str) -> psycopg.Connection[tuple[object, ...]]:
     """The OS-user administrator over the owner-only socket (peer)."""
     return psycopg.connect(
-        host=str(ci._pg_socket_dir()), port=pg_port, dbname=database, autocommit=True
+        host=str(ci.pg_socket_dir()), port=pg_port, dbname=database, autocommit=True
     )
 
 
@@ -286,8 +286,8 @@ def test_gateway_cold_start_restores_redis_url_identity(
         assert client.ping()  # pyright: ignore[reportUnknownMemberType]
         assert client.set("continuation", "pending")  # pyright: ignore[reportUnknownMemberType]
     subprocess.run(  # noqa: S603
-        [ci._redis_cli_bin(), "-p", str(redis_port), "shutdown", "save"],
-        env=ci._redis_cli_env(_REDIS_ADMIN),
+        [ci.redis_cli_bin(), "-p", str(redis_port), "shutdown", "save"],
+        env=ci.redis_cli_env(_REDIS_ADMIN),
         check=True,
         capture_output=True,
     )
@@ -370,8 +370,8 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
         assert f'requirepass "{admin}"' in (home / "redis" / "redis.conf").read_text()
     finally:
         subprocess.run(  # noqa: S603
-            [ci._redis_cli_bin(), "-p", str(redis_port), "shutdown", "nosave"],
-            env=ci._redis_cli_env(admin),
+            [ci.redis_cli_bin(), "-p", str(redis_port), "shutdown", "nosave"],
+            env=ci.redis_cli_env(admin),
             check=False,
             capture_output=True,
         )
@@ -412,9 +412,9 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
             foreign_url = (
                 f"postgresql://{getpass.getuser()}@/postgres?host={directory}&port={pg_port}"
             )
-            canonical_socket = ci._pg_socket_dir() / f".s.PGSQL.{pg_port}"
+            canonical_socket = ci.pg_socket_dir() / f".s.PGSQL.{pg_port}"
             canonical_socket.unlink()
-            assert ci._pg_running(pg_port), "the correct TCP instance is still ready"
+            assert ci.pg_running(pg_port), "the correct TCP instance is still ready"
             with pytest.raises(psycopg.OperationalError):
                 cluster.ensure_cluster_role(
                     "must_not_create",

@@ -250,7 +250,6 @@ def _drain_and_stop(
     # Task #3270: an operator's own stop binds the hold to this
     # command's shepherding process; daemon-driven holds stay unbound.
     from base.deploy.maintenance.hold_driver import mint_driver
-    from cli.commands.lifecycle.stop import _announce_stopping
 
     _timed_phase(
         phases,
@@ -265,7 +264,7 @@ def _drain_and_stop(
     )
     start_serving.clear_serving()
     if announce:
-        _announce_stopping(machine=machine)
+        announce_stopping(machine=machine)
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None  # noqa: S101
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
@@ -345,8 +344,6 @@ def stop(
     only when the pty-sessions service itself is kept) SIGKILLs what outlives
     its bounded grace (`service_stop.close_terminals`).
     """
-    from cli.commands.lifecycle.stop import _confirm_stop
-
     _refuse_hosted_stop()
     roles, _selected, preserved = _stop_plan(
         preserve_sessions=preserve_sessions,
@@ -359,7 +356,7 @@ def stop(
         f"terminals={'retained' if SERVICE_UNIT in preserved else 'closed'}; "
         f"data plane={'retained' if keep_infra else 'stopped on gateway'}"
     )
-    if not _confirm_stop(require_confirmation=require_confirmation):
+    if not confirm_stop(require_confirmation=require_confirmation):
         return 0
     deadline = deadline_after(timeout)
     owns_journal = begin("stop", deadline=deadline)
@@ -419,3 +416,43 @@ def _finish_stop(*, owns_journal: bool, notes: list[str], clients: list[str] | N
             extra["pooler_clients"] = clients
         finish(0, extra=extra or None)
     return 0
+
+
+def confirm_stop(*, require_confirmation: bool) -> bool:
+    """The stdin "y/N" gate. Returns True when the stop may proceed."""
+    if not require_confirmation:
+        return True
+    try:
+        answer = input("confirm? [y/N] ").strip().lower()
+    except EOFError:
+        answer = ""
+    if answer != "y":
+        print("aborted")
+        return False
+    return True
+
+
+def announce_stopping(*, machine: MachineIdentity) -> None:
+    """Best-effort POST `/api/cluster/stopping` before local teardown.
+
+    Stamps the stopping unit's `stopped_at` and recomputes the composed
+    `machines` row so the cluster view distinguishes an intentional `ava stop`
+    from a crash. `home` identifies THIS unit (a co-located peer keeps its
+    caps). Best-effort by design: if the gateway is unreachable we are stopping
+    anyway, so we log and proceed rather than block the teardown.
+    """
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
+    from base.paths import ava_home
+
+    try:
+        name = machine.name()
+        home = str(ava_home())
+        url = f"{gateway_api_base()}/api/cluster/stopping"
+        resp = dial_post(
+            url, params={"machine": name, "home": home}, timeout=5.0, headers=gateway_auth_headers()
+        )
+        resp.raise_for_status()
+        print(f"[ava stop] announced intentional shutdown of {name!r} ({home}) to the gateway")
+    except Exception as e:
+        print(f"[ava stop] could not announce shutdown (proceeding anyway): {e}")

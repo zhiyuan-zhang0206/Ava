@@ -186,7 +186,7 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     monkeypatch.setattr(command, "_stop_browser", record("browser-stopped"))
     monkeypatch.setattr(command, "_stop_extras", record("extras-stopped"))
     monkeypatch.setattr(command, "close_terminals", close_terminals)
-    monkeypatch.setattr(stop_commands, "_announce_stopping", record("announced"))
+    monkeypatch.setattr(command, "announce_stopping", record("announced"))
     runtime = MagicMock()
     monkeypatch.setattr(stop_commands, "_restart_runtime", lambda: runtime)
     monkeypatch.setattr(stop_commands, "_require_restart_runtime", lambda _runtime: None)  # pyright: ignore[reportUnknownArgumentType]
@@ -294,7 +294,7 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     def announce(*, machine: MachineIdentity) -> None:
         assert machine is command_runtime.machine
 
-    monkeypatch.setattr(entry, "_announce_stopping", announce)
+    monkeypatch.setattr(command, "announce_stopping", announce)
     name = "ava-agent-987-shell-2"
     assert new(name, home, {"AVA_HOME": str(home)})
     pty_reaper.track_session(name)
@@ -540,7 +540,7 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
     def announce(*, machine: MachineIdentity) -> None:
         assert machine is command_runtime.machine
 
-    monkeypatch.setattr(entry, "_announce_stopping", announce)
+    monkeypatch.setattr(command, "announce_stopping", announce)
     for hook in ("stop_permissions_helper",):
         monkeypatch.setattr(f"cli.commands.lifecycle._stop_extras.{hook}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(

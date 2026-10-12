@@ -33,7 +33,7 @@ def test_pgbouncer_ini_uses_only_canonical_socket(
     command_machine: MachineIdentity,
 ) -> None:
     canonical = tmp_path / "canonical"
-    monkeypatch.setattr(pooler, "_pg_socket_dir", lambda: canonical)
+    monkeypatch.setattr(pooler, "pg_socket_dir", lambda: canonical)
     ini = pooler._render_ini(
         pg_port=5433,
         listen_port=6433,
@@ -57,7 +57,7 @@ def test_pg_socket_dir_rejects_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path
     socket_dir.symlink_to(tmp_path / "elsewhere", target_is_directory=True)
 
     with pytest.raises(RuntimeError, match="symlink"):
-        _ci._pg_socket_dir(tmp_path)
+        _ci.pg_socket_dir(tmp_path)
 
 
 def test_pg_socket_dir_rejects_foreign_owner(
@@ -72,7 +72,7 @@ def test_pg_socket_dir_rejects_foreign_owner(
     monkeypatch.setattr(os, "geteuid", lambda: owner + 1)
 
     with pytest.raises(RuntimeError, match="not owned by the current user"):
-        _ci._pg_socket_dir(tmp_path)
+        _ci.pg_socket_dir(tmp_path)
 
 
 def test_pg_socket_dir_repairs_mode_drift(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -83,5 +83,5 @@ def test_pg_socket_dir_repairs_mode_drift(monkeypatch: pytest.MonkeyPatch, tmp_p
     socket_dir.mkdir()
     socket_dir.chmod(0o755)
 
-    assert _ci._pg_socket_dir(tmp_path) == socket_dir
+    assert _ci.pg_socket_dir(tmp_path) == socket_dir
     assert socket_dir.stat().st_mode & 0o777 == 0o700

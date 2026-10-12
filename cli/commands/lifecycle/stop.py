@@ -22,6 +22,7 @@ from base.events.live.bus import EventBus
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
 from cli.commands._repo import _repo_root
+from cli.commands.lifecycle import _temporary_stop
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import force_close_terminals
 from cli.database.runtime import CommandRuntime
@@ -54,7 +55,7 @@ def _stop_data_plane(
     elif skip_infra:
         print("\n→ stop pg/redis: kept up (keep_infra — migrate/start needs DB)")
     else:
-        from cli.commands.data_plane.cluster_instance import stop_cluster_instance
+        from cli.commands.data_plane.bringup import stop_cluster_instance
 
         stop_cluster_instance(retained_children=retained_children, producer=producer)
 
@@ -141,20 +142,6 @@ def _print_stop_plan(
     print()
 
 
-def _confirm_stop(*, require_confirmation: bool) -> bool:
-    """The stdin "y/N" gate. Returns True when the stop may proceed."""
-    if not require_confirmation:
-        return True
-    try:
-        answer = input("confirm? [y/N] ").strip().lower()
-    except EOFError:
-        answer = ""
-    if answer != "y":
-        print("aborted")
-        return False
-    return True
-
-
 def _force_stop(
     _repo: Path,  # retained for the common stop call contract
     *,
@@ -194,7 +181,7 @@ def _force_stop(
         runner_only=runner_only,
         keep_infra=keep_infra,
     )
-    if not _confirm_stop(require_confirmation=require_confirmation):
+    if not _temporary_stop.confirm_stop(require_confirmation=require_confirmation):
         return 0
 
     # A deliberate stop must revoke the prior start's recovery authority before
@@ -204,7 +191,7 @@ def _force_stop(
     start_serving.clear_serving()
 
     if announce:
-        _announce_stopping(machine=machine)
+        _temporary_stop.announce_stopping(machine=machine)
 
     # Explicit force interrupts the host process. Agent metadata/checkpoints
     # remain untouched; the next host uses its existing owner recovery. This
@@ -271,9 +258,7 @@ def _do_stop(
             producer=producer,
             machine=machine,
         )
-    from cli.commands.lifecycle._temporary_stop import stop
-
-    return stop(
+    return _temporary_stop.stop(
         require_confirmation=require_confirmation,
         keep_infra=keep_infra,
         preserve_sessions=preserve_sessions,
@@ -317,32 +302,6 @@ def cmd_stop(
         producer=producer,
         machine=machine,
     )
-
-
-def _announce_stopping(*, machine: MachineIdentity) -> None:
-    """Best-effort POST `/api/cluster/stopping` before local teardown.
-
-    Stamps the stopping unit's `stopped_at` and recomputes the composed
-    `machines` row so the cluster view distinguishes an intentional `ava stop`
-    from a crash. `home` identifies THIS unit (a co-located peer keeps its
-    caps). Best-effort by design: if the gateway is unreachable we are stopping
-    anyway, so we log and proceed rather than block the teardown.
-    """
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.host.net.http_dial import post as dial_post
-    from base.paths import ava_home
-
-    try:
-        name = machine.name()
-        home = str(ava_home())
-        url = f"{gateway_api_base()}/api/cluster/stopping"
-        resp = dial_post(
-            url, params={"machine": name, "home": home}, timeout=5.0, headers=gateway_auth_headers()
-        )
-        resp.raise_for_status()
-        print(f"[ava stop] announced intentional shutdown of {name!r} ({home}) to the gateway")
-    except Exception as e:
-        print(f"[ava stop] could not announce shutdown (proceeding anyway): {e}")
 
 
 def _release_self_heal_pause(
